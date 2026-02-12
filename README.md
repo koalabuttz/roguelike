@@ -101,6 +101,9 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 - [crossterm](https://crates.io/crates/crossterm) 0.28 — cross-platform terminal manipulation
 - [rand](https://crates.io/crates/rand) 0.8 — random number generation
 
+### Optional Dependencies (planned)
+- [rodio](https://crates.io/crates/rodio) — Audio playback for sound effects and music (background threads, MP3/WAV/OGG)
+
 ## Roadmap
 
 ### Foundation (enables networking & advanced features)
@@ -130,7 +133,8 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 
 ### Polish
 - [ ] **Animation effects** — Attack swooshes, spell particles (terminal-rendered)
-- [ ] **Sound effects** — Optional beeps/chimes for combat, level-up, death
+- [ ] **Sound effects** — Audio via rodio (MP3/WAV/OGG), background threads, SoundEvent enum
+- [ ] **Music** — Atmospheric dungeon tracks, boss themes, adaptive based on depth/danger
 - [ ] **Tileset support** — Alternative to ASCII (graphical tiles)
 - [ ] **Tutorial/guided run** — Introduce mechanics gradually for new players
 

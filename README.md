@@ -106,8 +106,10 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 
 ## Roadmap
 
-### Foundation (enables networking & advanced features)
+### Foundation (enables networking, platforms & advanced features)
 - [ ] **Input abstraction** — `GameCommand` enum, decouple game logic from terminal input
+- [ ] **Platform abstraction** — Traits for input, rendering, and audio; game logic never imports platform-specific crates
+- [ ] **Type aliases** — `Coord`, `Stat` type aliases for coordinates and stats, enabling platform-specific sizing
 - [ ] **Seeded RNG** — Separate RNG streams per system (map, combat, spawn, loot) for deterministic replay
 - [ ] **Save/load** — Serialize/deserialize game state via serde
 
@@ -130,6 +132,13 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 - [ ] **Daily challenges** — Everyone plays the same seed, compare scores
 - [ ] **Live spectating** — Watch other players in real-time via WebSocket
 - [ ] **Bones files** — Dead players leave traces in others' dungeons
+
+### Platform Support
+- [x] **Windows / macOS / Linux** — Native terminal via crossterm (current)
+- [ ] **CI matrix** — Test on all three desktop OS in GitHub Actions
+- [ ] **Web (WASM)** — Browser-based play via wasm-pack + xterm.js; enables browser spectating and leaderboards
+- [ ] **SSH server** — Server-side play via russh, NetHack-server style (players connect via SSH)
+- [ ] **Commodore 64** — Native 6502 via rust-mos; no_std, fixed-size containers, 8-bit types, C64 screen/keyboard I/O
 
 ### Polish
 - [ ] **Animation effects** — Attack swooshes, spell particles (terminal-rendered)

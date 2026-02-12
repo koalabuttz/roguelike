@@ -101,6 +101,39 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 - [crossterm](https://crates.io/crates/crossterm) 0.28 — cross-platform terminal manipulation
 - [rand](https://crates.io/crates/rand) 0.8 — random number generation
 
+## Roadmap
+
+### Foundation (enables networking & advanced features)
+- [ ] **Input abstraction** — `GameCommand` enum, decouple game logic from terminal input
+- [ ] **Seeded RNG** — Separate RNG streams per system (map, combat, spawn, loot) for deterministic replay
+- [ ] **Save/load** — Serialize/deserialize game state via serde
+
+### Core Gameplay
+- [ ] **Items** — Potions, scrolls, equipment, inventory system
+- [ ] **Hunger** — Food clock mechanic to encourage exploration
+- [ ] **Stairs** — Multi-level dungeons with procedural depth
+- [ ] **Experience/leveling** — Player progression system
+- [ ] **Magic/abilities** — Spells, special attacks, or class-specific powers
+
+### UI/UX
+- [ ] **Menus** — Inventory screen, character sheet, help screen
+- [ ] **Look mode** — Cursor to examine tiles and entities
+- [ ] **Targeting** — Ranged attacks, spell targeting
+- [ ] **Options/settings** — Keybind customization, display preferences, difficulty modes
+
+### Networking
+- [ ] **Replay system** — Record and playback games deterministically
+- [ ] **Shared leaderboard** — REST API for score submission
+- [ ] **Daily challenges** — Everyone plays the same seed, compare scores
+- [ ] **Live spectating** — Watch other players in real-time via WebSocket
+- [ ] **Bones files** — Dead players leave traces in others' dungeons
+
+### Polish
+- [ ] **Animation effects** — Attack swooshes, spell particles (terminal-rendered)
+- [ ] **Sound effects** — Optional beeps/chimes for combat, level-up, death
+- [ ] **Tileset support** — Alternative to ASCII (graphical tiles)
+- [ ] **Tutorial/guided run** — Introduce mechanics gradually for new players
+
 ## License
 
 GPL-3.0-or-later

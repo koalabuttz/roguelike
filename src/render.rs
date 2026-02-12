@@ -77,16 +77,14 @@ fn render_map<W: Write>(w: &mut W, state: &GameState) -> std::io::Result<()> {
 
 fn render_entities<W: Write>(w: &mut W, state: &GameState) -> std::io::Result<()> {
     for entity in state.entities.iter() {
-        if !entity.alive {
-            if state.visible.contains(&(entity.x, entity.y)) {
-                queue!(
-                    w,
-                    cursor::MoveTo(entity.x as u16, entity.y as u16),
-                    SetForegroundColor(Color::DarkRed),
-                    SetBackgroundColor(Color::Black),
-                    style::Print('%')
-                )?;
-            }
+        if !entity.alive && state.visible.contains(&(entity.x, entity.y)) {
+            queue!(
+                w,
+                cursor::MoveTo(entity.x as u16, entity.y as u16),
+                SetForegroundColor(Color::DarkRed),
+                SetBackgroundColor(Color::Black),
+                style::Print('%')
+            )?;
         }
     }
 
@@ -179,11 +177,12 @@ fn render_message_log<W: Write>(
             .take(screen_width as usize)
             .collect();
 
-        let color = if i as usize + messages.len().saturating_sub(4) >= messages.len().saturating_sub(1) {
-            Color::White
-        } else {
-            Color::Grey
-        };
+        let color =
+            if i as usize + messages.len().saturating_sub(4) >= messages.len().saturating_sub(1) {
+                Color::White
+            } else {
+                Color::Grey
+            };
 
         queue!(
             w,

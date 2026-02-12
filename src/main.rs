@@ -33,7 +33,11 @@ fn main() -> std::io::Result<()> {
 
         if state.game_over {
             loop {
-                if let Event::Key(KeyEvent { kind: KeyEventKind::Press, .. }) = event::read()? {
+                if let Event::Key(KeyEvent {
+                    kind: KeyEventKind::Press,
+                    ..
+                }) = event::read()?
+                {
                     break;
                 }
             }

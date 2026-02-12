@@ -39,6 +39,7 @@ fn is_blocking(map: &Map, x: i32, y: i32) -> bool {
     !map.in_bounds(x, y) || map.tiles[map.idx(x, y)] == Tile::Wall
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cast_light(
     map: &Map,
     visible: &mut HashSet<(i32, i32)>,
@@ -79,10 +80,8 @@ fn cast_light(
             let map_y = oy + dx * yx + dy * yy;
 
             // Only mark visible if within the circular radius
-            if (dx * dx + dy * dy) < radius_sq {
-                if map.in_bounds(map_x, map_y) {
-                    visible.insert((map_x, map_y));
-                }
+            if (dx * dx + dy * dy) < radius_sq && map.in_bounds(map_x, map_y) {
+                visible.insert((map_x, map_y));
             }
 
             if blocked {
@@ -96,7 +95,18 @@ fn cast_light(
             } else if is_blocking(map, map_x, map_y) && j < radius {
                 blocked = true;
                 cast_light(
-                    map, visible, ox, oy, radius, j + 1, start_slope, l_slope, xx, xy, yx, yy,
+                    map,
+                    visible,
+                    ox,
+                    oy,
+                    radius,
+                    j + 1,
+                    start_slope,
+                    l_slope,
+                    xx,
+                    xy,
+                    yx,
+                    yy,
                 );
                 next_start_slope = r_slope;
             }

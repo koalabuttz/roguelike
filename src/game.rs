@@ -65,11 +65,11 @@ impl GameState {
         let new_x = self.entities[0].x + dx;
         let new_y = self.entities[0].y + dy;
 
-        if let Some(target_idx) = self.entity_at(new_x, new_y) {
-            if target_idx != 0 {
-                combat::melee_attack(&mut self.entities, 0, target_idx, &mut self.log);
-                return true;
-            }
+        if let Some(target_idx) = self.entity_at(new_x, new_y)
+            && target_idx != 0
+        {
+            combat::melee_attack(&mut self.entities, 0, target_idx, &mut self.log);
+            return true;
         }
 
         if self.map.is_walkable(new_x, new_y) {
@@ -79,5 +79,102 @@ impl GameState {
         }
 
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entity::{Entity, EntityKind};
+    use crate::map::{Map, Tile};
+
+    /// Build a minimal GameState with a custom open map (no random generation).
+    fn test_game() -> GameState {
+        let mut m = Map::new(20, 20);
+        // Carve a 10x10 open area from (1,1) to (10,10)
+        for y in 1..=10 {
+            for x in 1..=10 {
+                let idx = m.idx(x, y);
+                m.tiles[idx] = Tile::Floor;
+            }
+        }
+
+        let player = Entity::player(5, 5);
+        let visible = fov::compute_fov(&m, 5, 5, 8);
+        let explored = visible.clone();
+
+        GameState {
+            map: m,
+            entities: vec![player],
+            fov_radius: 8,
+            visible,
+            explored,
+            log: MessageLog::new(),
+            game_over: false,
+        }
+    }
+
+    #[test]
+    fn player_is_entities_zero() {
+        let gs = test_game();
+        assert_eq!(gs.entities[0].kind, EntityKind::Player);
+    }
+
+    #[test]
+    fn entity_at_finds_living_entity() {
+        let mut gs = test_game();
+        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        gs.entities.push(monster);
+        assert_eq!(gs.entity_at(6, 5), Some(1));
+    }
+
+    #[test]
+    fn entity_at_ignores_dead() {
+        let mut gs = test_game();
+        let mut monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        monster.alive = false;
+        gs.entities.push(monster);
+        assert_eq!(gs.entity_at(6, 5), None);
+    }
+
+    #[test]
+    fn entity_at_returns_none_for_empty_cell() {
+        let gs = test_game();
+        assert_eq!(gs.entity_at(3, 3), None);
+    }
+
+    #[test]
+    fn player_moves_into_open_floor() {
+        let mut gs = test_game();
+        let acted = gs.player_move_or_attack(1, 0); // move right
+        assert!(acted);
+        assert_eq!(gs.entities[0].x, 6);
+        assert_eq!(gs.entities[0].y, 5);
+    }
+
+    #[test]
+    fn player_blocked_by_wall() {
+        let mut gs = test_game();
+        // Move player to edge of open area
+        gs.entities[0].x = 1;
+        gs.entities[0].y = 1;
+        let acted = gs.player_move_or_attack(-1, 0); // into wall at (0,1)
+        assert!(!acted);
+        assert_eq!(gs.entities[0].x, 1);
+    }
+
+    #[test]
+    fn player_attacks_monster() {
+        let mut gs = test_game();
+        let monster = Entity::from_template(&data::ORC, 6, 5);
+        let monster_hp = monster.hp;
+        gs.entities.push(monster);
+        let acted = gs.player_move_or_attack(1, 0); // attack orc at (6,5)
+        assert!(acted);
+        // Player should not have moved
+        assert_eq!(gs.entities[0].x, 5);
+        assert_eq!(gs.entities[0].y, 5);
+        // Orc should have taken damage (player atk=5, orc def=1, dmg=4)
+        assert_eq!(gs.entities[1].hp, monster_hp - 4);
     }
 }

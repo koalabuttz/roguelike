@@ -50,9 +50,18 @@ pub struct SpawnEntry {
 }
 
 pub const SPAWN_TABLE: &[SpawnEntry] = &[
-    SpawnEntry { template: &GOBLIN, weight: 60 },
-    SpawnEntry { template: &ORC, weight: 30 },
-    SpawnEntry { template: &TROLL, weight: 10 },
+    SpawnEntry {
+        template: &GOBLIN,
+        weight: 60,
+    },
+    SpawnEntry {
+        template: &ORC,
+        weight: 30,
+    },
+    SpawnEntry {
+        template: &TROLL,
+        weight: 10,
+    },
 ];
 
 /// Game-wide tuning knobs — change these to rebalance without touching logic.

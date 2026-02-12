@@ -131,3 +131,129 @@ impl Map {
         player_start
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rect_center() {
+        let r = Rect::new(0, 0, 10, 6);
+        assert_eq!(r.center(), (5, 3));
+    }
+
+    #[test]
+    fn rect_center_odd_dimensions() {
+        let r = Rect::new(1, 1, 5, 5);
+        // x1=1, x2=6, y1=1, y2=6 → center (3,3)
+        assert_eq!(r.center(), (3, 3));
+    }
+
+    #[test]
+    fn rect_intersects_overlapping() {
+        let a = Rect::new(0, 0, 5, 5);
+        let b = Rect::new(3, 3, 5, 5);
+        assert!(a.intersects(&b));
+        assert!(b.intersects(&a));
+    }
+
+    #[test]
+    fn rect_intersects_adjacent() {
+        // Rects sharing an edge — x2 of a == x1 of b
+        let a = Rect::new(0, 0, 5, 5);
+        let b = Rect::new(5, 0, 5, 5);
+        assert!(a.intersects(&b)); // touching counts as intersecting
+    }
+
+    #[test]
+    fn rect_no_intersect_disjoint() {
+        let a = Rect::new(0, 0, 3, 3);
+        let b = Rect::new(10, 10, 3, 3);
+        assert!(!a.intersects(&b));
+    }
+
+    #[test]
+    fn map_new_all_walls() {
+        let m = Map::new(10, 10);
+        assert!(m.tiles.iter().all(|t| *t == Tile::Wall));
+        assert_eq!(m.tiles.len(), 100);
+        assert!(m.rooms.is_empty());
+    }
+
+    #[test]
+    fn map_idx_correct() {
+        let m = Map::new(80, 50);
+        assert_eq!(m.idx(0, 0), 0);
+        assert_eq!(m.idx(1, 0), 1);
+        assert_eq!(m.idx(0, 1), 80);
+        assert_eq!(m.idx(5, 3), 3 * 80 + 5);
+    }
+
+    #[test]
+    fn in_bounds_interior() {
+        let m = Map::new(80, 50);
+        assert!(m.in_bounds(0, 0));
+        assert!(m.in_bounds(79, 49));
+        assert!(m.in_bounds(40, 25));
+    }
+
+    #[test]
+    fn in_bounds_out_of_range() {
+        let m = Map::new(80, 50);
+        assert!(!m.in_bounds(-1, 0));
+        assert!(!m.in_bounds(0, -1));
+        assert!(!m.in_bounds(80, 0));
+        assert!(!m.in_bounds(0, 50));
+    }
+
+    #[test]
+    fn is_walkable_wall() {
+        let m = Map::new(10, 10);
+        assert!(!m.is_walkable(5, 5)); // all walls
+    }
+
+    #[test]
+    fn is_walkable_floor() {
+        let mut m = Map::new(10, 10);
+        let idx = m.idx(5, 5);
+        m.tiles[idx] = Tile::Floor;
+        assert!(m.is_walkable(5, 5));
+    }
+
+    #[test]
+    fn is_walkable_out_of_bounds() {
+        let m = Map::new(10, 10);
+        assert!(!m.is_walkable(-1, -1));
+        assert!(!m.is_walkable(100, 100));
+    }
+
+    #[test]
+    fn generate_creates_at_least_one_room() {
+        let mut m = Map::new(80, 50);
+        m.generate(30, 4, 10);
+        assert!(!m.rooms.is_empty());
+    }
+
+    #[test]
+    fn generate_player_start_is_walkable() {
+        let mut m = Map::new(80, 50);
+        let (px, py) = m.generate(30, 4, 10);
+        assert!(m.is_walkable(px, py));
+    }
+
+    #[test]
+    fn generate_rooms_dont_overlap() {
+        let mut m = Map::new(80, 50);
+        m.generate(30, 4, 10);
+        for i in 0..m.rooms.len() {
+            for j in (i + 1)..m.rooms.len() {
+                assert!(
+                    !m.rooms[i].intersects(&m.rooms[j]),
+                    "rooms {} and {} overlap",
+                    i,
+                    j
+                );
+            }
+        }
+    }
+}

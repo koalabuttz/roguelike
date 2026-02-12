@@ -1,1 +1,15 @@
 /target
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude Code
+CLAUDE.md
+
+# OS artifacts
+Thumbs.db
+.DS_Store

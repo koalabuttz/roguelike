@@ -97,7 +97,7 @@ impl RoguelikeMcpServer {
     }
 
     #[tool(
-        description = "Take an action in the game. Valid actions: 'move_north', 'move_south', 'move_east', 'move_west', 'move_northeast', 'move_northwest', 'move_southeast', 'move_southwest', 'wait'. Moving into a monster attacks it. Returns the resulting game state after the action and any monster turns. Also supports autorun: 'autorun_north', 'autorun_south', 'autorun_east', 'autorun_west', 'autorun_northeast', 'autorun_northwest', 'autorun_southeast', 'autorun_southwest'. Autorun keeps moving in that direction until hitting a wall, spotting a new monster, taking damage, or reaching a corridor junction/room entrance. Use autorun to traverse long corridors efficiently. Also supports 'auto_fight' to resolve combat with an adjacent monster in one call — fights the weakest adjacent monster to the death. Response includes game stats: kills, total_monsters, rooms_found, total_rooms, explored_pct."
+        description = "Take an action in the game. Valid actions: 'move_north', 'move_south', 'move_east', 'move_west', 'move_northeast', 'move_northwest', 'move_southeast', 'move_southwest', 'wait'. Moving into a monster attacks it. Returns the resulting game state after the action and any monster turns. Also supports autorun: 'autorun_north', 'autorun_south', 'autorun_east', 'autorun_west', 'autorun_northeast', 'autorun_northwest', 'autorun_southeast', 'autorun_southwest'. Autorun keeps moving in that direction until hitting a wall, spotting a new monster, taking damage, or reaching a corridor junction/room entrance. Use autorun to traverse long corridors efficiently. Also supports 'auto_fight' to resolve combat with an adjacent monster in one call — fights the weakest adjacent monster to the death. Response includes game stats: kills, rooms_found, explored_pct."
     )]
     async fn act(
         &self,
@@ -202,8 +202,8 @@ impl RoguelikeMcpServer {
              - Use 'auto_fight' to resolve trivial combat in one call (fights weakest adjacent monster).\n\
              \n\
              ## Game Stats\n\
-             The observe response includes: kills, total_monsters, rooms_found, \
-             total_rooms, and explored_pct (percentage of map explored).",
+             The observe response includes: kills, rooms_found, and explored_pct \
+             (percentage of map explored).",
             CONFIG.fov_radius
         );
         Ok(CallToolResult::success(vec![Content::text(rules)]))

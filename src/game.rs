@@ -66,9 +66,7 @@ pub struct GameObservation {
     pub game_over: bool,
     // --- game stats ---
     pub kills: i32,
-    pub total_monsters: i32,
     pub rooms_found: i32,
-    pub total_rooms: i32,
     pub explored_pct: i32,
 }
 
@@ -446,17 +444,22 @@ impl GameState {
 
         // --- game stats ---
         let kills = self.entities.iter().skip(1).filter(|e| !e.alive).count() as i32;
-        let total_monsters = (self.entities.len() - 1) as i32;
         let rooms_found = self
             .map
             .rooms
             .iter()
             .filter(|r| self.explored.contains(&r.center()))
             .count() as i32;
-        let total_rooms = self.map.known_room_count();
         let floor_count = self.map.known_floor_count();
+        let explored_floors = self
+            .explored
+            .iter()
+            .filter(|&&(x, y)| {
+                self.map.in_bounds(x, y) && self.map.tiles[self.map.idx(x, y)] == map::Tile::Floor
+            })
+            .count() as i32;
         let explored_pct = if floor_count > 0 {
-            (self.explored.len() as i32 * 100) / floor_count
+            (explored_floors * 100) / floor_count
         } else {
             0
         };
@@ -473,9 +476,7 @@ impl GameState {
             recent_messages: self.log.recent(10).to_vec(),
             game_over: self.game_over,
             kills,
-            total_monsters,
             rooms_found,
-            total_rooms,
             explored_pct,
         }
     }
@@ -950,7 +951,6 @@ mod tests {
         gs.update_fov();
         let obs = gs.observe();
         assert_eq!(obs.kills, 0);
-        assert_eq!(obs.total_monsters, 0);
         assert!(obs.explored_pct > 0);
     }
 
@@ -965,7 +965,6 @@ mod tests {
         gs.update_fov();
         let obs = gs.observe();
         assert_eq!(obs.kills, 1);
-        assert_eq!(obs.total_monsters, 2);
     }
 
     #[test]
@@ -973,10 +972,8 @@ mod tests {
         // Use a real generated map so we have rooms
         let gs = GameState::new(80, 40);
         let obs = gs.observe();
-        assert!(obs.total_rooms > 0);
         // Player starts in first room, so at least 1 room found
         assert!(obs.rooms_found >= 1);
-        assert!(obs.rooms_found <= obs.total_rooms);
     }
 
     #[test]

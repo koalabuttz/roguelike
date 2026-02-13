@@ -131,9 +131,33 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 - [ ] **Options/settings** — Keybind customization, display preferences, difficulty modes
 
 ### Accessibility
+
+#### Visual
 - [ ] **Colorblind modes** — Alternative color palettes (current green/dark-green/dark-red is problematic for ~8% of men)
 - [ ] **High-contrast mode** — Maximum readability option
-- [ ] **Screen reader support** — Structured output for NVDA/JAWS/VoiceOver
+- [ ] **Configurable glyphs** — Let players remap which character represents what
+- [ ] **Reduced clutter mode** — Option to hide corpses, simplify display to essential info
+- [ ] **Screen reader support** — Structured output for NVDA/JAWS/VoiceOver; braille display compatible
+
+#### Motor
+- [ ] **One-handed play** — Full remap to left-hand-only or right-hand/numpad-only layouts
+- [ ] **Mouse-only play** — Click to move/attack, click-based menus for all actions
+- [ ] **Adjustable input timing** — Key repeat delay and debounce to prevent accidental double-moves
+- [ ] **Auto-explore** — Automatically move toward unexplored areas until interrupted
+- [ ] **Macros** — Record and replay action sequences with a single input
+
+#### Cognitive
+- [ ] **Granular difficulty** — Specific toggles (HP multiplier, damage reduction, reveal map) instead of just easy/hard
+- [ ] **Message history** — Scrollable log of all game events, not just the last 4
+- [ ] **Context-sensitive help** — Press `?` on any screen for an explanation of what's happening
+- [ ] **Predictable UI** — Same input always does the same thing; current mode always visible
+
+#### Auditory
+- [ ] **Visual alternatives for all audio** — Every sound cue has a text/visual equivalent; no game-critical info through sound alone
+
+#### Inclusivity
+- [ ] **Character identity** — Player-chosen name and pronouns used in game text
+- [ ] **Code of Conduct** — Contributor Covenant adoption for a welcoming community
 
 ### Networking
 - [ ] **Replay system** — Record and playback games deterministically

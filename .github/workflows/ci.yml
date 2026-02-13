@@ -31,6 +31,8 @@ jobs:
             os: ubuntu-24.04-arm
           - name: macOS ARM64
             os: macos-latest
+          - name: macOS x86_64
+            os: macos-15-large
           - name: Windows x86_64
             os: windows-latest
     runs-on: ${{ matrix.os }}

@@ -162,7 +162,7 @@ Design principles (not checkboxes — follow these always):
 
 ### Platform Support
 - [x] **Windows / macOS / Linux** — Native terminal via crossterm (current)
-- [x] **CI matrix** — Tests on Linux (x86_64 + ARM64), macOS (ARM64), Windows (x86_64) in GitHub Actions
+- [x] **CI matrix** — Tests on Linux and macOS (x86_64 + ARM64), Windows (x86_64) in GitHub Actions
 - [ ] **Web (WASM)** — Browser-based play via wasm-pack + xterm.js; enables browser spectating and leaderboards
 - [ ] **Game Boy Advance** — Native ARM via `thumbv4t-none-eabi` target + `gba` crate; no_std, fixed-size containers
 - [ ] **SSH server** — Server-side play via russh, NetHack-server style (players connect via SSH)

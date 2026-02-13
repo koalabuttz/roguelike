@@ -1,16 +1,6 @@
-mod ai;
-mod combat;
-mod data;
-mod entity;
-mod fov;
-mod game;
-mod input;
-mod map;
-mod message_log;
-mod render;
-mod spawn;
-
 use std::io::stdout;
+
+use roguelike::{ai, data, game, input, render};
 
 use crossterm::{
     cursor,

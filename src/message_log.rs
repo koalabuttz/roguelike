@@ -2,6 +2,12 @@ pub struct MessageLog {
     messages: Vec<String>,
 }
 
+impl Default for MessageLog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MessageLog {
     pub fn new() -> Self {
         MessageLog {

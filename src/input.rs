@@ -7,7 +7,15 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 /// raw key events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameCommand {
-    Move { dx: i32, dy: i32 },
+    Move {
+        dx: i32,
+        dy: i32,
+    },
+    /// Keep moving in a direction until something interesting happens.
+    Autorun {
+        dx: i32,
+        dy: i32,
+    },
     Wait,
     Quit,
 }
@@ -22,26 +30,51 @@ pub fn translate_key(key: KeyEvent) -> Option<GameCommand> {
         return Some(GameCommand::Quit);
     }
 
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+
     match key.code {
         // Cardinal movement — arrows, vi keys, numpad
-        KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('8') => {
-            Some(GameCommand::Move { dx: 0, dy: -1 })
-        }
-        KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('2') => {
-            Some(GameCommand::Move { dx: 0, dy: 1 })
-        }
-        KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('4') => {
-            Some(GameCommand::Move { dx: -1, dy: 0 })
-        }
-        KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('6') => {
-            Some(GameCommand::Move { dx: 1, dy: 0 })
-        }
+        // Shift+arrow or uppercase vi key = autorun
+        KeyCode::Up => Some(if shift {
+            GameCommand::Autorun { dx: 0, dy: -1 }
+        } else {
+            GameCommand::Move { dx: 0, dy: -1 }
+        }),
+        KeyCode::Down => Some(if shift {
+            GameCommand::Autorun { dx: 0, dy: 1 }
+        } else {
+            GameCommand::Move { dx: 0, dy: 1 }
+        }),
+        KeyCode::Left => Some(if shift {
+            GameCommand::Autorun { dx: -1, dy: 0 }
+        } else {
+            GameCommand::Move { dx: -1, dy: 0 }
+        }),
+        KeyCode::Right => Some(if shift {
+            GameCommand::Autorun { dx: 1, dy: 0 }
+        } else {
+            GameCommand::Move { dx: 1, dy: 0 }
+        }),
 
-        // Diagonal movement — vi keys, numpad
+        // Lowercase vi keys = move, uppercase = autorun
+        KeyCode::Char('k') | KeyCode::Char('8') => Some(GameCommand::Move { dx: 0, dy: -1 }),
+        KeyCode::Char('K') => Some(GameCommand::Autorun { dx: 0, dy: -1 }),
+        KeyCode::Char('j') | KeyCode::Char('2') => Some(GameCommand::Move { dx: 0, dy: 1 }),
+        KeyCode::Char('J') => Some(GameCommand::Autorun { dx: 0, dy: 1 }),
+        KeyCode::Char('h') | KeyCode::Char('4') => Some(GameCommand::Move { dx: -1, dy: 0 }),
+        KeyCode::Char('H') => Some(GameCommand::Autorun { dx: -1, dy: 0 }),
+        KeyCode::Char('l') | KeyCode::Char('6') => Some(GameCommand::Move { dx: 1, dy: 0 }),
+        KeyCode::Char('L') => Some(GameCommand::Autorun { dx: 1, dy: 0 }),
+
+        // Diagonal movement — vi keys (lowercase=move, uppercase=autorun), numpad
         KeyCode::Char('y') | KeyCode::Char('7') => Some(GameCommand::Move { dx: -1, dy: -1 }),
+        KeyCode::Char('Y') => Some(GameCommand::Autorun { dx: -1, dy: -1 }),
         KeyCode::Char('u') | KeyCode::Char('9') => Some(GameCommand::Move { dx: 1, dy: -1 }),
+        KeyCode::Char('U') => Some(GameCommand::Autorun { dx: 1, dy: -1 }),
         KeyCode::Char('b') | KeyCode::Char('1') => Some(GameCommand::Move { dx: -1, dy: 1 }),
+        KeyCode::Char('B') => Some(GameCommand::Autorun { dx: -1, dy: 1 }),
         KeyCode::Char('n') | KeyCode::Char('3') => Some(GameCommand::Move { dx: 1, dy: 1 }),
+        KeyCode::Char('N') => Some(GameCommand::Autorun { dx: 1, dy: 1 }),
 
         // Wait
         KeyCode::Char('.') | KeyCode::Char('5') => Some(GameCommand::Wait),
@@ -217,6 +250,66 @@ mod tests {
         assert_eq!(
             translate_key(press_with(KeyCode::Char('c'), KeyModifiers::CONTROL)),
             Some(GameCommand::Quit)
+        );
+    }
+
+    #[test]
+    fn uppercase_vi_keys_produce_autorun() {
+        assert_eq!(
+            translate_key(press(KeyCode::Char('K'))),
+            Some(GameCommand::Autorun { dx: 0, dy: -1 })
+        );
+        assert_eq!(
+            translate_key(press(KeyCode::Char('J'))),
+            Some(GameCommand::Autorun { dx: 0, dy: 1 })
+        );
+        assert_eq!(
+            translate_key(press(KeyCode::Char('H'))),
+            Some(GameCommand::Autorun { dx: -1, dy: 0 })
+        );
+        assert_eq!(
+            translate_key(press(KeyCode::Char('L'))),
+            Some(GameCommand::Autorun { dx: 1, dy: 0 })
+        );
+    }
+
+    #[test]
+    fn uppercase_vi_diagonal_keys_produce_autorun() {
+        assert_eq!(
+            translate_key(press(KeyCode::Char('Y'))),
+            Some(GameCommand::Autorun { dx: -1, dy: -1 })
+        );
+        assert_eq!(
+            translate_key(press(KeyCode::Char('U'))),
+            Some(GameCommand::Autorun { dx: 1, dy: -1 })
+        );
+        assert_eq!(
+            translate_key(press(KeyCode::Char('B'))),
+            Some(GameCommand::Autorun { dx: -1, dy: 1 })
+        );
+        assert_eq!(
+            translate_key(press(KeyCode::Char('N'))),
+            Some(GameCommand::Autorun { dx: 1, dy: 1 })
+        );
+    }
+
+    #[test]
+    fn shift_arrow_keys_produce_autorun() {
+        assert_eq!(
+            translate_key(press_with(KeyCode::Up, KeyModifiers::SHIFT)),
+            Some(GameCommand::Autorun { dx: 0, dy: -1 })
+        );
+        assert_eq!(
+            translate_key(press_with(KeyCode::Down, KeyModifiers::SHIFT)),
+            Some(GameCommand::Autorun { dx: 0, dy: 1 })
+        );
+        assert_eq!(
+            translate_key(press_with(KeyCode::Left, KeyModifiers::SHIFT)),
+            Some(GameCommand::Autorun { dx: -1, dy: 0 })
+        );
+        assert_eq!(
+            translate_key(press_with(KeyCode::Right, KeyModifiers::SHIFT)),
+            Some(GameCommand::Autorun { dx: 1, dy: 0 })
         );
     }
 }

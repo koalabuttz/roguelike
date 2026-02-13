@@ -9,7 +9,7 @@ use rmcp::{
 use tokio::sync::Mutex;
 
 use crate::data::CONFIG;
-use crate::game::GameState;
+use crate::game::{AutorunResult, GameState};
 use crate::input::GameCommand;
 
 /// MCP server that wraps a roguelike game session.
@@ -97,7 +97,7 @@ impl RoguelikeMcpServer {
     }
 
     #[tool(
-        description = "Take an action in the game. Valid actions: 'move_north', 'move_south', 'move_east', 'move_west', 'move_northeast', 'move_northwest', 'move_southeast', 'move_southwest', 'wait'. Moving into a monster attacks it. Returns the resulting game state after the action and any monster turns."
+        description = "Take an action in the game. Valid actions: 'move_north', 'move_south', 'move_east', 'move_west', 'move_northeast', 'move_northwest', 'move_southeast', 'move_southwest', 'wait'. Moving into a monster attacks it. Returns the resulting game state after the action and any monster turns. Also supports autorun: 'autorun_north', 'autorun_south', 'autorun_east', 'autorun_west', 'autorun_northeast', 'autorun_northwest', 'autorun_southeast', 'autorun_southwest'. Autorun keeps moving in that direction until hitting a wall, spotting a new monster, taking damage, or reaching a corridor junction/room entrance. Use autorun to traverse long corridors efficiently."
     )]
     async fn act(
         &self,
@@ -120,12 +120,24 @@ impl RoguelikeMcpServer {
                 format!(
                     "Unknown action '{}'. Valid actions: move_north, move_south, \
                      move_east, move_west, move_northeast, move_northwest, \
-                     move_southeast, move_southwest, wait",
+                     move_southeast, move_southwest, wait, \
+                     autorun_north, autorun_south, autorun_east, autorun_west, \
+                     autorun_northeast, autorun_northwest, autorun_southeast, \
+                     autorun_southwest",
                     params.action
                 ),
                 None,
             )
         })?;
+
+        // Autorun: loop internally and return final state with metadata.
+        if let GameCommand::Autorun { dx, dy } = cmd {
+            let autorun_result = state.autorun(dx, dy);
+            let observation = state.observe();
+            let json = format_autorun_response(&observation, &autorun_result)
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            return Ok(CallToolResult::success(vec![Content::text(json)]));
+        }
 
         let _step_result = state.step(cmd);
         let observation = state.observe();
@@ -215,9 +227,36 @@ pub fn parse_action(action: &str) -> Option<GameCommand> {
         "move_northwest" => Some(GameCommand::Move { dx: -1, dy: -1 }),
         "move_southeast" => Some(GameCommand::Move { dx: 1, dy: 1 }),
         "move_southwest" => Some(GameCommand::Move { dx: -1, dy: 1 }),
+        "autorun_north" => Some(GameCommand::Autorun { dx: 0, dy: -1 }),
+        "autorun_south" => Some(GameCommand::Autorun { dx: 0, dy: 1 }),
+        "autorun_east" => Some(GameCommand::Autorun { dx: 1, dy: 0 }),
+        "autorun_west" => Some(GameCommand::Autorun { dx: -1, dy: 0 }),
+        "autorun_northeast" => Some(GameCommand::Autorun { dx: 1, dy: -1 }),
+        "autorun_northwest" => Some(GameCommand::Autorun { dx: -1, dy: -1 }),
+        "autorun_southeast" => Some(GameCommand::Autorun { dx: 1, dy: 1 }),
+        "autorun_southwest" => Some(GameCommand::Autorun { dx: -1, dy: 1 }),
         "wait" => Some(GameCommand::Wait),
         _ => None,
     }
+}
+
+/// Build a JSON response that merges the observation with autorun metadata.
+fn format_autorun_response(
+    observation: &crate::game::GameObservation,
+    autorun: &AutorunResult,
+) -> Result<String, serde_json::Error> {
+    let mut value = serde_json::to_value(observation)?;
+    if let serde_json::Value::Object(ref mut map) = value {
+        map.insert(
+            "autorun_steps".into(),
+            serde_json::Value::Number(autorun.steps_taken.into()),
+        );
+        map.insert(
+            "autorun_stop_reason".into(),
+            serde_json::to_value(autorun.stop_reason)?,
+        );
+    }
+    serde_json::to_string_pretty(&value)
 }
 
 #[cfg(test)]
@@ -285,6 +324,68 @@ mod tests {
             assert!(
                 parse_action(dir).is_some(),
                 "Expected valid action for '{}'",
+                dir
+            );
+        }
+    }
+
+    #[test]
+    fn parse_all_autorun_actions() {
+        assert_eq!(
+            parse_action("autorun_north"),
+            Some(GameCommand::Autorun { dx: 0, dy: -1 })
+        );
+        assert_eq!(
+            parse_action("autorun_south"),
+            Some(GameCommand::Autorun { dx: 0, dy: 1 })
+        );
+        assert_eq!(
+            parse_action("autorun_east"),
+            Some(GameCommand::Autorun { dx: 1, dy: 0 })
+        );
+        assert_eq!(
+            parse_action("autorun_west"),
+            Some(GameCommand::Autorun { dx: -1, dy: 0 })
+        );
+        assert_eq!(
+            parse_action("autorun_northeast"),
+            Some(GameCommand::Autorun { dx: 1, dy: -1 })
+        );
+        assert_eq!(
+            parse_action("autorun_northwest"),
+            Some(GameCommand::Autorun { dx: -1, dy: -1 })
+        );
+        assert_eq!(
+            parse_action("autorun_southeast"),
+            Some(GameCommand::Autorun { dx: 1, dy: 1 })
+        );
+        assert_eq!(
+            parse_action("autorun_southwest"),
+            Some(GameCommand::Autorun { dx: -1, dy: 1 })
+        );
+    }
+
+    #[test]
+    fn parse_covers_all_autorun_directions() {
+        let directions = [
+            "autorun_north",
+            "autorun_south",
+            "autorun_east",
+            "autorun_west",
+            "autorun_northeast",
+            "autorun_northwest",
+            "autorun_southeast",
+            "autorun_southwest",
+        ];
+        for dir in &directions {
+            assert!(
+                parse_action(dir).is_some(),
+                "Expected valid action for '{}'",
+                dir
+            );
+            assert!(
+                matches!(parse_action(dir), Some(GameCommand::Autorun { .. })),
+                "Expected Autorun command for '{}'",
                 dir
             );
         }

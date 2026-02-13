@@ -48,6 +48,12 @@ fn main() -> std::io::Result<()> {
                 break;
             }
 
+            // Autorun: multiple steps collapsed into one keypress.
+            if let input::GameCommand::Autorun { dx, dy } = cmd {
+                state.autorun(dx, dy);
+                continue;
+            }
+
             let player_took_action = state.handle_command(cmd);
 
             if player_took_action {

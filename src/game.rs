@@ -22,6 +22,35 @@ pub struct StepResult {
     pub game_over: bool,
 }
 
+/// Why autorun stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutorunStopReason {
+    /// Hit a wall or map edge.
+    WallReached,
+    /// A new living monster entered the field of view.
+    MonsterSpotted,
+    /// Player took damage from a monster.
+    DamageTaken,
+    /// Player died.
+    GameOver,
+    /// Corridor branched or opened into a room.
+    CorridorBranches,
+    /// Safety cap on steps reached.
+    MaxSteps,
+}
+
+/// Result of an autorun sequence — multiple steps collapsed into one call.
+#[derive(Debug, Serialize)]
+pub struct AutorunResult {
+    /// How many tiles the player moved.
+    pub steps_taken: i32,
+    /// Why the run stopped.
+    pub stop_reason: AutorunStopReason,
+    /// All messages generated during the run.
+    pub messages: Vec<String>,
+}
+
 /// A snapshot of the visible game state, suitable for serialization.
 #[derive(Serialize)]
 pub struct GameObservation {
@@ -128,7 +157,8 @@ impl GameState {
         match cmd {
             GameCommand::Move { dx, dy } => self.player_move_or_attack(dx, dy),
             GameCommand::Wait => true,
-            GameCommand::Quit => false,
+            // Autorun is handled at a higher level (main loop / MCP act).
+            GameCommand::Autorun { .. } | GameCommand::Quit => false,
         }
     }
 
@@ -153,6 +183,136 @@ impl GameState {
             new_messages: self.log.messages_since(msg_count_before),
             game_over: self.game_over,
         }
+    }
+
+    /// Run in a direction until something interesting happens.
+    ///
+    /// Repeatedly calls `step(Move{dx,dy})`, stopping when:
+    /// - Wall ahead (can't move forward)
+    /// - A new monster enters FOV
+    /// - Player takes damage
+    /// - Game over
+    /// - Corridor branches or room entered (neighbor count changes)
+    /// - Safety cap reached
+    pub fn autorun(&mut self, dx: i32, dy: i32) -> AutorunResult {
+        let max_steps = data::CONFIG.max_autorun_steps;
+        let mut steps_taken = 0;
+        let mut all_messages = Vec::new();
+
+        // Snapshot the initial walkable-neighbor count (excluding "behind").
+        // This lets autorun work when started in a room — it only stops
+        // when the topology *changes*.
+        let initial_neighbor_count =
+            self.map
+                .open_neighbors_excluding(self.entities[0].x, self.entities[0].y, -dx, -dy);
+
+        loop {
+            if steps_taken >= max_steps {
+                return AutorunResult {
+                    steps_taken,
+                    stop_reason: AutorunStopReason::MaxSteps,
+                    messages: all_messages,
+                };
+            }
+
+            // Don't auto-attack: stop if any living monster is adjacent.
+            if self.has_adjacent_monster() {
+                return AutorunResult {
+                    steps_taken,
+                    stop_reason: AutorunStopReason::MonsterSpotted,
+                    messages: all_messages,
+                };
+            }
+
+            // Snapshot state before the step.
+            let hp_before = self.entities[0].hp;
+            let visible_monsters_before = self.visible_monster_ids();
+
+            let result = self.step(GameCommand::Move { dx, dy });
+            all_messages.extend(result.new_messages);
+
+            if !result.action_taken {
+                return AutorunResult {
+                    steps_taken,
+                    stop_reason: AutorunStopReason::WallReached,
+                    messages: all_messages,
+                };
+            }
+
+            steps_taken += 1;
+
+            if result.game_over {
+                return AutorunResult {
+                    steps_taken,
+                    stop_reason: AutorunStopReason::GameOver,
+                    messages: all_messages,
+                };
+            }
+
+            // Damage check — stop immediately so the player can react.
+            if self.entities[0].hp < hp_before {
+                return AutorunResult {
+                    steps_taken,
+                    stop_reason: AutorunStopReason::DamageTaken,
+                    messages: all_messages,
+                };
+            }
+
+            // New monster check.
+            let visible_monsters_after = self.visible_monster_ids();
+            if visible_monsters_after
+                .difference(&visible_monsters_before)
+                .next()
+                .is_some()
+            {
+                return AutorunResult {
+                    steps_taken,
+                    stop_reason: AutorunStopReason::MonsterSpotted,
+                    messages: all_messages,
+                };
+            }
+
+            // Forward tile blocked? We've reached the end of the road.
+            let px = self.entities[0].x;
+            let py = self.entities[0].y;
+            if !self.map.is_walkable(px + dx, py + dy) {
+                return AutorunResult {
+                    steps_taken,
+                    stop_reason: AutorunStopReason::WallReached,
+                    messages: all_messages,
+                };
+            }
+
+            // Corridor topology check — stop when surroundings change.
+            let current_neighbor_count = self.map.open_neighbors_excluding(px, py, -dx, -dy);
+            if current_neighbor_count != initial_neighbor_count {
+                return AutorunResult {
+                    steps_taken,
+                    stop_reason: AutorunStopReason::CorridorBranches,
+                    messages: all_messages,
+                };
+            }
+        }
+    }
+
+    /// True if any living monster is adjacent to the player (within 1 tile).
+    pub fn has_adjacent_monster(&self) -> bool {
+        let px = self.entities[0].x;
+        let py = self.entities[0].y;
+        self.entities
+            .iter()
+            .skip(1)
+            .any(|e| e.alive && (e.x - px).abs() <= 1 && (e.y - py).abs() <= 1)
+    }
+
+    /// Set of entity indices for living, visible monsters.
+    pub fn visible_monster_ids(&self) -> HashSet<usize> {
+        self.entities
+            .iter()
+            .enumerate()
+            .filter(|(i, e)| *i != 0 && e.alive && self.visible.contains(&(e.x, e.y)))
+            .map(|(i, _)| i)
+            .collect()
     }
 
     /// Produce a snapshot of the current visible game state.
@@ -545,5 +705,141 @@ mod tests {
     fn glyph_at_empty_cell() {
         let gs = test_game();
         assert_eq!(gs.glyph_at(3, 3), None);
+    }
+
+    // --- autorun() tests ---
+
+    /// Build a horizontal corridor: floor from (1, 5) to (18, 5), walls everywhere else.
+    fn corridor_game() -> GameState {
+        let mut m = Map::new(20, 10);
+        for x in 1..=18 {
+            let idx = m.idx(x, 5);
+            m.tiles[idx] = Tile::Floor;
+        }
+
+        let player = Entity::player(5, 5);
+        let visible = fov::compute_fov(&m, 5, 5, 8);
+        let explored = visible.clone();
+
+        GameState {
+            map: m,
+            entities: vec![player],
+            fov_radius: 8,
+            visible,
+            explored,
+            log: MessageLog::new(),
+            game_over: false,
+        }
+    }
+
+    #[test]
+    fn autorun_stops_at_wall() {
+        let mut gs = corridor_game();
+        // Player at (5,5), corridor ends at x=18. Running east should reach x=18
+        // and stop because the tile ahead (x=19) is a wall.
+        let result = gs.autorun(1, 0);
+        assert_eq!(result.stop_reason, AutorunStopReason::WallReached);
+        assert_eq!(gs.entities[0].x, 18);
+        assert_eq!(result.steps_taken, 13);
+    }
+
+    #[test]
+    fn autorun_stops_when_monster_spotted() {
+        let mut gs = corridor_game();
+        // Place a goblin at x=14, just outside FOV radius of 8 from (5,5).
+        // After moving east a few tiles, the goblin enters FOV.
+        let monster = Entity::from_template(&data::GOBLIN, 14, 5);
+        gs.entities.push(monster);
+        let result = gs.autorun(1, 0);
+        assert_eq!(result.stop_reason, AutorunStopReason::MonsterSpotted);
+        assert!(gs.entities[0].x < 14); // stopped before reaching monster
+    }
+
+    #[test]
+    fn autorun_stops_when_adjacent_to_monster() {
+        let mut gs = corridor_game();
+        // Place a goblin adjacent at (6, 5). Autorun should stop immediately
+        // because a monster is right next to us — don't auto-attack.
+        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        gs.entities.push(monster);
+        gs.update_fov();
+        let result = gs.autorun(1, 0);
+        assert_eq!(result.stop_reason, AutorunStopReason::MonsterSpotted);
+        assert_eq!(result.steps_taken, 0);
+        assert_eq!(gs.entities[0].x, 5); // didn't move
+    }
+
+    #[test]
+    fn autorun_stops_at_corridor_branch() {
+        let mut m = Map::new(20, 10);
+        // Horizontal corridor
+        for x in 1..=18 {
+            let idx = m.idx(x, 5);
+            m.tiles[idx] = Tile::Floor;
+        }
+        // Add a branch going north at x=10
+        for y in 1..=4 {
+            let idx = m.idx(10, y);
+            m.tiles[idx] = Tile::Floor;
+        }
+
+        let player = Entity::player(5, 5);
+        let visible = fov::compute_fov(&m, 5, 5, 8);
+        let explored = visible.clone();
+
+        let mut gs = GameState {
+            map: m,
+            entities: vec![player],
+            fov_radius: 8,
+            visible,
+            explored,
+            log: MessageLog::new(),
+            game_over: false,
+        };
+
+        let result = gs.autorun(1, 0);
+        assert_eq!(result.stop_reason, AutorunStopReason::CorridorBranches);
+        // Topology change detected when the NE neighbor (10,4) becomes visible
+        // from position (9,5), so the player stops at x=9.
+        assert_eq!(gs.entities[0].x, 9);
+    }
+
+    #[test]
+    fn autorun_respects_max_steps() {
+        // Create a very long corridor
+        let mut m = Map::new(200, 10);
+        for x in 1..=198 {
+            let idx = m.idx(x, 5);
+            m.tiles[idx] = Tile::Floor;
+        }
+
+        let player = Entity::player(5, 5);
+        let visible = fov::compute_fov(&m, 5, 5, 8);
+        let explored = visible.clone();
+
+        let mut gs = GameState {
+            map: m,
+            entities: vec![player],
+            fov_radius: 8,
+            visible,
+            explored,
+            log: MessageLog::new(),
+            game_over: false,
+        };
+
+        let result = gs.autorun(1, 0);
+        assert_eq!(result.stop_reason, AutorunStopReason::MaxSteps);
+        assert_eq!(result.steps_taken, data::CONFIG.max_autorun_steps);
+    }
+
+    #[test]
+    fn autorun_zero_steps_into_wall() {
+        let mut gs = corridor_game();
+        // Player at (5,5), run north into wall
+        let result = gs.autorun(0, -1);
+        assert_eq!(result.stop_reason, AutorunStopReason::WallReached);
+        assert_eq!(result.steps_taken, 0);
+        assert_eq!(gs.entities[0].x, 5);
+        assert_eq!(gs.entities[0].y, 5);
     }
 }

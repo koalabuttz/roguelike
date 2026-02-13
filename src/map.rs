@@ -61,6 +61,35 @@ impl Map {
         self.in_bounds(x, y) && self.tiles[self.idx(x, y)] == Tile::Floor
     }
 
+    /// Count walkable tiles adjacent to (x, y), excluding one direction.
+    ///
+    /// Useful for corridor topology detection: in a straight 1-wide corridor,
+    /// the count excluding "behind" is exactly 1. At junctions or room
+    /// entrances, it's 2+. At dead ends, it's 0.
+    pub fn open_neighbors_excluding(
+        &self,
+        x: i32,
+        y: i32,
+        exclude_dx: i32,
+        exclude_dy: i32,
+    ) -> i32 {
+        let mut count = 0;
+        for ny in -1..=1 {
+            for nx in -1..=1 {
+                if nx == 0 && ny == 0 {
+                    continue;
+                }
+                if nx == exclude_dx && ny == exclude_dy {
+                    continue;
+                }
+                if self.is_walkable(x + nx, y + ny) {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
     fn carve_room(&mut self, room: &Rect) {
         for y in (room.y1 + 1)..room.y2 {
             for x in (room.x1 + 1)..room.x2 {
@@ -239,6 +268,37 @@ mod tests {
         let mut m = Map::new(80, 50);
         let (px, py) = m.generate(30, 4, 10);
         assert!(m.is_walkable(px, py));
+    }
+
+    #[test]
+    fn open_neighbors_in_corridor() {
+        // Horizontal corridor at y=5
+        let mut m = Map::new(10, 10);
+        for x in 1..=8 {
+            let idx = m.idx(x, 5);
+            m.tiles[idx] = Tile::Floor;
+        }
+        // Middle of corridor: excluding west (behind), only east is open → 1
+        assert_eq!(m.open_neighbors_excluding(5, 5, -1, 0), 1);
+        // Dead end at x=8: excluding west, east is wall → 0
+        assert_eq!(m.open_neighbors_excluding(8, 5, -1, 0), 0);
+    }
+
+    #[test]
+    fn open_neighbors_at_junction() {
+        let mut m = Map::new(10, 10);
+        // Horizontal corridor at y=5
+        for x in 1..=8 {
+            let idx = m.idx(x, 5);
+            m.tiles[idx] = Tile::Floor;
+        }
+        // Branch going north at x=5
+        for y in 1..=4 {
+            let idx = m.idx(5, y);
+            m.tiles[idx] = Tile::Floor;
+        }
+        // At the junction: excluding west (behind), east and north are open → 2
+        assert_eq!(m.open_neighbors_excluding(5, 5, -1, 0), 2);
     }
 
     #[test]

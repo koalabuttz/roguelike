@@ -158,6 +158,27 @@ impl RoguelikeMcpServer {
     }
 
     #[tool(
+        description = "Get the full explored map — all tiles the player has ever seen. Unlike observe (which shows only current FOV), this shows the complete explored dungeon. Use this to plan exploration routes and find unvisited areas. Entity glyphs only appear at current positions if in FOV."
+    )]
+    async fn get_explored_map(&self) -> Result<CallToolResult, McpError> {
+        let guard = self.state.lock().await;
+        let state = guard.as_ref().ok_or_else(|| {
+            McpError::invalid_request("No game in progress. Call new_game first.", None)
+        })?;
+
+        let map_lines = state.explored_map();
+        let player = &state.entities[0];
+        let response = serde_json::json!({
+            "explored_map": map_lines,
+            "player_x": player.x,
+            "player_y": player.y,
+        });
+        let json = serde_json::to_string_pretty(&response)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(
         description = "Get the rules and mechanics of the roguelike game. Explains combat, movement, monsters, and field of view. Call this to understand the game before playing."
     )]
     async fn get_rules(&self) -> Result<CallToolResult, McpError> {
@@ -198,13 +219,13 @@ impl RoguelikeMcpServer {
              - Goblins deal 1 dmg/turn to you. You kill them in 2 hits.\n\
              - Orcs deal 2 dmg/turn. 3 hits to kill.\n\
              - Trolls deal 4 dmg/turn but take 10 hits to kill. Avoid if low HP.\n\
-             - You have no way to heal yet. Every point of HP matters.\n\
+             - You regenerate 1 HP every {} turns. Retreat and move to recover.\n\
              - Use 'auto_fight' to resolve trivial combat in one call (fights weakest adjacent monster).\n\
              \n\
              ## Game Stats\n\
              The observe response includes: kills, rooms_found, and explored_pct \
              (percentage of map explored).",
-            CONFIG.fov_radius
+            CONFIG.fov_radius, CONFIG.regen_interval
         );
         Ok(CallToolResult::success(vec![Content::text(rules)]))
     }

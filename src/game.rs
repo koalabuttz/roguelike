@@ -514,6 +514,44 @@ impl GameState {
         }
     }
 
+    /// Produce an ASCII map of all explored tiles.
+    ///
+    /// Unlike `observe()`, which only shows currently visible tiles, this
+    /// renders every tile the player has ever seen. Entity glyphs are only
+    /// shown at their current positions if visible (no stale positions).
+    /// Rows with no explored content are omitted.
+    pub fn explored_map(&self) -> Vec<String> {
+        let mut lines = Vec::new();
+        for y in 0..self.map.height {
+            let mut line = String::with_capacity(self.map.width as usize);
+            let mut has_content = false;
+
+            for x in 0..self.map.width {
+                if self.explored.contains(&(x, y)) {
+                    has_content = true;
+                    // Show entity glyphs only if currently visible.
+                    if self.visible.contains(&(x, y))
+                        && let Some(glyph) = self.glyph_at(x, y)
+                    {
+                        line.push(glyph);
+                        continue;
+                    }
+                    match self.map.tiles[self.map.idx(x, y)] {
+                        map::Tile::Floor => line.push('.'),
+                        map::Tile::Wall => line.push('#'),
+                    }
+                } else {
+                    line.push(' ');
+                }
+            }
+
+            if has_content {
+                lines.push(line.trim_end().to_string());
+            }
+        }
+        lines
+    }
+
     /// Get the display glyph for the topmost entity at (x, y).
     /// Living entities take priority over dead ones (corpses).
     fn glyph_at(&self, x: i32, y: i32) -> Option<char> {
@@ -1102,6 +1140,55 @@ mod tests {
         let obs = gs.observe();
         assert!(obs.explored_pct > 0);
         assert!(obs.explored_pct <= 100);
+    }
+
+    // --- explored_map() tests ---
+
+    #[test]
+    fn explored_map_includes_explored_tiles() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let map = gs.explored_map();
+        let text = map.join("\n");
+        // Player should be visible
+        assert!(text.contains('@'));
+        // Floor and wall tiles should appear
+        assert!(text.contains('.'));
+        assert!(text.contains('#'));
+    }
+
+    #[test]
+    fn explored_map_shows_more_than_fov_after_moving() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let initial_explored = gs.explored.len();
+        // Move east a few times to explore new tiles
+        for _ in 0..3 {
+            gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        }
+        assert!(gs.explored.len() > initial_explored);
+        let map = gs.explored_map();
+        let total_chars: usize = map.iter().map(|l| l.chars().filter(|c| *c != ' ').count()).sum();
+        // Explored map should have more non-space characters than a FOV-only view
+        let obs = gs.observe();
+        let obs_chars: usize = obs.map_ascii.iter().map(|l| l.chars().filter(|c| *c != ' ').count()).sum();
+        assert!(total_chars >= obs_chars);
+    }
+
+    #[test]
+    fn explored_map_hides_monsters_outside_fov() {
+        let mut gs = test_game();
+        // Place a monster far from player but technically in explored area
+        let monster = Entity::from_template(&data::GOBLIN, 3, 3);
+        gs.entities.push(monster);
+        gs.update_fov();
+        // Verify the monster is in explored area but check if it's in FOV
+        if !gs.visible.contains(&(3, 3)) {
+            let map = gs.explored_map();
+            let text = map.join("\n");
+            // Monster glyph should NOT appear since it's outside FOV
+            assert!(!text.contains('g'));
+        }
     }
 
     // --- auto_fight() tests ---

@@ -64,6 +64,27 @@ pub struct GameObservation {
     pub visible_entities: Vec<EntityInfo>,
     pub recent_messages: Vec<String>,
     pub game_over: bool,
+    // --- game stats ---
+    pub kills: i32,
+    pub total_monsters: i32,
+    pub rooms_found: i32,
+    pub total_rooms: i32,
+    pub explored_pct: i32,
+}
+
+/// Result of an auto-fight sequence — combat resolved in one call.
+#[derive(Debug, Serialize)]
+pub struct AutoFightResult {
+    /// How many rounds (full turns) the fight lasted.
+    pub rounds: i32,
+    /// Name of the monster fought.
+    pub target_name: String,
+    /// Whether the target was killed.
+    pub target_killed: bool,
+    /// Total HP the player lost during the fight (from all sources).
+    pub player_hp_lost: i32,
+    /// All messages generated during the fight.
+    pub messages: Vec<String>,
 }
 
 /// Info about a visible entity (monster or corpse).
@@ -295,6 +316,62 @@ impl GameState {
         }
     }
 
+    /// Fight an adjacent monster to the death in one call.
+    ///
+    /// Picks the adjacent monster with the lowest HP (quickest kill).
+    /// Each round is a full `step()`, so other monsters still act.
+    /// Stops when the target dies, the player dies, or the target moves away.
+    pub fn auto_fight(&mut self) -> Result<AutoFightResult, String> {
+        let px = self.entities[0].x;
+        let py = self.entities[0].y;
+
+        let target_idx = self
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(i, e)| *i != 0 && e.alive && (e.x - px).abs() <= 1 && (e.y - py).abs() <= 1)
+            .min_by_key(|(_, e)| e.hp)
+            .map(|(i, _)| i)
+            .ok_or_else(|| "No adjacent monster to fight.".to_string())?;
+
+        let hp_before = self.entities[0].hp;
+        let target_name = self.entities[target_idx].name.clone();
+        let msg_count_before = self.log.len();
+        let mut rounds = 0;
+
+        loop {
+            if !self.entities[target_idx].alive {
+                break;
+            }
+
+            // Recompute direction to target each round (safe if target moves)
+            let tx = self.entities[target_idx].x;
+            let ty = self.entities[target_idx].y;
+            let dx = (tx - self.entities[0].x).signum();
+            let dy = (ty - self.entities[0].y).signum();
+
+            // Target moved out of melee range — stop
+            if (tx - self.entities[0].x).abs() > 1 || (ty - self.entities[0].y).abs() > 1 {
+                break;
+            }
+
+            let result = self.step(GameCommand::Move { dx, dy });
+            rounds += 1;
+
+            if result.game_over {
+                break;
+            }
+        }
+
+        Ok(AutoFightResult {
+            rounds,
+            target_name,
+            target_killed: !self.entities[target_idx].alive,
+            player_hp_lost: hp_before - self.entities[0].hp,
+            messages: self.log.messages_since(msg_count_before),
+        })
+    }
+
     /// True if any living monster is adjacent to the player (within 1 tile).
     pub fn has_adjacent_monster(&self) -> bool {
         let px = self.entities[0].x;
@@ -367,6 +444,23 @@ impl GameState {
             })
             .collect();
 
+        // --- game stats ---
+        let kills = self.entities.iter().skip(1).filter(|e| !e.alive).count() as i32;
+        let total_monsters = (self.entities.len() - 1) as i32;
+        let rooms_found = self
+            .map
+            .rooms
+            .iter()
+            .filter(|r| self.explored.contains(&r.center()))
+            .count() as i32;
+        let total_rooms = self.map.rooms.len() as i32;
+        let floor_count = self.map.floor_count();
+        let explored_pct = if floor_count > 0 {
+            (self.explored.len() as i32 * 100) / floor_count
+        } else {
+            0
+        };
+
         GameObservation {
             player_hp: player.hp,
             player_max_hp: player.max_hp,
@@ -378,6 +472,11 @@ impl GameState {
             visible_entities,
             recent_messages: self.log.recent(10).to_vec(),
             game_over: self.game_over,
+            kills,
+            total_monsters,
+            rooms_found,
+            total_rooms,
+            explored_pct,
         }
     }
 
@@ -841,5 +940,119 @@ mod tests {
         assert_eq!(result.steps_taken, 0);
         assert_eq!(gs.entities[0].x, 5);
         assert_eq!(gs.entities[0].y, 5);
+    }
+
+    // --- observe() game stats tests ---
+
+    #[test]
+    fn observe_stats_no_monsters() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let obs = gs.observe();
+        assert_eq!(obs.kills, 0);
+        assert_eq!(obs.total_monsters, 0);
+        assert!(obs.explored_pct > 0);
+    }
+
+    #[test]
+    fn observe_stats_with_kills() {
+        let mut gs = test_game();
+        let mut dead = Entity::from_template(&data::GOBLIN, 6, 5);
+        dead.alive = false;
+        gs.entities.push(dead);
+        let alive = Entity::from_template(&data::ORC, 7, 5);
+        gs.entities.push(alive);
+        gs.update_fov();
+        let obs = gs.observe();
+        assert_eq!(obs.kills, 1);
+        assert_eq!(obs.total_monsters, 2);
+    }
+
+    #[test]
+    fn observe_stats_rooms_found() {
+        // Use a real generated map so we have rooms
+        let gs = GameState::new(80, 40);
+        let obs = gs.observe();
+        assert!(obs.total_rooms > 0);
+        // Player starts in first room, so at least 1 room found
+        assert!(obs.rooms_found >= 1);
+        assert!(obs.rooms_found <= obs.total_rooms);
+    }
+
+    #[test]
+    fn observe_stats_explored_pct_range() {
+        let gs = GameState::new(80, 40);
+        let obs = gs.observe();
+        assert!(obs.explored_pct > 0);
+        assert!(obs.explored_pct <= 100);
+    }
+
+    // --- auto_fight() tests ---
+
+    #[test]
+    fn auto_fight_kills_goblin() {
+        let mut gs = test_game();
+        let goblin = Entity::from_template(&data::GOBLIN, 6, 5);
+        gs.entities.push(goblin);
+        gs.update_fov();
+        let result = gs.auto_fight().unwrap();
+        assert!(result.target_killed);
+        assert_eq!(result.target_name, "Goblin");
+        // Player ATK=5, Goblin DEF=0 → 5 dmg/hit, Goblin HP=6 → 2 hits to kill
+        assert_eq!(result.rounds, 2);
+        // Goblin ATK=3, Player DEF=2 → 1 dmg/hit, 1 hit taken (dies on round 2)
+        assert_eq!(result.player_hp_lost, 1);
+        assert!(!result.messages.is_empty());
+    }
+
+    #[test]
+    fn auto_fight_kills_orc() {
+        let mut gs = test_game();
+        let orc = Entity::from_template(&data::ORC, 6, 5);
+        gs.entities.push(orc);
+        gs.update_fov();
+        let result = gs.auto_fight().unwrap();
+        assert!(result.target_killed);
+        assert_eq!(result.target_name, "Orc");
+        // Player ATK=5, Orc DEF=1 → 4 dmg/hit, Orc HP=12 → 3 hits to kill
+        assert_eq!(result.rounds, 3);
+        // Orc ATK=4, Player DEF=2 → 2 dmg/hit, 2 hits taken (dies on round 3)
+        assert_eq!(result.player_hp_lost, 4);
+    }
+
+    #[test]
+    fn auto_fight_no_adjacent_monster_errors() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let result = gs.auto_fight();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn auto_fight_picks_weakest_target() {
+        let mut gs = test_game();
+        // Place an orc (12 HP) and a goblin (6 HP) adjacent
+        let orc = Entity::from_template(&data::ORC, 4, 5);
+        gs.entities.push(orc);
+        let goblin = Entity::from_template(&data::GOBLIN, 6, 5);
+        gs.entities.push(goblin);
+        gs.update_fov();
+        let result = gs.auto_fight().unwrap();
+        // Should fight the goblin (lower HP) first
+        assert_eq!(result.target_name, "Goblin");
+        assert!(result.target_killed);
+    }
+
+    #[test]
+    fn auto_fight_player_dies_to_troll() {
+        let mut gs = test_game();
+        gs.entities[0].hp = 5; // low HP
+        gs.entities[0].defense = 0;
+        let troll = Entity::from_template(&data::TROLL, 6, 5);
+        gs.entities.push(troll);
+        gs.update_fov();
+        let result = gs.auto_fight().unwrap();
+        assert!(!result.target_killed);
+        assert!(gs.game_over);
     }
 }

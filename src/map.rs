@@ -90,6 +90,11 @@ impl Map {
         count
     }
 
+    /// Count the total number of floor tiles on the map.
+    pub fn floor_count(&self) -> i32 {
+        self.tiles.iter().filter(|t| **t == Tile::Floor).count() as i32
+    }
+
     fn carve_room(&mut self, room: &Rect) {
         for y in (room.y1 + 1)..room.y2 {
             for x in (room.x1 + 1)..room.x2 {
@@ -299,6 +304,22 @@ mod tests {
         }
         // At the junction: excluding west (behind), east and north are open → 2
         assert_eq!(m.open_neighbors_excluding(5, 5, -1, 0), 2);
+    }
+
+    #[test]
+    fn floor_count_empty_map() {
+        let m = Map::new(10, 10);
+        assert_eq!(m.floor_count(), 0);
+    }
+
+    #[test]
+    fn floor_count_with_floors() {
+        let mut m = Map::new(10, 10);
+        for x in 1..=5 {
+            let idx = m.idx(x, 5);
+            m.tiles[idx] = Tile::Floor;
+        }
+        assert_eq!(m.floor_count(), 5);
     }
 
     #[test]

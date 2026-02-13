@@ -9,7 +9,7 @@ use rmcp::{
 use tokio::sync::Mutex;
 
 use crate::data::CONFIG;
-use crate::game::{AutorunResult, GameState};
+use crate::game::{AutoFightResult, AutorunResult, GameState};
 use crate::input::GameCommand;
 
 /// MCP server that wraps a roguelike game session.
@@ -97,7 +97,7 @@ impl RoguelikeMcpServer {
     }
 
     #[tool(
-        description = "Take an action in the game. Valid actions: 'move_north', 'move_south', 'move_east', 'move_west', 'move_northeast', 'move_northwest', 'move_southeast', 'move_southwest', 'wait'. Moving into a monster attacks it. Returns the resulting game state after the action and any monster turns. Also supports autorun: 'autorun_north', 'autorun_south', 'autorun_east', 'autorun_west', 'autorun_northeast', 'autorun_northwest', 'autorun_southeast', 'autorun_southwest'. Autorun keeps moving in that direction until hitting a wall, spotting a new monster, taking damage, or reaching a corridor junction/room entrance. Use autorun to traverse long corridors efficiently."
+        description = "Take an action in the game. Valid actions: 'move_north', 'move_south', 'move_east', 'move_west', 'move_northeast', 'move_northwest', 'move_southeast', 'move_southwest', 'wait'. Moving into a monster attacks it. Returns the resulting game state after the action and any monster turns. Also supports autorun: 'autorun_north', 'autorun_south', 'autorun_east', 'autorun_west', 'autorun_northeast', 'autorun_northwest', 'autorun_southeast', 'autorun_southwest'. Autorun keeps moving in that direction until hitting a wall, spotting a new monster, taking damage, or reaching a corridor junction/room entrance. Use autorun to traverse long corridors efficiently. Also supports 'auto_fight' to resolve combat with an adjacent monster in one call — fights the weakest adjacent monster to the death. Response includes game stats: kills, total_monsters, rooms_found, total_rooms, explored_pct."
     )]
     async fn act(
         &self,
@@ -115,6 +115,17 @@ impl RoguelikeMcpServer {
             ));
         }
 
+        // Auto-fight: resolve adjacent combat in one call.
+        if params.action == "auto_fight" {
+            let fight_result = state
+                .auto_fight()
+                .map_err(|e| McpError::invalid_request(e, None))?;
+            let observation = state.observe();
+            let json = format_auto_fight_response(&observation, &fight_result)
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            return Ok(CallToolResult::success(vec![Content::text(json)]));
+        }
+
         let cmd = parse_action(&params.action).ok_or_else(|| {
             McpError::invalid_params(
                 format!(
@@ -123,7 +134,7 @@ impl RoguelikeMcpServer {
                      move_southeast, move_southwest, wait, \
                      autorun_north, autorun_south, autorun_east, autorun_west, \
                      autorun_northeast, autorun_northwest, autorun_southeast, \
-                     autorun_southwest",
+                     autorun_southwest, auto_fight",
                     params.action
                 ),
                 None,
@@ -187,7 +198,12 @@ impl RoguelikeMcpServer {
              - Goblins deal 1 dmg/turn to you. You kill them in 2 hits.\n\
              - Orcs deal 2 dmg/turn. 3 hits to kill.\n\
              - Trolls deal 4 dmg/turn but take 10 hits to kill. Avoid if low HP.\n\
-             - You have no way to heal yet. Every point of HP matters.",
+             - You have no way to heal yet. Every point of HP matters.\n\
+             - Use 'auto_fight' to resolve trivial combat in one call (fights weakest adjacent monster).\n\
+             \n\
+             ## Game Stats\n\
+             The observe response includes: kills, total_monsters, rooms_found, \
+             total_rooms, and explored_pct (percentage of map explored).",
             CONFIG.fov_radius
         );
         Ok(CallToolResult::success(vec![Content::text(rules)]))
@@ -238,6 +254,33 @@ pub fn parse_action(action: &str) -> Option<GameCommand> {
         "wait" => Some(GameCommand::Wait),
         _ => None,
     }
+}
+
+/// Build a JSON response that merges the observation with auto-fight metadata.
+fn format_auto_fight_response(
+    observation: &crate::game::GameObservation,
+    fight: &AutoFightResult,
+) -> Result<String, serde_json::Error> {
+    let mut value = serde_json::to_value(observation)?;
+    if let serde_json::Value::Object(ref mut map) = value {
+        map.insert(
+            "auto_fight_rounds".into(),
+            serde_json::Value::Number(fight.rounds.into()),
+        );
+        map.insert(
+            "auto_fight_target".into(),
+            serde_json::Value::String(fight.target_name.clone()),
+        );
+        map.insert(
+            "auto_fight_target_killed".into(),
+            serde_json::Value::Bool(fight.target_killed),
+        );
+        map.insert(
+            "auto_fight_player_hp_lost".into(),
+            serde_json::Value::Number(fight.player_hp_lost.into()),
+        );
+    }
+    serde_json::to_string_pretty(&value)
 }
 
 /// Build a JSON response that merges the observation with autorun metadata.

@@ -106,6 +106,11 @@ impl Map {
         self.tiles.iter().filter(|t| **t == Tile::Floor).count() as i32
     }
 
+    /// Whether (x, y) is inside any room's interior.
+    pub fn is_in_room(&self, x: i32, y: i32) -> bool {
+        self.rooms.iter().any(|r| r.contains_interior(x, y))
+    }
+
     /// Count floor tiles excluding those inside hidden rooms.
     /// Use this for exploration stats so hidden rooms don't leak info.
     pub fn known_floor_count(&self) -> i32 {
@@ -415,6 +420,23 @@ mod tests {
         hidden.hidden = true;
         m.rooms.push(hidden);
         assert_eq!(m.known_room_count(), 1);
+    }
+
+    #[test]
+    fn is_in_room_interior() {
+        let mut m = Map::new(20, 20);
+        let room = Rect::new(2, 2, 6, 6); // interior: 3..=7 x 3..=7
+        m.rooms.push(room);
+        assert!(m.is_in_room(5, 5));
+        assert!(!m.is_in_room(2, 5)); // wall edge
+        assert!(!m.is_in_room(0, 0)); // outside
+    }
+
+    #[test]
+    fn is_in_room_corridor() {
+        let m = Map::new(20, 20);
+        // No rooms registered — corridor tiles are never "in a room"
+        assert!(!m.is_in_room(5, 5));
     }
 
     #[test]

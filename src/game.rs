@@ -36,6 +36,8 @@ pub enum AutorunStopReason {
     GameOver,
     /// Corridor branched or opened into a room.
     CorridorBranches,
+    /// Transitioned between a room and a corridor (or vice versa).
+    RoomTransition,
     /// Safety cap on steps reached.
     MaxSteps,
 }
@@ -226,19 +228,22 @@ impl GameState {
     /// - A new monster enters FOV
     /// - Player takes damage
     /// - Game over
-    /// - Corridor branches or room entered (neighbor count changes)
+    /// - Corridor branches (topology changes while in a corridor)
+    /// - Transition between room and corridor
     /// - Safety cap reached
     pub fn autorun(&mut self, dx: i32, dy: i32) -> AutorunResult {
         let max_steps = data::CONFIG.max_autorun_steps;
         let mut steps_taken = 0;
         let mut all_messages = Vec::new();
 
-        // Snapshot the initial walkable-neighbor count (excluding "behind").
-        // This lets autorun work when started in a room — it only stops
-        // when the topology *changes*.
+        let start_x = self.entities[0].x;
+        let start_y = self.entities[0].y;
+        let initial_in_room = self.map.is_in_room(start_x, start_y);
+
+        // Corridor topology baseline (only used when starting in a corridor).
         let initial_neighbor_count =
             self.map
-                .open_neighbors_excluding(self.entities[0].x, self.entities[0].y, -dx, -dy);
+                .open_neighbors_excluding(start_x, start_y, -dx, -dy);
 
         loop {
             if steps_taken >= max_steps {
@@ -317,14 +322,27 @@ impl GameState {
                 };
             }
 
-            // Corridor topology check — stop when surroundings change.
-            let current_neighbor_count = self.map.open_neighbors_excluding(px, py, -dx, -dy);
-            if current_neighbor_count != initial_neighbor_count {
+            // Room/corridor transition — stop at boundaries.
+            let in_room = self.map.is_in_room(px, py);
+            if in_room != initial_in_room {
                 return AutorunResult {
                     steps_taken,
-                    stop_reason: AutorunStopReason::CorridorBranches,
+                    stop_reason: AutorunStopReason::RoomTransition,
                     messages: all_messages,
                 };
+            }
+
+            // Corridor topology check — only in corridors where junctions matter.
+            if !in_room {
+                let current_neighbor_count =
+                    self.map.open_neighbors_excluding(px, py, -dx, -dy);
+                if current_neighbor_count != initial_neighbor_count {
+                    return AutorunResult {
+                        steps_taken,
+                        stop_reason: AutorunStopReason::CorridorBranches,
+                        messages: all_messages,
+                    };
+                }
             }
         }
     }
@@ -960,6 +978,89 @@ mod tests {
         assert_eq!(result.steps_taken, 0);
         assert_eq!(gs.entities[0].x, 5);
         assert_eq!(gs.entities[0].y, 5);
+    }
+
+    #[test]
+    fn autorun_crosses_room_without_stopping() {
+        // test_game() has a 10x10 open area (room-like). Player at (5,5).
+        // Running east should cross the room and hit the wall at x=10.
+        let mut gs = test_game();
+        // Register the open area as a room so is_in_room works.
+        gs.map.rooms.push(crate::map::Rect::new(0, 0, 11, 11));
+        let result = gs.autorun(1, 0);
+        assert_eq!(result.stop_reason, AutorunStopReason::WallReached);
+        assert_eq!(gs.entities[0].x, 10);
+        assert!(result.steps_taken > 1);
+    }
+
+    #[test]
+    fn autorun_stops_at_room_to_corridor_transition() {
+        let mut m = Map::new(30, 10);
+        // Room from (1,1) to (10,8)
+        let room = crate::map::Rect::new(0, 0, 11, 9);
+        m.carve_room(&room);
+        m.rooms.push(room);
+        // Corridor going east from (11,5)
+        for x in 11..=20 {
+            let idx = m.idx(x, 5);
+            m.tiles[idx] = Tile::Floor;
+        }
+
+        let player = Entity::player(5, 5);
+        let visible = fov::compute_fov(&m, 5, 5, 8);
+        let explored = visible.clone();
+
+        let mut gs = GameState {
+            map: m,
+            entities: vec![player],
+            fov_radius: 8,
+            visible,
+            explored,
+            log: MessageLog::new(),
+            game_over: false,
+            turn_count: 0,
+        };
+
+        let result = gs.autorun(1, 0);
+        assert_eq!(result.stop_reason, AutorunStopReason::RoomTransition);
+        // Should stop when exiting the room (first corridor tile)
+        assert_eq!(gs.entities[0].x, 11);
+    }
+
+    #[test]
+    fn autorun_stops_at_corridor_to_room_transition() {
+        let mut m = Map::new(30, 10);
+        // Corridor from (1,5) to (10,5)
+        for x in 1..=10 {
+            let idx = m.idx(x, 5);
+            m.tiles[idx] = Tile::Floor;
+        }
+        // Room from (11,1) to (20,8)
+        let room = crate::map::Rect::new(10, 0, 11, 9);
+        m.carve_room(&room);
+        m.rooms.push(room);
+
+        let player = Entity::player(5, 5);
+        let visible = fov::compute_fov(&m, 5, 5, 8);
+        let explored = visible.clone();
+
+        let mut gs = GameState {
+            map: m,
+            entities: vec![player],
+            fov_radius: 8,
+            visible,
+            explored,
+            log: MessageLog::new(),
+            game_over: false,
+            turn_count: 0,
+        };
+
+        let result = gs.autorun(1, 0);
+        // Corridor topology change fires first as neighbor count increases
+        // near the room entrance — this is correct; the entrance is a
+        // natural decision point.
+        assert_eq!(result.stop_reason, AutorunStopReason::CorridorBranches);
+        assert_eq!(gs.entities[0].x, 10);
     }
 
     // --- observe() game stats tests ---

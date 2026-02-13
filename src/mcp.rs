@@ -39,6 +39,14 @@ pub struct ActParams {
     pub action: String,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct PathfindParams {
+    /// Target X coordinate.
+    pub x: i32,
+    /// Target Y coordinate.
+    pub y: i32,
+}
+
 impl Default for RoguelikeMcpServer {
     fn default() -> Self {
         Self::new()
@@ -158,7 +166,7 @@ impl RoguelikeMcpServer {
     }
 
     #[tool(
-        description = "Get the full explored map — all tiles the player has ever seen. Unlike observe (which shows only current FOV), this shows the complete explored dungeon. Use this to plan exploration routes and find unvisited areas. Entity glyphs only appear at current positions if in FOV."
+        description = "Get the full explored map — all tiles the player has ever seen. Unlike observe (which shows only current FOV), this shows the complete explored dungeon. Entity glyphs only appear at current positions if in FOV. Frontier tiles (explored floor adjacent to unexplored) are marked with '~' to show where further exploration is possible. The response includes frontier_exits coordinates for easy navigation with pathfind_to."
     )]
     async fn get_explored_map(&self) -> Result<CallToolResult, McpError> {
         let guard = self.state.lock().await;
@@ -168,12 +176,46 @@ impl RoguelikeMcpServer {
 
         let map_lines = state.explored_map();
         let player = &state.entities[0];
+        let frontier_tiles = state.frontier_tiles();
+        let frontier_exits: Vec<serde_json::Value> = frontier_tiles
+            .iter()
+            .map(|&(x, y)| serde_json::json!({"x": x, "y": y}))
+            .collect();
         let response = serde_json::json!({
             "explored_map": map_lines,
             "player_x": player.x,
             "player_y": player.y,
+            "frontier_exits": frontier_exits,
         });
         let json = serde_json::to_string_pretty(&response)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(
+        description = "Pathfind to a target tile using A*. The player automatically walks the shortest path through explored tiles, stopping for monsters, damage, or reaching the target. Use this instead of multiple move commands to navigate to a visible or previously-explored location."
+    )]
+    async fn pathfind_to(
+        &self,
+        Parameters(params): Parameters<PathfindParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let mut guard = self.state.lock().await;
+        let state = guard.as_mut().ok_or_else(|| {
+            McpError::invalid_request("No game in progress. Call new_game first.", None)
+        })?;
+
+        if state.game_over {
+            return Err(McpError::invalid_request(
+                "Game is over. Call new_game to start a new game.",
+                None,
+            ));
+        }
+
+        let pathfind_result = state
+            .pathfind_to(params.x, params.y)
+            .map_err(|e| McpError::invalid_request(e, None))?;
+        let observation = state.observe();
+        let json = format_autorun_response(&observation, &pathfind_result)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -193,6 +235,7 @@ impl RoguelikeMcpServer {
              ## Map Symbols\n\
              - '#' = wall (blocks movement and vision)\n\
              - '.' = floor (walkable)\n\
+             - '~' = frontier (on explored map only: floor adjacent to unexplored area)\n\
              - '%%' = corpse (walkable, dead monster)\n\
              - '@' = you (the player)\n\
              - Lowercase letters = monsters (g=goblin, o=orc)\n\
@@ -220,7 +263,29 @@ impl RoguelikeMcpServer {
              - Orcs deal 2 dmg/turn. 3 hits to kill.\n\
              - Trolls deal 4 dmg/turn but take 10 hits to kill. Avoid if low HP.\n\
              - You regenerate 1 HP every {} turns. Retreat and move to recover.\n\
-             - Use 'auto_fight' to resolve trivial combat in one call (fights weakest adjacent monster).\n\
+             \n\
+             ## Available Tools\n\
+             - **act** — move, wait, autorun, or auto_fight (see below)\n\
+             - **observe** — see current FOV, stats, and nearby entities\n\
+             - **pathfind_to(x, y)** — walk shortest path to any explored tile; \
+             stops for monsters, damage, or on arrival\n\
+             - **get_explored_map** — full map of everywhere you've been; '~' tiles \
+             are frontiers adjacent to unexplored areas; includes frontier_exits \
+             coordinates you can pass to pathfind_to\n\
+             - **get_rules** — this help text\n\
+             \n\
+             ## Autorun\n\
+             Use autorun_<direction> (e.g. 'autorun_east') via the act tool to \
+             travel in a straight line. Autorun crosses rooms and corridors freely, \
+             stopping only when:\n\
+             - Wall ahead (dead end)\n\
+             - Wall ahead with 2+ alternative paths (decision point)\n\
+             - Monster spotted or damage taken\n\
+             - Game over or max steps\n\
+             \n\
+             ## Combat Shortcuts\n\
+             - **auto_fight** (via act) — fights the weakest adjacent monster to \
+             the death in one call. Use for trivial fights.\n\
              \n\
              ## Game Stats\n\
              The observe response includes: kills, rooms_found, and explored_pct \

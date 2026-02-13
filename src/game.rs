@@ -10,6 +10,7 @@ use crate::fov;
 use crate::input::GameCommand;
 use crate::map;
 use crate::message_log::MessageLog;
+use crate::pathfinding;
 use crate::spawn;
 
 /// Result of executing one complete game step (player command + monster turns).
@@ -26,7 +27,7 @@ pub struct StepResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AutorunStopReason {
-    /// Hit a wall or map edge.
+    /// Hit a wall or dead end.
     WallReached,
     /// A new living monster entered the field of view.
     MonsterSpotted,
@@ -34,10 +35,10 @@ pub enum AutorunStopReason {
     DamageTaken,
     /// Player died.
     GameOver,
-    /// Corridor branched or opened into a room.
+    /// Forward path blocked with multiple alternative directions available.
     CorridorBranches,
-    /// Transitioned between a room and a corridor (or vice versa).
-    RoomTransition,
+    /// Pathfinding reached the destination tile.
+    PathComplete,
     /// Safety cap on steps reached.
     MaxSteps,
 }
@@ -224,26 +225,19 @@ impl GameState {
     /// Run in a direction until something interesting happens.
     ///
     /// Repeatedly calls `step(Move{dx,dy})`, stopping when:
-    /// - Wall ahead (can't move forward)
+    /// - Wall ahead with no alternative paths (dead end)
+    /// - Wall ahead with 2+ alternative paths (decision point)
     /// - A new monster enters FOV
     /// - Player takes damage
     /// - Game over
-    /// - Corridor branches (topology changes while in a corridor)
-    /// - Transition between room and corridor
     /// - Safety cap reached
+    ///
+    /// Crosses room/corridor boundaries freely — only stops at true
+    /// decision points or dead ends.
     pub fn autorun(&mut self, dx: i32, dy: i32) -> AutorunResult {
         let max_steps = data::CONFIG.max_autorun_steps;
         let mut steps_taken = 0;
         let mut all_messages = Vec::new();
-
-        let start_x = self.entities[0].x;
-        let start_y = self.entities[0].y;
-        let initial_in_room = self.map.is_in_room(start_x, start_y);
-
-        // Corridor topology baseline (only used when starting in a corridor).
-        let initial_neighbor_count =
-            self.map
-                .open_neighbors_excluding(start_x, start_y, -dx, -dy);
 
         loop {
             if steps_taken >= max_steps {
@@ -311,40 +305,125 @@ impl GameState {
                 };
             }
 
-            // Forward tile blocked? We've reached the end of the road.
+            // Forward tile blocked — decide if it's a dead end or decision point.
             let px = self.entities[0].x;
             let py = self.entities[0].y;
             if !self.map.is_walkable(px + dx, py + dy) {
-                return AutorunResult {
-                    steps_taken,
-                    stop_reason: AutorunStopReason::WallReached,
-                    messages: all_messages,
-                };
-            }
-
-            // Room/corridor transition — stop at boundaries.
-            let in_room = self.map.is_in_room(px, py);
-            if in_room != initial_in_room {
-                return AutorunResult {
-                    steps_taken,
-                    stop_reason: AutorunStopReason::RoomTransition,
-                    messages: all_messages,
-                };
-            }
-
-            // Corridor topology check — only in corridors where junctions matter.
-            if !in_room {
-                let current_neighbor_count =
+                let alternatives =
                     self.map.open_neighbors_excluding(px, py, -dx, -dy);
-                if current_neighbor_count != initial_neighbor_count {
+                if alternatives >= 2 {
                     return AutorunResult {
                         steps_taken,
                         stop_reason: AutorunStopReason::CorridorBranches,
                         messages: all_messages,
                     };
                 }
+                return AutorunResult {
+                    steps_taken,
+                    stop_reason: AutorunStopReason::WallReached,
+                    messages: all_messages,
+                };
             }
         }
+    }
+
+    /// Walk the shortest path to (tx, ty) using A* pathfinding.
+    ///
+    /// Only pathfinds through explored, walkable tiles. Stops early for the
+    /// same reasons as autorun: monster spotted, damage taken, game over,
+    /// or max steps. Returns `PathComplete` when the destination is reached.
+    pub fn pathfind_to(&mut self, tx: i32, ty: i32) -> Result<AutorunResult, String> {
+        let px = self.entities[0].x;
+        let py = self.entities[0].y;
+
+        let path = pathfinding::find_path(&self.map, px, py, tx, ty, &self.explored)
+            .ok_or_else(|| "No path found to target.".to_string())?;
+
+        if path.is_empty() {
+            return Ok(AutorunResult {
+                steps_taken: 0,
+                stop_reason: AutorunStopReason::PathComplete,
+                messages: Vec::new(),
+            });
+        }
+
+        let max_steps = data::CONFIG.max_autorun_steps;
+        let mut steps_taken = 0;
+        let mut all_messages = Vec::new();
+
+        for &(nx, ny) in &path {
+            if steps_taken >= max_steps {
+                return Ok(AutorunResult {
+                    steps_taken,
+                    stop_reason: AutorunStopReason::MaxSteps,
+                    messages: all_messages,
+                });
+            }
+
+            if self.has_adjacent_monster() {
+                return Ok(AutorunResult {
+                    steps_taken,
+                    stop_reason: AutorunStopReason::MonsterSpotted,
+                    messages: all_messages,
+                });
+            }
+
+            let hp_before = self.entities[0].hp;
+            let visible_monsters_before = self.visible_monster_ids();
+
+            let cx = self.entities[0].x;
+            let cy = self.entities[0].y;
+            let dx = nx - cx;
+            let dy = ny - cy;
+
+            let result = self.step(GameCommand::Move { dx, dy });
+            all_messages.extend(result.new_messages);
+
+            if !result.action_taken {
+                return Ok(AutorunResult {
+                    steps_taken,
+                    stop_reason: AutorunStopReason::WallReached,
+                    messages: all_messages,
+                });
+            }
+
+            steps_taken += 1;
+
+            if result.game_over {
+                return Ok(AutorunResult {
+                    steps_taken,
+                    stop_reason: AutorunStopReason::GameOver,
+                    messages: all_messages,
+                });
+            }
+
+            if self.entities[0].hp < hp_before {
+                return Ok(AutorunResult {
+                    steps_taken,
+                    stop_reason: AutorunStopReason::DamageTaken,
+                    messages: all_messages,
+                });
+            }
+
+            let visible_monsters_after = self.visible_monster_ids();
+            if visible_monsters_after
+                .difference(&visible_monsters_before)
+                .next()
+                .is_some()
+            {
+                return Ok(AutorunResult {
+                    steps_taken,
+                    stop_reason: AutorunStopReason::MonsterSpotted,
+                    messages: all_messages,
+                });
+            }
+        }
+
+        Ok(AutorunResult {
+            steps_taken,
+            stop_reason: AutorunStopReason::PathComplete,
+            messages: all_messages,
+        })
     }
 
     /// Fight an adjacent monster to the death in one call.
@@ -514,13 +593,37 @@ impl GameState {
         }
     }
 
+    /// Find frontier tiles: explored floor tiles adjacent to at least one
+    /// unexplored tile. These mark the boundary of explored territory and
+    /// indicate where further exploration is possible.
+    pub fn frontier_tiles(&self) -> Vec<(i32, i32)> {
+        self.explored
+            .iter()
+            .filter(|&&(x, y)| {
+                self.map.is_walkable(x, y)
+                    && (-1..=1i32).any(|dy| {
+                        (-1..=1i32).any(|dx| {
+                            (dx != 0 || dy != 0)
+                                && self.map.in_bounds(x + dx, y + dy)
+                                && !self.explored.contains(&(x + dx, y + dy))
+                        })
+                    })
+            })
+            .copied()
+            .collect()
+    }
+
     /// Produce an ASCII map of all explored tiles.
     ///
     /// Unlike `observe()`, which only shows currently visible tiles, this
     /// renders every tile the player has ever seen. Entity glyphs are only
     /// shown at their current positions if visible (no stale positions).
-    /// Rows with no explored content are omitted.
+    /// Frontier tiles (explored floor adjacent to unexplored) are rendered
+    /// as `~` to highlight exploration boundaries. Rows with no explored
+    /// content are omitted.
     pub fn explored_map(&self) -> Vec<String> {
+        let frontiers: HashSet<(i32, i32)> =
+            self.frontier_tiles().into_iter().collect();
         let mut lines = Vec::new();
         for y in 0..self.map.height {
             let mut line = String::with_capacity(self.map.width as usize);
@@ -536,9 +639,13 @@ impl GameState {
                         line.push(glyph);
                         continue;
                     }
-                    match self.map.tiles[self.map.idx(x, y)] {
-                        map::Tile::Floor => line.push('.'),
-                        map::Tile::Wall => line.push('#'),
+                    if frontiers.contains(&(x, y)) {
+                        line.push('~');
+                    } else {
+                        match self.map.tiles[self.map.idx(x, y)] {
+                            map::Tile::Floor => line.push('.'),
+                            map::Tile::Wall => line.push('#'),
+                        }
                     }
                 } else {
                     line.push(' ');
@@ -943,7 +1050,7 @@ mod tests {
     }
 
     #[test]
-    fn autorun_stops_at_corridor_branch() {
+    fn autorun_runs_through_junction() {
         let mut m = Map::new(20, 10);
         // Horizontal corridor
         for x in 1..=18 {
@@ -972,10 +1079,50 @@ mod tests {
         };
 
         let result = gs.autorun(1, 0);
+        // Forward is always clear through the junction — runs to the wall.
+        assert_eq!(result.stop_reason, AutorunStopReason::WallReached);
+        assert_eq!(gs.entities[0].x, 18);
+    }
+
+    #[test]
+    fn autorun_stops_at_t_junction() {
+        let mut m = Map::new(20, 10);
+        // Horizontal corridor from (1,5) to (9,5)
+        for x in 1..=9 {
+            let idx = m.idx(x, 5);
+            m.tiles[idx] = Tile::Floor;
+        }
+        // T-junction at x=10: floor + vertical branches north and south
+        let idx = m.idx(10, 5);
+        m.tiles[idx] = Tile::Floor;
+        for y in 1..=4 {
+            let idx = m.idx(10, y);
+            m.tiles[idx] = Tile::Floor;
+        }
+        for y in 6..=8 {
+            let idx = m.idx(10, y);
+            m.tiles[idx] = Tile::Floor;
+        }
+
+        let player = Entity::player(5, 5);
+        let visible = fov::compute_fov(&m, 5, 5, 8);
+        let explored = visible.clone();
+
+        let mut gs = GameState {
+            map: m,
+            entities: vec![player],
+            fov_radius: 8,
+            visible,
+            explored,
+            log: MessageLog::new(),
+            game_over: false,
+            turn_count: 0,
+        };
+
+        let result = gs.autorun(1, 0);
+        // Wall ahead at (11,5) with north and south alternatives → decision point.
         assert_eq!(result.stop_reason, AutorunStopReason::CorridorBranches);
-        // Topology change detected when the NE neighbor (10,4) becomes visible
-        // from position (9,5), so the player stops at x=9.
-        assert_eq!(gs.entities[0].x, 9);
+        assert_eq!(gs.entities[0].x, 10);
     }
 
     #[test]
@@ -1019,20 +1166,20 @@ mod tests {
     }
 
     #[test]
-    fn autorun_crosses_room_without_stopping() {
+    fn autorun_crosses_room_to_far_wall() {
         // test_game() has a 10x10 open area (room-like). Player at (5,5).
         // Running east should cross the room and hit the wall at x=10.
+        // With alternatives along the wall, this is a decision point.
         let mut gs = test_game();
-        // Register the open area as a room so is_in_room works.
         gs.map.rooms.push(crate::map::Rect::new(0, 0, 11, 11));
         let result = gs.autorun(1, 0);
-        assert_eq!(result.stop_reason, AutorunStopReason::WallReached);
+        assert_eq!(result.stop_reason, AutorunStopReason::CorridorBranches);
         assert_eq!(gs.entities[0].x, 10);
         assert!(result.steps_taken > 1);
     }
 
     #[test]
-    fn autorun_stops_at_room_to_corridor_transition() {
+    fn autorun_crosses_room_into_corridor() {
         let mut m = Map::new(30, 10);
         // Room from (1,1) to (10,8)
         let room = crate::map::Rect::new(0, 0, 11, 9);
@@ -1060,13 +1207,13 @@ mod tests {
         };
 
         let result = gs.autorun(1, 0);
-        assert_eq!(result.stop_reason, AutorunStopReason::RoomTransition);
-        // Should stop when exiting the room (first corridor tile)
-        assert_eq!(gs.entities[0].x, 11);
+        // Crosses room boundary freely, runs corridor to dead end at x=20.
+        assert_eq!(result.stop_reason, AutorunStopReason::WallReached);
+        assert_eq!(gs.entities[0].x, 20);
     }
 
     #[test]
-    fn autorun_stops_at_corridor_to_room_transition() {
+    fn autorun_crosses_corridor_into_room() {
         let mut m = Map::new(30, 10);
         // Corridor from (1,5) to (10,5)
         for x in 1..=10 {
@@ -1094,11 +1241,10 @@ mod tests {
         };
 
         let result = gs.autorun(1, 0);
-        // Corridor topology change fires first as neighbor count increases
-        // near the room entrance — this is correct; the entrance is a
-        // natural decision point.
+        // Crosses corridor into room, reaches far wall at x=20.
+        // Wall ahead with floor tiles north/south → decision point.
         assert_eq!(result.stop_reason, AutorunStopReason::CorridorBranches);
-        assert_eq!(gs.entities[0].x, 10);
+        assert_eq!(gs.entities[0].x, 20);
     }
 
     // --- observe() game stats tests ---
@@ -1323,5 +1469,137 @@ mod tests {
             gs.step(GameCommand::Wait);
         }
         assert_eq!(gs.entities[0].hp, 23);
+    }
+
+    // --- frontier_tiles() tests ---
+
+    #[test]
+    fn frontier_tiles_edge_of_explored() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let frontiers = gs.frontier_tiles();
+        // Some floor tiles at the edge of FOV should border unexplored tiles.
+        assert!(!frontiers.is_empty());
+        // Every frontier tile must be a walkable, explored tile.
+        for &(x, y) in &frontiers {
+            assert!(gs.map.is_walkable(x, y));
+            assert!(gs.explored.contains(&(x, y)));
+        }
+    }
+
+    #[test]
+    fn frontier_tiles_none_when_fully_explored() {
+        let mut gs = test_game();
+        // Mark every in-bounds tile as explored.
+        for y in 0..gs.map.height {
+            for x in 0..gs.map.width {
+                gs.explored.insert((x, y));
+            }
+        }
+        let frontiers = gs.frontier_tiles();
+        assert!(frontiers.is_empty());
+    }
+
+    #[test]
+    fn frontier_tiles_only_floor() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let frontiers = gs.frontier_tiles();
+        // Wall tiles should never appear as frontiers.
+        for &(x, y) in &frontiers {
+            assert!(gs.map.is_walkable(x, y), "Frontier at ({},{}) is not floor", x, y);
+        }
+    }
+
+    #[test]
+    fn explored_map_renders_frontier_as_tilde() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let frontiers = gs.frontier_tiles();
+        if frontiers.is_empty() {
+            return; // nothing to check in this map layout
+        }
+        let map_lines = gs.explored_map();
+        let text = map_lines.join("\n");
+        assert!(text.contains('~'), "Frontier tiles should be rendered as ~");
+    }
+
+    // --- pathfind_to() tests ---
+
+    #[test]
+    fn pathfind_to_reaches_target() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let result = gs.pathfind_to(8, 5).unwrap();
+        assert_eq!(result.stop_reason, AutorunStopReason::PathComplete);
+        assert_eq!(gs.entities[0].x, 8);
+        assert_eq!(gs.entities[0].y, 5);
+        assert_eq!(result.steps_taken, 3);
+    }
+
+    #[test]
+    fn pathfind_to_self_is_zero_steps() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let result = gs.pathfind_to(5, 5).unwrap();
+        assert_eq!(result.stop_reason, AutorunStopReason::PathComplete);
+        assert_eq!(result.steps_taken, 0);
+    }
+
+    #[test]
+    fn pathfind_to_wall_returns_error() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let result = gs.pathfind_to(0, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn pathfind_to_unexplored_returns_error() {
+        let mut gs = test_game();
+        gs.update_fov();
+        // (15, 15) is floor-free in test_game (only 1..=10 is carved),
+        // but even if it were floor it's unexplored. Use a coordinate
+        // that's definitely out of the explored set.
+        let result = gs.pathfind_to(19, 19);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn pathfind_to_stops_for_adjacent_monster() {
+        let mut gs = test_game();
+        // Place monster directly adjacent at (6, 5). The has_adjacent_monster
+        // check fires before any steps are taken.
+        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        gs.entities.push(monster);
+        gs.update_fov();
+        let result = gs.pathfind_to(9, 5).unwrap();
+        assert_eq!(result.stop_reason, AutorunStopReason::MonsterSpotted);
+        assert_eq!(result.steps_taken, 0);
+    }
+
+    #[test]
+    fn pathfind_to_stops_on_damage() {
+        let mut gs = test_game();
+        // Place monster 2 tiles away at (7, 5). Player steps to (6, 5),
+        // monster is now adjacent and attacks during its turn → damage taken.
+        let monster = Entity::from_template(&data::GOBLIN, 7, 5);
+        gs.entities.push(monster);
+        gs.update_fov();
+        let result = gs.pathfind_to(9, 5).unwrap();
+        assert_eq!(result.stop_reason, AutorunStopReason::DamageTaken);
+        assert_eq!(result.steps_taken, 1);
+    }
+
+    #[test]
+    fn pathfind_to_diagonal_path() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let result = gs.pathfind_to(8, 8).unwrap();
+        assert_eq!(result.stop_reason, AutorunStopReason::PathComplete);
+        assert_eq!(gs.entities[0].x, 8);
+        assert_eq!(gs.entities[0].y, 8);
+        // Chebyshev optimal: 3 diagonal steps
+        assert_eq!(result.steps_taken, 3);
     }
 }

@@ -135,8 +135,9 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 
 ### Platform Support
 - [x] **Windows / macOS / Linux** — Native terminal via crossterm (current)
-- [ ] **CI matrix** — Test on all three desktop OS in GitHub Actions
+- [ ] **CI matrix** — Test on all three desktop OS (Intel + ARM) in GitHub Actions
 - [ ] **Web (WASM)** — Browser-based play via wasm-pack + xterm.js; enables browser spectating and leaderboards
+- [ ] **Game Boy Advance** — Native ARM via `thumbv4t-none-eabi` target + `gba` crate; no_std, fixed-size containers
 - [ ] **SSH server** — Server-side play via russh, NetHack-server style (players connect via SSH)
 - [ ] **Commodore 64** — Native 6502 via rust-mos; no_std, fixed-size containers, 8-bit types, C64 screen/keyboard I/O
 

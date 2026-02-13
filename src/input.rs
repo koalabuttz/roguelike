@@ -16,8 +16,55 @@ pub enum GameCommand {
         dx: i32,
         dy: i32,
     },
+    AutoExplore,
     Wait,
     Quit,
+}
+
+/// Resolve a key to a direction `(dx, dy)` and whether it triggers autorun.
+///
+/// Each input method uses its own autorun convention:
+/// - Arrow keys: Shift = autorun
+/// - Vi keys: uppercase = autorun
+/// - Numpad: Shift = autorun
+fn resolve_direction(code: KeyCode, shift: bool) -> Option<(i32, i32, bool)> {
+    match code {
+        // Arrow keys: shift = autorun
+        KeyCode::Up => Some((0, -1, shift)),
+        KeyCode::Down => Some((0, 1, shift)),
+        KeyCode::Left => Some((-1, 0, shift)),
+        KeyCode::Right => Some((1, 0, shift)),
+
+        // Vi keys: uppercase = autorun
+        KeyCode::Char('k') => Some((0, -1, false)),
+        KeyCode::Char('K') => Some((0, -1, true)),
+        KeyCode::Char('j') => Some((0, 1, false)),
+        KeyCode::Char('J') => Some((0, 1, true)),
+        KeyCode::Char('h') => Some((-1, 0, false)),
+        KeyCode::Char('H') => Some((-1, 0, true)),
+        KeyCode::Char('l') => Some((1, 0, false)),
+        KeyCode::Char('L') => Some((1, 0, true)),
+        KeyCode::Char('y') => Some((-1, -1, false)),
+        KeyCode::Char('Y') => Some((-1, -1, true)),
+        KeyCode::Char('u') => Some((1, -1, false)),
+        KeyCode::Char('U') => Some((1, -1, true)),
+        KeyCode::Char('b') => Some((-1, 1, false)),
+        KeyCode::Char('B') => Some((-1, 1, true)),
+        KeyCode::Char('n') => Some((1, 1, false)),
+        KeyCode::Char('N') => Some((1, 1, true)),
+
+        // Numpad: shift = autorun
+        KeyCode::Char('8') => Some((0, -1, shift)),
+        KeyCode::Char('2') => Some((0, 1, shift)),
+        KeyCode::Char('4') => Some((-1, 0, shift)),
+        KeyCode::Char('6') => Some((1, 0, shift)),
+        KeyCode::Char('7') => Some((-1, -1, shift)),
+        KeyCode::Char('9') => Some((1, -1, shift)),
+        KeyCode::Char('1') => Some((-1, 1, shift)),
+        KeyCode::Char('3') => Some((1, 1, shift)),
+
+        _ => None,
+    }
 }
 
 /// Translate a crossterm key event into a game command.
@@ -32,56 +79,18 @@ pub fn translate_key(key: KeyEvent) -> Option<GameCommand> {
 
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
 
+    if let Some((dx, dy, autorun)) = resolve_direction(key.code, shift) {
+        return Some(if autorun {
+            GameCommand::Autorun { dx, dy }
+        } else {
+            GameCommand::Move { dx, dy }
+        });
+    }
+
     match key.code {
-        // Cardinal movement — arrows, vi keys, numpad
-        // Shift+arrow or uppercase vi key = autorun
-        KeyCode::Up => Some(if shift {
-            GameCommand::Autorun { dx: 0, dy: -1 }
-        } else {
-            GameCommand::Move { dx: 0, dy: -1 }
-        }),
-        KeyCode::Down => Some(if shift {
-            GameCommand::Autorun { dx: 0, dy: 1 }
-        } else {
-            GameCommand::Move { dx: 0, dy: 1 }
-        }),
-        KeyCode::Left => Some(if shift {
-            GameCommand::Autorun { dx: -1, dy: 0 }
-        } else {
-            GameCommand::Move { dx: -1, dy: 0 }
-        }),
-        KeyCode::Right => Some(if shift {
-            GameCommand::Autorun { dx: 1, dy: 0 }
-        } else {
-            GameCommand::Move { dx: 1, dy: 0 }
-        }),
-
-        // Lowercase vi keys = move, uppercase = autorun
-        KeyCode::Char('k') | KeyCode::Char('8') => Some(GameCommand::Move { dx: 0, dy: -1 }),
-        KeyCode::Char('K') => Some(GameCommand::Autorun { dx: 0, dy: -1 }),
-        KeyCode::Char('j') | KeyCode::Char('2') => Some(GameCommand::Move { dx: 0, dy: 1 }),
-        KeyCode::Char('J') => Some(GameCommand::Autorun { dx: 0, dy: 1 }),
-        KeyCode::Char('h') | KeyCode::Char('4') => Some(GameCommand::Move { dx: -1, dy: 0 }),
-        KeyCode::Char('H') => Some(GameCommand::Autorun { dx: -1, dy: 0 }),
-        KeyCode::Char('l') | KeyCode::Char('6') => Some(GameCommand::Move { dx: 1, dy: 0 }),
-        KeyCode::Char('L') => Some(GameCommand::Autorun { dx: 1, dy: 0 }),
-
-        // Diagonal movement — vi keys (lowercase=move, uppercase=autorun), numpad
-        KeyCode::Char('y') | KeyCode::Char('7') => Some(GameCommand::Move { dx: -1, dy: -1 }),
-        KeyCode::Char('Y') => Some(GameCommand::Autorun { dx: -1, dy: -1 }),
-        KeyCode::Char('u') | KeyCode::Char('9') => Some(GameCommand::Move { dx: 1, dy: -1 }),
-        KeyCode::Char('U') => Some(GameCommand::Autorun { dx: 1, dy: -1 }),
-        KeyCode::Char('b') | KeyCode::Char('1') => Some(GameCommand::Move { dx: -1, dy: 1 }),
-        KeyCode::Char('B') => Some(GameCommand::Autorun { dx: -1, dy: 1 }),
-        KeyCode::Char('n') | KeyCode::Char('3') => Some(GameCommand::Move { dx: 1, dy: 1 }),
-        KeyCode::Char('N') => Some(GameCommand::Autorun { dx: 1, dy: 1 }),
-
-        // Wait
+        KeyCode::Char('o') => Some(GameCommand::AutoExplore),
         KeyCode::Char('.') | KeyCode::Char('5') => Some(GameCommand::Wait),
-
-        // Quit
         KeyCode::Char('q') | KeyCode::Esc => Some(GameCommand::Quit),
-
         _ => None,
     }
 }
@@ -208,6 +217,42 @@ mod tests {
     }
 
     #[test]
+    fn shift_numpad_produces_autorun() {
+        assert_eq!(
+            translate_key(press_with(KeyCode::Char('8'), KeyModifiers::SHIFT)),
+            Some(GameCommand::Autorun { dx: 0, dy: -1 })
+        );
+        assert_eq!(
+            translate_key(press_with(KeyCode::Char('2'), KeyModifiers::SHIFT)),
+            Some(GameCommand::Autorun { dx: 0, dy: 1 })
+        );
+        assert_eq!(
+            translate_key(press_with(KeyCode::Char('4'), KeyModifiers::SHIFT)),
+            Some(GameCommand::Autorun { dx: -1, dy: 0 })
+        );
+        assert_eq!(
+            translate_key(press_with(KeyCode::Char('6'), KeyModifiers::SHIFT)),
+            Some(GameCommand::Autorun { dx: 1, dy: 0 })
+        );
+        assert_eq!(
+            translate_key(press_with(KeyCode::Char('7'), KeyModifiers::SHIFT)),
+            Some(GameCommand::Autorun { dx: -1, dy: -1 })
+        );
+        assert_eq!(
+            translate_key(press_with(KeyCode::Char('9'), KeyModifiers::SHIFT)),
+            Some(GameCommand::Autorun { dx: 1, dy: -1 })
+        );
+        assert_eq!(
+            translate_key(press_with(KeyCode::Char('1'), KeyModifiers::SHIFT)),
+            Some(GameCommand::Autorun { dx: -1, dy: 1 })
+        );
+        assert_eq!(
+            translate_key(press_with(KeyCode::Char('3'), KeyModifiers::SHIFT)),
+            Some(GameCommand::Autorun { dx: 1, dy: 1 })
+        );
+    }
+
+    #[test]
     fn wait_keys() {
         assert_eq!(
             translate_key(press(KeyCode::Char('.'))),
@@ -290,6 +335,14 @@ mod tests {
         assert_eq!(
             translate_key(press(KeyCode::Char('N'))),
             Some(GameCommand::Autorun { dx: 1, dy: 1 })
+        );
+    }
+
+    #[test]
+    fn o_key_produces_auto_explore() {
+        assert_eq!(
+            translate_key(press(KeyCode::Char('o'))),
+            Some(GameCommand::AutoExplore)
         );
     }
 

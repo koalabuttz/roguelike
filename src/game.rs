@@ -52,6 +52,8 @@ pub struct AutorunResult {
     pub stop_reason: AutorunStopReason,
     /// All messages generated during the run.
     pub messages: Vec<String>,
+    /// How many new tiles were added to the explored set during this run.
+    pub new_tiles_revealed: i32,
 }
 
 /// A snapshot of the visible game state, suitable for serialization.
@@ -86,6 +88,156 @@ pub struct AutoFightResult {
     pub player_hp_lost: i32,
     /// All messages generated during the fight.
     pub messages: Vec<String>,
+}
+
+/// Result of an auto-explore action — finds and walks to the nearest frontier.
+#[derive(Debug)]
+pub struct AutoExploreResult {
+    /// X coordinate of the chosen frontier target.
+    pub target_x: i32,
+    /// Y coordinate of the chosen frontier target.
+    pub target_y: i32,
+    /// The movement result from pathfinding to the frontier.
+    pub movement: AutorunResult,
+}
+
+/// Determines how the stepper decides the next direction each step.
+pub enum StepperMode {
+    /// Move in a fixed direction each step (autorun behavior).
+    Directional { dx: i32, dy: i32 },
+    /// Follow a precomputed A* path, stepping through each waypoint.
+    FollowPath { path: Vec<(i32, i32)>, index: usize },
+}
+
+/// Yields one game step at a time for multi-step movement sequences.
+///
+/// Created by `GameState::start_autorun()`, `start_pathfind()`, or
+/// `start_auto_explore()`. Consumed either step-by-step (for animation)
+/// or all at once via `run_to_completion()`.
+pub struct AutorunStepper {
+    mode: StepperMode,
+    steps_taken: i32,
+    max_steps: i32,
+    all_messages: Vec<String>,
+    explored_before: i32,
+}
+
+/// Result of a single stepper step.
+pub enum StepOutcome {
+    /// Step succeeded, stepper can continue.
+    Continue,
+    /// Sequence is finished.
+    Done(AutorunResult),
+}
+
+impl AutorunStepper {
+    /// Execute one step of the multi-step sequence.
+    pub fn next_step(&mut self, state: &mut GameState) -> StepOutcome {
+        // Check 1: max steps cap.
+        if self.steps_taken >= self.max_steps {
+            return self.finish(state, AutorunStopReason::MaxSteps);
+        }
+
+        // Check 2: adjacent monster before stepping.
+        if state.has_adjacent_monster() {
+            return self.finish(state, AutorunStopReason::MonsterSpotted);
+        }
+
+        // Compute dx, dy from mode.
+        let (dx, dy) = match &self.mode {
+            StepperMode::Directional { dx, dy } => (*dx, *dy),
+            StepperMode::FollowPath { path, index } => {
+                if *index >= path.len() {
+                    return self.finish(state, AutorunStopReason::PathComplete);
+                }
+                let (nx, ny) = path[*index];
+                let cx = state.entities[0].x;
+                let cy = state.entities[0].y;
+                (nx - cx, ny - cy)
+            }
+        };
+
+        // Snapshot before step.
+        let hp_before = state.entities[0].hp;
+        let visible_monsters_before = state.visible_monster_ids();
+
+        let result = state.step(GameCommand::Move { dx, dy });
+        self.all_messages.extend(result.new_messages);
+
+        // Check 3: wall hit.
+        if !result.action_taken {
+            return self.finish(state, AutorunStopReason::WallReached);
+        }
+
+        self.steps_taken += 1;
+
+        // Advance path index for FollowPath mode.
+        if let StepperMode::FollowPath { index, .. } = &mut self.mode {
+            *index += 1;
+        }
+
+        // Check 4: game over.
+        if result.game_over {
+            return self.finish(state, AutorunStopReason::GameOver);
+        }
+
+        // Check 5: damage taken.
+        if state.entities[0].hp < hp_before {
+            return self.finish(state, AutorunStopReason::DamageTaken);
+        }
+
+        // Check 6: new monster spotted.
+        let visible_monsters_after = state.visible_monster_ids();
+        if visible_monsters_after
+            .difference(&visible_monsters_before)
+            .next()
+            .is_some()
+        {
+            return self.finish(state, AutorunStopReason::MonsterSpotted);
+        }
+
+        // Mode-specific post-step logic.
+        match &self.mode {
+            StepperMode::Directional { dx, dy } => {
+                let px = state.entities[0].x;
+                let py = state.entities[0].y;
+                if !state.map.is_walkable(px + dx, py + dy) {
+                    let alternatives = state.map.open_neighbors_excluding(px, py, -dx, -dy);
+                    if alternatives >= 2 {
+                        return self.finish(state, AutorunStopReason::CorridorBranches);
+                    }
+                    return self.finish(state, AutorunStopReason::WallReached);
+                }
+            }
+            StepperMode::FollowPath { path, index } => {
+                if *index >= path.len() {
+                    return self.finish(state, AutorunStopReason::PathComplete);
+                }
+            }
+        }
+
+        StepOutcome::Continue
+    }
+
+    /// Run all remaining steps without pausing.
+    pub fn run_to_completion(mut self, state: &mut GameState) -> AutorunResult {
+        loop {
+            match self.next_step(state) {
+                StepOutcome::Continue => continue,
+                StepOutcome::Done(result) => return result,
+            }
+        }
+    }
+
+    /// Build the final AutorunResult.
+    fn finish(&mut self, state: &GameState, reason: AutorunStopReason) -> StepOutcome {
+        StepOutcome::Done(AutorunResult {
+            steps_taken: self.steps_taken,
+            stop_reason: reason,
+            messages: std::mem::take(&mut self.all_messages),
+            new_tiles_revealed: state.explored.len() as i32 - self.explored_before,
+        })
+    }
 }
 
 /// Info about a visible entity (monster or corpse).
@@ -181,8 +333,8 @@ impl GameState {
         match cmd {
             GameCommand::Move { dx, dy } => self.player_move_or_attack(dx, dy),
             GameCommand::Wait => true,
-            // Autorun is handled at a higher level (main loop / MCP act).
-            GameCommand::Autorun { .. } | GameCommand::Quit => false,
+            // Autorun and AutoExplore are handled at a higher level (main loop / MCP act).
+            GameCommand::Autorun { .. } | GameCommand::AutoExplore | GameCommand::Quit => false,
         }
     }
 
@@ -222,206 +374,92 @@ impl GameState {
         }
     }
 
-    /// Run in a direction until something interesting happens.
-    ///
-    /// Repeatedly calls `step(Move{dx,dy})`, stopping when:
-    /// - Wall ahead with no alternative paths (dead end)
-    /// - Wall ahead with 2+ alternative paths (decision point)
-    /// - A new monster enters FOV
-    /// - Player takes damage
-    /// - Game over
-    /// - Safety cap reached
-    ///
-    /// Crosses room/corridor boundaries freely — only stops at true
-    /// decision points or dead ends.
-    pub fn autorun(&mut self, dx: i32, dy: i32) -> AutorunResult {
-        let max_steps = data::CONFIG.max_autorun_steps;
-        let mut steps_taken = 0;
-        let mut all_messages = Vec::new();
-
-        loop {
-            if steps_taken >= max_steps {
-                return AutorunResult {
-                    steps_taken,
-                    stop_reason: AutorunStopReason::MaxSteps,
-                    messages: all_messages,
-                };
-            }
-
-            // Don't auto-attack: stop if any living monster is adjacent.
-            if self.has_adjacent_monster() {
-                return AutorunResult {
-                    steps_taken,
-                    stop_reason: AutorunStopReason::MonsterSpotted,
-                    messages: all_messages,
-                };
-            }
-
-            // Snapshot state before the step.
-            let hp_before = self.entities[0].hp;
-            let visible_monsters_before = self.visible_monster_ids();
-
-            let result = self.step(GameCommand::Move { dx, dy });
-            all_messages.extend(result.new_messages);
-
-            if !result.action_taken {
-                return AutorunResult {
-                    steps_taken,
-                    stop_reason: AutorunStopReason::WallReached,
-                    messages: all_messages,
-                };
-            }
-
-            steps_taken += 1;
-
-            if result.game_over {
-                return AutorunResult {
-                    steps_taken,
-                    stop_reason: AutorunStopReason::GameOver,
-                    messages: all_messages,
-                };
-            }
-
-            // Damage check — stop immediately so the player can react.
-            if self.entities[0].hp < hp_before {
-                return AutorunResult {
-                    steps_taken,
-                    stop_reason: AutorunStopReason::DamageTaken,
-                    messages: all_messages,
-                };
-            }
-
-            // New monster check.
-            let visible_monsters_after = self.visible_monster_ids();
-            if visible_monsters_after
-                .difference(&visible_monsters_before)
-                .next()
-                .is_some()
-            {
-                return AutorunResult {
-                    steps_taken,
-                    stop_reason: AutorunStopReason::MonsterSpotted,
-                    messages: all_messages,
-                };
-            }
-
-            // Forward tile blocked — decide if it's a dead end or decision point.
-            let px = self.entities[0].x;
-            let py = self.entities[0].y;
-            if !self.map.is_walkable(px + dx, py + dy) {
-                let alternatives = self.map.open_neighbors_excluding(px, py, -dx, -dy);
-                if alternatives >= 2 {
-                    return AutorunResult {
-                        steps_taken,
-                        stop_reason: AutorunStopReason::CorridorBranches,
-                        messages: all_messages,
-                    };
-                }
-                return AutorunResult {
-                    steps_taken,
-                    stop_reason: AutorunStopReason::WallReached,
-                    messages: all_messages,
-                };
-            }
+    /// Create a stepper for directional autorun.
+    pub fn start_autorun(&self, dx: i32, dy: i32) -> AutorunStepper {
+        AutorunStepper {
+            mode: StepperMode::Directional { dx, dy },
+            steps_taken: 0,
+            max_steps: data::CONFIG.max_autorun_steps,
+            all_messages: Vec::new(),
+            explored_before: self.explored.len() as i32,
         }
     }
 
-    /// Walk the shortest path to (tx, ty) using A* pathfinding.
-    ///
-    /// Only pathfinds through explored, walkable tiles. Stops early for the
-    /// same reasons as autorun: monster spotted, damage taken, game over,
-    /// or max steps. Returns `PathComplete` when the destination is reached.
-    pub fn pathfind_to(&mut self, tx: i32, ty: i32) -> Result<AutorunResult, String> {
+    /// Create a stepper that follows an A* path to (tx, ty).
+    pub fn start_pathfind(&self, tx: i32, ty: i32) -> Result<AutorunStepper, String> {
         let px = self.entities[0].x;
         let py = self.entities[0].y;
 
         let path = pathfinding::find_path(&self.map, px, py, tx, ty, &self.explored)
             .ok_or_else(|| "No path found to target.".to_string())?;
 
-        if path.is_empty() {
+        Ok(AutorunStepper {
+            mode: StepperMode::FollowPath { path, index: 0 },
+            steps_taken: 0,
+            max_steps: data::CONFIG.max_autorun_steps,
+            all_messages: Vec::new(),
+            explored_before: self.explored.len() as i32,
+        })
+    }
+
+    /// Create a stepper for auto-explore: pick nearest frontier, pathfind to it.
+    ///
+    /// Returns the stepper and the target (x, y) coordinates.
+    pub fn start_auto_explore(&self) -> Result<(AutorunStepper, i32, i32), String> {
+        let frontiers = self.frontier_tiles();
+        if frontiers.is_empty() {
+            return Err("No unexplored areas — map is fully explored.".to_string());
+        }
+
+        let px = self.entities[0].x;
+        let py = self.entities[0].y;
+
+        let &(tx, ty) = frontiers
+            .iter()
+            .min_by_key(|&&(fx, fy)| (fx - px).abs().max((fy - py).abs()))
+            .unwrap();
+
+        let stepper = self.start_pathfind(tx, ty)?;
+        Ok((stepper, tx, ty))
+    }
+
+    /// Run in a direction until something interesting happens.
+    ///
+    /// Convenience wrapper around the stepper — runs to completion in one call.
+    pub fn autorun(&mut self, dx: i32, dy: i32) -> AutorunResult {
+        let stepper = self.start_autorun(dx, dy);
+        stepper.run_to_completion(self)
+    }
+
+    /// Walk the shortest path to (tx, ty) using A* pathfinding.
+    ///
+    /// Convenience wrapper around the stepper — runs to completion in one call.
+    pub fn pathfind_to(&mut self, tx: i32, ty: i32) -> Result<AutorunResult, String> {
+        let stepper = self.start_pathfind(tx, ty)?;
+        // Preserve empty-path early return for behavioral parity.
+        if let StepperMode::FollowPath { ref path, .. } = stepper.mode
+            && path.is_empty()
+        {
             return Ok(AutorunResult {
                 steps_taken: 0,
                 stop_reason: AutorunStopReason::PathComplete,
                 messages: Vec::new(),
+                new_tiles_revealed: 0,
             });
         }
+        Ok(stepper.run_to_completion(self))
+    }
 
-        let max_steps = data::CONFIG.max_autorun_steps;
-        let mut steps_taken = 0;
-        let mut all_messages = Vec::new();
-
-        for &(nx, ny) in &path {
-            if steps_taken >= max_steps {
-                return Ok(AutorunResult {
-                    steps_taken,
-                    stop_reason: AutorunStopReason::MaxSteps,
-                    messages: all_messages,
-                });
-            }
-
-            if self.has_adjacent_monster() {
-                return Ok(AutorunResult {
-                    steps_taken,
-                    stop_reason: AutorunStopReason::MonsterSpotted,
-                    messages: all_messages,
-                });
-            }
-
-            let hp_before = self.entities[0].hp;
-            let visible_monsters_before = self.visible_monster_ids();
-
-            let cx = self.entities[0].x;
-            let cy = self.entities[0].y;
-            let dx = nx - cx;
-            let dy = ny - cy;
-
-            let result = self.step(GameCommand::Move { dx, dy });
-            all_messages.extend(result.new_messages);
-
-            if !result.action_taken {
-                return Ok(AutorunResult {
-                    steps_taken,
-                    stop_reason: AutorunStopReason::WallReached,
-                    messages: all_messages,
-                });
-            }
-
-            steps_taken += 1;
-
-            if result.game_over {
-                return Ok(AutorunResult {
-                    steps_taken,
-                    stop_reason: AutorunStopReason::GameOver,
-                    messages: all_messages,
-                });
-            }
-
-            if self.entities[0].hp < hp_before {
-                return Ok(AutorunResult {
-                    steps_taken,
-                    stop_reason: AutorunStopReason::DamageTaken,
-                    messages: all_messages,
-                });
-            }
-
-            let visible_monsters_after = self.visible_monster_ids();
-            if visible_monsters_after
-                .difference(&visible_monsters_before)
-                .next()
-                .is_some()
-            {
-                return Ok(AutorunResult {
-                    steps_taken,
-                    stop_reason: AutorunStopReason::MonsterSpotted,
-                    messages: all_messages,
-                });
-            }
-        }
-
-        Ok(AutorunResult {
-            steps_taken,
-            stop_reason: AutorunStopReason::PathComplete,
-            messages: all_messages,
+    /// Automatically explore: find the nearest frontier tile and pathfind to it.
+    ///
+    /// Convenience wrapper around the stepper — runs to completion in one call.
+    pub fn auto_explore(&mut self) -> Result<AutoExploreResult, String> {
+        let (stepper, tx, ty) = self.start_auto_explore()?;
+        let movement = stepper.run_to_completion(self);
+        Ok(AutoExploreResult {
+            target_x: tx,
+            target_y: ty,
+            movement,
         })
     }
 
@@ -1611,5 +1649,171 @@ mod tests {
         assert_eq!(gs.entities[0].y, 8);
         // Chebyshev optimal: 3 diagonal steps
         assert_eq!(result.steps_taken, 3);
+    }
+
+    // --- new_tiles_revealed tests ---
+
+    #[test]
+    fn autorun_counts_new_tiles_revealed() {
+        let mut gs = corridor_game();
+        // Running east from (5,5) in a corridor reveals new tiles.
+        let result = gs.autorun(1, 0);
+        assert!(result.new_tiles_revealed > 0);
+    }
+
+    #[test]
+    fn autorun_into_wall_reveals_zero_tiles() {
+        let mut gs = corridor_game();
+        // Running north into a wall from (5,5) — no movement, no new tiles.
+        let result = gs.autorun(0, -1);
+        assert_eq!(result.new_tiles_revealed, 0);
+        assert_eq!(result.steps_taken, 0);
+    }
+
+    #[test]
+    fn pathfind_counts_new_tiles_revealed() {
+        let mut gs = corridor_game();
+        let result = gs.pathfind_to(10, 5).unwrap();
+        // Walking east in a corridor reveals tiles at the far end.
+        assert!(result.new_tiles_revealed >= 0);
+        assert!(result.steps_taken > 0);
+    }
+
+    // --- auto_explore tests ---
+
+    #[test]
+    fn auto_explore_moves_toward_frontier() {
+        let mut gs = corridor_game();
+        // Corridor has unexplored tiles beyond FOV radius.
+        let result = gs.auto_explore().unwrap();
+        assert!(result.movement.steps_taken > 0);
+        assert_eq!(result.movement.stop_reason, AutorunStopReason::PathComplete);
+    }
+
+    #[test]
+    fn auto_explore_errors_when_fully_explored() {
+        let mut gs = test_game();
+        // Mark every in-bounds tile as explored.
+        for y in 0..gs.map.height {
+            for x in 0..gs.map.width {
+                gs.explored.insert((x, y));
+            }
+        }
+        let result = gs.auto_explore();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("fully explored"));
+    }
+
+    #[test]
+    fn auto_explore_stops_for_monster() {
+        let mut gs = corridor_game();
+        // Place monster adjacent at (6, 5).
+        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        gs.entities.push(monster);
+        gs.update_fov();
+        let result = gs.auto_explore().unwrap();
+        assert_eq!(
+            result.movement.stop_reason,
+            AutorunStopReason::MonsterSpotted
+        );
+        assert_eq!(result.movement.steps_taken, 0);
+    }
+
+    // --- AutorunStepper tests ---
+
+    #[test]
+    fn stepper_directional_matches_autorun() {
+        // Verify stepper produces identical results to convenience method.
+        let mut gs1 = corridor_game();
+        let mut gs2 = corridor_game();
+        let result_convenience = gs1.autorun(1, 0);
+        let stepper = gs2.start_autorun(1, 0);
+        let result_stepper = stepper.run_to_completion(&mut gs2);
+        assert_eq!(result_convenience.steps_taken, result_stepper.steps_taken);
+        assert_eq!(result_convenience.stop_reason, result_stepper.stop_reason);
+        assert_eq!(
+            result_convenience.new_tiles_revealed,
+            result_stepper.new_tiles_revealed
+        );
+        assert_eq!(gs1.entities[0].x, gs2.entities[0].x);
+        assert_eq!(gs1.entities[0].y, gs2.entities[0].y);
+    }
+
+    #[test]
+    fn stepper_follow_path_matches_pathfind_to() {
+        let mut gs1 = test_game();
+        gs1.update_fov();
+        let mut gs2 = test_game();
+        gs2.update_fov();
+        let result_conv = gs1.pathfind_to(8, 5).unwrap();
+        let stepper = gs2.start_pathfind(8, 5).unwrap();
+        let result_step = stepper.run_to_completion(&mut gs2);
+        assert_eq!(result_conv.steps_taken, result_step.steps_taken);
+        assert_eq!(result_conv.stop_reason, result_step.stop_reason);
+        assert_eq!(gs1.entities[0].x, gs2.entities[0].x);
+    }
+
+    #[test]
+    fn stepper_yields_continue_then_done() {
+        let mut gs = corridor_game();
+        let mut stepper = gs.start_autorun(1, 0);
+        // First step should be Continue (corridor is long).
+        assert!(matches!(stepper.next_step(&mut gs), StepOutcome::Continue));
+        // Run to completion.
+        loop {
+            match stepper.next_step(&mut gs) {
+                StepOutcome::Continue => continue,
+                StepOutcome::Done(result) => {
+                    assert!(result.steps_taken > 0);
+                    break;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn stepper_stops_for_adjacent_monster() {
+        let mut gs = corridor_game();
+        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        gs.entities.push(monster);
+        gs.update_fov();
+        let mut stepper = gs.start_autorun(1, 0);
+        match stepper.next_step(&mut gs) {
+            StepOutcome::Done(result) => {
+                assert_eq!(result.stop_reason, AutorunStopReason::MonsterSpotted);
+                assert_eq!(result.steps_taken, 0);
+            }
+            StepOutcome::Continue => panic!("Expected Done"),
+        }
+    }
+
+    #[test]
+    fn stepper_follow_path_empty_handled_by_convenience() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let result = gs.pathfind_to(5, 5).unwrap();
+        assert_eq!(result.stop_reason, AutorunStopReason::PathComplete);
+        assert_eq!(result.steps_taken, 0);
+    }
+
+    #[test]
+    fn start_auto_explore_returns_stepper_and_target() {
+        let mut gs = corridor_game();
+        let (stepper, tx, ty) = gs.start_auto_explore().unwrap();
+        let frontiers = gs.frontier_tiles();
+        assert!(frontiers.contains(&(tx, ty)));
+        let result = stepper.run_to_completion(&mut gs);
+        assert!(result.steps_taken > 0);
+    }
+
+    #[test]
+    fn start_auto_explore_errors_when_fully_explored() {
+        let mut gs = test_game();
+        for y in 0..gs.map.height {
+            for x in 0..gs.map.width {
+                gs.explored.insert((x, y));
+            }
+        }
+        assert!(gs.start_auto_explore().is_err());
     }
 }

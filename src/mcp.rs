@@ -9,7 +9,7 @@ use rmcp::{
 use tokio::sync::Mutex;
 
 use crate::data::CONFIG;
-use crate::game::{AutoFightResult, AutorunResult, GameState};
+use crate::game::{AutoExploreResult, AutoFightResult, AutorunResult, GameState};
 use crate::input::GameCommand;
 
 /// MCP server that wraps a roguelike game session.
@@ -90,7 +90,7 @@ impl RoguelikeMcpServer {
     }
 
     #[tool(
-        description = "Observe the current visible game state. Returns player stats, an ASCII map of visible tiles, a list of visible monsters with their stats, and the recent message log."
+        description = "Observe the current visible game state. Returns player stats, an ASCII map of visible tiles, a list of visible monsters with their stats, and the recent message log. Note: act, pathfind_to, auto_explore, and auto_fight already return observations. Use observe only to check state without taking an action."
     )]
     async fn observe(&self) -> Result<CallToolResult, McpError> {
         let guard = self.state.lock().await;
@@ -153,14 +153,27 @@ impl RoguelikeMcpServer {
         if let GameCommand::Autorun { dx, dy } = cmd {
             let autorun_result = state.autorun(dx, dy);
             let observation = state.observe();
-            let json = format_autorun_response(&observation, &autorun_result)
+            let frontiers = state.frontier_tiles();
+            let json = format_autorun_response(&observation, &autorun_result, &frontiers)
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
             return Ok(CallToolResult::success(vec![Content::text(json)]));
         }
 
+        let explored_before = state.explored.len() as i32;
         let _step_result = state.step(cmd);
+        let new_tiles_revealed = state.explored.len() as i32 - explored_before;
         let observation = state.observe();
-        let json = serde_json::to_string_pretty(&observation)
+        let frontiers = state.frontier_tiles();
+        let mut value = serde_json::to_value(&observation)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        if let serde_json::Value::Object(ref mut map) = value {
+            map.insert(
+                "new_tiles_revealed".into(),
+                serde_json::Value::Number(new_tiles_revealed.into()),
+            );
+        }
+        inject_frontier_exits(&mut value, &frontiers);
+        let json = serde_json::to_string_pretty(&value)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -215,7 +228,34 @@ impl RoguelikeMcpServer {
             .pathfind_to(params.x, params.y)
             .map_err(|e| McpError::invalid_request(e, None))?;
         let observation = state.observe();
-        let json = format_autorun_response(&observation, &pathfind_result)
+        let frontiers = state.frontier_tiles();
+        let json = format_autorun_response(&observation, &pathfind_result, &frontiers)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(
+        description = "Automatically explore the dungeon. Finds the nearest frontier tile (edge of explored area) and pathfinds to it. Equivalent to get_explored_map + pathfind_to in one call. Stops for monsters, damage, or when the frontier is reached. Returns observation with frontier_exits, new_tiles_revealed, and explore target coordinates."
+    )]
+    async fn auto_explore(&self) -> Result<CallToolResult, McpError> {
+        let mut guard = self.state.lock().await;
+        let state = guard.as_mut().ok_or_else(|| {
+            McpError::invalid_request("No game in progress. Call new_game first.", None)
+        })?;
+
+        if state.game_over {
+            return Err(McpError::invalid_request(
+                "Game is over. Call new_game to start a new game.",
+                None,
+            ));
+        }
+
+        let explore_result = state
+            .auto_explore()
+            .map_err(|e| McpError::invalid_request(e, None))?;
+        let observation = state.observe();
+        let frontiers = state.frontier_tiles();
+        let json = format_auto_explore_response(&observation, &explore_result, &frontiers)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -266,7 +306,11 @@ impl RoguelikeMcpServer {
              \n\
              ## Available Tools\n\
              - **act** — move, wait, autorun, or auto_fight (see below)\n\
-             - **observe** — see current FOV, stats, and nearby entities\n\
+             - **observe** — see current FOV, stats, and nearby entities. \
+             Rarely needed since act, pathfind_to, auto_explore, and auto_fight \
+             already return observations.\n\
+             - **auto_explore** — find nearest frontier and walk to it in one call. \
+             Best way to explore the dungeon. Returns frontier_exits for next move.\n\
              - **pathfind_to(x, y)** — walk shortest path to any explored tile; \
              stops for monsters, damage, or on arrival\n\
              - **get_explored_map** — full map of everywhere you've been; '~' tiles \
@@ -349,6 +393,8 @@ fn format_auto_fight_response(
 ) -> Result<String, serde_json::Error> {
     let mut value = serde_json::to_value(observation)?;
     if let serde_json::Value::Object(ref mut map) = value {
+        // Remove bulky map data — combat doesn't move the player.
+        map.remove("map_ascii");
         map.insert(
             "auto_fight_rounds".into(),
             serde_json::Value::Number(fight.rounds.into()),
@@ -373,6 +419,7 @@ fn format_auto_fight_response(
 fn format_autorun_response(
     observation: &crate::game::GameObservation,
     autorun: &AutorunResult,
+    frontier_tiles: &[(i32, i32)],
 ) -> Result<String, serde_json::Error> {
     let mut value = serde_json::to_value(observation)?;
     if let serde_json::Value::Object(ref mut map) = value {
@@ -384,8 +431,57 @@ fn format_autorun_response(
             "autorun_stop_reason".into(),
             serde_json::to_value(autorun.stop_reason)?,
         );
+        map.insert(
+            "new_tiles_revealed".into(),
+            serde_json::Value::Number(autorun.new_tiles_revealed.into()),
+        );
     }
+    inject_frontier_exits(&mut value, frontier_tiles);
     serde_json::to_string_pretty(&value)
+}
+
+/// Build a JSON response for auto_explore: observation + autorun metadata + explore target.
+fn format_auto_explore_response(
+    observation: &crate::game::GameObservation,
+    explore: &AutoExploreResult,
+    frontier_tiles: &[(i32, i32)],
+) -> Result<String, serde_json::Error> {
+    let mut value = serde_json::to_value(observation)?;
+    if let serde_json::Value::Object(ref mut map) = value {
+        map.insert(
+            "autorun_steps".into(),
+            serde_json::Value::Number(explore.movement.steps_taken.into()),
+        );
+        map.insert(
+            "autorun_stop_reason".into(),
+            serde_json::to_value(explore.movement.stop_reason)?,
+        );
+        map.insert(
+            "new_tiles_revealed".into(),
+            serde_json::Value::Number(explore.movement.new_tiles_revealed.into()),
+        );
+        map.insert(
+            "explore_target_x".into(),
+            serde_json::Value::Number(explore.target_x.into()),
+        );
+        map.insert(
+            "explore_target_y".into(),
+            serde_json::Value::Number(explore.target_y.into()),
+        );
+    }
+    inject_frontier_exits(&mut value, frontier_tiles);
+    serde_json::to_string_pretty(&value)
+}
+
+/// Inject `frontier_exits` array into an existing JSON object value.
+fn inject_frontier_exits(value: &mut serde_json::Value, frontier_tiles: &[(i32, i32)]) {
+    if let serde_json::Value::Object(map) = value {
+        let exits: Vec<serde_json::Value> = frontier_tiles
+            .iter()
+            .map(|&(x, y)| serde_json::json!({"x": x, "y": y}))
+            .collect();
+        map.insert("frontier_exits".into(), serde_json::Value::Array(exits));
+    }
 }
 
 #[cfg(test)]
@@ -518,5 +614,54 @@ mod tests {
                 dir
             );
         }
+    }
+
+    #[test]
+    fn auto_fight_response_omits_map_ascii() {
+        use crate::data;
+        use crate::entity::Entity;
+        use crate::fov;
+        use crate::map::{Map, Tile};
+        use crate::message_log::MessageLog;
+
+        // Build a minimal game with a goblin adjacent to the player.
+        let mut m = Map::new(20, 20);
+        for y in 1..=10 {
+            for x in 1..=10 {
+                let idx = m.idx(x, y);
+                m.tiles[idx] = Tile::Floor;
+            }
+        }
+        let player = Entity::player(5, 5);
+        let goblin = Entity::from_template(&data::GOBLIN, 6, 5);
+        let visible = fov::compute_fov(&m, 5, 5, 8);
+        let explored = visible.clone();
+
+        let mut state = GameState {
+            map: m,
+            entities: vec![player, goblin],
+            fov_radius: 8,
+            visible,
+            explored,
+            log: MessageLog::new(),
+            game_over: false,
+            turn_count: 0,
+        };
+        state.update_fov();
+
+        let fight = state.auto_fight().unwrap();
+        let obs = state.observe();
+        let json_str = format_auto_fight_response(&obs, &fight).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        // map_ascii should be removed from auto_fight responses.
+        assert!(parsed.get("map_ascii").is_none());
+        // But combat metadata should be present.
+        assert!(parsed.get("auto_fight_rounds").is_some());
+        assert!(parsed.get("auto_fight_target").is_some());
+        assert!(parsed.get("auto_fight_target_killed").is_some());
+        assert!(parsed.get("auto_fight_player_hp_lost").is_some());
+        // Player stats should still be present.
+        assert!(parsed.get("player_hp").is_some());
     }
 }

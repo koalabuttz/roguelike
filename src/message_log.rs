@@ -24,6 +24,21 @@ impl MessageLog {
         let start = self.messages.len().saturating_sub(n);
         &self.messages[start..]
     }
+
+    /// Total number of messages ever added.
+    pub fn len(&self) -> usize {
+        self.messages.len()
+    }
+
+    /// Whether the log contains no messages.
+    pub fn is_empty(&self) -> bool {
+        self.messages.is_empty()
+    }
+
+    /// Return all messages added since index `since` (exclusive).
+    pub fn messages_since(&self, since: usize) -> Vec<String> {
+        self.messages[since..].to_vec()
+    }
 }
 
 #[cfg(test)]
@@ -63,5 +78,35 @@ mod tests {
         let msgs = log.recent(100);
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0], "only");
+    }
+
+    #[test]
+    fn len_tracks_message_count() {
+        let mut log = MessageLog::new();
+        assert_eq!(log.len(), 0);
+        assert!(log.is_empty());
+        log.add("hello");
+        assert_eq!(log.len(), 1);
+        assert!(!log.is_empty());
+    }
+
+    #[test]
+    fn messages_since_returns_new_messages() {
+        let mut log = MessageLog::new();
+        log.add("old");
+        let before = log.len();
+        log.add("new1");
+        log.add("new2");
+        let new = log.messages_since(before);
+        assert_eq!(new, vec!["new1", "new2"]);
+    }
+
+    #[test]
+    fn messages_since_returns_empty_when_nothing_new() {
+        let mut log = MessageLog::new();
+        log.add("existing");
+        let before = log.len();
+        let new = log.messages_since(before);
+        assert!(new.is_empty());
     }
 }

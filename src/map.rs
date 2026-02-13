@@ -6,6 +6,18 @@ pub enum Tile {
     Floor,
 }
 
+impl Tile {
+    /// Movement cost for walking onto this tile. Extend this when adding
+    /// terrain types (e.g., Water → 2, Swamp → 3, Lava → 5).
+    /// Walls are not walkable — callers must check `is_walkable` first.
+    pub fn move_cost(&self) -> i32 {
+        match self {
+            Tile::Floor => 1,
+            Tile::Wall => unreachable!("walls are not walkable"),
+        }
+    }
+}
+
 pub struct Rect {
     pub x1: i32,
     pub y1: i32,

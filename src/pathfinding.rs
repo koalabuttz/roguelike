@@ -108,6 +108,63 @@ pub fn find_path(
     None
 }
 
+/// Find the nearest target tile by actual walking cost (Dijkstra).
+///
+/// Expands outward from (sx, sy) through explored walkable tiles, using
+/// `Tile::move_cost()` for edge weights. The first target popped from the
+/// priority queue is guaranteed to be the cheapest to reach. Returns `None`
+/// if no target is reachable.
+pub fn nearest_by_cost(
+    map: &Map,
+    sx: i32,
+    sy: i32,
+    targets: &HashSet<(i32, i32)>,
+    explored: &HashSet<(i32, i32)>,
+) -> Option<(i32, i32)> {
+    let start = (sx, sy);
+    let mut dist: HashMap<(i32, i32), i32> = HashMap::new();
+    let mut heap = BinaryHeap::new();
+
+    dist.insert(start, 0);
+    heap.push(Node {
+        pos: start,
+        f_score: 0,
+    });
+
+    while let Some(Node { pos, f_score: cost }) = heap.pop() {
+        if cost > *dist.get(&pos).unwrap_or(&i32::MAX) {
+            continue; // stale entry
+        }
+
+        if targets.contains(&pos) {
+            return Some(pos);
+        }
+
+        for dy in -1..=1i32 {
+            for dx in -1..=1i32 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let next = (pos.0 + dx, pos.1 + dy);
+                if !map.is_walkable(next.0, next.1) || !explored.contains(&next) {
+                    continue;
+                }
+                let tile_cost = map.tiles[map.idx(next.0, next.1)].move_cost();
+                let next_cost = cost + tile_cost;
+                if next_cost < *dist.get(&next).unwrap_or(&i32::MAX) {
+                    dist.insert(next, next_cost);
+                    heap.push(Node {
+                        pos: next,
+                        f_score: next_cost,
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,5 +280,84 @@ mod tests {
         let path = find_path(&m, 1, 5, 18, 5, &explored).unwrap();
         assert_eq!(path.len(), 17);
         assert_eq!(*path.last().unwrap(), (18, 5));
+    }
+
+    #[test]
+    fn nearest_by_cost_picks_closer_target() {
+        let (m, explored) = open_map();
+        let mut targets = HashSet::new();
+        targets.insert((2, 2)); // close
+        targets.insert((8, 8)); // far
+        let nearest = nearest_by_cost(&m, 1, 1, &targets, &explored);
+        assert_eq!(nearest, Some((2, 2)));
+    }
+
+    #[test]
+    fn nearest_by_cost_respects_walls() {
+        // Two parallel corridors separated by a wall with a gap at the left.
+        // Both targets are Chebyshev 4 from player, but (8,3) is only 4
+        // walking steps while (8,1) requires a 10-step detour through the gap.
+        //
+        //   12345678
+        // 1 ........   north corridor
+        // 2 .#######   wall with gap at x=1
+        // 3 ....@...   south corridor, player at (4,3)
+        let mut m = Map::new(10, 5);
+        let mut explored = HashSet::new();
+
+        // North corridor (y=1)
+        for x in 1..=8 {
+            let idx = m.idx(x, 1);
+            m.tiles[idx] = Tile::Floor;
+            explored.insert((x, 1));
+        }
+        // Gap at (1,2) — only connection between corridors
+        let idx = m.idx(1, 2);
+        m.tiles[idx] = Tile::Floor;
+        explored.insert((1, 2));
+        // South corridor (y=3)
+        for x in 1..=8 {
+            let idx = m.idx(x, 3);
+            m.tiles[idx] = Tile::Floor;
+            explored.insert((x, 3));
+        }
+
+        let mut targets = HashSet::new();
+        targets.insert((8, 1)); // far corridor — long detour through gap
+        targets.insert((8, 3)); // same corridor — short walk east
+
+        let nearest = nearest_by_cost(&m, 4, 3, &targets, &explored);
+        assert_eq!(nearest, Some((8, 3)));
+    }
+
+    #[test]
+    fn nearest_by_cost_start_is_target() {
+        let (m, explored) = open_map();
+        let mut targets = HashSet::new();
+        targets.insert((5, 5));
+        let nearest = nearest_by_cost(&m, 5, 5, &targets, &explored);
+        assert_eq!(nearest, Some((5, 5)));
+    }
+
+    #[test]
+    fn nearest_by_cost_no_reachable_target() {
+        let mut m = Map::new(10, 10);
+        let mut explored = HashSet::new();
+        // Two disconnected explored zones
+        for x in 1..=3 {
+            let idx = m.idx(x, 5);
+            m.tiles[idx] = Tile::Floor;
+            explored.insert((x, 5));
+        }
+        for x in 7..=9 {
+            let idx = m.idx(x, 5);
+            m.tiles[idx] = Tile::Floor;
+            explored.insert((x, 5));
+        }
+
+        let mut targets = HashSet::new();
+        targets.insert((8, 5)); // unreachable from (2, 5)
+        let nearest = nearest_by_cost(&m, 2, 5, &targets, &explored);
+        assert_eq!(nearest, None);
     }
 }

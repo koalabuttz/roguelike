@@ -402,6 +402,8 @@ impl GameState {
 
     /// Create a stepper for auto-explore: pick nearest frontier, pathfind to it.
     ///
+    /// Uses Dijkstra to find the frontier tile with the lowest actual walking
+    /// cost, respecting dungeon topology (walls, corridors, tile costs).
     /// Returns the stepper and the target (x, y) coordinates.
     pub fn start_auto_explore(&self) -> Result<(AutorunStepper, i32, i32), String> {
         let frontiers = self.frontier_tiles();
@@ -412,10 +414,10 @@ impl GameState {
         let px = self.entities[0].x;
         let py = self.entities[0].y;
 
-        let &(tx, ty) = frontiers
-            .iter()
-            .min_by_key(|&&(fx, fy)| (fx - px).abs().max((fy - py).abs()))
-            .unwrap();
+        let frontier_set: HashSet<(i32, i32)> = frontiers.into_iter().collect();
+        let (tx, ty) =
+            pathfinding::nearest_by_cost(&self.map, px, py, &frontier_set, &self.explored)
+                .ok_or_else(|| "No reachable frontier tiles.".to_string())?;
 
         let stepper = self.start_pathfind(tx, ty)?;
         Ok((stepper, tx, ty))

@@ -2,7 +2,7 @@
 
 A terminal-based roguelike dungeon crawler written in Rust.
 
-Explore randomly generated dungeons, fight monsters, and try to survive. Renders directly in the terminal using Unicode box-drawing characters and ANSI colors — no external game engine required.
+Explore randomly generated dungeons, fight monsters, and try to survive. Renders directly in the terminal using ASCII characters and ANSI colors — no external game engine required.
 
 ## Building and Running
 
@@ -13,6 +13,16 @@ cargo run
 ```
 
 The game adapts to your terminal size automatically.
+
+## Testing
+
+```sh
+cargo test          # 47 unit tests across 7 modules
+cargo clippy -- -D warnings
+cargo fmt --check
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 ## Controls
 
@@ -101,10 +111,9 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 - [crossterm](https://crates.io/crates/crossterm) 0.28 — cross-platform terminal manipulation
 - [rand](https://crates.io/crates/rand) 0.8 — random number generation
 
-### Optional Dependencies (planned)
-- [rodio](https://crates.io/crates/rodio) — Audio playback for sound effects and music (background threads, MP3/WAV/OGG)
-
 ## Roadmap
+
+See [docs/roadmap-priority.md](docs/roadmap-priority.md) for a detailed breakdown with dependencies, effort estimates, and a critical path diagram.
 
 ### Foundation (enables networking, platforms & advanced features)
 - [ ] **Input abstraction** — `GameCommand` enum, decouple game logic from terminal input
@@ -132,32 +141,16 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 
 ### Accessibility
 
-#### Visual
-- [ ] **Colorblind modes** — Alternative color palettes (current green/dark-green/dark-red is problematic for ~8% of men)
-- [ ] **High-contrast mode** — Maximum readability option
-- [ ] **Configurable glyphs** — Let players remap which character represents what
-- [ ] **Reduced clutter mode** — Option to hide corpses, simplify display to essential info
+- [ ] **Visual** — Colorblind palettes, high-contrast mode, configurable glyphs, reduced clutter option
 - [ ] **Screen reader support** — Structured output for NVDA/JAWS/VoiceOver; braille display compatible
-
-#### Motor
-- [ ] **One-handed play** — Full remap to left-hand-only or right-hand/numpad-only layouts
-- [ ] **Mouse-only play** — Click to move/attack, click-based menus for all actions
-- [ ] **Adjustable input timing** — Key repeat delay and debounce to prevent accidental double-moves
-- [ ] **Auto-explore** — Automatically move toward unexplored areas until interrupted
-- [ ] **Macros** — Record and replay action sequences with a single input
-
-#### Cognitive
-- [ ] **Granular difficulty** — Specific toggles (HP multiplier, damage reduction, reveal map) instead of just easy/hard
-- [ ] **Message history** — Scrollable log of all game events, not just the last 4
-- [ ] **Context-sensitive help** — Press `?` on any screen for an explanation of what's happening
-- [ ] **Predictable UI** — Same input always does the same thing; current mode always visible
-
-#### Auditory
-- [ ] **Visual alternatives for all audio** — Every sound cue has a text/visual equivalent; no game-critical info through sound alone
-
-#### Inclusivity
+- [ ] **Motor** — One-handed layouts, mouse-only play, adjustable input timing, auto-explore, macros
+- [ ] **Cognitive** — Granular difficulty toggles, scrollable message history, context-sensitive help (`?`)
 - [ ] **Character identity** — Player-chosen name and pronouns used in game text
 - [ ] **Code of Conduct** — Contributor Covenant adoption for a welcoming community
+
+Design principles (not checkboxes — follow these always):
+- Same input always does the same thing; current mode always visible
+- Every sound cue must have a text/visual equivalent; no game-critical info through sound alone
 
 ### Networking
 - [ ] **Replay system** — Record and playback games deterministically
@@ -169,7 +162,7 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 
 ### Platform Support
 - [x] **Windows / macOS / Linux** — Native terminal via crossterm (current)
-- [ ] **CI matrix** — Test on all three desktop OS (Intel + ARM) in GitHub Actions
+- [x] **CI matrix** — Tests on Linux, macOS, Windows (Intel + ARM) in GitHub Actions
 - [ ] **Web (WASM)** — Browser-based play via wasm-pack + xterm.js; enables browser spectating and leaderboards
 - [ ] **Game Boy Advance** — Native ARM via `thumbv4t-none-eabi` target + `gba` crate; no_std, fixed-size containers
 - [ ] **SSH server** — Server-side play via russh, NetHack-server style (players connect via SSH)

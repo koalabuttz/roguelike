@@ -61,6 +61,24 @@ This project uses Rust edition 2024. Key differences:
 - **Keep it modular** — New systems should be self-contained modules with clear interfaces
 - **Follow existing patterns** — Look at how current modules are structured before adding new ones
 
+## Code Organization
+
+### Method Placement Rule
+
+Place functions based on **what they operate on**, not who calls them:
+
+- **Map topology queries** → `map.rs` (e.g., `is_walkable`, `get_neighbors`)
+- **Entity spatial queries** → `game.rs` as public functions (e.g., `entity_at`, `find_monsters`)
+- **Game logic systems** → Own module (e.g., `combat.rs`, `ai.rs`, `spawn.rs`)
+- **Orchestration only** → `GameState` methods (multi-step game actions like `step()`, `autorun()`)
+- **Helpers go where the data lives**
+
+### Project Conventions
+
+- **Player entity** — Always `entities[0]` in the entity list
+- **Tests** — Use `#[cfg(test)] mod tests` blocks at the bottom of each source file
+- **Test coverage** — Add or update tests when adding features or changing behavior
+
 ## Adding a Monster
 
 The simplest way to contribute content — see the [README](README.md#adding-a-new-monster) for a step-by-step guide.

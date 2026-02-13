@@ -11,6 +11,10 @@ pub struct Rect {
     pub y1: i32,
     pub x2: i32,
     pub y2: i32,
+    /// Hidden rooms are carved into the map but not counted in stats
+    /// until discovered. Prevents exploration percentage from leaking
+    /// the existence of secret areas.
+    pub hidden: bool,
 }
 
 impl Rect {
@@ -20,6 +24,7 @@ impl Rect {
             y1: y,
             x2: x + w,
             y2: y + h,
+            hidden: false,
         }
     }
 
@@ -29,6 +34,12 @@ impl Rect {
 
     pub fn intersects(&self, other: &Rect) -> bool {
         self.x1 <= other.x2 && self.x2 >= other.x1 && self.y1 <= other.y2 && self.y2 >= other.y1
+    }
+
+    /// Whether (x, y) is in the carved interior of this room.
+    /// Matches `carve_room` bounds: x1 < x < x2, y1 < y < y2.
+    pub fn contains_interior(&self, x: i32, y: i32) -> bool {
+        x > self.x1 && x < self.x2 && y > self.y1 && y < self.y2
     }
 }
 
@@ -95,7 +106,31 @@ impl Map {
         self.tiles.iter().filter(|t| **t == Tile::Floor).count() as i32
     }
 
-    fn carve_room(&mut self, room: &Rect) {
+    /// Count floor tiles excluding those inside hidden rooms.
+    /// Use this for exploration stats so hidden rooms don't leak info.
+    pub fn known_floor_count(&self) -> i32 {
+        let mut count = 0;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if self.tiles[self.idx(x, y)] == Tile::Floor
+                    && !self
+                        .rooms
+                        .iter()
+                        .any(|r| r.hidden && r.contains_interior(x, y))
+                {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
+    /// Count non-hidden rooms.
+    pub fn known_room_count(&self) -> i32 {
+        self.rooms.iter().filter(|r| !r.hidden).count() as i32
+    }
+
+    pub(crate) fn carve_room(&mut self, room: &Rect) {
         for y in (room.y1 + 1)..room.y2 {
             for x in (room.x1 + 1)..room.x2 {
                 if self.in_bounds(x, y) {
@@ -320,6 +355,66 @@ mod tests {
             m.tiles[idx] = Tile::Floor;
         }
         assert_eq!(m.floor_count(), 5);
+    }
+
+    #[test]
+    fn contains_interior_inside() {
+        let r = Rect::new(2, 2, 4, 4); // x1=2, y1=2, x2=6, y2=6
+        // Interior is 3..=5 x 3..=5
+        assert!(r.contains_interior(3, 3));
+        assert!(r.contains_interior(5, 5));
+    }
+
+    #[test]
+    fn contains_interior_on_wall() {
+        let r = Rect::new(2, 2, 4, 4);
+        // Walls are at x=2, x=6, y=2, y=6
+        assert!(!r.contains_interior(2, 3));
+        assert!(!r.contains_interior(6, 3));
+        assert!(!r.contains_interior(3, 2));
+        assert!(!r.contains_interior(3, 6));
+    }
+
+    #[test]
+    fn contains_interior_outside() {
+        let r = Rect::new(2, 2, 4, 4);
+        assert!(!r.contains_interior(0, 0));
+        assert!(!r.contains_interior(10, 10));
+    }
+
+    #[test]
+    fn known_floor_count_equals_floor_count_without_hidden() {
+        let mut m = Map::new(80, 50);
+        m.generate(30, 4, 10);
+        // No hidden rooms → known == total
+        assert_eq!(m.known_floor_count(), m.floor_count());
+    }
+
+    #[test]
+    fn known_floor_count_excludes_hidden_rooms() {
+        let mut m = Map::new(20, 20);
+        // Carve two rooms manually
+        let room1 = Rect::new(1, 1, 4, 4); // interior: 2..=4 x 2..=4 = 9 tiles
+        m.carve_room(&room1);
+        m.rooms.push(room1);
+
+        let mut room2 = Rect::new(10, 10, 4, 4); // interior: 11..=13 x 11..=13 = 9 tiles
+        room2.hidden = true;
+        m.carve_room(&room2);
+        m.rooms.push(room2);
+
+        assert_eq!(m.floor_count(), 18); // both rooms
+        assert_eq!(m.known_floor_count(), 9); // only room1
+    }
+
+    #[test]
+    fn known_room_count_excludes_hidden() {
+        let mut m = Map::new(20, 20);
+        m.rooms.push(Rect::new(1, 1, 4, 4));
+        let mut hidden = Rect::new(10, 10, 4, 4);
+        hidden.hidden = true;
+        m.rooms.push(hidden);
+        assert_eq!(m.known_room_count(), 1);
     }
 
     #[test]

@@ -453,8 +453,8 @@ impl GameState {
             .iter()
             .filter(|r| self.explored.contains(&r.center()))
             .count() as i32;
-        let total_rooms = self.map.rooms.len() as i32;
-        let floor_count = self.map.floor_count();
+        let total_rooms = self.map.known_room_count();
+        let floor_count = self.map.known_floor_count();
         let explored_pct = if floor_count > 0 {
             (self.explored.len() as i32 * 100) / floor_count
         } else {

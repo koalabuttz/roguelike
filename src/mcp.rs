@@ -9,7 +9,9 @@ use rmcp::{
 use tokio::sync::Mutex;
 
 use crate::data::CONFIG;
-use crate::game::{AutoExploreResult, AutoFightResult, AutorunResult, GameState};
+use crate::game::{
+    AutoExploreResult, AutoFightResult, AutorunResult, AutorunStopReason, GameState,
+};
 use crate::input::GameCommand;
 
 /// MCP server that wraps a roguelike game session.
@@ -84,7 +86,7 @@ impl RoguelikeMcpServer {
         let observation = state.observe();
         *self.state.lock().await = Some(state);
 
-        let json = serde_json::to_string_pretty(&observation)
+        let json = serde_json::to_string(&observation)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -99,7 +101,7 @@ impl RoguelikeMcpServer {
         })?;
 
         let observation = state.observe();
-        let json = serde_json::to_string_pretty(&observation)
+        let json = serde_json::to_string(&observation)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -160,7 +162,7 @@ impl RoguelikeMcpServer {
         }
 
         let explored_before = state.explored.len() as i32;
-        let _step_result = state.step(cmd);
+        let step_result = state.step(cmd);
         let new_tiles_revealed = state.explored.len() as i32 - explored_before;
         let observation = state.observe();
         let frontiers = state.frontier_tiles();
@@ -172,8 +174,9 @@ impl RoguelikeMcpServer {
                 serde_json::Value::Number(new_tiles_revealed.into()),
             );
         }
+        replace_messages(&mut value, &step_result.new_messages);
         inject_frontier_exits(&mut value, &frontiers);
-        let json = serde_json::to_string_pretty(&value)
+        let json = serde_json::to_string(&value)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -200,7 +203,7 @@ impl RoguelikeMcpServer {
             "player_y": player.y,
             "frontier_exits": frontier_exits,
         });
-        let json = serde_json::to_string_pretty(&response)
+        let json = serde_json::to_string(&response)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -235,7 +238,7 @@ impl RoguelikeMcpServer {
     }
 
     #[tool(
-        description = "Automatically explore the dungeon. Finds the nearest frontier tile (edge of explored area) and pathfinds to it. Equivalent to get_explored_map + pathfind_to in one call. Stops for monsters, damage, or when the frontier is reached. Returns observation with frontier_exits, new_tiles_revealed, and explore target coordinates."
+        description = "Automatically explore the dungeon. Finds the nearest frontier tile (edge of explored area) and pathfinds to it. Equivalent to get_explored_map + pathfind_to in one call. Stops for monsters, damage, or when the frontier is reached. Returns observation with frontier_count, new_tiles_revealed, and explore target coordinates."
     )]
     async fn auto_explore(&self) -> Result<CallToolResult, McpError> {
         let mut guard = self.state.lock().await;
@@ -254,8 +257,8 @@ impl RoguelikeMcpServer {
             .auto_explore()
             .map_err(|e| McpError::invalid_request(e, None))?;
         let observation = state.observe();
-        let frontiers = state.frontier_tiles();
-        let json = format_auto_explore_response(&observation, &explore_result, &frontiers)
+        let frontier_count = state.frontier_tiles().len() as i32;
+        let json = format_auto_explore_response(&observation, &explore_result, frontier_count)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -412,7 +415,8 @@ fn format_auto_fight_response(
             serde_json::Value::Number(fight.player_hp_lost.into()),
         );
     }
-    serde_json::to_string_pretty(&value)
+    replace_messages(&mut value, &fight.messages);
+    serde_json::to_string(&value)
 }
 
 /// Build a JSON response that merges the observation with autorun metadata.
@@ -436,15 +440,21 @@ fn format_autorun_response(
             serde_json::Value::Number(autorun.new_tiles_revealed.into()),
         );
     }
+    replace_messages(&mut value, &autorun.messages);
     inject_frontier_exits(&mut value, frontier_tiles);
-    serde_json::to_string_pretty(&value)
+    serde_json::to_string(&value)
 }
 
 /// Build a JSON response for auto_explore: observation + autorun metadata + explore target.
+///
+/// Unlike other movement responses, auto_explore uses a compact `frontier_count`
+/// instead of the full `frontier_exits` array. The LLM calls auto_explore in a
+/// loop and the server picks the best frontier automatically — the coordinate
+/// list is dead weight here. Use `get_explored_map` for the full list.
 fn format_auto_explore_response(
     observation: &crate::game::GameObservation,
     explore: &AutoExploreResult,
-    frontier_tiles: &[(i32, i32)],
+    frontier_count: i32,
 ) -> Result<String, serde_json::Error> {
     let mut value = serde_json::to_value(observation)?;
     if let serde_json::Value::Object(ref mut map) = value {
@@ -468,9 +478,31 @@ fn format_auto_explore_response(
             "explore_target_y".into(),
             serde_json::Value::Number(explore.target_y.into()),
         );
+        map.insert(
+            "frontier_count".into(),
+            serde_json::Value::Number(frontier_count.into()),
+        );
+        // Flag dead ends: reached the frontier target but found nothing new beyond it.
+        if explore.movement.stop_reason == AutorunStopReason::PathComplete
+            && explore.movement.new_tiles_revealed <= 2
+        {
+            map.insert("dead_end".into(), serde_json::Value::Bool(true));
+        }
     }
-    inject_frontier_exits(&mut value, frontier_tiles);
-    serde_json::to_string_pretty(&value)
+    replace_messages(&mut value, &explore.movement.messages);
+    serde_json::to_string(&value)
+}
+
+/// Replace `recent_messages` in a serialized observation with only the messages
+/// generated during the current action. Avoids sending stale messages from
+/// previous turns that waste tokens without adding information.
+fn replace_messages(value: &mut serde_json::Value, messages: &[String]) {
+    if let serde_json::Value::Object(map) = value {
+        map.insert(
+            "recent_messages".into(),
+            serde_json::to_value(messages).unwrap_or_default(),
+        );
+    }
 }
 
 /// Inject `frontier_exits` array into an existing JSON object value.

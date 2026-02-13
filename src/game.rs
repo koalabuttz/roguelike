@@ -61,8 +61,6 @@ pub struct AutorunResult {
 pub struct GameObservation {
     pub player_hp: i32,
     pub player_max_hp: i32,
-    pub player_attack: i32,
-    pub player_defense: i32,
     pub player_x: i32,
     pub player_y: i32,
     pub map_ascii: Vec<String>,
@@ -616,8 +614,6 @@ impl GameState {
         GameObservation {
             player_hp: player.hp,
             player_max_hp: player.max_hp,
-            player_attack: player.attack,
-            player_defense: player.defense,
             player_x: player.x,
             player_y: player.y,
             map_ascii: map_lines,
@@ -917,8 +913,6 @@ mod tests {
         let obs = gs.observe();
         assert_eq!(obs.player_hp, 30);
         assert_eq!(obs.player_max_hp, 30);
-        assert_eq!(obs.player_attack, 5);
-        assert_eq!(obs.player_defense, 2);
         assert!(!obs.game_over);
     }
 

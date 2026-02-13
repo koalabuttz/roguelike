@@ -6,6 +6,7 @@ pub mod fov;
 pub mod game;
 pub mod input;
 pub mod map;
+pub mod mcp;
 pub mod message_log;
 pub mod render;
 pub mod spawn;

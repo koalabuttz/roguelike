@@ -186,6 +186,22 @@ Design principles (not checkboxes — follow these always):
 - [ ] **Localization (i18n)** — Externalized strings, multi-language support
 - [ ] **Tutorial/guided run** — Introduce mechanics gradually for new players
 
+## David's Statement on AI Use
+
+This project is largely vibecoded with architectural and design decisions made by me (David).
+
+Once the AI boom began, I initially found it quite interesting. Quickly I became very skeptical as I saw how it was affecting schools, artists, the market, etc. I consider it very likely that there is an AI bubble that will burst at some point. I also think LLMs will still be around after it does.
+
+Internally, I have a bias to reject it. However, it is a value of mine to not auto-reject new technology, remain generally open-minded, and be willing to change my mind. This project is me exploring the capabilities of AI firsthand in order to better understand its current state and its potential future role in society.
+
+I have the utmost respect for the talented developers who handcode their applications and games - this project is not on the same playing field as those developers' projects and I do not claim to have the skills they do.
+
+This is first and foremost an experiment and secondly a way for me to have fun. I do not support the ensloppification of the internet nor the use of sub-standard AI art in lieu of hiring real artists.
+
+To be clear:
+- AI was used for code generation, architecture planning, and documentation (except this section)
+- All design decisions are mine
+
 ## License
 
 GPL-3.0-or-later

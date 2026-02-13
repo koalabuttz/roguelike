@@ -29,12 +29,15 @@ Fills out the core game loop and addresses high-value, low-effort improvements.
 |------|--------|--------|--------|-------|
 | Menus | ~3 items | High | M | Needed the moment items exist. Design for keyboard + controller from the start. |
 | Seeded RNG | ~4 items | Medium | S | Unlocks replay, daily challenges, seed sharing. Small refactor, outsized downstream value. |
-| A* pathfinding | 0 | High | M | Current greedy chase gets stuck on corners in complex layouts. |
+| A* pathfinding | ~2 items | High | M | Current greedy chase gets stuck on corners in complex layouts. Unlocks MCP pathfind_to and auto-explore. |
 | Hunger | 0 | Medium | S | Classic mechanic. Simple (decrement per turn, eat food). Depends on items. |
 | Experience/leveling | 0 | High | M | Progression within a run. |
 | Data-driven content | ~2 items | Medium | M | Move templates to RON/TOML. Unlocks hot reload and community content. |
 | Look mode | 0 | Medium | S | "What is that T?" Needed as monster variety grows. |
 | Colorblind modes | 0 | High | S | Trivial if colors are in data files. 8% of men affected by current palette. |
+| MCP autorun tuning | 0 | High | S | Autorun stops every 1 step inside rooms due to open-neighbor count. Only stop at meaningful decision points (corridor forks, room exits). [Playtest: 31% of tool calls wasted.](llm-playtest-2026-02-13.md) |
+| MCP pathfind_to tool | 0 | High | S | Walk to a visible/explored `(x, y)` via shortest path. Requires A*. Eliminates navigation fumbles. [Playtest: 19% of tool calls wasted.](llm-playtest-2026-02-13.md) |
+| MCP explored map tool | 0 | Medium | S | Return all previously-seen tiles so LLM can plan exploration routes instead of wandering. |
 
 ## Tier 3: Extended Features
 
@@ -51,6 +54,7 @@ Builds on the core systems to add depth, platforms, and accessibility.
 | Granular difficulty | 0 | Medium | S | Config toggles. Broadens who can enjoy the game. |
 | Context-sensitive help | 0 | Medium | S | `?` key on any screen. Accessibility and onboarding. |
 | Debug overlay | 0 | Medium | S | See AI decisions, FOV, pathfinding. Accelerates development. |
+| MCP spectator mode (file) | ~1 item | Medium | S | Write rendered frames to a file after each MCP action; viewer process displays them. Proves the concept, upgrades to TCP later. [Design doc.](spectator-mode-options.md) |
 | Meta-progression | 0 | High | L | Persistent unlocks between runs. Requires save/load. |
 | Web (WASM) | ~2 items | High | L | Browser-based play. Requires platform abstraction. |
 | One-handed play | 0 | Medium | S | Keybind preset. Falls out of input abstraction + options. |
@@ -66,7 +70,8 @@ Features that build on a stable core and benefit from a wider feature set.
 | Daily challenges | 0 | Medium | M | Requires seeded RNG + leaderboard. |
 | Seed sharing | 0 | Medium | S | Falls out of seeded RNG almost for free. |
 | Steam Deck | 0 | Medium | M | Requires controller support. Steam Input API. |
-| Live spectating | 0 | High | L | Requires replay + networking. |
+| MCP spectator mode (TCP) | ~1 item | Medium | M | Upgrade file-based spectator to TCP server on localhost. Multiple viewers, remote access, WebSocket upgrade path. Enables live spectating. [Design doc.](spectator-mode-options.md) |
+| Live spectating | 0 | High | L | Requires replay + networking. TCP spectator mode is a stepping stone. |
 | Bones files | 0 | Medium | M | Requires save/load + networking. |
 | SSH server | 0 | Medium | L | Requires platform abstraction. |
 | Options/settings | 0 | Medium | M | Grows naturally as features accumulate. |
@@ -120,7 +125,16 @@ Input abstraction
   → Platform abstraction
     → WASM (web)
       → Spectating / Leaderboards
+
+  → MCP spectator (file)
+    → MCP spectator (TCP)
+      → Live spectating
+
+A* pathfinding
+  → MCP pathfind_to tool
+  → Auto-explore
 ```
 
 Input abstraction and save/load unlock both the gameplay branch and the
-networking branch. Everything else hangs off those two.
+networking branch. A* pathfinding unlocks MCP and exploration improvements.
+Everything else hangs off those three.

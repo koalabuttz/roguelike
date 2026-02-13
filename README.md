@@ -146,7 +146,7 @@ See [docs/roadmap-priority.md](docs/roadmap-priority.md) for a detailed breakdow
 - [ ] **Motor** — One-handed layouts, mouse-only play, adjustable input timing, auto-explore, macros
 - [ ] **Cognitive** — Granular difficulty toggles, scrollable message history, context-sensitive help (`?`)
 - [ ] **Character identity** — Player-chosen name and pronouns used in game text
-- [ ] **Code of Conduct** — Contributor Covenant adoption for a welcoming community
+- [x] **Code of Conduct** — See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 Design principles (not checkboxes — follow these always):
 - Same input always does the same thing; current mode always visible

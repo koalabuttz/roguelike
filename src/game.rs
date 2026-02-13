@@ -309,8 +309,7 @@ impl GameState {
             let px = self.entities[0].x;
             let py = self.entities[0].y;
             if !self.map.is_walkable(px + dx, py + dy) {
-                let alternatives =
-                    self.map.open_neighbors_excluding(px, py, -dx, -dy);
+                let alternatives = self.map.open_neighbors_excluding(px, py, -dx, -dy);
                 if alternatives >= 2 {
                     return AutorunResult {
                         steps_taken,
@@ -622,8 +621,7 @@ impl GameState {
     /// as `~` to highlight exploration boundaries. Rows with no explored
     /// content are omitted.
     pub fn explored_map(&self) -> Vec<String> {
-        let frontiers: HashSet<(i32, i32)> =
-            self.frontier_tiles().into_iter().collect();
+        let frontiers: HashSet<(i32, i32)> = self.frontier_tiles().into_iter().collect();
         let mut lines = Vec::new();
         for y in 0..self.map.height {
             let mut line = String::with_capacity(self.map.width as usize);
@@ -1314,10 +1312,17 @@ mod tests {
         }
         assert!(gs.explored.len() > initial_explored);
         let map = gs.explored_map();
-        let total_chars: usize = map.iter().map(|l| l.chars().filter(|c| *c != ' ').count()).sum();
+        let total_chars: usize = map
+            .iter()
+            .map(|l| l.chars().filter(|c| *c != ' ').count())
+            .sum();
         // Explored map should have more non-space characters than a FOV-only view
         let obs = gs.observe();
-        let obs_chars: usize = obs.map_ascii.iter().map(|l| l.chars().filter(|c| *c != ' ').count()).sum();
+        let obs_chars: usize = obs
+            .map_ascii
+            .iter()
+            .map(|l| l.chars().filter(|c| *c != ' ').count())
+            .sum();
         assert!(total_chars >= obs_chars);
     }
 
@@ -1507,7 +1512,12 @@ mod tests {
         let frontiers = gs.frontier_tiles();
         // Wall tiles should never appear as frontiers.
         for &(x, y) in &frontiers {
-            assert!(gs.map.is_walkable(x, y), "Frontier at ({},{}) is not floor", x, y);
+            assert!(
+                gs.map.is_walkable(x, y),
+                "Frontier at ({},{}) is not floor",
+                x,
+                y
+            );
         }
     }
 

@@ -6,7 +6,7 @@ Explore randomly generated dungeons, fight monsters, and try to survive. Renders
 
 ## Building and Running
 
-Requires [Rust](https://www.rust-lang.org/tools/install) (edition 2024).
+Requires [Rust](https://www.rust-lang.org/tools/install) **1.85.0 or later** (for edition 2024 support).
 
 ```sh
 cargo run
@@ -65,11 +65,15 @@ To use with Claude Desktop, add to your `claude_desktop_config.json`:
 }
 ```
 
-Test with the MCP inspector:
+### Testing the MCP Server Locally
+
+Use the MCP inspector to test server functionality without Claude Desktop:
 
 ```sh
 npx @modelcontextprotocol/inspector cargo run --bin mcp_server
 ```
+
+This opens a web UI where you can manually invoke tools and verify responses. Useful for debugging tool implementations or testing changes before integrating with Claude Desktop.
 
 ## Gameplay
 

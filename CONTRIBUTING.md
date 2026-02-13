@@ -26,6 +26,34 @@ cargo test
 
 CI runs these automatically on every pull request.
 
+## Development Workflow
+
+### Running Checks Locally
+
+Before pushing, run the validation commands above. You can run them individually during development or all at once before committing.
+
+### Pre-commit Hook (Recommended but Optional)
+
+To automatically run all checks before each commit:
+
+```sh
+# One-time setup
+cp .github/hooks/pre-commit .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+**Why it's optional**: The hook helps catch issues early and saves CI minutes, but it's not required — GitHub Actions will run the same checks on every PR. Some developers prefer to commit freely and rely on CI feedback.
+
+**Best practice**: If you're actively developing, enabling the hook prevents you from pushing broken code and provides faster feedback than waiting for CI.
+
+## Edition 2024 Notes
+
+This project uses Rust edition 2024. Key differences:
+
+- **`gen` is a reserved keyword** — Use `r#gen()` when calling `rand::Rng::gen()` directly
+- `gen_range()` and `gen_bool()` work normally (not exact match on `gen`)
+- Requires Rust 1.85.0 or later
+
 ## Guidelines
 
 - **One logical change per PR** — Don't mix features with refactors or bug fixes

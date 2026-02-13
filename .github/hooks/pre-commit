@@ -1,0 +1,32 @@
+#!/bin/bash
+# Pre-commit hook for roguelike project
+# Runs formatting, linting, and tests before allowing commit
+#
+# To install:
+#   cp .github/hooks/pre-commit .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+#
+# To bypass temporarily:
+#   git commit --no-verify
+
+set -e  # Exit on first failure
+
+echo "Running pre-commit checks..."
+echo ""
+
+echo "→ Checking code formatting..."
+cargo fmt --check
+echo "✓ Format check passed"
+echo ""
+
+echo "→ Running clippy..."
+cargo clippy -- -D warnings
+echo "✓ Clippy passed"
+echo ""
+
+echo "→ Running tests..."
+cargo test --quiet
+echo "✓ Tests passed"
+echo ""
+
+echo "✅ All checks passed! Proceeding with commit."

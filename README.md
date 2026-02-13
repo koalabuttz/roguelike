@@ -17,7 +17,7 @@ The game adapts to your terminal size automatically.
 ## Testing
 
 ```sh
-cargo test          # 59 unit tests across 8 modules
+cargo test          # 81 unit tests across 10 modules
 cargo clippy -- -D warnings
 cargo fmt --check
 ```
@@ -34,6 +34,42 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 | Quit | `q`, `Esc`, or `Ctrl+C` |
 
 Moving into a monster attacks it.
+
+## MCP Server (AI Play)
+
+An LLM agent (like Claude) can play the game through the [Model Context Protocol](https://modelcontextprotocol.io/) server.
+
+```sh
+cargo run --bin mcp_server
+```
+
+The server communicates over stdio and exposes four tools:
+
+| Tool | Description |
+|------|-------------|
+| `new_game` | Start a game (optional `width`/`height` params) |
+| `observe` | Get visible state: map, entities, HP, messages |
+| `act` | Take an action: `move_north`, `move_south`, etc., or `wait` |
+| `get_rules` | Read game mechanics and strategy tips |
+
+To use with Claude Desktop, add to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "roguelike": {
+      "command": "cargo",
+      "args": ["run", "--bin", "mcp_server", "--manifest-path", "/path/to/roguelike/Cargo.toml"]
+    }
+  }
+}
+```
+
+Test with the MCP inspector:
+
+```sh
+npx @modelcontextprotocol/inspector cargo run --bin mcp_server
+```
 
 ## Gameplay
 
@@ -80,9 +116,10 @@ If it needs new AI, add a variant to `AiBehavior` in `src/entity.rs` and impleme
 
 ```
 src/
-  main.rs          Event loop, dispatches commands to game state
+  lib.rs           Library root — re-exports all modules
+  main.rs          Terminal game entry point
   input.rs         GameCommand enum, key-to-command translation
-  game.rs          GameState struct and core game logic
+  game.rs          GameState struct, step(), observe(), core game logic
   data.rs          Monster templates, spawn table, config constants
   entity.rs        Entity struct, EntityKind, AiBehavior enum
   ai.rs            Monster AI system (dispatches on AiBehavior)
@@ -92,6 +129,9 @@ src/
   fov.rs           Field of view (recursive shadowcasting)
   render.rs        Terminal rendering
   message_log.rs   Message log
+  mcp.rs           MCP server — tools for LLM-driven play
+  bin/
+    mcp_server.rs  MCP server binary entry point
 ```
 
 ## Configuration
@@ -111,6 +151,9 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 
 - [crossterm](https://crates.io/crates/crossterm) 0.28 — cross-platform terminal manipulation
 - [rand](https://crates.io/crates/rand) 0.8 — random number generation
+- [serde](https://crates.io/crates/serde) 1 — serialization for game observations
+- [rmcp](https://crates.io/crates/rmcp) 0.15 — MCP server (official Rust SDK)
+- [tokio](https://crates.io/crates/tokio) 1 — async runtime for MCP server
 
 ## Roadmap
 

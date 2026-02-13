@@ -19,7 +19,7 @@ would never have this info. **Fixed in commit 43de46b** — removed from respons
 
 ## MCP Server Issues
 
-### 1. Autorun junction detection is too sensitive (HIGH PRIORITY)
+### 1. Autorun junction detection is too sensitive (HIGH PRIORITY — fixed)
 **Problem:** Autorun stops after 1 step at "corridor_branches" constantly — especially
 inside rooms, where nearly every floor tile has >2 open neighbors. Traversing a room
 takes 5-8 autorun calls that each stop after 1 step.
@@ -32,7 +32,7 @@ player must choose a direction. Inside rooms, autorun should continue until hitt
 a wall or room exit. Consider a separate heuristic: if the player is inside a room
 (surrounded by open floor), only stop at room exits or walls, not at every tile.
 
-### 2. No pathfinding tool (HIGH PRIORITY)
+### 2. No pathfinding tool (HIGH PRIORITY — fixed)
 **Problem:** Navigating to a visible corridor exit is painful. The LLM can see the
 exit in the ASCII map but has to guess the correct sequence of cardinal/diagonal
 moves. "Move south — wall. Move southwest — wall. Move west then south..." burns
@@ -44,7 +44,7 @@ moves. "Move south — wall. Move southwest — wall. Move west then south..." b
 shortest path. Stops early for the same reasons autorun does (monster spotted, damage
 taken). This would collapse dozens of navigation calls into one.
 
-### 3. No explored map view (MEDIUM)
+### 3. No explored map view (MEDIUM — fixed, enhanced with frontier markers)
 **Problem:** When hunting for the last 3% of unexplored tiles, the LLM has no memory
 of the full dungeon layout — only current FOV. It wandered through already-explored
 corridors hoping to stumble onto something new.
@@ -132,9 +132,8 @@ of sight through a room junction. Consider:
 
 ## Priority Recommendations
 
-1. **Healing mechanic** — without this, the game loop is fundamentally broken for
-   extended play
-2. **Autorun room awareness** — halves the tool calls per session
-3. **pathfind_to tool** — eliminates navigation waste
+1. ~~**Healing mechanic**~~ — **FIXED** (HP regen: 1 HP / 3 turns)
+2. ~~**Autorun room awareness**~~ — **FIXED** (removed `RoomTransition`, refined `CorridorBranches` to true decision points)
+3. ~~**pathfind_to tool**~~ — **FIXED** (A* pathfinding through explored tiles)
 4. **Win condition (stairs)** — gives the game a goal
-5. **Explored map tool** — enables strategic exploration
+5. ~~**Explored map tool**~~ — **FIXED** (added `get_explored_map` + frontier markers `~` + `frontier_exits` coordinates)

@@ -4,6 +4,7 @@ mod data;
 mod entity;
 mod fov;
 mod game;
+mod input;
 mod map;
 mod message_log;
 mod render;
@@ -13,7 +14,7 @@ use std::io::stdout;
 
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    event::{self, Event, KeyEvent, KeyEventKind},
     execute,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -32,6 +33,7 @@ fn main() -> std::io::Result<()> {
         render::render(&mut stdout, &state, cols as i32, rows as i32)?;
 
         if state.game_over {
+            // Game-over screen: any key dismisses
             loop {
                 if let Event::Key(KeyEvent {
                     kind: KeyEventKind::Press,
@@ -44,42 +46,19 @@ fn main() -> std::io::Result<()> {
             break;
         }
 
-        if let Event::Key(KeyEvent {
-            code,
-            modifiers,
-            kind: KeyEventKind::Press,
-            ..
-        }) = event::read()?
+        if let Event::Key(
+            key_event @ KeyEvent {
+                kind: KeyEventKind::Press,
+                ..
+            },
+        ) = event::read()?
+            && let Some(cmd) = input::translate_key(key_event)
         {
-            if modifiers.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('c') {
+            if matches!(cmd, input::GameCommand::Quit) {
                 break;
             }
 
-            let player_took_action = match code {
-                KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('8') => {
-                    state.player_move_or_attack(0, -1)
-                }
-                KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('2') => {
-                    state.player_move_or_attack(0, 1)
-                }
-                KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('4') => {
-                    state.player_move_or_attack(-1, 0)
-                }
-                KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('6') => {
-                    state.player_move_or_attack(1, 0)
-                }
-
-                KeyCode::Char('y') | KeyCode::Char('7') => state.player_move_or_attack(-1, -1),
-                KeyCode::Char('u') | KeyCode::Char('9') => state.player_move_or_attack(1, -1),
-                KeyCode::Char('b') | KeyCode::Char('1') => state.player_move_or_attack(-1, 1),
-                KeyCode::Char('n') | KeyCode::Char('3') => state.player_move_or_attack(1, 1),
-
-                KeyCode::Char('.') | KeyCode::Char('5') => true,
-
-                KeyCode::Char('q') | KeyCode::Esc => break,
-
-                _ => false,
-            };
+            let player_took_action = state.handle_command(cmd);
 
             if player_took_action {
                 state.update_fov();

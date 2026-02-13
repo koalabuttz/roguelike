@@ -14,7 +14,7 @@ These items block the most downstream work or are essential for the game to func
 
 | Item | Blocks | Impact | Effort | Notes |
 |------|--------|--------|--------|-------|
-| Input abstraction | ~15 items | Medium | S | Controller, replay, platforms, mouse-only, one-handed, auto-explore all depend on this. Single most blocking item. |
+| ~~Input abstraction~~ | ~~&zwj;~15 items~~ | ~~Medium~~ | ~~S~~ | ~~Controller, replay, platforms, mouse-only, one-handed, auto-explore all depend on this. Single most blocking item.~~ Done. |
 | Save/load | ~6 items | High | M | Unlocks meta-progression, bones, crash recovery. Expected baseline feature. |
 | Stairs | ~3 items | High | M | Transforms single-room arena into a multi-level dungeon. |
 | Items | ~4 items | High | M | Meaningful player decisions. Unlocks menus, inventory UI, hunger (food is an item). |

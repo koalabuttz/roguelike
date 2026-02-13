@@ -4,6 +4,7 @@ use crate::combat;
 use crate::data;
 use crate::entity::Entity;
 use crate::fov;
+use crate::input::GameCommand;
 use crate::map;
 use crate::message_log::MessageLog;
 use crate::spawn;
@@ -79,6 +80,16 @@ impl GameState {
         }
 
         false
+    }
+
+    /// Dispatch a game command. Returns `true` if the player took an action
+    /// (i.e. a turn was consumed), `false` otherwise.
+    pub fn handle_command(&mut self, cmd: GameCommand) -> bool {
+        match cmd {
+            GameCommand::Move { dx, dy } => self.player_move_or_attack(dx, dy),
+            GameCommand::Wait => true,
+            GameCommand::Quit => false,
+        }
     }
 }
 
@@ -176,5 +187,31 @@ mod tests {
         assert_eq!(gs.entities[0].y, 5);
         // Orc should have taken damage (player atk=5, orc def=1, dmg=4)
         assert_eq!(gs.entities[1].hp, monster_hp - 4);
+    }
+
+    #[test]
+    fn handle_command_move_moves_player() {
+        let mut gs = test_game();
+        let acted = gs.handle_command(GameCommand::Move { dx: 1, dy: 0 });
+        assert!(acted);
+        assert_eq!(gs.entities[0].x, 6);
+        assert_eq!(gs.entities[0].y, 5);
+    }
+
+    #[test]
+    fn handle_command_wait_consumes_turn() {
+        let mut gs = test_game();
+        let acted = gs.handle_command(GameCommand::Wait);
+        assert!(acted);
+        // Player should not have moved
+        assert_eq!(gs.entities[0].x, 5);
+        assert_eq!(gs.entities[0].y, 5);
+    }
+
+    #[test]
+    fn handle_command_quit_does_not_consume_turn() {
+        let mut gs = test_game();
+        let acted = gs.handle_command(GameCommand::Quit);
+        assert!(!acted);
     }
 }

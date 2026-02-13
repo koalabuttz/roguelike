@@ -17,7 +17,7 @@ The game adapts to your terminal size automatically.
 ## Testing
 
 ```sh
-cargo test          # 47 unit tests across 7 modules
+cargo test          # 59 unit tests across 8 modules
 cargo clippy -- -D warnings
 cargo fmt --check
 ```
@@ -80,7 +80,8 @@ If it needs new AI, add a variant to `AiBehavior` in `src/entity.rs` and impleme
 
 ```
 src/
-  main.rs          Event loop and input handling
+  main.rs          Event loop, dispatches commands to game state
+  input.rs         GameCommand enum, key-to-command translation
   game.rs          GameState struct and core game logic
   data.rs          Monster templates, spawn table, config constants
   entity.rs        Entity struct, EntityKind, AiBehavior enum
@@ -116,7 +117,7 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 See [docs/roadmap-priority.md](docs/roadmap-priority.md) for a detailed breakdown with dependencies, effort estimates, and a critical path diagram.
 
 ### Foundation (enables networking, platforms & advanced features)
-- [ ] **Input abstraction** — `GameCommand` enum, decouple game logic from terminal input
+- [x] **Input abstraction** — `GameCommand` enum, decouple game logic from terminal input
 - [ ] **Platform abstraction** — Traits for input, rendering, and audio; game logic never imports platform-specific crates
 - [ ] **Type aliases** — `Coord`, `Stat` type aliases for coordinates and stats, enabling platform-specific sizing
 - [ ] **Seeded RNG** — Separate RNG streams per system (map, combat, spawn, loot) for deterministic replay

@@ -119,6 +119,8 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 - [ ] **Stairs** — Multi-level dungeons with procedural depth
 - [ ] **Experience/leveling** — Player progression system
 - [ ] **Magic/abilities** — Spells, special attacks, or class-specific powers
+- [ ] **A\* pathfinding** — Smarter monster AI that navigates around obstacles
+- [ ] **Meta-progression** — Persistent unlocks between runs (classes, upgrades, achievements)
 
 ### UI/UX
 - [ ] **Controller support** — Gamepad input on all desktop platforms; d-pad/stick for movement, context-sensitive menus for actions
@@ -128,10 +130,16 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 - [ ] **Targeting** — Ranged attacks, spell targeting
 - [ ] **Options/settings** — Keybind customization, display preferences, difficulty modes
 
+### Accessibility
+- [ ] **Colorblind modes** — Alternative color palettes (current green/dark-green/dark-red is problematic for ~8% of men)
+- [ ] **High-contrast mode** — Maximum readability option
+- [ ] **Screen reader support** — Structured output for NVDA/JAWS/VoiceOver
+
 ### Networking
 - [ ] **Replay system** — Record and playback games deterministically
 - [ ] **Shared leaderboard** — REST API for score submission
 - [ ] **Daily challenges** — Everyone plays the same seed, compare scores
+- [ ] **Seed sharing** — Share a seed as a code/URL, others play the same dungeon
 - [ ] **Live spectating** — Watch other players in real-time via WebSocket
 - [ ] **Bones files** — Dead players leave traces in others' dungeons
 
@@ -143,11 +151,22 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 - [ ] **SSH server** — Server-side play via russh, NetHack-server style (players connect via SSH)
 - [ ] **Commodore 64** — Native 6502 via rust-mos; no_std, fixed-size containers, 8-bit types, C64 screen/keyboard I/O
 
+### Modding
+- [ ] **Data-driven content** — Move templates to external files (RON/TOML); add monsters/items without recompiling
+- [ ] **Hot reload** — Reload data files during development without restarting
+- [ ] **Scripting** — Embedded Lua or Rhai for custom AI, quests, and event handlers (future)
+
+### Developer Tools
+- [ ] **Debug overlay** — Visualize AI state, FOV boundaries, pathfinding routes
+- [ ] **Balance telemetry** — Track average run length, death causes, monster kill rates
+- [ ] **Map editor** — Visual tool for designing and testing dungeon layouts
+
 ### Polish
 - [ ] **Animation effects** — Attack swooshes, spell particles (terminal-rendered)
 - [ ] **Sound effects** — Audio via rodio (MP3/WAV/OGG), background threads, SoundEvent enum
 - [ ] **Music** — Atmospheric dungeon tracks, boss themes, adaptive based on depth/danger
 - [ ] **Tileset support** — Alternative to ASCII (graphical tiles)
+- [ ] **Localization (i18n)** — Externalized strings, multi-language support
 - [ ] **Tutorial/guided run** — Introduce mechanics gradually for new players
 
 ## License

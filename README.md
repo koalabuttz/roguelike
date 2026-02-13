@@ -121,7 +121,9 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 - [ ] **Magic/abilities** — Spells, special attacks, or class-specific powers
 
 ### UI/UX
-- [ ] **Menus** — Inventory screen, character sheet, help screen
+- [ ] **Controller support** — Gamepad input on all desktop platforms; d-pad/stick for movement, context-sensitive menus for actions
+- [ ] **Steam Deck** — Verified controller layout, Steam Input API integration
+- [ ] **Menus** — Inventory screen, character sheet, help screen (designed for both keyboard and controller)
 - [ ] **Look mode** — Cursor to examine tiles and entities
 - [ ] **Targeting** — Ranged attacks, spell targeting
 - [ ] **Options/settings** — Keybind customization, display preferences, difficulty modes

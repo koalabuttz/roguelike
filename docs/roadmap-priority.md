@@ -38,6 +38,7 @@ Fills out the core game loop and addresses high-value, low-effort improvements.
 | MCP autorun tuning | 0 | High | S | Autorun stops every 1 step inside rooms due to open-neighbor count. Only stop at meaningful decision points (corridor forks, room exits). [Playtest: 31% of tool calls wasted.](llm-playtest-2026-02-13.md) |
 | MCP pathfind_to tool | 0 | High | S | Walk to a visible/explored `(x, y)` via shortest path. Requires A*. Eliminates navigation fumbles. [Playtest: 19% of tool calls wasted.](llm-playtest-2026-02-13.md) |
 | MCP explored map tool | 0 | Medium | S | Return all previously-seen tiles so LLM can plan exploration routes instead of wandering. |
+| Wandering monsters | 0 | Medium | S | Spawn new monsters over time to pressure the player forward. Primary anti-camping guard for HP regen — prevents infinite wait-to-heal. Uses existing spawn system. |
 
 ## Tier 3: Extended Features
 

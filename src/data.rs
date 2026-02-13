@@ -73,6 +73,7 @@ pub struct GameConfig {
     pub max_monsters_per_room: i32,
     pub ui_bottom_rows: i32,
     pub max_autorun_steps: i32,
+    pub regen_interval: i32,
 }
 
 pub const CONFIG: GameConfig = GameConfig {
@@ -83,4 +84,5 @@ pub const CONFIG: GameConfig = GameConfig {
     max_monsters_per_room: 2,
     ui_bottom_rows: 5,
     max_autorun_steps: 100,
+    regen_interval: 3,
 };

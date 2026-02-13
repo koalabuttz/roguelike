@@ -1,6 +1,6 @@
 use std::io::stdout;
 
-use roguelike::{ai, data, game, input, render};
+use roguelike::{data, game, input, render};
 
 use crossterm::{
     cursor,
@@ -54,19 +54,7 @@ fn main() -> std::io::Result<()> {
                 continue;
             }
 
-            let player_took_action = state.handle_command(cmd);
-
-            if player_took_action {
-                state.update_fov();
-                if ai::run_monster_turns(
-                    &mut state.entities,
-                    &state.map,
-                    &state.visible,
-                    &mut state.log,
-                ) {
-                    state.game_over = true;
-                }
-            }
+            state.step(cmd);
         }
     }
 

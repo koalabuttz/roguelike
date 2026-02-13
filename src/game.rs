@@ -105,6 +105,7 @@ pub struct GameState {
     pub explored: HashSet<(i32, i32)>,
     pub log: MessageLog,
     pub game_over: bool,
+    pub turn_count: i32,
 }
 
 impl GameState {
@@ -131,6 +132,7 @@ impl GameState {
             explored,
             log,
             game_over: false,
+            turn_count: 0,
         }
     }
 
@@ -181,6 +183,17 @@ impl GameState {
         }
     }
 
+    /// Heal the player by 1 HP if enough turns have passed (NetHack-style regen).
+    fn apply_regen(&mut self) {
+        let player = &mut self.entities[0];
+        if player.alive
+            && player.hp < player.max_hp
+            && self.turn_count % data::CONFIG.regen_interval == 0
+        {
+            player.hp += 1;
+        }
+    }
+
     /// Execute one complete game step: player command, FOV update, monster turns.
     ///
     /// This is the atomic turn operation used by the MCP server and any other
@@ -195,6 +208,8 @@ impl GameState {
             if ai::run_monster_turns(&mut self.entities, &self.map, &self.visible, &mut self.log) {
                 self.game_over = true;
             }
+            self.turn_count += 1;
+            self.apply_regen();
         }
 
         StepResult {
@@ -533,6 +548,7 @@ mod tests {
             explored,
             log: MessageLog::new(),
             game_over: false,
+            turn_count: 0,
         }
     }
 
@@ -829,6 +845,7 @@ mod tests {
             explored,
             log: MessageLog::new(),
             game_over: false,
+            turn_count: 0,
         }
     }
 
@@ -895,6 +912,7 @@ mod tests {
             explored,
             log: MessageLog::new(),
             game_over: false,
+            turn_count: 0,
         };
 
         let result = gs.autorun(1, 0);
@@ -925,6 +943,7 @@ mod tests {
             explored,
             log: MessageLog::new(),
             game_over: false,
+            turn_count: 0,
         };
 
         let result = gs.autorun(1, 0);
@@ -1013,8 +1032,9 @@ mod tests {
         assert_eq!(result.target_name, "Orc");
         // Player ATK=5, Orc DEF=1 → 4 dmg/hit, Orc HP=12 → 3 hits to kill
         assert_eq!(result.rounds, 3);
-        // Orc ATK=4, Player DEF=2 → 2 dmg/hit, 2 hits taken (dies on round 3)
-        assert_eq!(result.player_hp_lost, 4);
+        // Orc ATK=4, Player DEF=2 → 2 dmg/hit, 2 hits taken (4 raw damage)
+        // Regen heals 1 HP on turn 3 (regen_interval=3), so net loss = 3
+        assert_eq!(result.player_hp_lost, 3);
     }
 
     #[test]
@@ -1051,5 +1071,69 @@ mod tests {
         let result = gs.auto_fight().unwrap();
         assert!(!result.target_killed);
         assert!(gs.game_over);
+    }
+
+    // --- regen tests ---
+
+    #[test]
+    fn regen_heals_on_interval() {
+        let mut gs = test_game();
+        gs.entities[0].hp = 20;
+        // Advance to one turn before regen triggers
+        gs.turn_count = data::CONFIG.regen_interval - 1;
+        let result = gs.step(GameCommand::Wait);
+        assert!(result.action_taken);
+        // turn_count is now regen_interval, so regen fires
+        assert_eq!(gs.entities[0].hp, 21);
+    }
+
+    #[test]
+    fn regen_does_not_heal_between_intervals() {
+        let mut gs = test_game();
+        gs.entities[0].hp = 20;
+        gs.turn_count = data::CONFIG.regen_interval; // just healed
+        let result = gs.step(GameCommand::Wait);
+        assert!(result.action_taken);
+        // turn_count is regen_interval + 1, not a multiple — no heal
+        assert_eq!(gs.entities[0].hp, 20);
+    }
+
+    #[test]
+    fn regen_does_not_exceed_max_hp() {
+        let mut gs = test_game();
+        // Already at full HP
+        gs.turn_count = data::CONFIG.regen_interval - 1;
+        let hp_before = gs.entities[0].hp;
+        assert_eq!(hp_before, gs.entities[0].max_hp);
+        gs.step(GameCommand::Wait);
+        assert_eq!(gs.entities[0].hp, hp_before);
+    }
+
+    #[test]
+    fn regen_does_not_heal_dead_player() {
+        let mut gs = test_game();
+        gs.entities[0].hp = 1;
+        gs.entities[0].defense = 0;
+        gs.turn_count = data::CONFIG.regen_interval - 1;
+        // Place a monster that will kill the player
+        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        gs.entities.push(monster);
+        gs.update_fov();
+        gs.step(GameCommand::Wait);
+        // Player died — regen should not have brought them back
+        assert!(gs.game_over);
+        assert!(gs.entities[0].hp <= 0);
+    }
+
+    #[test]
+    fn regen_accumulates_over_multiple_intervals() {
+        let mut gs = test_game();
+        gs.entities[0].hp = 20;
+        let interval = data::CONFIG.regen_interval;
+        // Run enough turns for 3 regen ticks
+        for _ in 0..(interval * 3) {
+            gs.step(GameCommand::Wait);
+        }
+        assert_eq!(gs.entities[0].hp, 23);
     }
 }

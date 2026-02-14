@@ -17,7 +17,7 @@ The game adapts to your terminal size automatically.
 ## Testing
 
 ```sh
-cargo test          # 81 unit tests across 10 modules
+cargo test          # 169 unit tests across 10 modules
 cargo clippy -- -D warnings
 cargo fmt --check
 ```
@@ -43,13 +43,18 @@ An LLM agent (like Claude) can play the game through the [Model Context Protocol
 cargo run --bin mcp_server
 ```
 
-The server communicates over stdio and exposes four tools:
+The server communicates over stdio and exposes these tools:
 
 | Tool | Description |
 |------|-------------|
-| `new_game` | Start a game (optional `width`/`height` params) |
+| `new_game` | Start a game (optional `width`/`height`/`seed` params) |
 | `observe` | Get visible state: map, entities, HP, messages |
-| `act` | Take an action: `move_north`, `move_south`, etc., or `wait` |
+| `act` | Take an action: move, wait, autorun, or auto\_fight |
+| `pathfind_to` | A\* pathfind to a target tile; stops for monsters or damage |
+| `auto_explore` | Find nearest frontier and walk to it in one call |
+| `get_explored_map` | Full explored map with frontier markers (`~`) |
+| `save_game` | Save current state to an in-memory slot |
+| `load_game` | Restore a previously saved game state |
 | `get_rules` | Read game mechanics and strategy tips |
 
 To use with Claude Desktop, add to your `claude_desktop_config.json`:
@@ -131,8 +136,10 @@ src/
   spawn.rs         Monster spawning using weighted tables
   map.rs           Map struct and dungeon generation
   fov.rs           Field of view (recursive shadowcasting)
+  pathfinding.rs   A* pathfinding for monsters and MCP navigation
   render.rs        Terminal rendering
   message_log.rs   Message log
+  types.rs         Type aliases (Coord, Stat, Pos) and GameColor enum
   mcp.rs           MCP server — tools for LLM-driven play
   bin/
     mcp_server.rs  MCP server binary entry point
@@ -176,7 +183,7 @@ See [docs/roadmap-priority.md](docs/roadmap-priority.md) for a detailed breakdow
 - [ ] **Stairs** — Multi-level dungeons with procedural depth
 - [ ] **Experience/leveling** — Player progression system
 - [ ] **Magic/abilities** — Spells, special attacks, or class-specific powers
-- [ ] **A\* pathfinding** — Smarter monster AI that navigates around obstacles
+- [x] **A\* pathfinding** — Smarter monster AI that navigates around obstacles
 - [ ] **Meta-progression** — Persistent unlocks between runs (classes, upgrades, achievements)
 
 ### UI/UX

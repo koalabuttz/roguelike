@@ -1,8 +1,9 @@
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 
 use crate::types::{Coord, Pos};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Tile {
     Wall,
     Floor,
@@ -20,6 +21,7 @@ impl Tile {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Rect {
     pub x1: Coord,
     pub y1: Coord,
@@ -57,6 +59,7 @@ impl Rect {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Map {
     pub width: Coord,
     pub height: Coord,

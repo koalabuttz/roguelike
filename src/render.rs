@@ -7,7 +7,17 @@ use crossterm::{
 
 use crate::game::GameState;
 use crate::map::Tile;
-use crate::types::Coord;
+use crate::types::{Coord, GameColor};
+
+/// Map a platform-independent `GameColor` to a crossterm terminal color.
+fn to_crossterm_color(c: GameColor) -> Color {
+    match c {
+        GameColor::Yellow => Color::Yellow,
+        GameColor::Green => Color::Green,
+        GameColor::DarkGreen => Color::DarkGreen,
+        GameColor::DarkRed => Color::DarkRed,
+    }
+}
 
 pub fn render<W: Write>(
     w: &mut W,
@@ -94,7 +104,7 @@ fn render_entities<W: Write>(w: &mut W, state: &GameState) -> std::io::Result<()
             queue!(
                 w,
                 cursor::MoveTo(entity.x as u16, entity.y as u16),
-                SetForegroundColor(entity.color),
+                SetForegroundColor(to_crossterm_color(entity.color)),
                 SetBackgroundColor(Color::Black),
                 style::Print(entity.glyph)
             )?;

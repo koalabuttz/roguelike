@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use rand::SeedableRng;
 use rand::rngs::StdRng;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::ai;
 use crate::combat;
@@ -254,10 +254,12 @@ pub struct EntityInfo {
     pub alive: bool,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct GameState {
     pub map: map::Map,
     pub entities: Vec<Entity>,
     pub fov_radius: Coord,
+    #[serde(skip)]
     pub visible: HashSet<Pos>,
     pub explored: HashSet<Pos>,
     pub log: MessageLog,
@@ -328,6 +330,21 @@ impl GameState {
         let py = self.entities[0].y;
         self.visible = fov::compute_fov(&self.map, px, py, self.fov_radius);
         self.explored.extend(&self.visible);
+    }
+
+    /// Serialize the current game state to a JSON string.
+    pub fn save_to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+
+    /// Deserialize a game state from a JSON string.
+    ///
+    /// After loading, `update_fov()` is called to rebuild the `visible` set
+    /// (which is skipped during serialization as runtime-only derived state).
+    pub fn load_from_json(json: &str) -> Result<Self, serde_json::Error> {
+        let mut state: Self = serde_json::from_str(json)?;
+        state.update_fov();
+        Ok(state)
     }
 
     /// Find a living entity at (x, y). Returns its index.
@@ -1897,5 +1914,67 @@ mod tests {
         let gs = GameState::with_seed(80, 40, seed);
         let obs = gs.observe();
         assert_eq!(obs.seed, seed);
+    }
+
+    // --- save/load tests ---
+
+    #[test]
+    fn save_load_round_trip() {
+        let gs = GameState::with_seed(80, 40, 42);
+        let json = gs.save_to_json().expect("save failed");
+        let loaded = GameState::load_from_json(&json).expect("load failed");
+
+        // Map tiles and rooms
+        assert_eq!(gs.map.tiles, loaded.map.tiles);
+        assert_eq!(gs.map.width, loaded.map.width);
+        assert_eq!(gs.map.height, loaded.map.height);
+        assert_eq!(gs.map.rooms.len(), loaded.map.rooms.len());
+
+        // Entities
+        assert_eq!(gs.entities.len(), loaded.entities.len());
+        for (e1, e2) in gs.entities.iter().zip(loaded.entities.iter()) {
+            assert_eq!(e1.x, e2.x);
+            assert_eq!(e1.y, e2.y);
+            assert_eq!(e1.name, e2.name);
+            assert_eq!(e1.glyph, e2.glyph);
+            assert_eq!(e1.hp, e2.hp);
+            assert_eq!(e1.color, e2.color);
+        }
+
+        // Explored set
+        assert_eq!(gs.explored, loaded.explored);
+
+        // Scalar fields
+        assert_eq!(gs.seed, loaded.seed);
+        assert_eq!(gs.turn_count, loaded.turn_count);
+        assert_eq!(gs.game_over, loaded.game_over);
+
+        // Visible is recomputed from FOV, should match
+        assert_eq!(gs.visible, loaded.visible);
+    }
+
+    #[test]
+    fn save_load_mid_game() {
+        let mut gs = GameState::with_seed(80, 40, 42);
+        // Play 5 turns
+        for _ in 0..5 {
+            gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        }
+        let px = gs.entities[0].x;
+        let py = gs.entities[0].y;
+        let turn = gs.turn_count;
+
+        let json = gs.save_to_json().expect("save failed");
+        let loaded = GameState::load_from_json(&json).expect("load failed");
+
+        assert_eq!(loaded.entities[0].x, px);
+        assert_eq!(loaded.entities[0].y, py);
+        assert_eq!(loaded.turn_count, turn);
+    }
+
+    #[test]
+    fn load_invalid_json_returns_error() {
+        let result = GameState::load_from_json("not valid json");
+        assert!(result.is_err());
     }
 }

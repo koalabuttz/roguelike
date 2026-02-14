@@ -1,13 +1,11 @@
-use crossterm::style::Color;
-
 use crate::entity::AiBehavior;
-use crate::types::{Coord, Stat};
+use crate::types::{Coord, GameColor, Stat};
 
 /// Defines a type of monster — all stats, appearance, and AI in one place.
 pub struct MonsterTemplate {
     pub name: &'static str,
     pub glyph: char,
-    pub color: Color,
+    pub color: GameColor,
     pub hp: Stat,
     pub attack: Stat,
     pub defense: Stat,
@@ -17,7 +15,7 @@ pub struct MonsterTemplate {
 pub const GOBLIN: MonsterTemplate = MonsterTemplate {
     name: "Goblin",
     glyph: 'g',
-    color: Color::Green,
+    color: GameColor::Green,
     hp: 6,
     attack: 3,
     defense: 0,
@@ -27,7 +25,7 @@ pub const GOBLIN: MonsterTemplate = MonsterTemplate {
 pub const ORC: MonsterTemplate = MonsterTemplate {
     name: "Orc",
     glyph: 'o',
-    color: Color::DarkGreen,
+    color: GameColor::DarkGreen,
     hp: 12,
     attack: 4,
     defense: 1,
@@ -37,7 +35,7 @@ pub const ORC: MonsterTemplate = MonsterTemplate {
 pub const TROLL: MonsterTemplate = MonsterTemplate {
     name: "Troll",
     glyph: 'T',
-    color: Color::DarkRed,
+    color: GameColor::DarkRed,
     hp: 20,
     attack: 6,
     defense: 3,

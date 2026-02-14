@@ -1,25 +1,26 @@
-use crossterm::style::Color;
+use serde::{Deserialize, Serialize};
 
 use crate::data::MonsterTemplate;
-use crate::types::{Coord, Stat};
+use crate::types::{Coord, GameColor, Stat};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum EntityKind {
     Player,
     Monster,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum AiBehavior {
     None,  // Player — no automatic AI
     Chase, // Greedy chase toward player
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Entity {
     pub x: Coord,
     pub y: Coord,
     pub glyph: char,
-    pub color: Color,
+    pub color: GameColor,
     pub name: String,
     #[allow(dead_code)]
     pub kind: EntityKind,
@@ -37,7 +38,7 @@ impl Entity {
             x,
             y,
             glyph: '@',
-            color: Color::Yellow,
+            color: GameColor::Yellow,
             name: "Player".into(),
             kind: EntityKind::Player,
             ai: AiBehavior::None,

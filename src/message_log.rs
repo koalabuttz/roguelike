@@ -1,3 +1,4 @@
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct MessageLog {
     messages: Vec<String>,
 }

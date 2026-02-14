@@ -168,7 +168,7 @@ See [docs/roadmap-priority.md](docs/roadmap-priority.md) for a detailed breakdow
 - [ ] **Platform abstraction** — Traits for input, rendering, and audio; game logic never imports platform-specific crates
 - [x] **Type aliases** — `Coord`, `Stat` type aliases for coordinates and stats, enabling platform-specific sizing
 - [x] **Seeded RNG** — Separate RNG streams per system (map, combat, spawn, loot) for deterministic replay
-- [ ] **Save/load** — Serialize/deserialize game state via serde
+- [x] **Save/load** — Serialize/deserialize game state via serde
 
 ### Core Gameplay
 - [ ] **Items** — Potions, scrolls, equipment, inventory system

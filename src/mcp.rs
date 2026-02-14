@@ -23,6 +23,7 @@ use crate::types::{Coord, Pos};
 #[derive(Clone)]
 pub struct RoguelikeMcpServer {
     state: Arc<Mutex<Option<GameState>>>,
+    save_slot: Arc<Mutex<Option<String>>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -65,6 +66,7 @@ impl RoguelikeMcpServer {
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(None)),
+            save_slot: Arc::new(Mutex::new(None)),
             tool_router: Self::tool_router(),
         }
     }
@@ -272,6 +274,66 @@ impl RoguelikeMcpServer {
     }
 
     #[tool(
+        description = "Save the current game state. Stores the game in an in-memory save slot (one slot, overwrites previous save). Returns turn count, HP, seed, and save size."
+    )]
+    async fn save_game(&self) -> Result<CallToolResult, McpError> {
+        // Lock state, serialize, drop state lock before acquiring save_slot lock.
+        let json = {
+            let guard = self.state.lock().await;
+            let state = guard.as_ref().ok_or_else(|| {
+                McpError::invalid_request("No game in progress. Call new_game first.", None)
+            })?;
+            let json = state.save_to_json().map_err(|e| {
+                McpError::internal_error(format!("Serialization failed: {e}"), None)
+            })?;
+            let player = &state.entities[0];
+            let info = serde_json::json!({
+                "saved": true,
+                "turn_count": state.turn_count,
+                "player_hp": player.hp,
+                "player_max_hp": player.max_hp,
+                "seed": state.seed,
+                "save_size_bytes": json.len(),
+            });
+            (json, info)
+        };
+        let (save_json, info) = json;
+
+        *self.save_slot.lock().await = Some(save_json);
+
+        let response = serde_json::to_string(&info)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(CallToolResult::success(vec![Content::text(response)]))
+    }
+
+    #[tool(
+        description = "Load a previously saved game state. Replaces the current game with the saved state. Returns the observation of the restored state."
+    )]
+    async fn load_game(&self) -> Result<CallToolResult, McpError> {
+        // Lock save_slot, clone JSON, drop save_slot lock before acquiring state lock.
+        let save_json = {
+            let guard = self.save_slot.lock().await;
+            guard.as_ref().cloned().ok_or_else(|| {
+                McpError::invalid_request("No saved game. Call save_game first.", None)
+            })?
+        };
+
+        let loaded = GameState::load_from_json(&save_json)
+            .map_err(|e| McpError::internal_error(format!("Deserialization failed: {e}"), None))?;
+        let observation = loaded.observe();
+        *self.state.lock().await = Some(loaded);
+
+        let mut value = serde_json::to_value(&observation)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        if let serde_json::Value::Object(ref mut map) = value {
+            map.insert("loaded".into(), serde_json::Value::Bool(true));
+        }
+        let json = serde_json::to_string(&value)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(
         description = "Get the rules and mechanics of the roguelike game. Explains combat, movement, monsters, and field of view. Call this to understand the game before playing."
     )]
     async fn get_rules(&self) -> Result<CallToolResult, McpError> {
@@ -327,6 +389,10 @@ impl RoguelikeMcpServer {
              - **get_explored_map** — full map of everywhere you've been; '~' tiles \
              are frontiers adjacent to unexplored areas; includes frontier_exits \
              coordinates you can pass to pathfind_to\n\
+             - **save_game** — save current state to an in-memory slot (one slot, \
+             overwrites previous). Returns turn count, HP, seed, and save size.\n\
+             - **load_game** — restore the saved game state. Replaces current game \
+             with the saved snapshot.\n\
              - **get_rules** — this help text\n\
              \n\
              ## Autorun\n\

@@ -1,6 +1,6 @@
 use rand::Rng;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Tile {
     Wall,
     Floor,
@@ -178,8 +178,13 @@ impl Map {
 
     /// Generate a dungeon with random rooms connected by corridors.
     /// Returns the player's starting position (center of the first room).
-    pub fn generate(&mut self, max_rooms: i32, min_size: i32, max_size: i32) -> (i32, i32) {
-        let mut rng = rand::thread_rng();
+    pub fn generate(
+        &mut self,
+        max_rooms: i32,
+        min_size: i32,
+        max_size: i32,
+        rng: &mut impl Rng,
+    ) -> (i32, i32) {
         let mut player_start = (0, 0);
 
         for _ in 0..max_rooms {
@@ -221,6 +226,7 @@ impl Map {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::{SeedableRng, rngs::StdRng};
 
     #[test]
     fn rect_center() {
@@ -316,14 +322,16 @@ mod tests {
     #[test]
     fn generate_creates_at_least_one_room() {
         let mut m = Map::new(80, 50);
-        m.generate(30, 4, 10);
+        let mut rng = StdRng::seed_from_u64(42);
+        m.generate(30, 4, 10, &mut rng);
         assert!(!m.rooms.is_empty());
     }
 
     #[test]
     fn generate_player_start_is_walkable() {
         let mut m = Map::new(80, 50);
-        let (px, py) = m.generate(30, 4, 10);
+        let mut rng = StdRng::seed_from_u64(42);
+        let (px, py) = m.generate(30, 4, 10, &mut rng);
         assert!(m.is_walkable(px, py));
     }
 
@@ -402,7 +410,8 @@ mod tests {
     #[test]
     fn known_floor_count_equals_floor_count_without_hidden() {
         let mut m = Map::new(80, 50);
-        m.generate(30, 4, 10);
+        let mut rng = StdRng::seed_from_u64(42);
+        m.generate(30, 4, 10, &mut rng);
         // No hidden rooms → known == total
         assert_eq!(m.known_floor_count(), m.floor_count());
     }
@@ -454,7 +463,8 @@ mod tests {
     #[test]
     fn generate_rooms_dont_overlap() {
         let mut m = Map::new(80, 50);
-        m.generate(30, 4, 10);
+        let mut rng = StdRng::seed_from_u64(42);
+        m.generate(30, 4, 10, &mut rng);
         for i in 0..m.rooms.len() {
             for j in (i + 1)..m.rooms.len() {
                 assert!(

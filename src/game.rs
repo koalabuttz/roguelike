@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use serde::Serialize;
 
 use crate::ai;
@@ -71,6 +73,7 @@ pub struct GameObservation {
     pub kills: i32,
     pub rooms_found: i32,
     pub explored_pct: i32,
+    pub seed: u64,
 }
 
 /// Result of an auto-fight sequence — combat resolved in one call.
@@ -259,16 +262,45 @@ pub struct GameState {
     pub log: MessageLog,
     pub game_over: bool,
     pub turn_count: i32,
+    /// The seed used to generate this game. Enables reproducible dungeons,
+    /// seed sharing, and deterministic replay.
+    pub seed: u64,
 }
 
 impl GameState {
+    /// Create a new game with a random seed.
     pub fn new(width: i32, height: i32) -> Self {
+        Self::with_seed(width, height, rand::random::<u64>())
+    }
+
+    /// Create a new game with a specific seed for reproducible dungeons.
+    ///
+    /// The seed determines map layout and monster placement. Separate RNG
+    /// streams ensure that changes to one system (e.g., spawn weights)
+    /// don't alter another (e.g., map layout) for the same seed.
+    pub fn with_seed(width: i32, height: i32, seed: u64) -> Self {
         let cfg = &data::CONFIG;
+
+        // Derive independent RNG streams from the master seed.
+        let mut master = StdRng::seed_from_u64(seed);
+        let mut map_rng = StdRng::from_rng(&mut master).unwrap();
+        let mut spawn_rng = StdRng::from_rng(&mut master).unwrap();
+
         let mut map = map::Map::new(width, height);
-        let (px, py) = map.generate(cfg.max_rooms, cfg.room_size_min, cfg.room_size_max);
+        let (px, py) = map.generate(
+            cfg.max_rooms,
+            cfg.room_size_min,
+            cfg.room_size_max,
+            &mut map_rng,
+        );
 
         let mut entities = vec![Entity::player(px, py)];
-        let monsters = spawn::spawn_monsters(&map, data::SPAWN_TABLE, cfg.max_monsters_per_room);
+        let monsters = spawn::spawn_monsters(
+            &map,
+            data::SPAWN_TABLE,
+            cfg.max_monsters_per_room,
+            &mut spawn_rng,
+        );
         entities.extend(monsters);
 
         let visible = fov::compute_fov(&map, px, py, cfg.fov_radius);
@@ -286,6 +318,7 @@ impl GameState {
             log,
             game_over: false,
             turn_count: 0,
+            seed,
         }
     }
 
@@ -625,6 +658,7 @@ impl GameState {
             kills,
             rooms_found,
             explored_pct,
+            seed: self.seed,
         }
     }
 
@@ -746,6 +780,7 @@ mod tests {
             log: MessageLog::new(),
             game_over: false,
             turn_count: 0,
+            seed: 0,
         }
     }
 
@@ -1041,6 +1076,7 @@ mod tests {
             log: MessageLog::new(),
             game_over: false,
             turn_count: 0,
+            seed: 0,
         }
     }
 
@@ -1108,6 +1144,7 @@ mod tests {
             log: MessageLog::new(),
             game_over: false,
             turn_count: 0,
+            seed: 0,
         };
 
         let result = gs.autorun(1, 0);
@@ -1149,6 +1186,7 @@ mod tests {
             log: MessageLog::new(),
             game_over: false,
             turn_count: 0,
+            seed: 0,
         };
 
         let result = gs.autorun(1, 0);
@@ -1179,6 +1217,7 @@ mod tests {
             log: MessageLog::new(),
             game_over: false,
             turn_count: 0,
+            seed: 0,
         };
 
         let result = gs.autorun(1, 0);
@@ -1236,6 +1275,7 @@ mod tests {
             log: MessageLog::new(),
             game_over: false,
             turn_count: 0,
+            seed: 0,
         };
 
         let result = gs.autorun(1, 0);
@@ -1270,6 +1310,7 @@ mod tests {
             log: MessageLog::new(),
             game_over: false,
             turn_count: 0,
+            seed: 0,
         };
 
         let result = gs.autorun(1, 0);
@@ -1811,5 +1852,49 @@ mod tests {
             }
         }
         assert!(gs.start_auto_explore().is_err());
+    }
+
+    // --- seeded RNG tests ---
+
+    #[test]
+    fn same_seed_produces_identical_games() {
+        let seed = 12345;
+        let gs1 = GameState::with_seed(80, 40, seed);
+        let gs2 = GameState::with_seed(80, 40, seed);
+
+        // Identical map tiles
+        assert_eq!(gs1.map.tiles, gs2.map.tiles);
+        assert_eq!(gs1.map.rooms.len(), gs2.map.rooms.len());
+
+        // Identical entity count, positions, and types
+        assert_eq!(gs1.entities.len(), gs2.entities.len());
+        for (e1, e2) in gs1.entities.iter().zip(gs2.entities.iter()) {
+            assert_eq!(e1.x, e2.x);
+            assert_eq!(e1.y, e2.y);
+            assert_eq!(e1.name, e2.name);
+            assert_eq!(e1.glyph, e2.glyph);
+            assert_eq!(e1.hp, e2.hp);
+        }
+
+        // Seed stored correctly
+        assert_eq!(gs1.seed, seed);
+        assert_eq!(gs2.seed, seed);
+    }
+
+    #[test]
+    fn different_seeds_produce_different_maps() {
+        let gs1 = GameState::with_seed(80, 40, 1);
+        let gs2 = GameState::with_seed(80, 40, 2);
+
+        // Maps should differ (extremely unlikely to collide)
+        assert_ne!(gs1.map.tiles, gs2.map.tiles);
+    }
+
+    #[test]
+    fn seed_appears_in_observation() {
+        let seed = 99999;
+        let gs = GameState::with_seed(80, 40, seed);
+        let obs = gs.observe();
+        assert_eq!(obs.seed, seed);
     }
 }

@@ -31,6 +31,10 @@ pub struct NewGameParams {
     pub width: Option<i32>,
     /// Map height in tiles. Defaults to 40 if not specified.
     pub height: Option<i32>,
+    /// Random seed for reproducible dungeons. If not specified, a random seed
+    /// is generated. Use the same seed to replay a dungeon with identical
+    /// layout and monster placement.
+    pub seed: Option<u64>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -81,7 +85,10 @@ impl RoguelikeMcpServer {
             ));
         }
 
-        let mut state = GameState::new(width, height);
+        let mut state = match params.seed {
+            Some(seed) => GameState::with_seed(width, height, seed),
+            None => GameState::new(width, height),
+        };
         state.update_fov();
         let observation = state.observe();
         *self.state.lock().await = Some(state);
@@ -335,8 +342,14 @@ impl RoguelikeMcpServer {
              the death in one call. Use for trivial fights.\n\
              \n\
              ## Game Stats\n\
-             The observe response includes: kills, rooms_found, and explored_pct \
-             (percentage of map explored).",
+             The observe response includes: kills, rooms_found, explored_pct \
+             (percentage of map explored), and seed (for reproducible dungeons).\n\
+             \n\
+             ## Seed Sharing\n\
+             Every game has a seed (shown in observations). Pass a seed to \
+             new_game to replay the same dungeon with identical layout and \
+             monster placement. Share seeds to compare strategies on the \
+             same map.",
             CONFIG.fov_radius, CONFIG.regen_interval
         );
         Ok(CallToolResult::success(vec![Content::text(rules)]))
@@ -678,6 +691,7 @@ mod tests {
             log: MessageLog::new(),
             game_over: false,
             turn_count: 0,
+            seed: 0,
         };
         state.update_fov();
 

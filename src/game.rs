@@ -14,6 +14,7 @@ use crate::map;
 use crate::message_log::MessageLog;
 use crate::pathfinding;
 use crate::spawn;
+use crate::types::{Coord, Pos, Stat};
 
 /// Result of executing one complete game step (player command + monster turns).
 pub struct StepResult {
@@ -61,10 +62,10 @@ pub struct AutorunResult {
 /// A snapshot of the visible game state, suitable for serialization.
 #[derive(Serialize)]
 pub struct GameObservation {
-    pub player_hp: i32,
-    pub player_max_hp: i32,
-    pub player_x: i32,
-    pub player_y: i32,
+    pub player_hp: Stat,
+    pub player_max_hp: Stat,
+    pub player_x: Coord,
+    pub player_y: Coord,
     pub map_ascii: Vec<String>,
     pub visible_entities: Vec<EntityInfo>,
     pub recent_messages: Vec<String>,
@@ -86,7 +87,7 @@ pub struct AutoFightResult {
     /// Whether the target was killed.
     pub target_killed: bool,
     /// Total HP the player lost during the fight (from all sources).
-    pub player_hp_lost: i32,
+    pub player_hp_lost: Stat,
     /// All messages generated during the fight.
     pub messages: Vec<String>,
 }
@@ -95,9 +96,9 @@ pub struct AutoFightResult {
 #[derive(Debug)]
 pub struct AutoExploreResult {
     /// X coordinate of the chosen frontier target.
-    pub target_x: i32,
+    pub target_x: Coord,
     /// Y coordinate of the chosen frontier target.
-    pub target_y: i32,
+    pub target_y: Coord,
     /// The movement result from pathfinding to the frontier.
     pub movement: AutorunResult,
 }
@@ -105,9 +106,9 @@ pub struct AutoExploreResult {
 /// Determines how the stepper decides the next direction each step.
 pub enum StepperMode {
     /// Move in a fixed direction each step (autorun behavior).
-    Directional { dx: i32, dy: i32 },
+    Directional { dx: Coord, dy: Coord },
     /// Follow a precomputed A* path, stepping through each waypoint.
-    FollowPath { path: Vec<(i32, i32)>, index: usize },
+    FollowPath { path: Vec<Pos>, index: usize },
 }
 
 /// Yields one game step at a time for multi-step movement sequences.
@@ -246,19 +247,19 @@ impl AutorunStepper {
 pub struct EntityInfo {
     pub name: String,
     pub glyph: char,
-    pub x: i32,
-    pub y: i32,
-    pub hp: i32,
-    pub max_hp: i32,
+    pub x: Coord,
+    pub y: Coord,
+    pub hp: Stat,
+    pub max_hp: Stat,
     pub alive: bool,
 }
 
 pub struct GameState {
     pub map: map::Map,
     pub entities: Vec<Entity>,
-    pub fov_radius: i32,
-    pub visible: HashSet<(i32, i32)>,
-    pub explored: HashSet<(i32, i32)>,
+    pub fov_radius: Coord,
+    pub visible: HashSet<Pos>,
+    pub explored: HashSet<Pos>,
     pub log: MessageLog,
     pub game_over: bool,
     pub turn_count: i32,
@@ -269,7 +270,7 @@ pub struct GameState {
 
 impl GameState {
     /// Create a new game with a random seed.
-    pub fn new(width: i32, height: i32) -> Self {
+    pub fn new(width: Coord, height: Coord) -> Self {
         Self::with_seed(width, height, rand::random::<u64>())
     }
 
@@ -278,7 +279,7 @@ impl GameState {
     /// The seed determines map layout and monster placement. Separate RNG
     /// streams ensure that changes to one system (e.g., spawn weights)
     /// don't alter another (e.g., map layout) for the same seed.
-    pub fn with_seed(width: i32, height: i32, seed: u64) -> Self {
+    pub fn with_seed(width: Coord, height: Coord, seed: u64) -> Self {
         let cfg = &data::CONFIG;
 
         // Derive independent RNG streams from the master seed.
@@ -330,7 +331,7 @@ impl GameState {
     }
 
     /// Find a living entity at (x, y). Returns its index.
-    pub fn entity_at(&self, x: i32, y: i32) -> Option<usize> {
+    pub fn entity_at(&self, x: Coord, y: Coord) -> Option<usize> {
         self.entities
             .iter()
             .position(|e| e.alive && e.x == x && e.y == y)
@@ -338,7 +339,7 @@ impl GameState {
 
     /// Try to move the player. If a living monster occupies the target cell, attack it instead.
     /// Returns true if the player took an action (moved or attacked).
-    pub fn player_move_or_attack(&mut self, dx: i32, dy: i32) -> bool {
+    pub fn player_move_or_attack(&mut self, dx: Coord, dy: Coord) -> bool {
         let new_x = self.entities[0].x + dx;
         let new_y = self.entities[0].y + dy;
 
@@ -406,7 +407,7 @@ impl GameState {
     }
 
     /// Create a stepper for directional autorun.
-    pub fn start_autorun(&self, dx: i32, dy: i32) -> AutorunStepper {
+    pub fn start_autorun(&self, dx: Coord, dy: Coord) -> AutorunStepper {
         AutorunStepper {
             mode: StepperMode::Directional { dx, dy },
             steps_taken: 0,
@@ -417,7 +418,7 @@ impl GameState {
     }
 
     /// Create a stepper that follows an A* path to (tx, ty).
-    pub fn start_pathfind(&self, tx: i32, ty: i32) -> Result<AutorunStepper, String> {
+    pub fn start_pathfind(&self, tx: Coord, ty: Coord) -> Result<AutorunStepper, String> {
         let px = self.entities[0].x;
         let py = self.entities[0].y;
 
@@ -438,7 +439,7 @@ impl GameState {
     /// Uses Dijkstra to find the frontier tile with the lowest actual walking
     /// cost, respecting dungeon topology (walls, corridors, tile costs).
     /// Returns the stepper and the target (x, y) coordinates.
-    pub fn start_auto_explore(&self) -> Result<(AutorunStepper, i32, i32), String> {
+    pub fn start_auto_explore(&self) -> Result<(AutorunStepper, Coord, Coord), String> {
         let frontiers = self.frontier_tiles();
         if frontiers.is_empty() {
             return Err("No unexplored areas — map is fully explored.".to_string());
@@ -447,7 +448,7 @@ impl GameState {
         let px = self.entities[0].x;
         let py = self.entities[0].y;
 
-        let frontier_set: HashSet<(i32, i32)> = frontiers.into_iter().collect();
+        let frontier_set: HashSet<Pos> = frontiers.into_iter().collect();
         let (tx, ty) =
             pathfinding::nearest_by_cost(&self.map, px, py, &frontier_set, &self.explored)
                 .ok_or_else(|| "No reachable frontier tiles.".to_string())?;
@@ -459,7 +460,7 @@ impl GameState {
     /// Run in a direction until something interesting happens.
     ///
     /// Convenience wrapper around the stepper — runs to completion in one call.
-    pub fn autorun(&mut self, dx: i32, dy: i32) -> AutorunResult {
+    pub fn autorun(&mut self, dx: Coord, dy: Coord) -> AutorunResult {
         let stepper = self.start_autorun(dx, dy);
         stepper.run_to_completion(self)
     }
@@ -467,7 +468,7 @@ impl GameState {
     /// Walk the shortest path to (tx, ty) using A* pathfinding.
     ///
     /// Convenience wrapper around the stepper — runs to completion in one call.
-    pub fn pathfind_to(&mut self, tx: i32, ty: i32) -> Result<AutorunResult, String> {
+    pub fn pathfind_to(&mut self, tx: Coord, ty: Coord) -> Result<AutorunResult, String> {
         let stepper = self.start_pathfind(tx, ty)?;
         // Preserve empty-path early return for behavioral parity.
         if let StepperMode::FollowPath { ref path, .. } = stepper.mode
@@ -665,7 +666,7 @@ impl GameState {
     /// Find frontier tiles: explored floor tiles adjacent to at least one
     /// unexplored tile. These mark the boundary of explored territory and
     /// indicate where further exploration is possible.
-    pub fn frontier_tiles(&self) -> Vec<(i32, i32)> {
+    pub fn frontier_tiles(&self) -> Vec<Pos> {
         self.explored
             .iter()
             .filter(|&&(x, y)| {
@@ -691,7 +692,7 @@ impl GameState {
     /// as `~` to highlight exploration boundaries. Rows with no explored
     /// content are omitted.
     pub fn explored_map(&self) -> Vec<String> {
-        let frontiers: HashSet<(i32, i32)> = self.frontier_tiles().into_iter().collect();
+        let frontiers: HashSet<Pos> = self.frontier_tiles().into_iter().collect();
         let mut lines = Vec::new();
         for y in 0..self.map.height {
             let mut line = String::with_capacity(self.map.width as usize);
@@ -729,7 +730,7 @@ impl GameState {
 
     /// Get the display glyph for the topmost entity at (x, y).
     /// Living entities take priority over dead ones (corpses).
-    fn glyph_at(&self, x: i32, y: i32) -> Option<char> {
+    fn glyph_at(&self, x: Coord, y: Coord) -> Option<char> {
         // Alive entity on top
         if let Some(idx) = self
             .entities

@@ -1,6 +1,7 @@
 use crossterm::style::Color;
 
 use crate::data::MonsterTemplate;
+use crate::types::{Coord, Stat};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EntityKind {
@@ -15,23 +16,23 @@ pub enum AiBehavior {
 }
 
 pub struct Entity {
-    pub x: i32,
-    pub y: i32,
+    pub x: Coord,
+    pub y: Coord,
     pub glyph: char,
     pub color: Color,
     pub name: String,
     #[allow(dead_code)]
     pub kind: EntityKind,
     pub ai: AiBehavior,
-    pub hp: i32,
-    pub max_hp: i32,
-    pub attack: i32,
-    pub defense: i32,
+    pub hp: Stat,
+    pub max_hp: Stat,
+    pub attack: Stat,
+    pub defense: Stat,
     pub alive: bool,
 }
 
 impl Entity {
-    pub fn player(x: i32, y: i32) -> Self {
+    pub fn player(x: Coord, y: Coord) -> Self {
         Entity {
             x,
             y,
@@ -48,7 +49,7 @@ impl Entity {
         }
     }
 
-    pub fn from_template(template: &MonsterTemplate, x: i32, y: i32) -> Self {
+    pub fn from_template(template: &MonsterTemplate, x: Coord, y: Coord) -> Self {
         Entity {
             x,
             y,

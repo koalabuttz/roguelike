@@ -13,6 +13,7 @@ use crate::game::{
     AutoExploreResult, AutoFightResult, AutorunResult, AutorunStopReason, GameState,
 };
 use crate::input::GameCommand;
+use crate::types::{Coord, Pos};
 
 /// MCP server that wraps a roguelike game session.
 ///
@@ -28,9 +29,9 @@ pub struct RoguelikeMcpServer {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct NewGameParams {
     /// Map width in tiles. Defaults to 80 if not specified.
-    pub width: Option<i32>,
+    pub width: Option<Coord>,
     /// Map height in tiles. Defaults to 40 if not specified.
-    pub height: Option<i32>,
+    pub height: Option<Coord>,
     /// Random seed for reproducible dungeons. If not specified, a random seed
     /// is generated. Use the same seed to replay a dungeon with identical
     /// layout and monster placement.
@@ -48,9 +49,9 @@ pub struct ActParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct PathfindParams {
     /// Target X coordinate.
-    pub x: i32,
+    pub x: Coord,
     /// Target Y coordinate.
-    pub y: i32,
+    pub y: Coord,
 }
 
 impl Default for RoguelikeMcpServer {
@@ -436,7 +437,7 @@ fn format_auto_fight_response(
 fn format_autorun_response(
     observation: &crate::game::GameObservation,
     autorun: &AutorunResult,
-    frontier_tiles: &[(i32, i32)],
+    frontier_tiles: &[Pos],
 ) -> Result<String, serde_json::Error> {
     let mut value = serde_json::to_value(observation)?;
     if let serde_json::Value::Object(ref mut map) = value {
@@ -519,7 +520,7 @@ fn replace_messages(value: &mut serde_json::Value, messages: &[String]) {
 }
 
 /// Inject `frontier_exits` array into an existing JSON object value.
-fn inject_frontier_exits(value: &mut serde_json::Value, frontier_tiles: &[(i32, i32)]) {
+fn inject_frontier_exits(value: &mut serde_json::Value, frontier_tiles: &[Pos]) {
     if let serde_json::Value::Object(map) = value {
         let exits: Vec<serde_json::Value> = frontier_tiles
             .iter()

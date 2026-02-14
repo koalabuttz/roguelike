@@ -166,8 +166,8 @@ See [docs/roadmap-priority.md](docs/roadmap-priority.md) for a detailed breakdow
 ### Foundation (enables networking, platforms & advanced features)
 - [x] **Input abstraction** — `GameCommand` enum, decouple game logic from terminal input
 - [ ] **Platform abstraction** — Traits for input, rendering, and audio; game logic never imports platform-specific crates
-- [ ] **Type aliases** — `Coord`, `Stat` type aliases for coordinates and stats, enabling platform-specific sizing
-- [ ] **Seeded RNG** — Separate RNG streams per system (map, combat, spawn, loot) for deterministic replay
+- [x] **Type aliases** — `Coord`, `Stat` type aliases for coordinates and stats, enabling platform-specific sizing
+- [x] **Seeded RNG** — Separate RNG streams per system (map, combat, spawn, loot) for deterministic replay
 - [ ] **Save/load** — Serialize/deserialize game state via serde
 
 ### Core Gameplay

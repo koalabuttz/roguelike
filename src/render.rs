@@ -7,12 +7,13 @@ use crossterm::{
 
 use crate::game::GameState;
 use crate::map::Tile;
+use crate::types::Coord;
 
 pub fn render<W: Write>(
     w: &mut W,
     state: &GameState,
-    screen_width: i32,
-    screen_height: i32,
+    screen_width: Coord,
+    screen_height: Coord,
 ) -> std::io::Result<()> {
     render_map(w, state)?;
     render_entities(w, state)?;
@@ -106,8 +107,8 @@ fn render_entities<W: Write>(w: &mut W, state: &GameState) -> std::io::Result<()
 fn render_status_bar<W: Write>(
     w: &mut W,
     state: &GameState,
-    screen_width: i32,
-    screen_height: i32,
+    screen_width: Coord,
+    screen_height: Coord,
 ) -> std::io::Result<()> {
     let player = &state.entities[0];
     let bar_row = (screen_height - 5) as u16;
@@ -161,8 +162,8 @@ fn render_status_bar<W: Write>(
 fn render_message_log<W: Write>(
     w: &mut W,
     state: &GameState,
-    screen_width: i32,
-    screen_height: i32,
+    screen_width: Coord,
+    screen_height: Coord,
 ) -> std::io::Result<()> {
     let log_start_row = (screen_height - 4) as u16;
     let messages = state.log.recent(4);

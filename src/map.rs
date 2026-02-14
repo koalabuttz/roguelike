@@ -1,5 +1,7 @@
 use rand::Rng;
 
+use crate::types::{Coord, Pos};
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Tile {
     Wall,
@@ -19,10 +21,10 @@ impl Tile {
 }
 
 pub struct Rect {
-    pub x1: i32,
-    pub y1: i32,
-    pub x2: i32,
-    pub y2: i32,
+    pub x1: Coord,
+    pub y1: Coord,
+    pub x2: Coord,
+    pub y2: Coord,
     /// Hidden rooms are carved into the map but not counted in stats
     /// until discovered. Prevents exploration percentage from leaking
     /// the existence of secret areas.
@@ -30,7 +32,7 @@ pub struct Rect {
 }
 
 impl Rect {
-    pub fn new(x: i32, y: i32, w: i32, h: i32) -> Self {
+    pub fn new(x: Coord, y: Coord, w: Coord, h: Coord) -> Self {
         Rect {
             x1: x,
             y1: y,
@@ -40,7 +42,7 @@ impl Rect {
         }
     }
 
-    pub fn center(&self) -> (i32, i32) {
+    pub fn center(&self) -> Pos {
         ((self.x1 + self.x2) / 2, (self.y1 + self.y2) / 2)
     }
 
@@ -50,20 +52,20 @@ impl Rect {
 
     /// Whether (x, y) is in the carved interior of this room.
     /// Matches `carve_room` bounds: x1 < x < x2, y1 < y < y2.
-    pub fn contains_interior(&self, x: i32, y: i32) -> bool {
+    pub fn contains_interior(&self, x: Coord, y: Coord) -> bool {
         x > self.x1 && x < self.x2 && y > self.y1 && y < self.y2
     }
 }
 
 pub struct Map {
-    pub width: i32,
-    pub height: i32,
+    pub width: Coord,
+    pub height: Coord,
     pub tiles: Vec<Tile>,
     pub rooms: Vec<Rect>,
 }
 
 impl Map {
-    pub fn new(width: i32, height: i32) -> Self {
+    pub fn new(width: Coord, height: Coord) -> Self {
         Map {
             width,
             height,
@@ -72,15 +74,15 @@ impl Map {
         }
     }
 
-    pub fn idx(&self, x: i32, y: i32) -> usize {
+    pub fn idx(&self, x: Coord, y: Coord) -> usize {
         (y * self.width + x) as usize
     }
 
-    pub fn in_bounds(&self, x: i32, y: i32) -> bool {
+    pub fn in_bounds(&self, x: Coord, y: Coord) -> bool {
         x >= 0 && x < self.width && y >= 0 && y < self.height
     }
 
-    pub fn is_walkable(&self, x: i32, y: i32) -> bool {
+    pub fn is_walkable(&self, x: Coord, y: Coord) -> bool {
         self.in_bounds(x, y) && self.tiles[self.idx(x, y)] == Tile::Floor
     }
 
@@ -91,10 +93,10 @@ impl Map {
     /// entrances, it's 2+. At dead ends, it's 0.
     pub fn open_neighbors_excluding(
         &self,
-        x: i32,
-        y: i32,
-        exclude_dx: i32,
-        exclude_dy: i32,
+        x: Coord,
+        y: Coord,
+        exclude_dx: Coord,
+        exclude_dy: Coord,
     ) -> i32 {
         let mut count = 0;
         for ny in -1..=1 {
@@ -119,7 +121,7 @@ impl Map {
     }
 
     /// Whether (x, y) is inside any room's interior.
-    pub fn is_in_room(&self, x: i32, y: i32) -> bool {
+    pub fn is_in_room(&self, x: Coord, y: Coord) -> bool {
         self.rooms.iter().any(|r| r.contains_interior(x, y))
     }
 
@@ -158,7 +160,7 @@ impl Map {
         }
     }
 
-    fn carve_h_tunnel(&mut self, x1: i32, x2: i32, y: i32) {
+    fn carve_h_tunnel(&mut self, x1: Coord, x2: Coord, y: Coord) {
         for x in x1.min(x2)..=x1.max(x2) {
             if self.in_bounds(x, y) {
                 let idx = self.idx(x, y);
@@ -167,7 +169,7 @@ impl Map {
         }
     }
 
-    fn carve_v_tunnel(&mut self, y1: i32, y2: i32, x: i32) {
+    fn carve_v_tunnel(&mut self, y1: Coord, y2: Coord, x: Coord) {
         for y in y1.min(y2)..=y1.max(y2) {
             if self.in_bounds(x, y) {
                 let idx = self.idx(x, y);
@@ -181,10 +183,10 @@ impl Map {
     pub fn generate(
         &mut self,
         max_rooms: i32,
-        min_size: i32,
-        max_size: i32,
+        min_size: Coord,
+        max_size: Coord,
         rng: &mut impl Rng,
-    ) -> (i32, i32) {
+    ) -> Pos {
         let mut player_start = (0, 0);
 
         for _ in 0..max_rooms {

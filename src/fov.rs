@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use crate::map::{Map, Tile};
+use crate::types::{Coord, Pos};
 
 /// Octant multipliers for recursive shadowcasting.
 /// Each column represents one of 8 octants around the origin.
@@ -11,7 +12,7 @@ const MULT_YY: [i32; 8] = [1, 0, 0, 1, -1, 0, 0, -1];
 
 /// Compute field of view from (ox, oy) with the given radius.
 /// Returns a set of all visible (x, y) positions.
-pub fn compute_fov(map: &Map, ox: i32, oy: i32, radius: i32) -> HashSet<(i32, i32)> {
+pub fn compute_fov(map: &Map, ox: Coord, oy: Coord, radius: Coord) -> HashSet<Pos> {
     let mut visible = HashSet::new();
     visible.insert((ox, oy));
 
@@ -35,14 +36,14 @@ pub fn compute_fov(map: &Map, ox: i32, oy: i32, radius: i32) -> HashSet<(i32, i3
     visible
 }
 
-fn is_blocking(map: &Map, x: i32, y: i32) -> bool {
+fn is_blocking(map: &Map, x: Coord, y: Coord) -> bool {
     !map.in_bounds(x, y) || map.tiles[map.idx(x, y)] == Tile::Wall
 }
 
 #[allow(clippy::too_many_arguments)]
 fn cast_light(
     map: &Map,
-    visible: &mut HashSet<(i32, i32)>,
+    visible: &mut HashSet<Pos>,
     ox: i32,
     oy: i32,
     radius: i32,

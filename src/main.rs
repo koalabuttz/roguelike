@@ -1,7 +1,7 @@
 use std::io::stdout;
 use std::time::Duration;
 
-use roguelike::{data, game, input, render};
+use roguelike::{data, game, input, render, types::Coord};
 
 use crossterm::{
     cursor,
@@ -16,8 +16,8 @@ fn animate_stepper(
     stdout: &mut impl std::io::Write,
     state: &mut game::GameState,
     mut stepper: game::AutorunStepper,
-    cols: i32,
-    rows: i32,
+    cols: Coord,
+    rows: Coord,
 ) -> std::io::Result<()> {
     loop {
         match stepper.next_step(state) {

@@ -1,15 +1,16 @@
 use crossterm::style::Color;
 
 use crate::entity::AiBehavior;
+use crate::types::{Coord, Stat};
 
 /// Defines a type of monster — all stats, appearance, and AI in one place.
 pub struct MonsterTemplate {
     pub name: &'static str,
     pub glyph: char,
     pub color: Color,
-    pub hp: i32,
-    pub attack: i32,
-    pub defense: i32,
+    pub hp: Stat,
+    pub attack: Stat,
+    pub defense: Stat,
     pub ai: AiBehavior,
 }
 
@@ -66,10 +67,10 @@ pub const SPAWN_TABLE: &[SpawnEntry] = &[
 
 /// Game-wide tuning knobs — change these to rebalance without touching logic.
 pub struct GameConfig {
-    pub fov_radius: i32,
+    pub fov_radius: Coord,
     pub max_rooms: i32,
-    pub room_size_min: i32,
-    pub room_size_max: i32,
+    pub room_size_min: Coord,
+    pub room_size_max: Coord,
     pub max_monsters_per_room: i32,
     pub ui_bottom_rows: i32,
     pub max_autorun_steps: i32,

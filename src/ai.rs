@@ -4,12 +4,13 @@ use crate::combat;
 use crate::entity::{AiBehavior, Entity};
 use crate::map::Map;
 use crate::message_log::MessageLog;
+use crate::types::{Coord, Pos};
 
 /// Run all monster turns. Returns true if the player was killed.
 pub fn run_monster_turns(
     entities: &mut [Entity],
     map: &Map,
-    visible: &HashSet<(i32, i32)>,
+    visible: &HashSet<Pos>,
     log: &mut MessageLog,
 ) -> bool {
     let px = entities[0].x;
@@ -37,8 +38,8 @@ pub fn run_monster_turns(
 fn chase_ai(
     entities: &mut [Entity],
     idx: usize,
-    px: i32,
-    py: i32,
+    px: Coord,
+    py: Coord,
     map: &Map,
     log: &mut MessageLog,
 ) {
@@ -72,7 +73,7 @@ fn chase_ai(
     }
 }
 
-fn is_occupied_by_monster(entities: &[Entity], x: i32, y: i32, skip: usize) -> bool {
+fn is_occupied_by_monster(entities: &[Entity], x: Coord, y: Coord, skip: usize) -> bool {
     entities
         .iter()
         .enumerate()
@@ -98,7 +99,7 @@ mod tests {
     }
 
     /// Make all positions in the map visible.
-    fn full_visibility(w: i32, h: i32) -> HashSet<(i32, i32)> {
+    fn full_visibility(w: i32, h: i32) -> HashSet<Pos> {
         let mut vis = HashSet::new();
         for y in 0..h {
             for x in 0..w {

@@ -39,15 +39,16 @@ pub fn melee_attack(
 mod tests {
     use super::*;
     use crate::entity::Entity;
+    use crate::types::Stat;
 
-    fn make_attacker(atk: i32) -> Entity {
+    fn make_attacker(atk: Stat) -> Entity {
         let mut e = Entity::player(0, 0);
         e.name = "Attacker".into();
         e.attack = atk;
         e
     }
 
-    fn make_defender(hp: i32, def: i32) -> Entity {
+    fn make_defender(hp: Stat, def: Stat) -> Entity {
         let mut e = Entity::player(1, 0);
         e.name = "Defender".into();
         e.hp = hp;

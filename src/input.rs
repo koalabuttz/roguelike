@@ -1,5 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::types::Coord;
+
 /// A platform-independent game command.
 ///
 /// Input adapters (keyboard, controller, replay, network) produce these;
@@ -8,13 +10,13 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameCommand {
     Move {
-        dx: i32,
-        dy: i32,
+        dx: Coord,
+        dy: Coord,
     },
     /// Keep moving in a direction until something interesting happens.
     Autorun {
-        dx: i32,
-        dy: i32,
+        dx: Coord,
+        dy: Coord,
     },
     AutoExplore,
     Wait,
@@ -27,7 +29,7 @@ pub enum GameCommand {
 /// - Arrow keys: Shift = autorun
 /// - Vi keys: uppercase = autorun
 /// - Numpad: Shift = autorun
-fn resolve_direction(code: KeyCode, shift: bool) -> Option<(i32, i32, bool)> {
+fn resolve_direction(code: KeyCode, shift: bool) -> Option<(Coord, Coord, bool)> {
     match code {
         // Arrow keys: shift = autorun
         KeyCode::Up => Some((0, -1, shift)),

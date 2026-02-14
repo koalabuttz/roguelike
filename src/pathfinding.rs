@@ -2,10 +2,11 @@ use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use crate::map::Map;
+use crate::types::{Coord, Pos};
 
 #[derive(Eq, PartialEq)]
 struct Node {
-    pos: (i32, i32),
+    pos: Pos,
     f_score: i32,
 }
 
@@ -24,7 +25,7 @@ impl PartialOrd for Node {
 
 /// Chebyshev distance — optimal heuristic for 8-directional movement
 /// where all moves cost 1.
-fn chebyshev(a: (i32, i32), b: (i32, i32)) -> i32 {
+fn chebyshev(a: Pos, b: Pos) -> i32 {
     (a.0 - b.0).abs().max((a.1 - b.1).abs())
 }
 
@@ -38,12 +39,12 @@ fn chebyshev(a: (i32, i32), b: (i32, i32)) -> i32 {
 /// exclusive of start. Returns `None` if no path exists.
 pub fn find_path(
     map: &Map,
-    sx: i32,
-    sy: i32,
-    tx: i32,
-    ty: i32,
-    explored: &HashSet<(i32, i32)>,
-) -> Option<Vec<(i32, i32)>> {
+    sx: Coord,
+    sy: Coord,
+    tx: Coord,
+    ty: Coord,
+    explored: &HashSet<Pos>,
+) -> Option<Vec<Pos>> {
     if !map.is_walkable(tx, ty) || !explored.contains(&(tx, ty)) {
         return None;
     }
@@ -56,8 +57,8 @@ pub fn find_path(
     }
 
     let mut open = BinaryHeap::new();
-    let mut came_from: HashMap<(i32, i32), (i32, i32)> = HashMap::new();
-    let mut g_score: HashMap<(i32, i32), i32> = HashMap::new();
+    let mut came_from: HashMap<Pos, Pos> = HashMap::new();
+    let mut g_score: HashMap<Pos, i32> = HashMap::new();
 
     g_score.insert(start, 0);
     open.push(Node {
@@ -116,13 +117,13 @@ pub fn find_path(
 /// if no target is reachable.
 pub fn nearest_by_cost(
     map: &Map,
-    sx: i32,
-    sy: i32,
-    targets: &HashSet<(i32, i32)>,
-    explored: &HashSet<(i32, i32)>,
-) -> Option<(i32, i32)> {
+    sx: Coord,
+    sy: Coord,
+    targets: &HashSet<Pos>,
+    explored: &HashSet<Pos>,
+) -> Option<Pos> {
     let start = (sx, sy);
-    let mut dist: HashMap<(i32, i32), i32> = HashMap::new();
+    let mut dist: HashMap<Pos, i32> = HashMap::new();
     let mut heap = BinaryHeap::new();
 
     dist.insert(start, 0);
@@ -171,7 +172,7 @@ mod tests {
     use crate::map::{Map, Tile};
 
     /// Build a 10x10 map with floor from (1,1) to (8,8).
-    fn open_map() -> (Map, HashSet<(i32, i32)>) {
+    fn open_map() -> (Map, HashSet<Pos>) {
         let mut m = Map::new(10, 10);
         let mut explored = HashSet::new();
         for y in 1..=8 {

@@ -8,13 +8,18 @@ pub enum MenuAction {
     ResumeGame,
     SaveGame,
     LoadGame,
-    MainMenu,
     Quit,
     /// The user pressed Esc/Back. The caller decides what this means:
     /// title screen interprets it as quit, pause menu as resume.
     Back,
     /// The user confirmed a yes/no dialog (the "Yes" choice).
     Confirm,
+    /// Navigate to the settings submenu.
+    Settings,
+    /// Toggle casual/classic mode in the settings menu.
+    ToggleCasualMode,
+    /// Return to the title screen from the pause menu.
+    TitleScreen,
 }
 
 /// A single menu entry.
@@ -140,11 +145,11 @@ impl Menu {
 
 /// Construct the title screen menu.
 ///
-/// When `has_save` is true the "Load Game" option is selectable; otherwise
-/// it is shown greyed-out so the player knows the feature exists.
-pub fn title_menu(has_save: bool) -> Menu {
-    Menu::new(
-        "R O G U E L I K E",
+/// In **classic** mode the layout is: Continue (enabled if save) → New Game →
+/// Settings → Quit. In **casual** mode: New Game → Load Game (enabled if
+/// save) → Settings → Quit.
+pub fn title_menu(has_save: bool, casual_mode: bool) -> Menu {
+    let items = if casual_mode {
         vec![
             MenuItem {
                 label: "New Game".to_string(),
@@ -157,18 +162,50 @@ pub fn title_menu(has_save: bool) -> Menu {
                 enabled: has_save,
             },
             MenuItem {
+                label: "Settings".to_string(),
+                action: MenuAction::Settings,
+                enabled: true,
+            },
+            MenuItem {
                 label: "Quit".to_string(),
                 action: MenuAction::Quit,
                 enabled: true,
             },
-        ],
-    )
+        ]
+    } else {
+        vec![
+            MenuItem {
+                label: "Continue".to_string(),
+                action: MenuAction::LoadGame,
+                enabled: has_save,
+            },
+            MenuItem {
+                label: "New Game".to_string(),
+                action: MenuAction::NewGame,
+                enabled: true,
+            },
+            MenuItem {
+                label: "Settings".to_string(),
+                action: MenuAction::Settings,
+                enabled: true,
+            },
+            MenuItem {
+                label: "Quit".to_string(),
+                action: MenuAction::Quit,
+                enabled: true,
+            },
+        ]
+    };
+    Menu::new("R O G U E L I K E", items)
 }
 
 /// Construct the pause menu.
-pub fn pause_menu() -> Menu {
-    Menu::new(
-        "Paused",
+///
+/// In **classic** mode: Resume → Title Screen → Quit (no save/load — autosave
+/// handles it). In **casual** mode: Resume → Save Game → Load Game → Title
+/// Screen → Quit.
+pub fn pause_menu(casual_mode: bool) -> Menu {
+    let items = if casual_mode {
         vec![
             MenuItem {
                 label: "Resume".to_string(),
@@ -186,13 +223,58 @@ pub fn pause_menu() -> Menu {
                 enabled: true,
             },
             MenuItem {
-                label: "Main Menu".to_string(),
-                action: MenuAction::MainMenu,
+                label: "Title Screen".to_string(),
+                action: MenuAction::TitleScreen,
                 enabled: true,
             },
             MenuItem {
                 label: "Quit".to_string(),
                 action: MenuAction::Quit,
+                enabled: true,
+            },
+        ]
+    } else {
+        vec![
+            MenuItem {
+                label: "Resume".to_string(),
+                action: MenuAction::ResumeGame,
+                enabled: true,
+            },
+            MenuItem {
+                label: "Title Screen".to_string(),
+                action: MenuAction::TitleScreen,
+                enabled: true,
+            },
+            MenuItem {
+                label: "Quit".to_string(),
+                action: MenuAction::Quit,
+                enabled: true,
+            },
+        ]
+    };
+    Menu::new("Paused", items)
+}
+
+/// Construct the settings submenu.
+///
+/// Shows the current mode as a toggle and a "Back" option.
+pub fn settings_menu(casual_mode: bool) -> Menu {
+    let mode_label = if casual_mode {
+        "Mode: Casual"
+    } else {
+        "Mode: Classic"
+    };
+    Menu::new(
+        "Settings",
+        vec![
+            MenuItem {
+                label: mode_label.to_string(),
+                action: MenuAction::ToggleCasualMode,
+                enabled: true,
+            },
+            MenuItem {
+                label: "Back".to_string(),
+                action: MenuAction::Back,
                 enabled: true,
             },
         ],
@@ -445,24 +527,55 @@ mod tests {
     }
 
     #[test]
-    fn title_menu_has_expected_items() {
-        let menu = title_menu(false);
+    fn title_menu_classic_has_expected_items() {
+        let menu = title_menu(false, false);
         assert_eq!(menu.title, "R O G U E L I K E");
-        assert_eq!(menu.items.len(), 3);
+        assert_eq!(menu.items.len(), 4);
+        assert_eq!(menu.items[0].action, MenuAction::LoadGame); // "Continue"
+        assert_eq!(menu.items[0].label, "Continue");
+        assert_eq!(menu.items[1].action, MenuAction::NewGame);
+        assert_eq!(menu.items[2].action, MenuAction::Settings);
+        assert_eq!(menu.items[3].action, MenuAction::Quit);
+    }
+
+    #[test]
+    fn title_menu_casual_has_expected_items() {
+        let menu = title_menu(false, true);
+        assert_eq!(menu.title, "R O G U E L I K E");
+        assert_eq!(menu.items.len(), 4);
         assert_eq!(menu.items[0].action, MenuAction::NewGame);
         assert_eq!(menu.items[1].action, MenuAction::LoadGame);
+        assert_eq!(menu.items[1].label, "Load Game");
+        assert_eq!(menu.items[2].action, MenuAction::Settings);
+        assert_eq!(menu.items[3].action, MenuAction::Quit);
+    }
+
+    #[test]
+    fn title_menu_classic_continue_enabled_when_save_exists() {
+        let menu = title_menu(true, false);
+        assert!(menu.items[0].enabled); // "Continue" enabled
+        assert_eq!(menu.items[0].label, "Continue");
+    }
+
+    #[test]
+    fn pause_menu_classic_has_expected_items() {
+        let menu = pause_menu(false);
+        assert_eq!(menu.title, "Paused");
+        assert_eq!(menu.items.len(), 3);
+        assert_eq!(menu.items[0].action, MenuAction::ResumeGame);
+        assert_eq!(menu.items[1].action, MenuAction::TitleScreen);
         assert_eq!(menu.items[2].action, MenuAction::Quit);
     }
 
     #[test]
-    fn pause_menu_has_expected_items() {
-        let menu = pause_menu();
+    fn pause_menu_casual_has_expected_items() {
+        let menu = pause_menu(true);
         assert_eq!(menu.title, "Paused");
         assert_eq!(menu.items.len(), 5);
         assert_eq!(menu.items[0].action, MenuAction::ResumeGame);
         assert_eq!(menu.items[1].action, MenuAction::SaveGame);
         assert_eq!(menu.items[2].action, MenuAction::LoadGame);
-        assert_eq!(menu.items[3].action, MenuAction::MainMenu);
+        assert_eq!(menu.items[3].action, MenuAction::TitleScreen);
         assert_eq!(menu.items[4].action, MenuAction::Quit);
     }
 
@@ -559,8 +672,8 @@ mod tests {
     }
 
     #[test]
-    fn title_menu_with_save_has_load_enabled() {
-        let menu = title_menu(true);
+    fn title_menu_casual_with_save_has_load_enabled() {
+        let menu = title_menu(true, true);
         let load_item = menu
             .items
             .iter()
@@ -570,14 +683,36 @@ mod tests {
     }
 
     #[test]
-    fn title_menu_without_save_has_load_disabled() {
-        let menu = title_menu(false);
+    fn title_menu_casual_without_save_has_load_disabled() {
+        let menu = title_menu(false, true);
         let load_item = menu
             .items
             .iter()
             .find(|i| i.action == MenuAction::LoadGame)
             .unwrap();
         assert!(!load_item.enabled);
+    }
+
+    #[test]
+    fn title_menu_classic_without_save_has_continue_disabled() {
+        let menu = title_menu(false, false);
+        let continue_item = menu.items.iter().find(|i| i.label == "Continue").unwrap();
+        assert!(!continue_item.enabled);
+    }
+
+    #[test]
+    fn settings_menu_classic_shows_mode() {
+        let menu = settings_menu(false);
+        assert_eq!(menu.items[0].label, "Mode: Classic");
+        assert_eq!(menu.items[0].action, MenuAction::ToggleCasualMode);
+        assert_eq!(menu.items[1].action, MenuAction::Back);
+    }
+
+    #[test]
+    fn settings_menu_casual_shows_mode() {
+        let menu = settings_menu(true);
+        assert_eq!(menu.items[0].label, "Mode: Casual");
+        assert_eq!(menu.items[0].action, MenuAction::ToggleCasualMode);
     }
 
     #[test]

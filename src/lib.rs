@@ -12,5 +12,6 @@ pub mod message_log;
 pub mod pathfinding;
 pub mod platform;
 pub mod render;
+pub mod settings;
 pub mod spawn;
 pub mod types;

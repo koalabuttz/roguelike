@@ -11,6 +11,10 @@
 CLAUDE.md
 claude.md
 
+# Game data files
+savegame.json
+settings.json
+
 # OS artifacts
 Thumbs.db
 .DS_Store

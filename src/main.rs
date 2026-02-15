@@ -288,8 +288,6 @@ fn main() -> std::io::Result<()> {
                         menu::draw_loading(&mut renderer);
                         match load_game() {
                             Ok(mut loaded) => {
-                                let _ = std::fs::remove_file(SAVE_FILE);
-                                let _ = std::fs::remove_file(AUTOSAVE_META_FILE);
                                 loaded.log.add("Game loaded.");
                                 game_state = Some(loaded);
                                 autosave_buf = None;

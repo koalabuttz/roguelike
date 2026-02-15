@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use roguelike::{
     data, game, input, menu, menu::MenuAction, platform::Renderer, render, saves::SlotMetadata,
-    settings, types::Coord,
+    settings, settings::Platform, types::Coord,
 };
 
 use crossterm::{
@@ -34,13 +34,14 @@ fn animate_stepper(
     cols: Coord,
     rows: Coord,
     show_explored_pct: bool,
+    animation_speed_ms: u64,
 ) -> std::io::Result<()> {
     loop {
         match stepper.next_step(state) {
             game::StepOutcome::Continue => {
                 render::render(stdout, state, cols, rows, show_explored_pct)?;
-                // 50ms frame pacing + interrupt detection.
-                if event::poll(Duration::from_millis(50))? {
+                // Frame pacing + interrupt detection.
+                if event::poll(Duration::from_millis(animation_speed_ms))? {
                     let _ = event::read()?;
                     return Ok(());
                 }
@@ -305,8 +306,7 @@ fn main() -> std::io::Result<()> {
                 }
                 MenuAction::Settings => {
                     loop {
-                        let mut settings_m =
-                            menu::settings_menu(settings.casual_mode, settings.show_explored_pct);
+                        let mut settings_m = menu::settings_menu(&settings, Platform::Terminal);
                         match run_menu(&mut settings_m, &mut renderer)? {
                             MenuAction::ToggleCasualMode => {
                                 settings.casual_mode = !settings.casual_mode;
@@ -314,6 +314,54 @@ fn main() -> std::io::Result<()> {
                             }
                             MenuAction::ToggleShowExploredPct => {
                                 settings.show_explored_pct = !settings.show_explored_pct;
+                                save_settings(&settings);
+                            }
+                            MenuAction::ToggleShowCoordinates => {
+                                settings.show_coordinates = !settings.show_coordinates;
+                                save_settings(&settings);
+                            }
+                            MenuAction::ToggleShowKeybindHints => {
+                                settings.show_keybind_hints = !settings.show_keybind_hints;
+                                save_settings(&settings);
+                            }
+                            MenuAction::ToggleShowCorpses => {
+                                settings.show_corpses = !settings.show_corpses;
+                                save_settings(&settings);
+                            }
+                            MenuAction::ToggleViKeys => {
+                                settings.vi_keys = !settings.vi_keys;
+                                save_settings(&settings);
+                            }
+                            MenuAction::ToggleNumpad => {
+                                settings.numpad = !settings.numpad;
+                                save_settings(&settings);
+                            }
+                            MenuAction::CycleAnimationSpeed => {
+                                settings.animation_speed_ms = match settings.animation_speed_ms {
+                                    0 => 25,
+                                    25 => 50,
+                                    50 => 100,
+                                    100 => 200,
+                                    _ => 0,
+                                };
+                                save_settings(&settings);
+                            }
+                            MenuAction::CycleAutosaveFrequency => {
+                                settings.autosave_frequency = match settings.autosave_frequency {
+                                    1 => 5,
+                                    5 => 10,
+                                    10 => 25,
+                                    _ => 1,
+                                };
+                                save_settings(&settings);
+                            }
+                            MenuAction::CycleMessageLogLines => {
+                                settings.message_log_lines = match settings.message_log_lines {
+                                    2 => 4,
+                                    4 => 6,
+                                    6 => 8,
+                                    _ => 2,
+                                };
                                 save_settings(&settings);
                             }
                             _ => break,
@@ -376,9 +424,13 @@ fn main() -> std::io::Result<()> {
                                 cols as i32,
                                 rows as i32,
                                 settings.show_explored_pct,
+                                settings.animation_speed_ms as u64,
                             )?;
                             // Autosave after autorun completes.
-                            if let Ok(json) = state.save_to_json() {
+                            if state.dirty
+                                && let Ok(json) = state.save_to_json()
+                            {
+                                state.dirty = false;
                                 autosave_buf = Some(json);
                             }
                         }
@@ -392,9 +444,13 @@ fn main() -> std::io::Result<()> {
                                     cols as i32,
                                     rows as i32,
                                     settings.show_explored_pct,
+                                    settings.animation_speed_ms as u64,
                                 )?;
                                 // Autosave after auto-explore completes.
-                                if let Ok(json) = state.save_to_json() {
+                                if state.dirty
+                                    && let Ok(json) = state.save_to_json()
+                                {
+                                    state.dirty = false;
                                     autosave_buf = Some(json);
                                 }
                             }
@@ -406,7 +462,10 @@ fn main() -> std::io::Result<()> {
                         _ => {
                             state.step(cmd);
                             // Autosave after each turn.
-                            if let Ok(json) = state.save_to_json() {
+                            if state.dirty
+                                && let Ok(json) = state.save_to_json()
+                            {
+                                state.dirty = false;
                                 autosave_buf = Some(json);
                             }
                         }

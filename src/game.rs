@@ -268,6 +268,8 @@ pub struct GameState {
     /// The seed used to generate this game. Enables reproducible dungeons,
     /// seed sharing, and deterministic replay.
     pub seed: u64,
+    #[serde(skip)]
+    pub dirty: bool,
 }
 
 impl GameState {
@@ -322,6 +324,7 @@ impl GameState {
             game_over: false,
             turn_count: 0,
             seed,
+            dirty: false,
         }
     }
 
@@ -408,6 +411,7 @@ impl GameState {
         let action_taken = self.handle_command(cmd);
 
         if action_taken {
+            self.dirty = true;
             self.update_fov();
             if ai::run_monster_turns(&mut self.entities, &self.map, &self.visible, &mut self.log) {
                 self.game_over = true;
@@ -825,6 +829,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            dirty: false,
         }
     }
 
@@ -1121,6 +1126,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            dirty: false,
         }
     }
 
@@ -1189,6 +1195,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            dirty: false,
         };
 
         let result = gs.autorun(1, 0);
@@ -1231,6 +1238,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            dirty: false,
         };
 
         let result = gs.autorun(1, 0);
@@ -1262,6 +1270,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            dirty: false,
         };
 
         let result = gs.autorun(1, 0);
@@ -1320,6 +1329,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            dirty: false,
         };
 
         let result = gs.autorun(1, 0);
@@ -1355,6 +1365,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            dirty: false,
         };
 
         let result = gs.autorun(1, 0);
@@ -2019,5 +2030,43 @@ mod tests {
         assert_eq!(meta.player_hp, obs.player_hp);
         assert_eq!(meta.player_max_hp, obs.player_max_hp);
         assert_eq!(meta.explored_pct, obs.explored_pct);
+    }
+
+    // --- dirty flag tests ---
+
+    #[test]
+    fn step_sets_dirty_on_action() {
+        let mut gs = test_game();
+        assert!(!gs.dirty);
+        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        assert!(gs.dirty);
+    }
+
+    #[test]
+    fn step_does_not_set_dirty_on_wall() {
+        let mut gs = test_game();
+        gs.entities[0].x = 1;
+        gs.entities[0].y = 1;
+        gs.step(GameCommand::Move { dx: -1, dy: 0 });
+        assert!(!gs.dirty);
+    }
+
+    #[test]
+    fn save_to_json_does_not_clear_dirty() {
+        let mut gs = test_game();
+        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        assert!(gs.dirty);
+        let _ = gs.save_to_json();
+        assert!(gs.dirty);
+    }
+
+    #[test]
+    fn dirty_not_serialized() {
+        let mut gs = test_game();
+        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        assert!(gs.dirty);
+        let json = gs.save_to_json().unwrap();
+        let loaded = GameState::load_from_json(&json).unwrap();
+        assert!(!loaded.dirty);
     }
 }

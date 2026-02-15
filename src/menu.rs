@@ -1,5 +1,6 @@
 use crate::platform::{MenuCommand, Renderer};
 use crate::saves::SlotMetadata;
+use crate::settings::{Platform, Setting, Settings};
 use crate::types::GameColor;
 
 /// What happens when a menu item is selected.
@@ -23,6 +24,22 @@ pub enum MenuAction {
     ToggleShowExploredPct,
     /// Return to the title screen from the pause menu.
     TitleScreen,
+    /// Toggle coordinates display in the settings menu.
+    ToggleShowCoordinates,
+    /// Toggle keybind hints in the settings menu.
+    ToggleShowKeybindHints,
+    /// Toggle corpse rendering in the settings menu.
+    ToggleShowCorpses,
+    /// Toggle vi-key movement in the settings menu.
+    ToggleViKeys,
+    /// Toggle numpad movement in the settings menu.
+    ToggleNumpad,
+    /// Cycle animation speed in the settings menu.
+    CycleAnimationSpeed,
+    /// Cycle autosave frequency in the settings menu.
+    CycleAutosaveFrequency,
+    /// Cycle message log lines in the settings menu.
+    CycleMessageLogLines,
     /// A save slot was selected (0-indexed slot number).
     SelectSlot(u8),
 }
@@ -262,38 +279,137 @@ pub fn pause_menu(casual_mode: bool) -> Menu {
 
 /// Construct the settings submenu.
 ///
-/// Shows the current mode as a toggle, an explored-% toggle, and "Back".
-pub fn settings_menu(casual_mode: bool, show_explored_pct: bool) -> Menu {
-    let mode_label = if casual_mode {
-        "Mode: Casual"
-    } else {
-        "Mode: Classic"
-    };
-    let explored_label = if show_explored_pct {
-        "Explored %: On"
-    } else {
-        "Explored %: Off"
-    };
-    Menu::new(
-        "Settings",
-        vec![
-            MenuItem {
-                label: mode_label.to_string(),
-                action: MenuAction::ToggleCasualMode,
-                enabled: true,
-            },
-            MenuItem {
-                label: explored_label.to_string(),
-                action: MenuAction::ToggleShowExploredPct,
-                enabled: true,
-            },
-            MenuItem {
-                label: "Back".to_string(),
-                action: MenuAction::Back,
-                enabled: true,
-            },
-        ],
-    )
+/// Shows only settings available on the current platform, with current values.
+pub fn settings_menu(settings: &Settings, platform: Platform) -> Menu {
+    let mut items = Vec::new();
+
+    if Setting::CasualMode.is_available(platform) {
+        let label = if settings.casual_mode {
+            "Mode: Casual"
+        } else {
+            "Mode: Classic"
+        };
+        items.push(MenuItem {
+            label: label.to_string(),
+            action: MenuAction::ToggleCasualMode,
+            enabled: true,
+        });
+    }
+
+    if Setting::ShowExploredPct.is_available(platform) {
+        let label = if settings.show_explored_pct {
+            "Explored %: On"
+        } else {
+            "Explored %: Off"
+        };
+        items.push(MenuItem {
+            label: label.to_string(),
+            action: MenuAction::ToggleShowExploredPct,
+            enabled: true,
+        });
+    }
+
+    if Setting::ShowCoordinates.is_available(platform) {
+        let label = if settings.show_coordinates {
+            "Coordinates: On"
+        } else {
+            "Coordinates: Off"
+        };
+        items.push(MenuItem {
+            label: label.to_string(),
+            action: MenuAction::ToggleShowCoordinates,
+            enabled: true,
+        });
+    }
+
+    if Setting::ShowKeybindHints.is_available(platform) {
+        let label = if settings.show_keybind_hints {
+            "Keybind Hints: On"
+        } else {
+            "Keybind Hints: Off"
+        };
+        items.push(MenuItem {
+            label: label.to_string(),
+            action: MenuAction::ToggleShowKeybindHints,
+            enabled: true,
+        });
+    }
+
+    if Setting::ShowCorpses.is_available(platform) {
+        let label = if settings.show_corpses {
+            "Show Corpses: On"
+        } else {
+            "Show Corpses: Off"
+        };
+        items.push(MenuItem {
+            label: label.to_string(),
+            action: MenuAction::ToggleShowCorpses,
+            enabled: true,
+        });
+    }
+
+    if Setting::ViKeys.is_available(platform) {
+        let label = if settings.vi_keys {
+            "Vi Keys: On"
+        } else {
+            "Vi Keys: Off"
+        };
+        items.push(MenuItem {
+            label: label.to_string(),
+            action: MenuAction::ToggleViKeys,
+            enabled: true,
+        });
+    }
+
+    if Setting::Numpad.is_available(platform) {
+        let label = if settings.numpad {
+            "Numpad: On"
+        } else {
+            "Numpad: Off"
+        };
+        items.push(MenuItem {
+            label: label.to_string(),
+            action: MenuAction::ToggleNumpad,
+            enabled: true,
+        });
+    }
+
+    if Setting::AnimationSpeed.is_available(platform) {
+        items.push(MenuItem {
+            label: format!("Animation Speed: {}ms", settings.animation_speed_ms),
+            action: MenuAction::CycleAnimationSpeed,
+            enabled: true,
+        });
+    }
+
+    if Setting::AutosaveFrequency.is_available(platform) {
+        let label = if settings.autosave_frequency == 1 {
+            "Autosave: Every Turn".to_string()
+        } else {
+            format!("Autosave: Every {} Turns", settings.autosave_frequency)
+        };
+        items.push(MenuItem {
+            label,
+            action: MenuAction::CycleAutosaveFrequency,
+            enabled: true,
+        });
+    }
+
+    if Setting::MessageLogLines.is_available(platform) {
+        items.push(MenuItem {
+            label: format!("Message Log: {} Lines", settings.message_log_lines),
+            action: MenuAction::CycleMessageLogLines,
+            enabled: true,
+        });
+    }
+
+    items.push(MenuItem {
+        label: "Back".to_string(),
+        action: MenuAction::Back,
+        enabled: true,
+    });
+
+    Menu::new("Settings", items)
 }
 
 /// Construct a yes/no confirmation dialog.
@@ -802,26 +918,66 @@ mod tests {
 
     #[test]
     fn settings_menu_classic_shows_mode() {
-        let menu = settings_menu(false, false);
+        let s = Settings::default();
+        let menu = settings_menu(&s, Platform::Terminal);
         assert_eq!(menu.items[0].label, "Mode: Classic");
         assert_eq!(menu.items[0].action, MenuAction::ToggleCasualMode);
         assert_eq!(menu.items[1].label, "Explored %: Off");
         assert_eq!(menu.items[1].action, MenuAction::ToggleShowExploredPct);
-        assert_eq!(menu.items[2].action, MenuAction::Back);
+        // Last item should be Back.
+        assert_eq!(menu.items.last().unwrap().action, MenuAction::Back);
     }
 
     #[test]
     fn settings_menu_casual_shows_mode() {
-        let menu = settings_menu(true, false);
+        let s = Settings {
+            casual_mode: true,
+            ..Settings::default()
+        };
+        let menu = settings_menu(&s, Platform::Terminal);
         assert_eq!(menu.items[0].label, "Mode: Casual");
         assert_eq!(menu.items[0].action, MenuAction::ToggleCasualMode);
     }
 
     #[test]
     fn settings_menu_explored_pct_on() {
-        let menu = settings_menu(false, true);
+        let s = Settings {
+            show_explored_pct: true,
+            ..Settings::default()
+        };
+        let menu = settings_menu(&s, Platform::Terminal);
         assert_eq!(menu.items[1].label, "Explored %: On");
         assert_eq!(menu.items[1].action, MenuAction::ToggleShowExploredPct);
+    }
+
+    #[test]
+    fn settings_menu_mcp_hides_unavailable() {
+        let s = Settings::defaults_for(Platform::Mcp);
+        let menu = settings_menu(&s, Platform::Mcp);
+        // MCP should not have AnimationSpeed, ViKeys, Numpad, or ShowKeybindHints.
+        let actions: Vec<_> = menu.items.iter().map(|i| i.action).collect();
+        assert!(!actions.contains(&MenuAction::CycleAnimationSpeed));
+        assert!(!actions.contains(&MenuAction::ToggleViKeys));
+        assert!(!actions.contains(&MenuAction::ToggleNumpad));
+        assert!(!actions.contains(&MenuAction::ToggleShowKeybindHints));
+    }
+
+    #[test]
+    fn settings_menu_terminal_shows_all() {
+        let s = Settings::default();
+        let menu = settings_menu(&s, Platform::Terminal);
+        let actions: Vec<_> = menu.items.iter().map(|i| i.action).collect();
+        assert!(actions.contains(&MenuAction::ToggleCasualMode));
+        assert!(actions.contains(&MenuAction::ToggleShowExploredPct));
+        assert!(actions.contains(&MenuAction::ToggleShowCoordinates));
+        assert!(actions.contains(&MenuAction::ToggleShowKeybindHints));
+        assert!(actions.contains(&MenuAction::ToggleShowCorpses));
+        assert!(actions.contains(&MenuAction::ToggleViKeys));
+        assert!(actions.contains(&MenuAction::ToggleNumpad));
+        assert!(actions.contains(&MenuAction::CycleAnimationSpeed));
+        assert!(actions.contains(&MenuAction::CycleAutosaveFrequency));
+        assert!(actions.contains(&MenuAction::CycleMessageLogLines));
+        assert!(actions.contains(&MenuAction::Back));
     }
 
     #[test]

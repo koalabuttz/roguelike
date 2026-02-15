@@ -759,6 +759,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            dirty: false,
         };
         state.update_fov();
 

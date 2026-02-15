@@ -8,6 +8,7 @@ pub enum MenuAction {
     ResumeGame,
     SaveGame,
     LoadGame,
+    MainMenu,
     Quit,
     /// The user pressed Esc/Back. The caller decides what this means:
     /// title screen interprets it as quit, pause menu as resume.
@@ -104,8 +105,16 @@ impl Menu {
             GameColor::Black,
         );
 
-        // Items: centered, starting below the title.
+        // Items: left-justified as a block, block centered on screen.
         let items_start_y = title_y + 3;
+        let max_item_width = self
+            .items
+            .iter()
+            .map(|item| item.label.len() as i32 + 2) // +2 for "> " or "  " prefix
+            .max()
+            .unwrap_or(0);
+        let items_x = (screen_w - max_item_width) / 2;
+
         for (i, item) in self.items.iter().enumerate() {
             let y = items_start_y + i as i32;
             let is_selected = i == self.selected;
@@ -113,7 +122,6 @@ impl Menu {
             let prefix = if is_selected { "> " } else { "  " };
             let text = format!("{}{}", prefix, item.label);
 
-            let x = (screen_w - text.len() as i32) / 2;
             let fg = if !item.enabled {
                 GameColor::DarkGrey
             } else if is_selected {
@@ -121,7 +129,7 @@ impl Menu {
             } else {
                 GameColor::White
             };
-            renderer.draw_str(x, y, &text, fg, GameColor::Black);
+            renderer.draw_str(items_x, y, &text, fg, GameColor::Black);
         }
 
         renderer.flush();
@@ -173,6 +181,11 @@ pub fn pause_menu() -> Menu {
             MenuItem {
                 label: "Load Game".to_string(),
                 action: MenuAction::LoadGame,
+                enabled: true,
+            },
+            MenuItem {
+                label: "Main Menu".to_string(),
+                action: MenuAction::MainMenu,
                 enabled: true,
             },
             MenuItem {
@@ -417,11 +430,12 @@ mod tests {
     fn pause_menu_has_expected_items() {
         let menu = pause_menu();
         assert_eq!(menu.title, "Paused");
-        assert_eq!(menu.items.len(), 4);
+        assert_eq!(menu.items.len(), 5);
         assert_eq!(menu.items[0].action, MenuAction::ResumeGame);
         assert_eq!(menu.items[1].action, MenuAction::SaveGame);
         assert_eq!(menu.items[2].action, MenuAction::LoadGame);
-        assert_eq!(menu.items[3].action, MenuAction::Quit);
+        assert_eq!(menu.items[3].action, MenuAction::MainMenu);
+        assert_eq!(menu.items[4].action, MenuAction::Quit);
     }
 
     #[test]
@@ -443,14 +457,17 @@ mod tests {
     }
 
     #[test]
-    fn draw_centers_items_horizontally() {
+    fn draw_left_justifies_items_as_centered_block() {
         let menu = two_item_menu();
         let mut r = MockRenderer::new(80, 24);
         menu.draw(&mut r);
 
-        // "> Option A" = 10 chars. (80 - 10) / 2 = 35
-        let item = r.find_str("Option A").unwrap();
-        assert_eq!(item.0, 35);
+        // Both items are 10 chars ("  Option A" / "  Option B"), so the
+        // block x = (80 - 10) / 2 = 35. All items share this x.
+        let item_a = r.find_str("Option A").unwrap();
+        let item_b = r.find_str("Option B").unwrap();
+        assert_eq!(item_a.0, 35);
+        assert_eq!(item_b.0, 35);
     }
 
     #[test]

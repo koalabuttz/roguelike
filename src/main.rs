@@ -219,6 +219,11 @@ fn main() -> std::io::Result<()> {
                             }
                         }
                     }
+                    MenuAction::MainMenu => {
+                        game_state = None;
+                        let has_save = std::path::Path::new(SAVE_FILE).exists();
+                        app_state = AppState::Title(menu::title_menu(has_save));
+                    }
                     MenuAction::Quit => break 'app,
                     _ => {}
                 }

@@ -12,7 +12,7 @@ CLAUDE.md
 claude.md
 
 # Game data files
-savegame.json
+savegame*.json
 settings.json
 
 # OS artifacts

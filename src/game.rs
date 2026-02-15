@@ -680,6 +680,32 @@ impl GameState {
         }
     }
 
+    /// Extract lightweight metadata for save-slot display.
+    ///
+    /// Uses the same explored-percentage formula as `observe()`.
+    pub fn extract_metadata(&self) -> crate::saves::SlotMetadata {
+        let player = &self.entities[0];
+        let floor_count = self.map.known_floor_count();
+        let explored_floors = self
+            .explored
+            .iter()
+            .filter(|&&(x, y)| {
+                self.map.in_bounds(x, y) && self.map.tiles[self.map.idx(x, y)] == map::Tile::Floor
+            })
+            .count() as i32;
+        let explored_pct = if floor_count > 0 {
+            (explored_floors * 100) / floor_count
+        } else {
+            0
+        };
+        crate::saves::SlotMetadata {
+            turn_count: self.turn_count,
+            player_hp: player.hp,
+            player_max_hp: player.max_hp,
+            explored_pct,
+        }
+    }
+
     /// Find frontier tiles: explored floor tiles adjacent to at least one
     /// unexplored tile. These mark the boundary of explored territory and
     /// indicate where further exploration is possible.
@@ -1976,5 +2002,22 @@ mod tests {
     fn load_invalid_json_returns_error() {
         let result = GameState::load_from_json("not valid json");
         assert!(result.is_err());
+    }
+
+    // --- extract_metadata tests ---
+
+    #[test]
+    fn extract_metadata_matches_observe() {
+        let mut gs = test_game();
+        // Play a few turns to change state.
+        for _ in 0..3 {
+            gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        }
+        let obs = gs.observe();
+        let meta = gs.extract_metadata();
+        assert_eq!(meta.turn_count, gs.turn_count);
+        assert_eq!(meta.player_hp, obs.player_hp);
+        assert_eq!(meta.player_max_hp, obs.player_max_hp);
+        assert_eq!(meta.explored_pct, obs.explored_pct);
     }
 }

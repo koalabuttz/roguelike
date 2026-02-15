@@ -226,6 +226,110 @@ impl Map {
 
         player_start
     }
+
+    /// Generate a map from a named preset. Returns the player start position.
+    ///
+    /// Presets are deterministic given a seed and produce specific topologies
+    /// useful for targeted testing and development.
+    pub fn from_preset(&mut self, preset: MapPreset, rng: &mut impl Rng) -> Pos {
+        match preset {
+            MapPreset::Arena => self.gen_arena(rng),
+            MapPreset::Corridor => self.gen_corridor(),
+            MapPreset::Labyrinth => self.gen_labyrinth(rng),
+            MapPreset::SingleRoom => self.gen_single_room(),
+            MapPreset::OpenField => self.gen_open_field(),
+        }
+    }
+
+    /// One large room filling most of the map with monsters spawning inside.
+    fn gen_arena(&mut self, rng: &mut impl Rng) -> Pos {
+        let room = Rect::new(1, 1, self.width - 3, self.height - 3);
+        self.carve_room(&room);
+        self.rooms.push(room);
+
+        // Add a second room in the same space so monsters spawn
+        // (spawn_monsters skips room 0).
+        let spawn_room = Rect::new(1, 1, self.width - 3, self.height - 3);
+        self.rooms.push(spawn_room);
+
+        let _ = rng; // consume rng for signature consistency
+        let (cx, cy) = self.rooms[0].center();
+        (cx, cy)
+    }
+
+    /// Long horizontal corridor spanning the map.
+    fn gen_corridor(&mut self) -> Pos {
+        let mid_y = self.height / 2;
+        for x in 1..self.width - 1 {
+            let idx = self.idx(x, mid_y);
+            self.tiles[idx] = Tile::Floor;
+        }
+        // Register as rooms so spawn works.
+        let left = Rect::new(0, mid_y - 1, self.width / 3, 2);
+        let right = Rect::new(
+            (self.width * 2 / 3) as Coord,
+            mid_y - 1,
+            self.width / 3 - 1,
+            2,
+        );
+        // Carve room floors too (so interior check works).
+        self.carve_room(&left);
+        self.carve_room(&right);
+        self.rooms.push(left);
+        self.rooms.push(right);
+        (2, mid_y)
+    }
+
+    /// Dense maze with many corridors and intersections.
+    fn gen_labyrinth(&mut self, rng: &mut impl Rng) -> Pos {
+        // Use many small rooms connected by corridors.
+        self.generate(
+            50, // many rooms
+            2,  // tiny rooms
+            4,  // small max
+            rng,
+        )
+    }
+
+    /// Minimal map: one small room.
+    fn gen_single_room(&mut self) -> Pos {
+        let room = Rect::new(2, 2, 6, 6);
+        self.carve_room(&room);
+        self.rooms.push(room);
+        self.rooms[0].center()
+    }
+
+    /// Large open area with no walls (except border).
+    fn gen_open_field(&mut self) -> Pos {
+        for y in 1..self.height - 1 {
+            for x in 1..self.width - 1 {
+                let idx = self.idx(x, y);
+                self.tiles[idx] = Tile::Floor;
+            }
+        }
+        let room = Rect::new(0, 0, self.width - 1, self.height - 1);
+        self.rooms.push(room);
+        (self.width / 2, self.height / 2)
+    }
+}
+
+/// Named map generation presets for development and testing.
+///
+/// Each preset produces a specific map topology useful for targeted scenarios:
+/// combat testing, pathfinding validation, FOV edge cases, etc.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MapPreset {
+    /// One large room filling the map — good for combat testing.
+    Arena,
+    /// Long horizontal corridor — good for pathfinding / FOV testing.
+    Corridor,
+    /// Dense maze of tiny rooms — good for auto-explore testing.
+    Labyrinth,
+    /// One small room — minimal scenario for unit tests.
+    SingleRoom,
+    /// Huge open area — good for FOV performance testing.
+    OpenField,
 }
 
 #[cfg(test)]
@@ -480,5 +584,91 @@ mod tests {
                 );
             }
         }
+    }
+
+    // --- Map preset tests ---
+
+    #[test]
+    fn preset_arena_has_walkable_center() {
+        let mut m = Map::new(40, 30);
+        let mut rng = StdRng::seed_from_u64(42);
+        let (px, py) = m.from_preset(MapPreset::Arena, &mut rng);
+        assert!(m.is_walkable(px, py));
+        assert!(m.floor_count() > 100);
+    }
+
+    #[test]
+    fn preset_corridor_is_horizontal() {
+        let mut m = Map::new(40, 20);
+        let mut rng = StdRng::seed_from_u64(42);
+        let (px, py) = m.from_preset(MapPreset::Corridor, &mut rng);
+        assert!(m.is_walkable(px, py));
+        let mid_y = 20 / 2;
+        // The corridor should span the middle row.
+        for x in 1..39 {
+            assert!(
+                m.is_walkable(x, mid_y),
+                "tile ({}, {}) should be walkable in corridor",
+                x,
+                mid_y
+            );
+        }
+    }
+
+    #[test]
+    fn preset_labyrinth_has_rooms() {
+        let mut m = Map::new(80, 50);
+        let mut rng = StdRng::seed_from_u64(42);
+        let (px, py) = m.from_preset(MapPreset::Labyrinth, &mut rng);
+        assert!(m.is_walkable(px, py));
+        assert!(m.rooms.len() > 5, "labyrinth should have many rooms");
+    }
+
+    #[test]
+    fn preset_single_room_is_small() {
+        let mut m = Map::new(40, 30);
+        let mut rng = StdRng::seed_from_u64(42);
+        let (px, py) = m.from_preset(MapPreset::SingleRoom, &mut rng);
+        assert!(m.is_walkable(px, py));
+        assert_eq!(m.rooms.len(), 1);
+    }
+
+    #[test]
+    fn preset_open_field_mostly_walkable() {
+        let mut m = Map::new(40, 30);
+        let mut rng = StdRng::seed_from_u64(42);
+        let (px, py) = m.from_preset(MapPreset::OpenField, &mut rng);
+        assert!(m.is_walkable(px, py));
+        // Nearly all interior tiles should be floor.
+        let expected_floor = (38) * (28);
+        assert!(
+            m.floor_count() >= expected_floor,
+            "expected at least {} floor tiles, got {}",
+            expected_floor,
+            m.floor_count()
+        );
+    }
+
+    #[test]
+    fn preset_deterministic_with_same_seed() {
+        let mut m1 = Map::new(40, 30);
+        let mut rng1 = StdRng::seed_from_u64(99);
+        let (p1x, p1y) = m1.from_preset(MapPreset::Arena, &mut rng1);
+
+        let mut m2 = Map::new(40, 30);
+        let mut rng2 = StdRng::seed_from_u64(99);
+        let (p2x, p2y) = m2.from_preset(MapPreset::Arena, &mut rng2);
+
+        assert_eq!(p1x, p2x);
+        assert_eq!(p1y, p2y);
+        assert_eq!(m1.tiles, m2.tiles);
+    }
+
+    #[test]
+    fn preset_serialization_roundtrip() {
+        let preset = MapPreset::Corridor;
+        let json = serde_json::to_string(&preset).unwrap();
+        let loaded: MapPreset = serde_json::from_str(&json).unwrap();
+        assert_eq!(preset, loaded);
     }
 }

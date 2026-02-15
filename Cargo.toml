@@ -21,3 +21,7 @@ path = "src/main.rs"
 [[bin]]
 name = "mcp_server"
 path = "src/bin/mcp_server.rs"
+
+[[bin]]
+name = "headless"
+path = "src/bin/headless.rs"

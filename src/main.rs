@@ -1,6 +1,8 @@
 use std::io::stdout;
 use std::time::Duration;
 
+#[cfg(debug_assertions)]
+use roguelike::dev_tools::DevCommand;
 use roguelike::{
     game, input, menu, menu::MenuAction, platform::Renderer, render, saves::SlotMetadata, settings,
     settings::Platform, types::Coord,
@@ -403,6 +405,26 @@ fn main() -> std::io::Result<()> {
                 }
 
                 let key = wait_for_keypress()?;
+
+                // Debug keybindings (debug builds only).
+                #[cfg(debug_assertions)]
+                {
+                    use crossterm::event::KeyCode;
+                    let dev_cmd = match key.code {
+                        KeyCode::F(1) => Some(DevCommand::DumpStats),
+                        KeyCode::F(2) => Some(DevCommand::ToggleFov),
+                        KeyCode::F(3) => Some(DevCommand::ToggleGodMode),
+                        KeyCode::F(4) => Some(DevCommand::RevealMap),
+                        KeyCode::F(5) => Some(DevCommand::KillAll),
+                        _ => None,
+                    };
+                    if let Some(cmd) = dev_cmd {
+                        let msg = state.exec_dev(cmd);
+                        state.log.add(&msg);
+                        continue;
+                    }
+                }
+
                 if let Some(cmd) = input::translate_key(key, settings.vi_keys, settings.numpad) {
                     match cmd {
                         input::GameCommand::Quit => {

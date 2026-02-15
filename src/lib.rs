@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod combat;
 pub mod data;
+pub mod dev_tools;
 pub mod entity;
 pub mod fov;
 pub mod game;

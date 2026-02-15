@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::ai;
 use crate::combat;
 use crate::data;
+use crate::dev_tools::DevFlags;
 use crate::entity::{Entity, EntityKind};
 use crate::fov;
 use crate::input::GameCommand;
@@ -270,12 +271,64 @@ pub struct GameState {
     pub seed: u64,
     #[serde(skip)]
     pub dirty: bool,
+    /// Debug flags (FOV disable, god mode, etc.). Skipped during normal
+    /// serialization — dev state is not persisted.
+    #[serde(skip)]
+    pub dev_flags: DevFlags,
+    /// Record of every GameCommand executed, enabling deterministic replay.
+    /// Only populated when recording is active (debug builds / headless).
+    #[serde(default)]
+    pub command_log: Vec<GameCommand>,
 }
 
 impl GameState {
     /// Create a new game with a random seed.
     pub fn new(width: Coord, height: Coord) -> Self {
         Self::with_seed(width, height, rand::random::<u64>())
+    }
+
+    /// Create a new game using a named map preset.
+    ///
+    /// Presets produce deterministic topologies for testing and development.
+    /// Monster spawning still uses the seed for placement within rooms.
+    pub fn with_preset(width: Coord, height: Coord, seed: u64, preset: map::MapPreset) -> Self {
+        let cfg = &data::CONFIG;
+        let mut master = StdRng::seed_from_u64(seed);
+        let mut map_rng = StdRng::from_rng(&mut master).unwrap();
+        let mut spawn_rng = StdRng::from_rng(&mut master).unwrap();
+
+        let mut map = map::Map::new(width, height);
+        let (px, py) = map.from_preset(preset, &mut map_rng);
+
+        let mut entities = vec![Entity::player(px, py)];
+        let monsters = spawn::spawn_monsters(
+            &map,
+            data::SPAWN_TABLE,
+            cfg.max_monsters_per_room,
+            &mut spawn_rng,
+        );
+        entities.extend(monsters);
+
+        let visible = fov::compute_fov(&map, px, py, cfg.fov_radius);
+        let explored = visible.clone();
+
+        let mut log = MessageLog::new();
+        log.add(format!("Welcome! Map preset: {:?}", preset));
+
+        GameState {
+            map,
+            entities,
+            fov_radius: cfg.fov_radius,
+            visible,
+            explored,
+            log,
+            game_over: false,
+            turn_count: 0,
+            seed,
+            dirty: false,
+            dev_flags: DevFlags::default(),
+            command_log: Vec::new(),
+        }
     }
 
     /// Create a new game with a specific seed for reproducible dungeons.
@@ -325,14 +378,25 @@ impl GameState {
             turn_count: 0,
             seed,
             dirty: false,
+            dev_flags: DevFlags::default(),
+            command_log: Vec::new(),
         }
     }
 
     pub fn update_fov(&mut self) {
-        let px = self.entities[0].x;
-        let py = self.entities[0].y;
-        self.visible = fov::compute_fov(&self.map, px, py, self.fov_radius);
-        self.explored.extend(&self.visible);
+        if self.dev_flags.fov_disabled {
+            for y in 0..self.map.height {
+                for x in 0..self.map.width {
+                    self.visible.insert((x, y));
+                }
+            }
+            self.explored.extend(&self.visible);
+        } else {
+            let px = self.entities[0].x;
+            let py = self.entities[0].y;
+            self.visible = fov::compute_fov(&self.map, px, py, self.fov_radius);
+            self.explored.extend(&self.visible);
+        }
     }
 
     /// Serialize the current game state to a JSON string.
@@ -407,6 +471,10 @@ impl GameState {
     /// non-terminal consumer. It bundles the logic that `main.rs` performs
     /// across multiple calls into a single method.
     pub fn step(&mut self, cmd: GameCommand) -> StepResult {
+        // Record command for replay if recording is active.
+        if !self.command_log.is_empty() || cfg!(debug_assertions) {
+            self.command_log.push(cmd);
+        }
         let msg_count_before = self.log.len();
         let action_taken = self.handle_command(cmd);
 
@@ -414,7 +482,13 @@ impl GameState {
             self.dirty = true;
             self.update_fov();
             if ai::run_monster_turns(&mut self.entities, &self.map, &self.visible, &mut self.log) {
-                self.game_over = true;
+                if self.dev_flags.god_mode {
+                    // God mode: prevent death, restore to 1 HP.
+                    self.entities[0].hp = 1;
+                    self.entities[0].alive = true;
+                } else {
+                    self.game_over = true;
+                }
             }
             self.turn_count += 1;
             self.apply_regen();
@@ -830,6 +904,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            dev_flags: DevFlags::default(),
+            command_log: Vec::new(),
         }
     }
 
@@ -1127,6 +1203,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            dev_flags: DevFlags::default(),
+            command_log: Vec::new(),
         }
     }
 
@@ -1196,6 +1274,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            dev_flags: DevFlags::default(),
+            command_log: Vec::new(),
         };
 
         let result = gs.autorun(1, 0);
@@ -1239,6 +1319,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            dev_flags: DevFlags::default(),
+            command_log: Vec::new(),
         };
 
         let result = gs.autorun(1, 0);
@@ -1271,6 +1353,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            dev_flags: DevFlags::default(),
+            command_log: Vec::new(),
         };
 
         let result = gs.autorun(1, 0);
@@ -1330,6 +1414,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            dev_flags: DevFlags::default(),
+            command_log: Vec::new(),
         };
 
         let result = gs.autorun(1, 0);
@@ -1366,6 +1452,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            dev_flags: DevFlags::default(),
+            command_log: Vec::new(),
         };
 
         let result = gs.autorun(1, 0);

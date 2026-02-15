@@ -33,11 +33,12 @@ fn animate_stepper(
     mut stepper: game::AutorunStepper,
     cols: Coord,
     rows: Coord,
+    show_explored_pct: bool,
 ) -> std::io::Result<()> {
     loop {
         match stepper.next_step(state) {
             game::StepOutcome::Continue => {
-                render::render(stdout, state, cols, rows)?;
+                render::render(stdout, state, cols, rows, show_explored_pct)?;
                 // 50ms frame pacing + interrupt detection.
                 if event::poll(Duration::from_millis(50))? {
                     let _ = event::read()?;
@@ -229,7 +230,12 @@ fn main() -> std::io::Result<()> {
                         let slots = load_all_slot_metadata();
                         let auto_meta = load_autosave_metadata();
                         let has_auto = std::path::Path::new(SAVE_FILE).exists();
-                        let mut load_menu = menu::load_slot_menu(has_auto, &auto_meta, &slots);
+                        let mut load_menu = menu::load_slot_menu(
+                            has_auto,
+                            &auto_meta,
+                            &slots,
+                            settings.show_explored_pct,
+                        );
                         match run_menu(&mut load_menu, &mut renderer)? {
                             MenuAction::LoadGame => {
                                 // Load autosave.
@@ -301,10 +307,15 @@ fn main() -> std::io::Result<()> {
                 }
                 MenuAction::Settings => {
                     loop {
-                        let mut settings_m = menu::settings_menu(settings.casual_mode);
+                        let mut settings_m =
+                            menu::settings_menu(settings.casual_mode, settings.show_explored_pct);
                         match run_menu(&mut settings_m, &mut renderer)? {
                             MenuAction::ToggleCasualMode => {
                                 settings.casual_mode = !settings.casual_mode;
+                                save_settings(&settings);
+                            }
+                            MenuAction::ToggleShowExploredPct => {
+                                settings.show_explored_pct = !settings.show_explored_pct;
                                 save_settings(&settings);
                             }
                             _ => break,
@@ -329,7 +340,13 @@ fn main() -> std::io::Result<()> {
                     autosave_buf = None;
                 }
 
-                render::render(&mut stdout, state, cols as i32, rows as i32)?;
+                render::render(
+                    &mut stdout,
+                    state,
+                    cols as i32,
+                    rows as i32,
+                    settings.show_explored_pct,
+                )?;
 
                 if state.game_over {
                     // Game-over: any key returns to title.
@@ -354,7 +371,14 @@ fn main() -> std::io::Result<()> {
 
                         input::GameCommand::Autorun { dx, dy } => {
                             let stepper = state.start_autorun(dx, dy);
-                            animate_stepper(&mut stdout, state, stepper, cols as i32, rows as i32)?;
+                            animate_stepper(
+                                &mut stdout,
+                                state,
+                                stepper,
+                                cols as i32,
+                                rows as i32,
+                                settings.show_explored_pct,
+                            )?;
                             // Autosave after autorun completes.
                             if let Ok(json) = state.save_to_json() {
                                 autosave_buf = Some(json);
@@ -369,6 +393,7 @@ fn main() -> std::io::Result<()> {
                                     stepper,
                                     cols as i32,
                                     rows as i32,
+                                    settings.show_explored_pct,
                                 )?;
                                 // Autosave after auto-explore completes.
                                 if let Ok(json) = state.save_to_json() {
@@ -401,7 +426,8 @@ fn main() -> std::io::Result<()> {
                         if let Some(ref state) = game_state {
                             // Show save-slot picker.
                             let slots = load_all_slot_metadata();
-                            let mut slot_menu = menu::save_slot_menu(&slots);
+                            let mut slot_menu =
+                                menu::save_slot_menu(&slots, settings.show_explored_pct);
                             match run_menu(&mut slot_menu, &mut renderer)? {
                                 MenuAction::SelectSlot(slot) => {
                                     let msg = save_to_slot(state, slot);
@@ -426,7 +452,12 @@ fn main() -> std::io::Result<()> {
                         let slots = load_all_slot_metadata();
                         let auto_meta = load_autosave_metadata();
                         let has_auto = std::path::Path::new(SAVE_FILE).exists();
-                        let mut load_m = menu::load_slot_menu(has_auto, &auto_meta, &slots);
+                        let mut load_m = menu::load_slot_menu(
+                            has_auto,
+                            &auto_meta,
+                            &slots,
+                            settings.show_explored_pct,
+                        );
                         match run_menu(&mut load_m, &mut renderer)? {
                             MenuAction::LoadGame => {
                                 // Load autosave.

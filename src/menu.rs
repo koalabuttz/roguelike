@@ -19,6 +19,8 @@ pub enum MenuAction {
     Settings,
     /// Toggle casual/classic mode in the settings menu.
     ToggleCasualMode,
+    /// Toggle explored-percentage display in the settings menu.
+    ToggleShowExploredPct,
     /// Return to the title screen from the pause menu.
     TitleScreen,
     /// A save slot was selected (0-indexed slot number).
@@ -260,12 +262,17 @@ pub fn pause_menu(casual_mode: bool) -> Menu {
 
 /// Construct the settings submenu.
 ///
-/// Shows the current mode as a toggle and a "Back" option.
-pub fn settings_menu(casual_mode: bool) -> Menu {
+/// Shows the current mode as a toggle, an explored-% toggle, and "Back".
+pub fn settings_menu(casual_mode: bool, show_explored_pct: bool) -> Menu {
     let mode_label = if casual_mode {
         "Mode: Casual"
     } else {
         "Mode: Classic"
+    };
+    let explored_label = if show_explored_pct {
+        "Explored %: On"
+    } else {
+        "Explored %: Off"
     };
     Menu::new(
         "Settings",
@@ -273,6 +280,11 @@ pub fn settings_menu(casual_mode: bool) -> Menu {
             MenuItem {
                 label: mode_label.to_string(),
                 action: MenuAction::ToggleCasualMode,
+                enabled: true,
+            },
+            MenuItem {
+                label: explored_label.to_string(),
+                action: MenuAction::ToggleShowExploredPct,
                 enabled: true,
             },
             MenuItem {
@@ -312,15 +324,23 @@ pub fn confirm_menu(message: &str) -> Menu {
 
 /// Format a slot label from its metadata.
 ///
-/// Occupied: `"Slot 1 — Turn 42, 20/30 HP, 35%"`
-/// Empty:    `"Slot 1 — Empty"`
-fn slot_label(index: u8, meta: &Option<SlotMetadata>) -> String {
+/// Occupied (show_pct=true):  `"Slot 1 — Turn 42, 20/30 HP, 35%"`
+/// Occupied (show_pct=false): `"Slot 1 — Turn 42, 20/30 HP"`
+/// Empty:                     `"Slot 1 — Empty"`
+fn slot_label(index: u8, meta: &Option<SlotMetadata>, show_pct: bool) -> String {
     let num = index + 1;
     match meta {
-        Some(m) => format!(
-            "Slot {} \u{2014} Turn {}, {}/{} HP, {}%",
-            num, m.turn_count, m.player_hp, m.player_max_hp, m.explored_pct
-        ),
+        Some(m) => {
+            let base = format!(
+                "Slot {} \u{2014} Turn {}, {}/{} HP",
+                num, m.turn_count, m.player_hp, m.player_max_hp
+            );
+            if show_pct {
+                format!("{}, {}%", base, m.explored_pct)
+            } else {
+                base
+            }
+        }
         None => format!("Slot {} \u{2014} Empty", num),
     }
 }
@@ -328,10 +348,10 @@ fn slot_label(index: u8, meta: &Option<SlotMetadata>) -> String {
 /// Construct the save-slot picker (casual mode, from pause menu).
 ///
 /// Shows 5 slots (always enabled — saving to any slot is valid) plus "Back".
-pub fn save_slot_menu(slots: &[Option<SlotMetadata>; 5]) -> Menu {
+pub fn save_slot_menu(slots: &[Option<SlotMetadata>; 5], show_pct: bool) -> Menu {
     let mut items: Vec<MenuItem> = (0..5u8)
         .map(|i| MenuItem {
-            label: slot_label(i, &slots[i as usize]),
+            label: slot_label(i, &slots[i as usize], show_pct),
             action: MenuAction::SelectSlot(i),
             enabled: true,
         })
@@ -351,12 +371,20 @@ pub fn load_slot_menu(
     has_autosave: bool,
     autosave_meta: &Option<SlotMetadata>,
     slots: &[Option<SlotMetadata>; 5],
+    show_pct: bool,
 ) -> Menu {
     let autosave_label = match autosave_meta {
-        Some(m) => format!(
-            "Autosave \u{2014} Turn {}, {}/{} HP, {}%",
-            m.turn_count, m.player_hp, m.player_max_hp, m.explored_pct
-        ),
+        Some(m) => {
+            let base = format!(
+                "Autosave \u{2014} Turn {}, {}/{} HP",
+                m.turn_count, m.player_hp, m.player_max_hp
+            );
+            if show_pct {
+                format!("{}, {}%", base, m.explored_pct)
+            } else {
+                base
+            }
+        }
         None => "Autosave \u{2014} Empty".to_string(),
     };
     let mut items = vec![MenuItem {
@@ -366,7 +394,7 @@ pub fn load_slot_menu(
     }];
     for i in 0..5u8 {
         items.push(MenuItem {
-            label: slot_label(i, &slots[i as usize]),
+            label: slot_label(i, &slots[i as usize], show_pct),
             action: MenuAction::SelectSlot(i),
             enabled: slots[i as usize].is_some(),
         });
@@ -774,17 +802,26 @@ mod tests {
 
     #[test]
     fn settings_menu_classic_shows_mode() {
-        let menu = settings_menu(false);
+        let menu = settings_menu(false, false);
         assert_eq!(menu.items[0].label, "Mode: Classic");
         assert_eq!(menu.items[0].action, MenuAction::ToggleCasualMode);
-        assert_eq!(menu.items[1].action, MenuAction::Back);
+        assert_eq!(menu.items[1].label, "Explored %: Off");
+        assert_eq!(menu.items[1].action, MenuAction::ToggleShowExploredPct);
+        assert_eq!(menu.items[2].action, MenuAction::Back);
     }
 
     #[test]
     fn settings_menu_casual_shows_mode() {
-        let menu = settings_menu(true);
+        let menu = settings_menu(true, false);
         assert_eq!(menu.items[0].label, "Mode: Casual");
         assert_eq!(menu.items[0].action, MenuAction::ToggleCasualMode);
+    }
+
+    #[test]
+    fn settings_menu_explored_pct_on() {
+        let menu = settings_menu(false, true);
+        assert_eq!(menu.items[1].label, "Explored %: On");
+        assert_eq!(menu.items[1].action, MenuAction::ToggleShowExploredPct);
     }
 
     #[test]
@@ -843,7 +880,7 @@ mod tests {
     #[test]
     fn save_slot_menu_shows_five_slots_plus_back() {
         let slots: [Option<SlotMetadata>; 5] = Default::default();
-        let menu = save_slot_menu(&slots);
+        let menu = save_slot_menu(&slots, false);
         assert_eq!(menu.title, "Save Game");
         assert_eq!(menu.items.len(), 6); // 5 slots + Back
         assert_eq!(menu.items[5].action, MenuAction::Back);
@@ -852,7 +889,7 @@ mod tests {
     #[test]
     fn save_slot_menu_all_slots_enabled() {
         let slots: [Option<SlotMetadata>; 5] = Default::default();
-        let menu = save_slot_menu(&slots);
+        let menu = save_slot_menu(&slots, false);
         for i in 0..5 {
             assert!(menu.items[i].enabled, "Slot {} should be enabled", i);
             assert_eq!(menu.items[i].action, MenuAction::SelectSlot(i as u8));
@@ -863,16 +900,26 @@ mod tests {
     fn save_slot_menu_occupied_shows_stats() {
         let mut slots: [Option<SlotMetadata>; 5] = Default::default();
         slots[0] = Some(sample_metadata());
-        let menu = save_slot_menu(&slots);
+        let menu = save_slot_menu(&slots, true);
         assert!(menu.items[0].label.contains("Turn 42"));
         assert!(menu.items[0].label.contains("20/30 HP"));
         assert!(menu.items[0].label.contains("35%"));
     }
 
     #[test]
+    fn save_slot_menu_occupied_hides_pct_when_off() {
+        let mut slots: [Option<SlotMetadata>; 5] = Default::default();
+        slots[0] = Some(sample_metadata());
+        let menu = save_slot_menu(&slots, false);
+        assert!(menu.items[0].label.contains("Turn 42"));
+        assert!(menu.items[0].label.contains("20/30 HP"));
+        assert!(!menu.items[0].label.contains("35%"));
+    }
+
+    #[test]
     fn save_slot_menu_empty_shows_empty() {
         let slots: [Option<SlotMetadata>; 5] = Default::default();
-        let menu = save_slot_menu(&slots);
+        let menu = save_slot_menu(&slots, false);
         assert!(menu.items[0].label.contains("Empty"));
     }
 
@@ -881,7 +928,7 @@ mod tests {
     #[test]
     fn load_slot_menu_structure() {
         let slots: [Option<SlotMetadata>; 5] = Default::default();
-        let menu = load_slot_menu(false, &None, &slots);
+        let menu = load_slot_menu(false, &None, &slots, false);
         assert_eq!(menu.title, "Load Game");
         assert_eq!(menu.items.len(), 7); // Autosave + 5 slots + Back
         assert_eq!(menu.items[0].action, MenuAction::LoadGame); // Autosave
@@ -891,7 +938,7 @@ mod tests {
     #[test]
     fn load_slot_menu_empty_slots_disabled() {
         let slots: [Option<SlotMetadata>; 5] = Default::default();
-        let menu = load_slot_menu(false, &None, &slots);
+        let menu = load_slot_menu(false, &None, &slots, false);
         for i in 1..=5 {
             assert!(
                 !menu.items[i].enabled,
@@ -905,7 +952,7 @@ mod tests {
     fn load_slot_menu_occupied_slot_enabled() {
         let mut slots: [Option<SlotMetadata>; 5] = Default::default();
         slots[2] = Some(sample_metadata());
-        let menu = load_slot_menu(false, &None, &slots);
+        let menu = load_slot_menu(false, &None, &slots, false);
         assert!(menu.items[3].enabled); // index 3 = slot 2 (offset by autosave)
         assert_eq!(menu.items[3].action, MenuAction::SelectSlot(2));
     }
@@ -914,16 +961,27 @@ mod tests {
     fn load_slot_menu_autosave_enabled_when_present() {
         let slots: [Option<SlotMetadata>; 5] = Default::default();
         let auto_meta = Some(sample_metadata());
-        let menu = load_slot_menu(true, &auto_meta, &slots);
+        let menu = load_slot_menu(true, &auto_meta, &slots, true);
         assert!(menu.items[0].enabled);
         assert!(menu.items[0].label.contains("Autosave"));
         assert!(menu.items[0].label.contains("Turn 42"));
+        assert!(menu.items[0].label.contains("35%"));
+    }
+
+    #[test]
+    fn load_slot_menu_autosave_hides_pct_when_off() {
+        let slots: [Option<SlotMetadata>; 5] = Default::default();
+        let auto_meta = Some(sample_metadata());
+        let menu = load_slot_menu(true, &auto_meta, &slots, false);
+        assert!(menu.items[0].label.contains("Autosave"));
+        assert!(menu.items[0].label.contains("Turn 42"));
+        assert!(!menu.items[0].label.contains("35%"));
     }
 
     #[test]
     fn load_slot_menu_autosave_disabled_when_absent() {
         let slots: [Option<SlotMetadata>; 5] = Default::default();
-        let menu = load_slot_menu(false, &None, &slots);
+        let menu = load_slot_menu(false, &None, &slots, false);
         assert!(!menu.items[0].enabled);
     }
 }

@@ -7,7 +7,7 @@ use crossterm::{
 };
 
 use crate::game::GameState;
-use crate::map::Tile;
+use crate::map::{self, Tile};
 use crate::platform::Renderer;
 use crate::types::{Coord, GameColor};
 
@@ -86,10 +86,11 @@ pub fn render<W: Write>(
     state: &GameState,
     screen_width: Coord,
     screen_height: Coord,
+    show_explored_pct: bool,
 ) -> std::io::Result<()> {
     render_map(w, state)?;
     render_entities(w, state)?;
-    render_status_bar(w, state, screen_width, screen_height)?;
+    render_status_bar(w, state, screen_width, screen_height, show_explored_pct)?;
     render_message_log(w, state, screen_width, screen_height)?;
 
     w.flush()?;
@@ -181,6 +182,7 @@ fn render_status_bar<W: Write>(
     state: &GameState,
     screen_width: Coord,
     screen_height: Coord,
+    show_explored_pct: bool,
 ) -> std::io::Result<()> {
     let player = &state.entities[0];
     let bar_row = (screen_height - 5) as u16;
@@ -210,9 +212,29 @@ fn render_status_bar<W: Write>(
     let bar_filled: String = "\u{2588}".repeat(fill as usize);
     let bar_empty: String = "\u{2591}".repeat(empty as usize);
 
+    let explored_segment = if show_explored_pct {
+        let floor_count = state.map.known_floor_count();
+        let explored_floors = state
+            .explored
+            .iter()
+            .filter(|&&(x, y)| {
+                state.map.in_bounds(x, y)
+                    && state.map.tiles[state.map.idx(x, y)] == map::Tile::Floor
+            })
+            .count() as i32;
+        let pct = if floor_count > 0 {
+            (explored_floors * 100) / floor_count
+        } else {
+            0
+        };
+        format!(" | Explored: {}%", pct)
+    } else {
+        String::new()
+    };
+
     let status = format!(
-        " HP [{}{}] {}/{} | ({},{}) | hjkl/numpad/arrows: move | .: wait | q: quit",
-        bar_filled, bar_empty, player.hp, player.max_hp, player.x, player.y
+        " HP [{}{}] {}/{} | ({},{}){} | hjkl/numpad/arrows: move | .: wait | q: quit",
+        bar_filled, bar_empty, player.hp, player.max_hp, player.x, player.y, explored_segment
     );
     let truncated: String = status
         .chars()

@@ -7,6 +7,7 @@ pub mod game;
 pub mod input;
 pub mod map;
 pub mod mcp;
+pub mod menu;
 pub mod message_log;
 pub mod pathfinding;
 pub mod platform;

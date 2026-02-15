@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::data;
 use crate::entity::Entity;
-use crate::fov;
 use crate::game::GameState;
+use crate::input::GameCommand;
 use crate::map::Tile;
 use crate::types::{Coord, Stat};
 
@@ -35,208 +35,195 @@ pub enum DevCommand {
     ToggleGodMode,
 }
 
-/// Mutable flags that control debug behavior, stored on GameState.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct DevFlags {
+/// Debug state owned by the caller (main loop, headless runner), not by
+/// GameState. This keeps the core game struct free of dev-only fields.
+#[derive(Debug, Clone, Default)]
+pub struct DevSession {
     /// When true, all tiles are always visible (FOV disabled).
     pub fov_disabled: bool,
     /// When true, player takes no damage.
     pub god_mode: bool,
+    /// Recorded commands for replay export.
+    pub command_log: Vec<GameCommand>,
+    /// Whether recording is active.
+    pub recording: bool,
 }
 
-impl GameState {
-    /// Execute a dev command. Returns a message describing what happened.
-    pub fn exec_dev(&mut self, cmd: DevCommand) -> String {
-        match cmd {
-            DevCommand::Teleport { x, y } => self.dev_teleport(x, y),
-            DevCommand::SetHp { hp } => self.dev_set_hp(hp),
-            DevCommand::SetAttack { attack } => self.dev_set_attack(attack),
-            DevCommand::SetDefense { defense } => self.dev_set_defense(defense),
-            DevCommand::Spawn { name, x, y } => self.dev_spawn(&name, x, y),
-            DevCommand::RevealMap => self.dev_reveal_map(),
-            DevCommand::ToggleFov => self.dev_toggle_fov(),
-            DevCommand::KillAll => self.dev_kill_all(),
-            DevCommand::DumpStats => self.dev_dump_stats(),
-            DevCommand::ToggleGodMode => self.dev_toggle_god_mode(),
-        }
-    }
-
-    fn dev_teleport(&mut self, x: Coord, y: Coord) -> String {
-        if !self.map.is_walkable(x, y) {
-            return format!("Cannot teleport to ({}, {}): not walkable.", x, y);
-        }
-        self.entities[0].x = x;
-        self.entities[0].y = y;
-        self.update_fov();
-        format!("Teleported to ({}, {}).", x, y)
-    }
-
-    fn dev_set_hp(&mut self, hp: Stat) -> String {
-        let clamped = hp.clamp(1, self.entities[0].max_hp);
-        self.entities[0].hp = clamped;
-        format!("HP set to {}.", clamped)
-    }
-
-    fn dev_set_attack(&mut self, attack: Stat) -> String {
-        self.entities[0].attack = attack;
-        format!("Attack set to {}.", attack)
-    }
-
-    fn dev_set_defense(&mut self, defense: Stat) -> String {
-        self.entities[0].defense = defense;
-        format!("Defense set to {}.", defense)
-    }
-
-    fn dev_spawn(&mut self, name: &str, x: Coord, y: Coord) -> String {
-        if !self.map.is_walkable(x, y) {
-            return format!("Cannot spawn at ({}, {}): not walkable.", x, y);
-        }
-        let template = match name.to_lowercase().as_str() {
-            "goblin" => &data::GOBLIN,
-            "orc" => &data::ORC,
-            "troll" => &data::TROLL,
-            _ => return format!("Unknown monster: '{}'. Use goblin, orc, or troll.", name),
-        };
-        self.entities.push(Entity::from_template(template, x, y));
-        format!("Spawned {} at ({}, {}).", template.name, x, y)
-    }
-
-    fn dev_reveal_map(&mut self) -> String {
-        for y in 0..self.map.height {
-            for x in 0..self.map.width {
-                self.explored.insert((x, y));
+/// Execute a dev command against the game state. Returns a user-facing message.
+///
+/// This is a free function — it operates *on* GameState through its public
+/// fields rather than being an inherent method, keeping GameState's interface
+/// defined entirely in `game.rs` per the method placement rule.
+pub fn exec_dev(gs: &mut GameState, session: &mut DevSession, cmd: DevCommand) -> String {
+    match cmd {
+        DevCommand::Teleport { x, y } => {
+            if !gs.map.is_walkable(x, y) {
+                return format!("Cannot teleport to ({}, {}): not walkable.", x, y);
             }
+            gs.entities[0].x = x;
+            gs.entities[0].y = y;
+            gs.update_fov();
+            if session.fov_disabled {
+                apply_fov_override(gs);
+            }
+            format!("Teleported to ({}, {}).", x, y)
         }
-        "Entire map revealed.".to_string()
-    }
-
-    fn dev_toggle_fov(&mut self) -> String {
-        self.dev_flags.fov_disabled = !self.dev_flags.fov_disabled;
-        if self.dev_flags.fov_disabled {
-            // Make all tiles visible.
-            for y in 0..self.map.height {
-                for x in 0..self.map.width {
-                    self.visible.insert((x, y));
-                    self.explored.insert((x, y));
+        DevCommand::SetHp { hp } => {
+            let clamped = hp.clamp(1, gs.entities[0].max_hp);
+            gs.entities[0].hp = clamped;
+            format!("HP set to {}.", clamped)
+        }
+        DevCommand::SetAttack { attack } => {
+            gs.entities[0].attack = attack;
+            format!("Attack set to {}.", attack)
+        }
+        DevCommand::SetDefense { defense } => {
+            gs.entities[0].defense = defense;
+            format!("Defense set to {}.", defense)
+        }
+        DevCommand::Spawn { name, x, y } => {
+            if !gs.map.is_walkable(x, y) {
+                return format!("Cannot spawn at ({}, {}): not walkable.", x, y);
+            }
+            let template = match name.to_lowercase().as_str() {
+                "goblin" => &data::GOBLIN,
+                "orc" => &data::ORC,
+                "troll" => &data::TROLL,
+                _ => return format!("Unknown monster: '{}'. Use goblin, orc, or troll.", name),
+            };
+            gs.entities.push(Entity::from_template(template, x, y));
+            format!("Spawned {} at ({}, {}).", template.name, x, y)
+        }
+        DevCommand::RevealMap => {
+            for y in 0..gs.map.height {
+                for x in 0..gs.map.width {
+                    gs.explored.insert((x, y));
                 }
             }
-            "FOV disabled (all tiles visible).".to_string()
-        } else {
-            self.update_fov();
-            "FOV re-enabled.".to_string()
+            "Entire map revealed.".to_string()
         }
-    }
-
-    fn dev_kill_all(&mut self) -> String {
-        let mut killed = 0;
-        for entity in self.entities.iter_mut().skip(1) {
-            if entity.alive {
-                entity.alive = false;
-                entity.hp = 0;
-                killed += 1;
-            }
-        }
-        format!("Killed {} monsters.", killed)
-    }
-
-    fn dev_dump_stats(&self) -> String {
-        let living = self.entities.iter().skip(1).filter(|e| e.alive).count();
-        let dead = self.entities.iter().skip(1).filter(|e| !e.alive).count();
-        let floor_count = self.map.floor_count();
-        let explored_floors = self
-            .explored
-            .iter()
-            .filter(|&&(x, y)| {
-                self.map.in_bounds(x, y) && self.map.tiles[self.map.idx(x, y)] == Tile::Floor
-            })
-            .count();
-        let p = &self.entities[0];
-        format!(
-            "Turn {} | Seed {} | HP {}/{} | ATK {} DEF {} | \
-             Monsters: {} alive, {} dead | Rooms: {} | \
-             Explored: {}/{} floor tiles ({}%) | Flags: fov_off={} god={}",
-            self.turn_count,
-            self.seed,
-            p.hp,
-            p.max_hp,
-            p.attack,
-            p.defense,
-            living,
-            dead,
-            self.map.rooms.len(),
-            explored_floors,
-            floor_count,
-            if floor_count > 0 {
-                (explored_floors as i32 * 100) / floor_count
+        DevCommand::ToggleFov => {
+            session.fov_disabled = !session.fov_disabled;
+            if session.fov_disabled {
+                apply_fov_override(gs);
+                "FOV disabled (all tiles visible).".to_string()
             } else {
-                0
-            },
-            self.dev_flags.fov_disabled,
-            self.dev_flags.god_mode,
-        )
-    }
-
-    fn dev_toggle_god_mode(&mut self) -> String {
-        self.dev_flags.god_mode = !self.dev_flags.god_mode;
-        if self.dev_flags.god_mode {
-            "God mode enabled (invulnerable).".to_string()
-        } else {
-            "God mode disabled.".to_string()
+                gs.update_fov();
+                "FOV re-enabled.".to_string()
+            }
         }
-    }
-
-    /// Override update_fov when FOV is disabled via dev tools.
-    pub fn dev_update_fov(&mut self) {
-        if self.dev_flags.fov_disabled {
-            for y in 0..self.map.height {
-                for x in 0..self.map.width {
-                    self.visible.insert((x, y));
+        DevCommand::KillAll => {
+            let mut killed = 0;
+            for entity in gs.entities.iter_mut().skip(1) {
+                if entity.alive {
+                    entity.alive = false;
+                    entity.hp = 0;
+                    killed += 1;
                 }
             }
+            format!("Killed {} monsters.", killed)
+        }
+        DevCommand::DumpStats => dump_stats(gs, session),
+        DevCommand::ToggleGodMode => {
+            session.god_mode = !session.god_mode;
+            if session.god_mode {
+                "God mode enabled (invulnerable).".to_string()
+            } else {
+                "God mode disabled.".to_string()
+            }
+        }
+    }
+}
+
+/// Make all tiles visible — called after FOV toggle or after step() when
+/// FOV is disabled.
+fn apply_fov_override(gs: &mut GameState) {
+    for y in 0..gs.map.height {
+        for x in 0..gs.map.width {
+            gs.visible.insert((x, y));
+            gs.explored.insert((x, y));
+        }
+    }
+}
+
+/// Format a debug summary of the game state.
+fn dump_stats(gs: &GameState, session: &DevSession) -> String {
+    let living = gs.entities.iter().skip(1).filter(|e| e.alive).count();
+    let dead = gs.entities.iter().skip(1).filter(|e| !e.alive).count();
+    let floor_count = gs.map.floor_count();
+    let explored_floors = gs
+        .explored
+        .iter()
+        .filter(|&&(x, y)| gs.map.in_bounds(x, y) && gs.map.tiles[gs.map.idx(x, y)] == Tile::Floor)
+        .count();
+    let p = &gs.entities[0];
+    format!(
+        "Turn {} | Seed {} | HP {}/{} | ATK {} DEF {} | \
+         Monsters: {} alive, {} dead | Rooms: {} | \
+         Explored: {}/{} floor tiles ({}%) | Flags: fov_off={} god={}",
+        gs.turn_count,
+        gs.seed,
+        p.hp,
+        p.max_hp,
+        p.attack,
+        p.defense,
+        living,
+        dead,
+        gs.map.rooms.len(),
+        explored_floors,
+        floor_count,
+        if floor_count > 0 {
+            (explored_floors as i32 * 100) / floor_count
         } else {
-            let px = self.entities[0].x;
-            let py = self.entities[0].y;
-            self.visible = fov::compute_fov(&self.map, px, py, self.fov_radius);
-            self.explored.extend(&self.visible);
+            0
+        },
+        session.fov_disabled,
+        session.god_mode,
+    )
+}
+
+/// Apply dev-session overrides after a normal `gs.step()` call.
+///
+/// Call this in the game loop after each `step()` to enforce god mode and
+/// FOV disable without polluting GameState's core logic.
+pub fn after_step(gs: &mut GameState, session: &mut DevSession, cmd: GameCommand) {
+    // Record command if recording is active.
+    if session.recording {
+        session.command_log.push(cmd);
+    }
+    // God mode: undo death.
+    if session.god_mode && gs.game_over {
+        gs.entities[0].hp = 1;
+        gs.entities[0].alive = true;
+        gs.game_over = false;
+    }
+    // FOV override: make all tiles visible.
+    if session.fov_disabled {
+        apply_fov_override(gs);
+    }
+}
+
+/// Replay a sequence of commands on a game state. Returns a summary.
+///
+/// This is the core replay engine — it drives `gs.step()` for each command
+/// and collects statistics.
+pub fn replay_commands(gs: &mut GameState, commands: &[GameCommand]) -> ReplayResult {
+    let mut turns_played = 0;
+    for &cmd in commands {
+        if gs.game_over {
+            break;
+        }
+        let result = gs.step(cmd);
+        if result.action_taken {
+            turns_played += 1;
         }
     }
-
-    /// Start recording commands (clears any existing log).
-    pub fn start_recording(&mut self) {
-        self.command_log.clear();
-    }
-
-    /// Export the command log as a Replay.
-    pub fn export_replay(&self) -> Replay {
-        Replay {
-            seed: self.seed,
-            width: self.map.width,
-            height: self.map.height,
-            commands: self.command_log.clone(),
-            preset: None,
-        }
-    }
-
-    /// Replay a sequence of commands on this game state.
-    /// Returns the number of commands successfully executed.
-    pub fn replay_commands(&mut self, commands: &[crate::input::GameCommand]) -> ReplayResult {
-        let mut turns_played = 0;
-        for &cmd in commands {
-            if self.game_over {
-                break;
-            }
-            let result = self.step(cmd);
-            if result.action_taken {
-                turns_played += 1;
-            }
-        }
-        ReplayResult {
-            turns_played,
-            game_over: self.game_over,
-            final_hp: self.entities[0].hp,
-            final_turn: self.turn_count,
-            kills: self.entities.iter().skip(1).filter(|e| !e.alive).count() as i32,
-        }
+    ReplayResult {
+        turns_played,
+        game_over: gs.game_over,
+        final_hp: gs.entities[0].hp,
+        final_turn: gs.turn_count,
+        kills: gs.entities.iter().skip(1).filter(|e| !e.alive).count() as i32,
     }
 }
 
@@ -249,12 +236,23 @@ pub struct Replay {
     pub seed: u64,
     pub width: Coord,
     pub height: Coord,
-    pub commands: Vec<crate::input::GameCommand>,
+    pub commands: Vec<GameCommand>,
     /// Optional map preset used (None = standard generation).
     pub preset: Option<crate::map::MapPreset>,
 }
 
 impl Replay {
+    /// Build a replay from the current game + recorded commands.
+    pub fn from_session(gs: &GameState, session: &DevSession) -> Self {
+        Replay {
+            seed: gs.seed,
+            width: gs.map.width,
+            height: gs.map.height,
+            commands: session.command_log.clone(),
+            preset: None,
+        }
+    }
+
     /// Serialize to JSON.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
@@ -271,7 +269,7 @@ impl Replay {
             Some(preset) => GameState::with_preset(self.width, self.height, self.seed, preset),
             None => GameState::with_seed(self.width, self.height, self.seed),
         };
-        gs.replay_commands(&self.commands)
+        replay_commands(&mut gs, &self.commands)
     }
 }
 
@@ -301,6 +299,7 @@ pub struct BatchRunStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fov;
     use crate::game::GameState;
     use crate::map::{Map, Tile};
     use crate::message_log::MessageLog;
@@ -327,15 +326,14 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
-            dev_flags: DevFlags::default(),
-            command_log: Vec::new(),
         }
     }
 
     #[test]
     fn teleport_to_walkable() {
         let mut gs = test_game();
-        let msg = gs.exec_dev(DevCommand::Teleport { x: 8, y: 8 });
+        let mut session = DevSession::default();
+        let msg = exec_dev(&mut gs, &mut session, DevCommand::Teleport { x: 8, y: 8 });
         assert!(msg.contains("Teleported"));
         assert_eq!(gs.entities[0].x, 8);
         assert_eq!(gs.entities[0].y, 8);
@@ -344,7 +342,8 @@ mod tests {
     #[test]
     fn teleport_to_wall_fails() {
         let mut gs = test_game();
-        let msg = gs.exec_dev(DevCommand::Teleport { x: 0, y: 0 });
+        let mut session = DevSession::default();
+        let msg = exec_dev(&mut gs, &mut session, DevCommand::Teleport { x: 0, y: 0 });
         assert!(msg.contains("not walkable"));
         assert_eq!(gs.entities[0].x, 5);
     }
@@ -352,34 +351,46 @@ mod tests {
     #[test]
     fn set_hp_clamps() {
         let mut gs = test_game();
-        gs.exec_dev(DevCommand::SetHp { hp: 999 });
+        let mut session = DevSession::default();
+        exec_dev(&mut gs, &mut session, DevCommand::SetHp { hp: 999 });
         assert_eq!(gs.entities[0].hp, gs.entities[0].max_hp);
-        gs.exec_dev(DevCommand::SetHp { hp: -5 });
+        exec_dev(&mut gs, &mut session, DevCommand::SetHp { hp: -5 });
         assert_eq!(gs.entities[0].hp, 1);
     }
 
     #[test]
     fn set_attack() {
         let mut gs = test_game();
-        gs.exec_dev(DevCommand::SetAttack { attack: 99 });
+        let mut session = DevSession::default();
+        exec_dev(&mut gs, &mut session, DevCommand::SetAttack { attack: 99 });
         assert_eq!(gs.entities[0].attack, 99);
     }
 
     #[test]
     fn set_defense() {
         let mut gs = test_game();
-        gs.exec_dev(DevCommand::SetDefense { defense: 50 });
+        let mut session = DevSession::default();
+        exec_dev(
+            &mut gs,
+            &mut session,
+            DevCommand::SetDefense { defense: 50 },
+        );
         assert_eq!(gs.entities[0].defense, 50);
     }
 
     #[test]
     fn spawn_known_monster() {
         let mut gs = test_game();
-        let msg = gs.exec_dev(DevCommand::Spawn {
-            name: "goblin".to_string(),
-            x: 3,
-            y: 3,
-        });
+        let mut session = DevSession::default();
+        let msg = exec_dev(
+            &mut gs,
+            &mut session,
+            DevCommand::Spawn {
+                name: "goblin".to_string(),
+                x: 3,
+                y: 3,
+            },
+        );
         assert!(msg.contains("Spawned Goblin"));
         assert_eq!(gs.entities.len(), 2);
         assert_eq!(gs.entities[1].name, "Goblin");
@@ -388,11 +399,16 @@ mod tests {
     #[test]
     fn spawn_unknown_monster_fails() {
         let mut gs = test_game();
-        let msg = gs.exec_dev(DevCommand::Spawn {
-            name: "dragon".to_string(),
-            x: 3,
-            y: 3,
-        });
+        let mut session = DevSession::default();
+        let msg = exec_dev(
+            &mut gs,
+            &mut session,
+            DevCommand::Spawn {
+                name: "dragon".to_string(),
+                x: 3,
+                y: 3,
+            },
+        );
         assert!(msg.contains("Unknown monster"));
         assert_eq!(gs.entities.len(), 1);
     }
@@ -400,21 +416,26 @@ mod tests {
     #[test]
     fn spawn_on_wall_fails() {
         let mut gs = test_game();
-        let msg = gs.exec_dev(DevCommand::Spawn {
-            name: "orc".to_string(),
-            x: 0,
-            y: 0,
-        });
+        let mut session = DevSession::default();
+        let msg = exec_dev(
+            &mut gs,
+            &mut session,
+            DevCommand::Spawn {
+                name: "orc".to_string(),
+                x: 0,
+                y: 0,
+            },
+        );
         assert!(msg.contains("not walkable"));
     }
 
     #[test]
     fn reveal_map_explores_everything() {
         let mut gs = test_game();
+        let mut session = DevSession::default();
         let before = gs.explored.len();
-        gs.exec_dev(DevCommand::RevealMap);
+        exec_dev(&mut gs, &mut session, DevCommand::RevealMap);
         assert!(gs.explored.len() > before);
-        // All in-bounds tiles should be explored.
         for y in 0..gs.map.height {
             for x in 0..gs.map.width {
                 assert!(gs.explored.contains(&(x, y)));
@@ -425,29 +446,31 @@ mod tests {
     #[test]
     fn toggle_fov_disables_and_enables() {
         let mut gs = test_game();
-        assert!(!gs.dev_flags.fov_disabled);
-        gs.exec_dev(DevCommand::ToggleFov);
-        assert!(gs.dev_flags.fov_disabled);
-        // All tiles visible.
+        let mut session = DevSession::default();
+        assert!(!session.fov_disabled);
+        exec_dev(&mut gs, &mut session, DevCommand::ToggleFov);
+        assert!(session.fov_disabled);
         assert!(gs.visible.contains(&(0, 0)));
-        gs.exec_dev(DevCommand::ToggleFov);
-        assert!(!gs.dev_flags.fov_disabled);
+        exec_dev(&mut gs, &mut session, DevCommand::ToggleFov);
+        assert!(!session.fov_disabled);
     }
 
     #[test]
     fn kill_all_monsters() {
         let mut gs = test_game();
+        let mut session = DevSession::default();
         gs.entities.push(Entity::from_template(&data::GOBLIN, 3, 3));
         gs.entities.push(Entity::from_template(&data::ORC, 4, 4));
-        let msg = gs.exec_dev(DevCommand::KillAll);
+        let msg = exec_dev(&mut gs, &mut session, DevCommand::KillAll);
         assert!(msg.contains("Killed 2"));
         assert!(gs.entities.iter().skip(1).all(|e| !e.alive));
     }
 
     #[test]
     fn dump_stats_includes_key_info() {
-        let mut gs = test_game();
-        let msg = gs.exec_dev(DevCommand::DumpStats);
+        let gs = test_game();
+        let session = DevSession::default();
+        let msg = dump_stats(&gs, &session);
         assert!(msg.contains("Turn 0"));
         assert!(msg.contains("Seed 0"));
         assert!(msg.contains("HP"));
@@ -457,11 +480,30 @@ mod tests {
     #[test]
     fn toggle_god_mode() {
         let mut gs = test_game();
-        assert!(!gs.dev_flags.god_mode);
-        gs.exec_dev(DevCommand::ToggleGodMode);
-        assert!(gs.dev_flags.god_mode);
-        gs.exec_dev(DevCommand::ToggleGodMode);
-        assert!(!gs.dev_flags.god_mode);
+        let mut session = DevSession::default();
+        assert!(!session.god_mode);
+        exec_dev(&mut gs, &mut session, DevCommand::ToggleGodMode);
+        assert!(session.god_mode);
+        exec_dev(&mut gs, &mut session, DevCommand::ToggleGodMode);
+        assert!(!session.god_mode);
+    }
+
+    #[test]
+    fn god_mode_prevents_death_via_after_step() {
+        let mut gs = test_game();
+        let mut session = DevSession::default();
+        session.god_mode = true;
+        gs.entities[0].hp = 1;
+        gs.entities[0].attack = 0;
+        let mut monster = Entity::from_template(&data::TROLL, 6, 5);
+        monster.attack = 100;
+        gs.entities.push(monster);
+        gs.step(GameCommand::Wait);
+        after_step(&mut gs, &mut session, GameCommand::Wait);
+        // God mode should have undone the death.
+        assert!(!gs.game_over);
+        assert!(gs.entities[0].alive);
+        assert_eq!(gs.entities[0].hp, 1);
     }
 
     // --- Replay tests ---
@@ -469,19 +511,27 @@ mod tests {
     #[test]
     fn recording_captures_commands() {
         let mut gs = test_game();
-        gs.start_recording();
-        gs.step(crate::input::GameCommand::Move { dx: 1, dy: 0 });
-        gs.step(crate::input::GameCommand::Wait);
-        // In debug builds, command_log always records; check it has entries.
-        assert!(gs.command_log.len() >= 2);
+        let mut session = DevSession {
+            recording: true,
+            ..DevSession::default()
+        };
+        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        after_step(&mut gs, &mut session, GameCommand::Move { dx: 1, dy: 0 });
+        gs.step(GameCommand::Wait);
+        after_step(&mut gs, &mut session, GameCommand::Wait);
+        assert_eq!(session.command_log.len(), 2);
     }
 
     #[test]
     fn export_replay_roundtrip() {
         let mut gs = test_game();
-        gs.start_recording();
-        gs.step(crate::input::GameCommand::Move { dx: 1, dy: 0 });
-        let replay = gs.export_replay();
+        let mut session = DevSession {
+            recording: true,
+            ..DevSession::default()
+        };
+        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        after_step(&mut gs, &mut session, GameCommand::Move { dx: 1, dy: 0 });
+        let replay = Replay::from_session(&gs, &session);
         let json = replay.to_json().unwrap();
         let loaded = Replay::from_json(&json).unwrap();
         assert_eq!(loaded.seed, 0);
@@ -490,13 +540,16 @@ mod tests {
 
     #[test]
     fn replay_deterministic_same_outcome() {
-        // Create a game, record some moves, export, then replay and compare.
         let mut gs = GameState::with_seed(40, 30, 42);
-        gs.start_recording();
+        let mut session = DevSession {
+            recording: true,
+            ..DevSession::default()
+        };
         for _ in 0..5 {
-            gs.step(crate::input::GameCommand::Wait);
+            gs.step(GameCommand::Wait);
+            after_step(&mut gs, &mut session, GameCommand::Wait);
         }
-        let replay = gs.export_replay();
+        let replay = Replay::from_session(&gs, &session);
         let result = replay.execute();
         assert_eq!(result.final_turn, gs.turn_count);
     }
@@ -507,10 +560,7 @@ mod tests {
             seed: 42,
             width: 40,
             height: 30,
-            commands: vec![
-                crate::input::GameCommand::Wait,
-                crate::input::GameCommand::Wait,
-            ],
+            commands: vec![GameCommand::Wait, GameCommand::Wait],
             preset: Some(crate::map::MapPreset::Arena),
         };
         let result = replay.execute();
@@ -522,18 +572,14 @@ mod tests {
         let mut gs = test_game();
         gs.entities[0].hp = 1;
         gs.entities[0].attack = 0;
-        // Place a strong monster adjacent.
         let mut monster = Entity::from_template(&data::TROLL, 6, 5);
         monster.attack = 100;
         gs.entities.push(monster);
-        // Replaying many waits — should stop after player dies.
-        let commands: Vec<_> = (0..100).map(|_| crate::input::GameCommand::Wait).collect();
-        let result = gs.replay_commands(&commands);
+        let commands: Vec<_> = (0..100).map(|_| GameCommand::Wait).collect();
+        let result = replay_commands(&mut gs, &commands);
         assert!(result.game_over);
         assert!(result.turns_played < 100);
     }
-
-    // --- with_preset constructor test ---
 
     #[test]
     fn with_preset_creates_valid_game() {

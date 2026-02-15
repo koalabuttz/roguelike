@@ -760,8 +760,6 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
-            dev_flags: crate::dev_tools::DevFlags::default(),
-            command_log: Vec::new(),
         };
         state.update_fov();
 

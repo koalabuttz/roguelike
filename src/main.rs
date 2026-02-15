@@ -2,7 +2,7 @@ use std::io::stdout;
 use std::time::Duration;
 
 #[cfg(debug_assertions)]
-use roguelike::dev_tools::DevCommand;
+use roguelike::dev_tools::{self, DevCommand, DevSession};
 use roguelike::{
     game, input, menu, menu::MenuAction, platform::Renderer, render, saves::SlotMetadata, settings,
     settings::Platform, types::Coord,
@@ -193,6 +193,8 @@ fn main() -> std::io::Result<()> {
     let map_height = (rows as i32) - 1 - settings.message_log_lines as i32;
     let mut game_state: Option<game::GameState> = None;
     let mut autosave_buf: Option<String> = None;
+    #[cfg(debug_assertions)]
+    let mut dev_session = DevSession::default();
     let has_save = has_save_for_title(settings.casual_mode);
     let mut app_state = AppState::Title(menu::title_menu(has_save, settings.casual_mode));
 
@@ -419,7 +421,7 @@ fn main() -> std::io::Result<()> {
                         _ => None,
                     };
                     if let Some(cmd) = dev_cmd {
-                        let msg = state.exec_dev(cmd);
+                        let msg = dev_tools::exec_dev(state, &mut dev_session, cmd);
                         state.log.add(&msg);
                         continue;
                     }

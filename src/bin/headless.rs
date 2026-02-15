@@ -22,7 +22,7 @@
 //! cargo run --bin headless -- --games 10 --save-replays
 //! ```
 
-use roguelike::dev_tools::{BatchRunStats, Replay, ReplayResult};
+use roguelike::dev_tools::{BatchRunStats, DevSession, Replay, ReplayResult};
 use roguelike::game::GameState;
 use roguelike::map::MapPreset;
 
@@ -155,9 +155,10 @@ fn run_single_game(
         None => GameState::with_seed(width, height, seed),
     };
 
-    if save_replay {
-        gs.start_recording();
-    }
+    let session = DevSession {
+        recording: save_replay,
+        ..DevSession::default()
+    };
 
     let mut turns = 0;
     while !gs.game_over && turns < max_turns {
@@ -183,13 +184,14 @@ fn run_single_game(
     }
 
     if save_replay {
-        let replay = gs.export_replay();
+        let replay = Replay::from_session(&gs, &session);
         let filename = format!("replay_{}.json", seed);
         if let Ok(json) = replay.to_json() {
             let _ = std::fs::write(&filename, json);
             eprintln!("  Saved replay to {}", filename);
         }
     }
+    let _ = session; // consumed
 
     let kills = gs.entities.iter().skip(1).filter(|e| !e.alive).count() as i32;
     ReplayResult {

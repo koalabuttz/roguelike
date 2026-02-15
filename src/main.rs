@@ -102,7 +102,8 @@ fn main() -> std::io::Result<()> {
     let map_height = (rows as i32) - data::CONFIG.ui_bottom_rows;
 
     let mut game_state: Option<game::GameState> = None;
-    let mut app_state = AppState::Title(menu::title_menu());
+    let has_save = std::path::Path::new(SAVE_FILE).exists();
+    let mut app_state = AppState::Title(menu::title_menu(has_save));
 
     'app: loop {
         match &mut app_state {
@@ -110,6 +111,23 @@ fn main() -> std::io::Result<()> {
                 MenuAction::NewGame => {
                     game_state = Some(game::GameState::new(cols as i32, map_height));
                     app_state = AppState::Playing;
+                }
+                MenuAction::LoadGame => {
+                    menu::draw_loading(&mut renderer);
+                    match load_game() {
+                        Ok(mut loaded) => {
+                            loaded.log.add("Game loaded.");
+                            game_state = Some(loaded);
+                            app_state = AppState::Playing;
+                        }
+                        Err(msg) => {
+                            // Shouldn't normally happen (button is disabled when
+                            // no save exists), but handle gracefully.
+                            let _ = msg;
+                            let has_save = std::path::Path::new(SAVE_FILE).exists();
+                            app_state = AppState::Title(menu::title_menu(has_save));
+                        }
+                    }
                 }
                 MenuAction::Quit | MenuAction::Back => break 'app,
                 _ => {}
@@ -124,7 +142,8 @@ fn main() -> std::io::Result<()> {
                     // Game-over: any key returns to title.
                     wait_for_keypress()?;
                     game_state = None;
-                    app_state = AppState::Title(menu::title_menu());
+                    let has_save = std::path::Path::new(SAVE_FILE).exists();
+                    app_state = AppState::Title(menu::title_menu(has_save));
                     continue;
                 }
 
@@ -182,21 +201,24 @@ fn main() -> std::io::Result<()> {
                             }
                         }
                     }
-                    MenuAction::LoadGame => match load_game() {
-                        Ok(mut loaded) => {
-                            loaded.log.add("Game loaded.");
-                            game_state = Some(loaded);
-                            app_state = AppState::Playing;
-                        }
-                        Err(msg) => {
-                            if let Some(ref mut state) = game_state {
-                                state.log.add(&msg);
+                    MenuAction::LoadGame => {
+                        menu::draw_loading(&mut renderer);
+                        match load_game() {
+                            Ok(mut loaded) => {
+                                loaded.log.add("Game loaded.");
+                                game_state = Some(loaded);
+                                app_state = AppState::Playing;
                             }
-                            let mut new_pause = menu::pause_menu();
-                            new_pause.selected = 2;
-                            app_state = AppState::Paused(new_pause);
+                            Err(msg) => {
+                                if let Some(ref mut state) = game_state {
+                                    state.log.add(&msg);
+                                }
+                                let mut new_pause = menu::pause_menu();
+                                new_pause.selected = 2;
+                                app_state = AppState::Paused(new_pause);
+                            }
                         }
-                    },
+                    }
                     MenuAction::Quit => break 'app,
                     _ => {}
                 }

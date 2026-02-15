@@ -18,6 +18,7 @@ pub enum MenuAction {
 pub struct MenuItem {
     pub label: String,
     pub action: MenuAction,
+    pub enabled: bool,
 }
 
 /// A navigable menu screen with a title and selectable items.
@@ -75,7 +76,13 @@ impl Menu {
                 self.move_down();
                 None
             }
-            MenuCommand::Select => Some(self.selected_action()),
+            MenuCommand::Select => {
+                if self.items[self.selected].enabled {
+                    Some(self.selected_action())
+                } else {
+                    None
+                }
+            }
             MenuCommand::Back => Some(MenuAction::Back),
         }
     }
@@ -107,7 +114,9 @@ impl Menu {
             let text = format!("{}{}", prefix, item.label);
 
             let x = (screen_w - text.len() as i32) / 2;
-            let fg = if is_selected {
+            let fg = if !item.enabled {
+                GameColor::DarkGrey
+            } else if is_selected {
                 GameColor::Yellow
             } else {
                 GameColor::White
@@ -120,17 +129,27 @@ impl Menu {
 }
 
 /// Construct the title screen menu.
-pub fn title_menu() -> Menu {
+///
+/// When `has_save` is true the "Load Game" option is selectable; otherwise
+/// it is shown greyed-out so the player knows the feature exists.
+pub fn title_menu(has_save: bool) -> Menu {
     Menu::new(
         "R O G U E L I K E",
         vec![
             MenuItem {
                 label: "New Game".to_string(),
                 action: MenuAction::NewGame,
+                enabled: true,
+            },
+            MenuItem {
+                label: "Load Game".to_string(),
+                action: MenuAction::LoadGame,
+                enabled: has_save,
             },
             MenuItem {
                 label: "Quit".to_string(),
                 action: MenuAction::Quit,
+                enabled: true,
             },
         ],
     )
@@ -144,21 +163,37 @@ pub fn pause_menu() -> Menu {
             MenuItem {
                 label: "Resume".to_string(),
                 action: MenuAction::ResumeGame,
+                enabled: true,
             },
             MenuItem {
                 label: "Save Game".to_string(),
                 action: MenuAction::SaveGame,
+                enabled: true,
             },
             MenuItem {
                 label: "Load Game".to_string(),
                 action: MenuAction::LoadGame,
+                enabled: true,
             },
             MenuItem {
                 label: "Quit".to_string(),
                 action: MenuAction::Quit,
+                enabled: true,
             },
         ],
     )
+}
+
+/// Display a centered "Loading..." message. Call before a potentially slow
+/// operation (like deserializing a save file) so the player sees feedback.
+pub fn draw_loading(renderer: &mut dyn Renderer) {
+    let (screen_w, screen_h) = renderer.screen_size();
+    renderer.clear();
+    let msg = "Loading...";
+    let x = (screen_w - msg.len() as i32) / 2;
+    let y = screen_h / 2;
+    renderer.draw_str(x, y, msg, GameColor::White, GameColor::Black);
+    renderer.flush();
 }
 
 #[cfg(test)]
@@ -222,10 +257,12 @@ mod tests {
                 MenuItem {
                     label: "Option A".to_string(),
                     action: MenuAction::NewGame,
+                    enabled: true,
                 },
                 MenuItem {
                     label: "Option B".to_string(),
                     action: MenuAction::Quit,
+                    enabled: true,
                 },
             ],
         )
@@ -308,6 +345,7 @@ mod tests {
             vec![MenuItem {
                 label: "Only".to_string(),
                 action: MenuAction::Quit,
+                enabled: true,
             }],
         );
         // Up and down should stay on the only item.
@@ -367,11 +405,12 @@ mod tests {
 
     #[test]
     fn title_menu_has_expected_items() {
-        let menu = title_menu();
+        let menu = title_menu(false);
         assert_eq!(menu.title, "R O G U E L I K E");
-        assert_eq!(menu.items.len(), 2);
+        assert_eq!(menu.items.len(), 3);
         assert_eq!(menu.items[0].action, MenuAction::NewGame);
-        assert_eq!(menu.items[1].action, MenuAction::Quit);
+        assert_eq!(menu.items[1].action, MenuAction::LoadGame);
+        assert_eq!(menu.items[2].action, MenuAction::Quit);
     }
 
     #[test]
@@ -392,6 +431,7 @@ mod tests {
             vec![MenuItem {
                 label: "Go".to_string(),
                 action: MenuAction::NewGame,
+                enabled: true,
             }],
         );
         let mut r = MockRenderer::new(80, 24);
@@ -420,6 +460,7 @@ mod tests {
             vec![MenuItem {
                 label: "Item".to_string(),
                 action: MenuAction::Quit,
+                enabled: true,
             }],
         );
         // Screen narrower than the title — x should go negative
@@ -430,5 +471,83 @@ mod tests {
         // Title still gets drawn (renderer handles clipping).
         assert!(r.find_str("Very Long").is_some());
         assert!(r.flushed);
+    }
+
+    #[test]
+    fn disabled_item_not_selectable() {
+        let mut menu = Menu::new(
+            "Test",
+            vec![MenuItem {
+                label: "Disabled".to_string(),
+                action: MenuAction::LoadGame,
+                enabled: false,
+            }],
+        );
+        assert_eq!(menu.handle_input(MenuCommand::Select), None);
+    }
+
+    #[test]
+    fn disabled_item_drawn_in_dark_grey() {
+        let menu = Menu::new(
+            "Test",
+            vec![
+                MenuItem {
+                    label: "Enabled".to_string(),
+                    action: MenuAction::NewGame,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Disabled".to_string(),
+                    action: MenuAction::LoadGame,
+                    enabled: false,
+                },
+            ],
+        );
+        let mut r = MockRenderer::new(80, 24);
+        menu.draw(&mut r);
+
+        let disabled = r.find_str("Disabled").unwrap();
+        assert_eq!(disabled.3, GameColor::DarkGrey);
+
+        let enabled = r.find_str("Enabled").unwrap();
+        assert_eq!(enabled.3, GameColor::Yellow); // selected, so Yellow
+    }
+
+    #[test]
+    fn title_menu_with_save_has_load_enabled() {
+        let menu = title_menu(true);
+        let load_item = menu
+            .items
+            .iter()
+            .find(|i| i.action == MenuAction::LoadGame)
+            .unwrap();
+        assert!(load_item.enabled);
+    }
+
+    #[test]
+    fn title_menu_without_save_has_load_disabled() {
+        let menu = title_menu(false);
+        let load_item = menu
+            .items
+            .iter()
+            .find(|i| i.action == MenuAction::LoadGame)
+            .unwrap();
+        assert!(!load_item.enabled);
+    }
+
+    #[test]
+    fn draw_loading_renders_centered_message() {
+        let mut r = MockRenderer::new(80, 24);
+        draw_loading(&mut r);
+
+        assert!(r.cleared);
+        assert!(r.flushed);
+
+        let msg = r.find_str("Loading...").unwrap();
+        // "Loading..." = 10 chars. (80 - 10) / 2 = 35
+        assert_eq!(msg.0, 35);
+        // Vertically centered: 24 / 2 = 12
+        assert_eq!(msg.1, 12);
+        assert_eq!(msg.3, GameColor::White);
     }
 }

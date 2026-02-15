@@ -4,6 +4,10 @@ version = "0.1.1"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
+[features]
+default = ["dev-tools"]
+dev-tools = []
+
 [dependencies]
 crossterm = "0.28"
 rand = "0.8"

@@ -25,16 +25,17 @@
 use roguelike::dev_tools::{BatchRunStats, DevSession, Replay, ReplayResult};
 use roguelike::game::GameState;
 use roguelike::map::MapPreset;
+use roguelike::types::{Coord, Stat};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    let mut games = 10;
-    let mut width = 80;
-    let mut height = 40;
+    let mut games: Stat = 10;
+    let mut width: Coord = 80;
+    let mut height: Coord = 40;
     let mut seed: Option<u64> = None;
     let mut preset: Option<MapPreset> = None;
-    let mut max_turns = 500;
+    let mut max_turns: Stat = 500;
     let mut replay_path: Option<String> = None;
     let mut save_replays = false;
 
@@ -143,11 +144,11 @@ fn main() {
 }
 
 fn run_single_game(
-    width: i32,
-    height: i32,
+    width: Coord,
+    height: Coord,
     seed: u64,
     preset: Option<MapPreset>,
-    max_turns: i32,
+    max_turns: Stat,
     save_replay: bool,
 ) -> ReplayResult {
     let mut gs = match preset {
@@ -186,14 +187,14 @@ fn run_single_game(
     if save_replay {
         let replay = Replay::from_session(&gs, &session);
         let filename = format!("replay_{}.json", seed);
-        if let Ok(json) = replay.to_json() {
+        if let Ok(json) = serde_json::to_string_pretty(&replay) {
             let _ = std::fs::write(&filename, json);
             eprintln!("  Saved replay to {}", filename);
         }
     }
     let _ = session; // consumed
 
-    let kills = gs.entities.iter().skip(1).filter(|e| !e.alive).count() as i32;
+    let kills = gs.entities.iter().skip(1).filter(|e| !e.alive).count() as Stat;
     ReplayResult {
         turns_played: gs.turn_count,
         game_over: gs.game_over,
@@ -205,7 +206,7 @@ fn run_single_game(
 
 fn run_replay(path: &str) {
     let json = std::fs::read_to_string(path).expect("failed to read replay file");
-    let replay = Replay::from_json(&json).expect("failed to parse replay");
+    let replay: Replay = serde_json::from_str(&json).expect("failed to parse replay");
     eprintln!(
         "Replaying: seed={}, {}x{}, {} commands",
         replay.seed,

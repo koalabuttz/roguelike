@@ -223,7 +223,7 @@ pub fn replay_commands(gs: &mut GameState, commands: &[GameCommand]) -> ReplayRe
         game_over: gs.game_over,
         final_hp: gs.entities[0].hp,
         final_turn: gs.turn_count,
-        kills: gs.entities.iter().skip(1).filter(|e| !e.alive).count() as i32,
+        kills: gs.entities.iter().skip(1).filter(|e| !e.alive).count() as Stat,
     }
 }
 
@@ -253,16 +253,6 @@ impl Replay {
         }
     }
 
-    /// Serialize to JSON.
-    pub fn to_json(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string_pretty(self)
-    }
-
-    /// Deserialize from JSON.
-    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(json)
-    }
-
     /// Execute this replay and return the result.
     pub fn execute(&self) -> ReplayResult {
         let mut gs = match self.preset {
@@ -276,21 +266,21 @@ impl Replay {
 /// Summary of a replay execution or headless run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplayResult {
-    pub turns_played: i32,
+    pub turns_played: Stat,
     pub game_over: bool,
     pub final_hp: Stat,
-    pub final_turn: i32,
-    pub kills: i32,
+    pub final_turn: Stat,
+    pub kills: Stat,
 }
 
 /// Result of a headless batch run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchRunStats {
-    pub games_played: i32,
-    pub games_won: i32,
-    pub games_lost: i32,
-    pub total_turns: i32,
-    pub total_kills: i32,
+    pub games_played: Stat,
+    pub games_won: Stat,
+    pub games_lost: Stat,
+    pub total_turns: Stat,
+    pub total_kills: Stat,
     pub avg_turns_per_game: f64,
     pub avg_kills_per_game: f64,
     pub seeds_used: Vec<u64>,
@@ -532,8 +522,8 @@ mod tests {
         gs.step(GameCommand::Move { dx: 1, dy: 0 });
         after_step(&mut gs, &mut session, GameCommand::Move { dx: 1, dy: 0 });
         let replay = Replay::from_session(&gs, &session);
-        let json = replay.to_json().unwrap();
-        let loaded = Replay::from_json(&json).unwrap();
+        let json = serde_json::to_string_pretty(&replay).unwrap();
+        let loaded: Replay = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.seed, 0);
         assert!(!loaded.commands.is_empty());
     }

@@ -1,21 +1,83 @@
-use std::io::Write;
+use std::io::{Stdout, Write};
 
 use crossterm::{
     cursor, queue,
     style::{self, Color, SetBackgroundColor, SetForegroundColor},
+    terminal,
 };
 
 use crate::game::GameState;
 use crate::map::Tile;
+use crate::platform::Renderer;
 use crate::types::{Coord, GameColor};
 
 /// Map a platform-independent `GameColor` to a crossterm terminal color.
 fn to_crossterm_color(c: GameColor) -> Color {
     match c {
-        GameColor::Yellow => Color::Yellow,
+        GameColor::Black => Color::Black,
+        GameColor::White => Color::White,
+        GameColor::Grey => Color::Grey,
+        GameColor::DarkGrey => Color::DarkGrey,
+        GameColor::Red => Color::Red,
+        GameColor::DarkRed => Color::DarkRed,
         GameColor::Green => Color::Green,
         GameColor::DarkGreen => Color::DarkGreen,
-        GameColor::DarkRed => Color::DarkRed,
+        GameColor::Yellow => Color::Yellow,
+        GameColor::DarkBlue => Color::DarkBlue,
+        GameColor::Cyan => Color::Cyan,
+        GameColor::Rgb(r, g, b) => Color::Rgb { r, g, b },
+    }
+}
+
+/// Terminal renderer backed by crossterm.
+///
+/// Wraps `Stdout` and uses crossterm's queued-write API for efficient
+/// batched rendering. Call `flush()` after a frame of draw calls.
+pub struct CrosstermRenderer {
+    out: Stdout,
+}
+
+impl CrosstermRenderer {
+    pub fn new(out: Stdout) -> Self {
+        Self { out }
+    }
+}
+
+impl Renderer for CrosstermRenderer {
+    fn clear(&mut self) {
+        let _ = queue!(
+            self.out,
+            terminal::Clear(terminal::ClearType::All),
+            cursor::MoveTo(0, 0)
+        );
+    }
+
+    fn draw_char(&mut self, x: Coord, y: Coord, ch: char, fg: GameColor, bg: GameColor) {
+        let _ = queue!(
+            self.out,
+            cursor::MoveTo(x as u16, y as u16),
+            SetForegroundColor(to_crossterm_color(fg)),
+            SetBackgroundColor(to_crossterm_color(bg)),
+            style::Print(ch)
+        );
+    }
+
+    fn draw_str(&mut self, x: Coord, y: Coord, text: &str, fg: GameColor, bg: GameColor) {
+        let _ = queue!(
+            self.out,
+            cursor::MoveTo(x as u16, y as u16),
+            SetForegroundColor(to_crossterm_color(fg)),
+            SetBackgroundColor(to_crossterm_color(bg)),
+            style::Print(text)
+        );
+    }
+
+    fn flush(&mut self) {
+        let _ = self.out.flush();
+    }
+
+    fn screen_size(&self) -> (Coord, Coord) {
+        terminal::size().map_or((80, 24), |(w, h)| (w as Coord, h as Coord))
     }
 }
 

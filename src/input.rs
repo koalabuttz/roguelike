@@ -1,5 +1,6 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+use crate::platform::{InputSource, MenuCommand};
 use crate::types::Coord;
 
 /// A platform-independent game command.
@@ -94,6 +95,55 @@ pub fn translate_key(key: KeyEvent) -> Option<GameCommand> {
         KeyCode::Char('.') | KeyCode::Char('5') => Some(GameCommand::Wait),
         KeyCode::Char('q') | KeyCode::Esc => Some(GameCommand::Quit),
         _ => None,
+    }
+}
+
+/// Translate a crossterm key event into a menu command.
+///
+/// Returns `None` for keys that have no menu binding.
+pub fn translate_menu_key(key: KeyEvent) -> Option<MenuCommand> {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('8') => Some(MenuCommand::Up),
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('2') => Some(MenuCommand::Down),
+        KeyCode::Enter | KeyCode::Char(' ') => Some(MenuCommand::Select),
+        KeyCode::Esc | KeyCode::Char('q') => Some(MenuCommand::Back),
+        _ => None,
+    }
+}
+
+/// Terminal input source backed by crossterm.
+///
+/// Blocks on `crossterm::event::read()` and translates key events into
+/// platform-independent commands.
+pub struct CrosstermInput;
+
+impl InputSource for CrosstermInput {
+    fn next_command(&mut self) -> Option<GameCommand> {
+        loop {
+            if let Ok(Event::Key(
+                key @ KeyEvent {
+                    kind: KeyEventKind::Press,
+                    ..
+                },
+            )) = event::read()
+            {
+                return translate_key(key);
+            }
+        }
+    }
+
+    fn next_menu_command(&mut self) -> Option<MenuCommand> {
+        loop {
+            if let Ok(Event::Key(
+                key @ KeyEvent {
+                    kind: KeyEventKind::Press,
+                    ..
+                },
+            )) = event::read()
+            {
+                return translate_menu_key(key);
+            }
+        }
     }
 }
 
@@ -366,5 +416,69 @@ mod tests {
             translate_key(press_with(KeyCode::Right, KeyModifiers::SHIFT)),
             Some(GameCommand::Autorun { dx: 1, dy: 0 })
         );
+    }
+
+    // --- Menu command tests ---
+
+    #[test]
+    fn menu_up_keys() {
+        assert_eq!(
+            translate_menu_key(press(KeyCode::Up)),
+            Some(MenuCommand::Up)
+        );
+        assert_eq!(
+            translate_menu_key(press(KeyCode::Char('k'))),
+            Some(MenuCommand::Up)
+        );
+        assert_eq!(
+            translate_menu_key(press(KeyCode::Char('8'))),
+            Some(MenuCommand::Up)
+        );
+    }
+
+    #[test]
+    fn menu_down_keys() {
+        assert_eq!(
+            translate_menu_key(press(KeyCode::Down)),
+            Some(MenuCommand::Down)
+        );
+        assert_eq!(
+            translate_menu_key(press(KeyCode::Char('j'))),
+            Some(MenuCommand::Down)
+        );
+        assert_eq!(
+            translate_menu_key(press(KeyCode::Char('2'))),
+            Some(MenuCommand::Down)
+        );
+    }
+
+    #[test]
+    fn menu_select_keys() {
+        assert_eq!(
+            translate_menu_key(press(KeyCode::Enter)),
+            Some(MenuCommand::Select)
+        );
+        assert_eq!(
+            translate_menu_key(press(KeyCode::Char(' '))),
+            Some(MenuCommand::Select)
+        );
+    }
+
+    #[test]
+    fn menu_back_keys() {
+        assert_eq!(
+            translate_menu_key(press(KeyCode::Esc)),
+            Some(MenuCommand::Back)
+        );
+        assert_eq!(
+            translate_menu_key(press(KeyCode::Char('q'))),
+            Some(MenuCommand::Back)
+        );
+    }
+
+    #[test]
+    fn menu_unbound_key_returns_none() {
+        assert_eq!(translate_menu_key(press(KeyCode::Char('x'))), None);
+        assert_eq!(translate_menu_key(press(KeyCode::F(1))), None);
     }
 }

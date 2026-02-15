@@ -9,14 +9,23 @@ pub type Pos = (Coord, Coord);
 /// Character or combat statistic (HP, attack, defense, damage).
 pub type Stat = i32;
 
-/// Platform-independent color for game entities.
+/// Platform-independent color for game rendering.
 ///
 /// Maps to `crossterm::style::Color` in the terminal renderer. Adding a variant
-/// here is all that's needed when introducing new monster colors.
+/// here is all that's needed when introducing new colors.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum GameColor {
-    Yellow,
+    Black,
+    White,
+    Grey,
+    DarkGrey,
+    Red,
+    DarkRed,
     Green,
     DarkGreen,
-    DarkRed,
+    Yellow,
+    DarkBlue,
+    Cyan,
+    /// Arbitrary RGB color for cases that don't fit a named variant.
+    Rgb(u8, u8, u8),
 }

@@ -220,9 +220,19 @@ fn main() -> std::io::Result<()> {
                         }
                     }
                     MenuAction::MainMenu => {
-                        game_state = None;
-                        let has_save = std::path::Path::new(SAVE_FILE).exists();
-                        app_state = AppState::Title(menu::title_menu(has_save));
+                        let mut confirm = menu::confirm_menu("Unsaved progress will be lost.");
+                        match run_menu(&mut confirm, &mut renderer)? {
+                            MenuAction::Confirm => {
+                                game_state = None;
+                                let has_save = std::path::Path::new(SAVE_FILE).exists();
+                                app_state = AppState::Title(menu::title_menu(has_save));
+                            }
+                            _ => {
+                                let mut new_pause = menu::pause_menu();
+                                new_pause.selected = 3; // keep cursor on "Main Menu"
+                                app_state = AppState::Paused(new_pause);
+                            }
+                        }
                     }
                     MenuAction::Quit => break 'app,
                     _ => {}

@@ -13,6 +13,8 @@ pub enum MenuAction {
     /// The user pressed Esc/Back. The caller decides what this means:
     /// title screen interprets it as quit, pause menu as resume.
     Back,
+    /// The user confirmed a yes/no dialog (the "Yes" choice).
+    Confirm,
 }
 
 /// A single menu entry.
@@ -195,6 +197,32 @@ pub fn pause_menu() -> Menu {
             },
         ],
     )
+}
+
+/// Construct a yes/no confirmation dialog.
+///
+/// The `message` is shown as the menu title (e.g. "Unsaved progress will be
+/// lost."). "Yes" maps to `MenuAction::Confirm`; "No" maps to
+/// `MenuAction::Back`. Default selection is "No" (index 1) so that an
+/// accidental Enter press doesn't confirm.
+pub fn confirm_menu(message: &str) -> Menu {
+    let mut menu = Menu::new(
+        message,
+        vec![
+            MenuItem {
+                label: "Yes".to_string(),
+                action: MenuAction::Confirm,
+                enabled: true,
+            },
+            MenuItem {
+                label: "No".to_string(),
+                action: MenuAction::Back,
+                enabled: true,
+            },
+        ],
+    );
+    menu.selected = 1;
+    menu
 }
 
 /// Display a centered "Loading..." message. Call before a potentially slow
@@ -550,6 +578,32 @@ mod tests {
             .find(|i| i.action == MenuAction::LoadGame)
             .unwrap();
         assert!(!load_item.enabled);
+    }
+
+    #[test]
+    fn confirm_menu_defaults_to_no() {
+        let menu = confirm_menu("Are you sure?");
+        assert_eq!(menu.selected, 1);
+        assert_eq!(menu.selected_action(), MenuAction::Back);
+    }
+
+    #[test]
+    fn confirm_menu_yes_returns_confirm() {
+        let mut menu = confirm_menu("Are you sure?");
+        menu.selected = 0;
+        assert_eq!(
+            menu.handle_input(MenuCommand::Select),
+            Some(MenuAction::Confirm)
+        );
+    }
+
+    #[test]
+    fn confirm_menu_no_returns_back() {
+        let mut menu = confirm_menu("Are you sure?");
+        assert_eq!(
+            menu.handle_input(MenuCommand::Select),
+            Some(MenuAction::Back)
+        );
     }
 
     #[test]

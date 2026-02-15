@@ -9,6 +9,7 @@ use crossterm::{
 use crate::game::GameState;
 use crate::map::{self, Tile};
 use crate::platform::Renderer;
+use crate::settings::Settings;
 use crate::types::{Coord, GameColor};
 
 /// Map a platform-independent `GameColor` to a crossterm terminal color.
@@ -86,12 +87,18 @@ pub fn render<W: Write>(
     state: &GameState,
     screen_width: Coord,
     screen_height: Coord,
-    show_explored_pct: bool,
+    settings: &Settings,
 ) -> std::io::Result<()> {
     render_map(w, state)?;
-    render_entities(w, state)?;
-    render_status_bar(w, state, screen_width, screen_height, show_explored_pct)?;
-    render_message_log(w, state, screen_width, screen_height)?;
+    render_entities(w, state, settings.show_corpses)?;
+    render_status_bar(w, state, screen_width, screen_height, settings)?;
+    render_message_log(
+        w,
+        state,
+        screen_width,
+        screen_height,
+        settings.message_log_lines,
+    )?;
 
     w.flush()?;
     Ok(())
@@ -149,16 +156,22 @@ fn render_map<W: Write>(w: &mut W, state: &GameState) -> std::io::Result<()> {
     Ok(())
 }
 
-fn render_entities<W: Write>(w: &mut W, state: &GameState) -> std::io::Result<()> {
-    for entity in state.entities.iter() {
-        if !entity.alive && state.visible.contains(&(entity.x, entity.y)) {
-            queue!(
-                w,
-                cursor::MoveTo(entity.x as u16, entity.y as u16),
-                SetForegroundColor(Color::DarkRed),
-                SetBackgroundColor(Color::Black),
-                style::Print('%')
-            )?;
+fn render_entities<W: Write>(
+    w: &mut W,
+    state: &GameState,
+    show_corpses: bool,
+) -> std::io::Result<()> {
+    if show_corpses {
+        for entity in state.entities.iter() {
+            if !entity.alive && state.visible.contains(&(entity.x, entity.y)) {
+                queue!(
+                    w,
+                    cursor::MoveTo(entity.x as u16, entity.y as u16),
+                    SetForegroundColor(Color::DarkRed),
+                    SetBackgroundColor(Color::Black),
+                    style::Print('%')
+                )?;
+            }
         }
     }
 
@@ -182,10 +195,10 @@ fn render_status_bar<W: Write>(
     state: &GameState,
     screen_width: Coord,
     screen_height: Coord,
-    show_explored_pct: bool,
+    settings: &Settings,
 ) -> std::io::Result<()> {
     let player = &state.entities[0];
-    let bar_row = (screen_height - 5) as u16;
+    let bar_row = (screen_height - 1 - settings.message_log_lines as i32) as u16;
 
     let bar_width = 16;
     let fill = if player.max_hp > 0 {
@@ -212,7 +225,13 @@ fn render_status_bar<W: Write>(
     let bar_filled: String = "\u{2588}".repeat(fill as usize);
     let bar_empty: String = "\u{2591}".repeat(empty as usize);
 
-    let explored_segment = if show_explored_pct {
+    let coord_segment = if settings.show_coordinates {
+        format!(" | ({},{})", player.x, player.y)
+    } else {
+        String::new()
+    };
+
+    let explored_segment = if settings.show_explored_pct {
         let floor_count = state.map.known_floor_count();
         let explored_floors = state
             .explored
@@ -232,9 +251,21 @@ fn render_status_bar<W: Write>(
         String::new()
     };
 
+    let hint_segment = if settings.show_keybind_hints {
+        " | hjkl/arrows: move | .: wait | q: quit"
+    } else {
+        ""
+    };
+
     let status = format!(
-        " HP [{}{}] {}/{} | ({},{}){} | hjkl/numpad/arrows: move | .: wait | q: quit",
-        bar_filled, bar_empty, player.hp, player.max_hp, player.x, player.y, explored_segment
+        " HP [{}{}] {}/{}{}{}{}",
+        bar_filled,
+        bar_empty,
+        player.hp,
+        player.max_hp,
+        coord_segment,
+        explored_segment,
+        hint_segment
     );
     let truncated: String = status
         .chars()
@@ -258,11 +289,13 @@ fn render_message_log<W: Write>(
     state: &GameState,
     screen_width: Coord,
     screen_height: Coord,
+    message_log_lines: u8,
 ) -> std::io::Result<()> {
-    let log_start_row = (screen_height - 4) as u16;
-    let messages = state.log.recent(4);
+    let n = message_log_lines as usize;
+    let log_start_row = (screen_height - message_log_lines as i32) as u16;
+    let messages = state.log.recent(n);
 
-    for i in 0..4u16 {
+    for i in 0..message_log_lines as u16 {
         let row = log_start_row + i;
         let msg = messages.get(i as usize).map(|s| s.as_str()).unwrap_or("");
         let line = format!(" {}", msg);
@@ -273,7 +306,7 @@ fn render_message_log<W: Write>(
             .collect();
 
         let color =
-            if i as usize + messages.len().saturating_sub(4) >= messages.len().saturating_sub(1) {
+            if i as usize + messages.len().saturating_sub(n) >= messages.len().saturating_sub(1) {
                 Color::White
             } else {
                 Color::Grey

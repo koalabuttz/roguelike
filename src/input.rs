@@ -30,41 +30,46 @@ pub enum GameCommand {
 /// - Arrow keys: Shift = autorun
 /// - Vi keys: uppercase = autorun
 /// - Numpad: Shift = autorun
-fn resolve_direction(code: KeyCode, shift: bool) -> Option<(Coord, Coord, bool)> {
+fn resolve_direction(
+    code: KeyCode,
+    shift: bool,
+    vi_keys: bool,
+    numpad: bool,
+) -> Option<(Coord, Coord, bool)> {
     match code {
-        // Arrow keys: shift = autorun
+        // Arrow keys: shift = autorun (always available)
         KeyCode::Up => Some((0, -1, shift)),
         KeyCode::Down => Some((0, 1, shift)),
         KeyCode::Left => Some((-1, 0, shift)),
         KeyCode::Right => Some((1, 0, shift)),
 
         // Vi keys: uppercase = autorun
-        KeyCode::Char('k') => Some((0, -1, false)),
-        KeyCode::Char('K') => Some((0, -1, true)),
-        KeyCode::Char('j') => Some((0, 1, false)),
-        KeyCode::Char('J') => Some((0, 1, true)),
-        KeyCode::Char('h') => Some((-1, 0, false)),
-        KeyCode::Char('H') => Some((-1, 0, true)),
-        KeyCode::Char('l') => Some((1, 0, false)),
-        KeyCode::Char('L') => Some((1, 0, true)),
-        KeyCode::Char('y') => Some((-1, -1, false)),
-        KeyCode::Char('Y') => Some((-1, -1, true)),
-        KeyCode::Char('u') => Some((1, -1, false)),
-        KeyCode::Char('U') => Some((1, -1, true)),
-        KeyCode::Char('b') => Some((-1, 1, false)),
-        KeyCode::Char('B') => Some((-1, 1, true)),
-        KeyCode::Char('n') => Some((1, 1, false)),
-        KeyCode::Char('N') => Some((1, 1, true)),
+        KeyCode::Char('k') if vi_keys => Some((0, -1, false)),
+        KeyCode::Char('K') if vi_keys => Some((0, -1, true)),
+        KeyCode::Char('j') if vi_keys => Some((0, 1, false)),
+        KeyCode::Char('J') if vi_keys => Some((0, 1, true)),
+        KeyCode::Char('h') if vi_keys => Some((-1, 0, false)),
+        KeyCode::Char('H') if vi_keys => Some((-1, 0, true)),
+        KeyCode::Char('l') if vi_keys => Some((1, 0, false)),
+        KeyCode::Char('L') if vi_keys => Some((1, 0, true)),
+        KeyCode::Char('y') if vi_keys => Some((-1, -1, false)),
+        KeyCode::Char('Y') if vi_keys => Some((-1, -1, true)),
+        KeyCode::Char('u') if vi_keys => Some((1, -1, false)),
+        KeyCode::Char('U') if vi_keys => Some((1, -1, true)),
+        KeyCode::Char('b') if vi_keys => Some((-1, 1, false)),
+        KeyCode::Char('B') if vi_keys => Some((-1, 1, true)),
+        KeyCode::Char('n') if vi_keys => Some((1, 1, false)),
+        KeyCode::Char('N') if vi_keys => Some((1, 1, true)),
 
         // Numpad: shift = autorun
-        KeyCode::Char('8') => Some((0, -1, shift)),
-        KeyCode::Char('2') => Some((0, 1, shift)),
-        KeyCode::Char('4') => Some((-1, 0, shift)),
-        KeyCode::Char('6') => Some((1, 0, shift)),
-        KeyCode::Char('7') => Some((-1, -1, shift)),
-        KeyCode::Char('9') => Some((1, -1, shift)),
-        KeyCode::Char('1') => Some((-1, 1, shift)),
-        KeyCode::Char('3') => Some((1, 1, shift)),
+        KeyCode::Char('8') if numpad => Some((0, -1, shift)),
+        KeyCode::Char('2') if numpad => Some((0, 1, shift)),
+        KeyCode::Char('4') if numpad => Some((-1, 0, shift)),
+        KeyCode::Char('6') if numpad => Some((1, 0, shift)),
+        KeyCode::Char('7') if numpad => Some((-1, -1, shift)),
+        KeyCode::Char('9') if numpad => Some((1, -1, shift)),
+        KeyCode::Char('1') if numpad => Some((-1, 1, shift)),
+        KeyCode::Char('3') if numpad => Some((1, 1, shift)),
 
         _ => None,
     }
@@ -74,7 +79,7 @@ fn resolve_direction(code: KeyCode, shift: bool) -> Option<(Coord, Coord, bool)>
 ///
 /// Returns `None` for keys that have no binding, so the caller can
 /// silently ignore them.
-pub fn translate_key(key: KeyEvent) -> Option<GameCommand> {
+pub fn translate_key(key: KeyEvent, vi_keys: bool, numpad: bool) -> Option<GameCommand> {
     // Ctrl+C always quits, checked before any character bindings
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         return Some(GameCommand::Quit);
@@ -82,7 +87,7 @@ pub fn translate_key(key: KeyEvent) -> Option<GameCommand> {
 
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
 
-    if let Some((dx, dy, autorun)) = resolve_direction(key.code, shift) {
+    if let Some((dx, dy, autorun)) = resolve_direction(key.code, shift, vi_keys, numpad) {
         return Some(if autorun {
             GameCommand::Autorun { dx, dy }
         } else {
@@ -115,7 +120,10 @@ pub fn translate_menu_key(key: KeyEvent) -> Option<MenuCommand> {
 ///
 /// Blocks on `crossterm::event::read()` and translates key events into
 /// platform-independent commands.
-pub struct CrosstermInput;
+pub struct CrosstermInput {
+    pub vi_keys: bool,
+    pub numpad: bool,
+}
 
 impl InputSource for CrosstermInput {
     fn next_command(&mut self) -> Option<GameCommand> {
@@ -127,7 +135,7 @@ impl InputSource for CrosstermInput {
                 },
             )) = event::read()
             {
-                return translate_key(key);
+                return translate_key(key, self.vi_keys, self.numpad);
             }
         }
     }
@@ -175,19 +183,19 @@ mod tests {
     #[test]
     fn arrow_keys_produce_cardinal_moves() {
         assert_eq!(
-            translate_key(press(KeyCode::Up)),
+            translate_key(press(KeyCode::Up), true, true),
             Some(GameCommand::Move { dx: 0, dy: -1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Down)),
+            translate_key(press(KeyCode::Down), true, true),
             Some(GameCommand::Move { dx: 0, dy: 1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Left)),
+            translate_key(press(KeyCode::Left), true, true),
             Some(GameCommand::Move { dx: -1, dy: 0 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Right)),
+            translate_key(press(KeyCode::Right), true, true),
             Some(GameCommand::Move { dx: 1, dy: 0 })
         );
     }
@@ -195,19 +203,19 @@ mod tests {
     #[test]
     fn vi_keys_produce_cardinal_moves() {
         assert_eq!(
-            translate_key(press(KeyCode::Char('k'))),
+            translate_key(press(KeyCode::Char('k')), true, true),
             Some(GameCommand::Move { dx: 0, dy: -1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('j'))),
+            translate_key(press(KeyCode::Char('j')), true, true),
             Some(GameCommand::Move { dx: 0, dy: 1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('h'))),
+            translate_key(press(KeyCode::Char('h')), true, true),
             Some(GameCommand::Move { dx: -1, dy: 0 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('l'))),
+            translate_key(press(KeyCode::Char('l')), true, true),
             Some(GameCommand::Move { dx: 1, dy: 0 })
         );
     }
@@ -215,19 +223,19 @@ mod tests {
     #[test]
     fn vi_diagonal_keys_produce_diagonal_moves() {
         assert_eq!(
-            translate_key(press(KeyCode::Char('y'))),
+            translate_key(press(KeyCode::Char('y')), true, true),
             Some(GameCommand::Move { dx: -1, dy: -1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('u'))),
+            translate_key(press(KeyCode::Char('u')), true, true),
             Some(GameCommand::Move { dx: 1, dy: -1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('b'))),
+            translate_key(press(KeyCode::Char('b')), true, true),
             Some(GameCommand::Move { dx: -1, dy: 1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('n'))),
+            translate_key(press(KeyCode::Char('n')), true, true),
             Some(GameCommand::Move { dx: 1, dy: 1 })
         );
     }
@@ -235,35 +243,35 @@ mod tests {
     #[test]
     fn numpad_produces_all_eight_directions() {
         assert_eq!(
-            translate_key(press(KeyCode::Char('8'))),
+            translate_key(press(KeyCode::Char('8')), true, true),
             Some(GameCommand::Move { dx: 0, dy: -1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('2'))),
+            translate_key(press(KeyCode::Char('2')), true, true),
             Some(GameCommand::Move { dx: 0, dy: 1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('4'))),
+            translate_key(press(KeyCode::Char('4')), true, true),
             Some(GameCommand::Move { dx: -1, dy: 0 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('6'))),
+            translate_key(press(KeyCode::Char('6')), true, true),
             Some(GameCommand::Move { dx: 1, dy: 0 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('7'))),
+            translate_key(press(KeyCode::Char('7')), true, true),
             Some(GameCommand::Move { dx: -1, dy: -1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('9'))),
+            translate_key(press(KeyCode::Char('9')), true, true),
             Some(GameCommand::Move { dx: 1, dy: -1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('1'))),
+            translate_key(press(KeyCode::Char('1')), true, true),
             Some(GameCommand::Move { dx: -1, dy: 1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('3'))),
+            translate_key(press(KeyCode::Char('3')), true, true),
             Some(GameCommand::Move { dx: 1, dy: 1 })
         );
     }
@@ -271,35 +279,67 @@ mod tests {
     #[test]
     fn shift_numpad_produces_autorun() {
         assert_eq!(
-            translate_key(press_with(KeyCode::Char('8'), KeyModifiers::SHIFT)),
+            translate_key(
+                press_with(KeyCode::Char('8'), KeyModifiers::SHIFT),
+                true,
+                true
+            ),
             Some(GameCommand::Autorun { dx: 0, dy: -1 })
         );
         assert_eq!(
-            translate_key(press_with(KeyCode::Char('2'), KeyModifiers::SHIFT)),
+            translate_key(
+                press_with(KeyCode::Char('2'), KeyModifiers::SHIFT),
+                true,
+                true
+            ),
             Some(GameCommand::Autorun { dx: 0, dy: 1 })
         );
         assert_eq!(
-            translate_key(press_with(KeyCode::Char('4'), KeyModifiers::SHIFT)),
+            translate_key(
+                press_with(KeyCode::Char('4'), KeyModifiers::SHIFT),
+                true,
+                true
+            ),
             Some(GameCommand::Autorun { dx: -1, dy: 0 })
         );
         assert_eq!(
-            translate_key(press_with(KeyCode::Char('6'), KeyModifiers::SHIFT)),
+            translate_key(
+                press_with(KeyCode::Char('6'), KeyModifiers::SHIFT),
+                true,
+                true
+            ),
             Some(GameCommand::Autorun { dx: 1, dy: 0 })
         );
         assert_eq!(
-            translate_key(press_with(KeyCode::Char('7'), KeyModifiers::SHIFT)),
+            translate_key(
+                press_with(KeyCode::Char('7'), KeyModifiers::SHIFT),
+                true,
+                true
+            ),
             Some(GameCommand::Autorun { dx: -1, dy: -1 })
         );
         assert_eq!(
-            translate_key(press_with(KeyCode::Char('9'), KeyModifiers::SHIFT)),
+            translate_key(
+                press_with(KeyCode::Char('9'), KeyModifiers::SHIFT),
+                true,
+                true
+            ),
             Some(GameCommand::Autorun { dx: 1, dy: -1 })
         );
         assert_eq!(
-            translate_key(press_with(KeyCode::Char('1'), KeyModifiers::SHIFT)),
+            translate_key(
+                press_with(KeyCode::Char('1'), KeyModifiers::SHIFT),
+                true,
+                true
+            ),
             Some(GameCommand::Autorun { dx: -1, dy: 1 })
         );
         assert_eq!(
-            translate_key(press_with(KeyCode::Char('3'), KeyModifiers::SHIFT)),
+            translate_key(
+                press_with(KeyCode::Char('3'), KeyModifiers::SHIFT),
+                true,
+                true
+            ),
             Some(GameCommand::Autorun { dx: 1, dy: 1 })
         );
     }
@@ -307,11 +347,11 @@ mod tests {
     #[test]
     fn wait_keys() {
         assert_eq!(
-            translate_key(press(KeyCode::Char('.'))),
+            translate_key(press(KeyCode::Char('.')), true, true),
             Some(GameCommand::Wait)
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('5'))),
+            translate_key(press(KeyCode::Char('5')), true, true),
             Some(GameCommand::Wait)
         );
     }
@@ -319,33 +359,44 @@ mod tests {
     #[test]
     fn quit_keys() {
         assert_eq!(
-            translate_key(press(KeyCode::Char('q'))),
+            translate_key(press(KeyCode::Char('q')), true, true),
             Some(GameCommand::Quit)
         );
-        assert_eq!(translate_key(press(KeyCode::Esc)), Some(GameCommand::Quit));
+        assert_eq!(
+            translate_key(press(KeyCode::Esc), true, true),
+            Some(GameCommand::Quit)
+        );
     }
 
     #[test]
     fn ctrl_c_quits() {
         assert_eq!(
-            translate_key(press_with(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            translate_key(
+                press_with(KeyCode::Char('c'), KeyModifiers::CONTROL),
+                true,
+                true
+            ),
             Some(GameCommand::Quit)
         );
     }
 
     #[test]
     fn unbound_key_returns_none() {
-        assert_eq!(translate_key(press(KeyCode::Char('x'))), None);
-        assert_eq!(translate_key(press(KeyCode::Char('z'))), None);
-        assert_eq!(translate_key(press(KeyCode::F(1))), None);
+        assert_eq!(translate_key(press(KeyCode::Char('x')), true, true), None);
+        assert_eq!(translate_key(press(KeyCode::Char('z')), true, true), None);
+        assert_eq!(translate_key(press(KeyCode::F(1)), true, true), None);
     }
 
     #[test]
     fn ctrl_c_takes_priority_over_character_bindings() {
         // 'c' alone is unbound, but Ctrl+C should still quit
-        assert_eq!(translate_key(press(KeyCode::Char('c'))), None);
+        assert_eq!(translate_key(press(KeyCode::Char('c')), true, true), None);
         assert_eq!(
-            translate_key(press_with(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            translate_key(
+                press_with(KeyCode::Char('c'), KeyModifiers::CONTROL),
+                true,
+                true
+            ),
             Some(GameCommand::Quit)
         );
     }
@@ -353,19 +404,19 @@ mod tests {
     #[test]
     fn uppercase_vi_keys_produce_autorun() {
         assert_eq!(
-            translate_key(press(KeyCode::Char('K'))),
+            translate_key(press(KeyCode::Char('K')), true, true),
             Some(GameCommand::Autorun { dx: 0, dy: -1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('J'))),
+            translate_key(press(KeyCode::Char('J')), true, true),
             Some(GameCommand::Autorun { dx: 0, dy: 1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('H'))),
+            translate_key(press(KeyCode::Char('H')), true, true),
             Some(GameCommand::Autorun { dx: -1, dy: 0 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('L'))),
+            translate_key(press(KeyCode::Char('L')), true, true),
             Some(GameCommand::Autorun { dx: 1, dy: 0 })
         );
     }
@@ -373,19 +424,19 @@ mod tests {
     #[test]
     fn uppercase_vi_diagonal_keys_produce_autorun() {
         assert_eq!(
-            translate_key(press(KeyCode::Char('Y'))),
+            translate_key(press(KeyCode::Char('Y')), true, true),
             Some(GameCommand::Autorun { dx: -1, dy: -1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('U'))),
+            translate_key(press(KeyCode::Char('U')), true, true),
             Some(GameCommand::Autorun { dx: 1, dy: -1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('B'))),
+            translate_key(press(KeyCode::Char('B')), true, true),
             Some(GameCommand::Autorun { dx: -1, dy: 1 })
         );
         assert_eq!(
-            translate_key(press(KeyCode::Char('N'))),
+            translate_key(press(KeyCode::Char('N')), true, true),
             Some(GameCommand::Autorun { dx: 1, dy: 1 })
         );
     }
@@ -393,7 +444,7 @@ mod tests {
     #[test]
     fn o_key_produces_auto_explore() {
         assert_eq!(
-            translate_key(press(KeyCode::Char('o'))),
+            translate_key(press(KeyCode::Char('o')), true, true),
             Some(GameCommand::AutoExplore)
         );
     }
@@ -401,19 +452,19 @@ mod tests {
     #[test]
     fn shift_arrow_keys_produce_autorun() {
         assert_eq!(
-            translate_key(press_with(KeyCode::Up, KeyModifiers::SHIFT)),
+            translate_key(press_with(KeyCode::Up, KeyModifiers::SHIFT), true, true),
             Some(GameCommand::Autorun { dx: 0, dy: -1 })
         );
         assert_eq!(
-            translate_key(press_with(KeyCode::Down, KeyModifiers::SHIFT)),
+            translate_key(press_with(KeyCode::Down, KeyModifiers::SHIFT), true, true),
             Some(GameCommand::Autorun { dx: 0, dy: 1 })
         );
         assert_eq!(
-            translate_key(press_with(KeyCode::Left, KeyModifiers::SHIFT)),
+            translate_key(press_with(KeyCode::Left, KeyModifiers::SHIFT), true, true),
             Some(GameCommand::Autorun { dx: -1, dy: 0 })
         );
         assert_eq!(
-            translate_key(press_with(KeyCode::Right, KeyModifiers::SHIFT)),
+            translate_key(press_with(KeyCode::Right, KeyModifiers::SHIFT), true, true),
             Some(GameCommand::Autorun { dx: 1, dy: 0 })
         );
     }
@@ -480,5 +531,80 @@ mod tests {
     fn menu_unbound_key_returns_none() {
         assert_eq!(translate_menu_key(press(KeyCode::Char('x'))), None);
         assert_eq!(translate_menu_key(press(KeyCode::F(1))), None);
+    }
+
+    // --- vi_keys / numpad toggle tests ---
+
+    #[test]
+    fn vi_keys_disabled_ignores_hjkl() {
+        assert_eq!(translate_key(press(KeyCode::Char('h')), false, true), None);
+        assert_eq!(translate_key(press(KeyCode::Char('j')), false, true), None);
+        assert_eq!(translate_key(press(KeyCode::Char('k')), false, true), None);
+        assert_eq!(translate_key(press(KeyCode::Char('l')), false, true), None);
+    }
+
+    #[test]
+    fn vi_keys_disabled_ignores_diagonal() {
+        assert_eq!(translate_key(press(KeyCode::Char('y')), false, true), None);
+        assert_eq!(translate_key(press(KeyCode::Char('u')), false, true), None);
+        assert_eq!(translate_key(press(KeyCode::Char('b')), false, true), None);
+        assert_eq!(translate_key(press(KeyCode::Char('n')), false, true), None);
+    }
+
+    #[test]
+    fn vi_keys_disabled_ignores_autorun() {
+        assert_eq!(translate_key(press(KeyCode::Char('H')), false, true), None);
+        assert_eq!(translate_key(press(KeyCode::Char('L')), false, true), None);
+    }
+
+    #[test]
+    fn numpad_disabled_ignores_digits() {
+        assert_eq!(translate_key(press(KeyCode::Char('8')), true, false), None);
+        assert_eq!(translate_key(press(KeyCode::Char('2')), true, false), None);
+        assert_eq!(translate_key(press(KeyCode::Char('4')), true, false), None);
+        assert_eq!(translate_key(press(KeyCode::Char('6')), true, false), None);
+    }
+
+    #[test]
+    fn numpad_disabled_ignores_diagonals() {
+        assert_eq!(translate_key(press(KeyCode::Char('7')), true, false), None);
+        assert_eq!(translate_key(press(KeyCode::Char('9')), true, false), None);
+        assert_eq!(translate_key(press(KeyCode::Char('1')), true, false), None);
+        assert_eq!(translate_key(press(KeyCode::Char('3')), true, false), None);
+    }
+
+    #[test]
+    fn arrows_work_with_both_disabled() {
+        assert_eq!(
+            translate_key(press(KeyCode::Up), false, false),
+            Some(GameCommand::Move { dx: 0, dy: -1 })
+        );
+        assert_eq!(
+            translate_key(press(KeyCode::Down), false, false),
+            Some(GameCommand::Move { dx: 0, dy: 1 })
+        );
+    }
+
+    #[test]
+    fn wait_and_quit_work_with_both_disabled() {
+        assert_eq!(
+            translate_key(press(KeyCode::Char('.')), false, false),
+            Some(GameCommand::Wait)
+        );
+        assert_eq!(
+            translate_key(press(KeyCode::Esc), false, false),
+            Some(GameCommand::Quit)
+        );
+    }
+
+    #[test]
+    fn numpad_disabled_wait_on_5_still_works() {
+        // '5' is the wait key AND a numpad key. With numpad off,
+        // '5' should NOT be treated as numpad movement — it falls through
+        // to the wait match.
+        assert_eq!(
+            translate_key(press(KeyCode::Char('5')), true, false),
+            Some(GameCommand::Wait)
+        );
     }
 }

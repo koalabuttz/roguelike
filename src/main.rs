@@ -2,8 +2,8 @@ use std::io::stdout;
 use std::time::Duration;
 
 use roguelike::{
-    data, game, input, menu, menu::MenuAction, platform::Renderer, render, saves::SlotMetadata,
-    settings, settings::Platform, types::Coord,
+    game, input, menu, menu::MenuAction, platform::Renderer, render, saves::SlotMetadata, settings,
+    settings::Platform, types::Coord,
 };
 
 use crossterm::{
@@ -33,15 +33,14 @@ fn animate_stepper(
     mut stepper: game::AutorunStepper,
     cols: Coord,
     rows: Coord,
-    show_explored_pct: bool,
-    animation_speed_ms: u64,
+    settings: &settings::Settings,
 ) -> std::io::Result<()> {
     loop {
         match stepper.next_step(state) {
             game::StepOutcome::Continue => {
-                render::render(stdout, state, cols, rows, show_explored_pct)?;
+                render::render(stdout, state, cols, rows, settings)?;
                 // Frame pacing + interrupt detection.
-                if event::poll(Duration::from_millis(animation_speed_ms))? {
+                if event::poll(Duration::from_millis(settings.animation_speed_ms as u64))? {
                     let _ = event::read()?;
                     return Ok(());
                 }
@@ -186,9 +185,10 @@ fn main() -> std::io::Result<()> {
 
     let mut renderer = render::CrosstermRenderer::new(std::io::stdout());
     let (cols, rows) = terminal::size()?;
-    let map_height = (rows as i32) - data::CONFIG.ui_bottom_rows;
 
     let mut settings = load_settings();
+    // Map height = terminal rows - status bar (1) - message log lines.
+    let map_height = (rows as i32) - 1 - settings.message_log_lines as i32;
     let mut game_state: Option<game::GameState> = None;
     let mut autosave_buf: Option<String> = None;
     let has_save = has_save_for_title(settings.casual_mode);
@@ -386,13 +386,7 @@ fn main() -> std::io::Result<()> {
                     autosave_buf = None;
                 }
 
-                render::render(
-                    &mut stdout,
-                    state,
-                    cols as i32,
-                    rows as i32,
-                    settings.show_explored_pct,
-                )?;
+                render::render(&mut stdout, state, cols as i32, rows as i32, &settings)?;
 
                 if state.game_over {
                     // Game-over: any key returns to title.
@@ -409,7 +403,7 @@ fn main() -> std::io::Result<()> {
                 }
 
                 let key = wait_for_keypress()?;
-                if let Some(cmd) = input::translate_key(key) {
+                if let Some(cmd) = input::translate_key(key, settings.vi_keys, settings.numpad) {
                     match cmd {
                         input::GameCommand::Quit => {
                             app_state = AppState::Paused(menu::pause_menu(settings.casual_mode));
@@ -423,8 +417,7 @@ fn main() -> std::io::Result<()> {
                                 stepper,
                                 cols as i32,
                                 rows as i32,
-                                settings.show_explored_pct,
-                                settings.animation_speed_ms as u64,
+                                &settings,
                             )?;
                             // Autosave after autorun completes.
                             if state.dirty
@@ -443,8 +436,7 @@ fn main() -> std::io::Result<()> {
                                     stepper,
                                     cols as i32,
                                     rows as i32,
-                                    settings.show_explored_pct,
-                                    settings.animation_speed_ms as u64,
+                                    &settings,
                                 )?;
                                 // Autosave after auto-explore completes.
                                 if state.dirty
@@ -461,8 +453,10 @@ fn main() -> std::io::Result<()> {
 
                         _ => {
                             state.step(cmd);
-                            // Autosave after each turn.
+                            // Autosave respecting frequency setting.
                             if state.dirty
+                                && (state.turn_count as u32)
+                                    .is_multiple_of(settings.autosave_frequency)
                                 && let Ok(json) = state.save_to_json()
                             {
                                 state.dirty = false;

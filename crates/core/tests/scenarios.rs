@@ -3,8 +3,8 @@
 //! These tests verify game balance properties — e.g., that certain monster
 //! configurations are survivable or lethal as expected.
 
-use roguelike::map::MapPreset;
-use roguelike::scenario::Scenario;
+use roguelike_core::map::MapPreset;
+use roguelike_core::scenario::Scenario;
 
 // --- Survivability tests ---
 

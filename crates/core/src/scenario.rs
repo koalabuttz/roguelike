@@ -8,8 +8,8 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use roguelike::scenario::Scenario;
-//! use roguelike::map::MapPreset;
+//! use roguelike_core::scenario::Scenario;
+//! use roguelike_core::map::MapPreset;
 //!
 //! Scenario::new(20, 20, 42)
 //!     .preset(MapPreset::SingleRoom)
@@ -21,11 +21,13 @@
 //! ```
 
 use crate::analytics::{self, GameAnalytics};
+use crate::command::GameCommand;
 use crate::dev_tools::{DevCommand, DevSession, after_step, exec_dev};
 use crate::game::GameState;
-use crate::input::GameCommand;
 use crate::map::MapPreset;
 use crate::types::{Coord, Stat};
+
+type Mutation = Box<dyn FnOnce(&mut GameState, &mut DevSession)>;
 
 /// Builder for constructing a test scenario.
 ///
@@ -36,7 +38,7 @@ pub struct Scenario {
     seed: u64,
     preset: Option<MapPreset>,
     commands: Vec<DevCommand>,
-    mutations: Vec<Box<dyn FnOnce(&mut GameState, &mut DevSession)>>,
+    mutations: Vec<Mutation>,
 }
 
 impl Scenario {

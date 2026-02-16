@@ -1,10 +1,43 @@
 # Cross-Platform Architecture
 
-How to structure the codebase for multiple platform targets (terminal, GBA, web, etc.) without maintaining separate branches.
+How the codebase is structured for multiple platform targets (terminal, GBA, Vita, web, etc.) without maintaining separate branches.
 
 ## Current State
 
-The codebase has type aliases in `src/types.rs` that centralize platform-sensitive sizing:
+The codebase is split into a Cargo workspace with three crates:
+
+```
+roguelike/
+├── Cargo.toml              (workspace root)
+├── crates/
+│   ├── core/               roguelike-core: game logic, zero platform deps
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── command.rs  ← GameCommand enum (platform-independent)
+│   │       ├── types.rs    ← Coord, Stat, Pos + GameColor
+│   │       ├── game.rs, map.rs, combat.rs, ai.rs, fov.rs
+│   │       ├── pathfinding.rs, spawn.rs, entity.rs, data.rs
+│   │       ├── platform.rs ← Renderer, InputSource traits
+│   │       ├── menu.rs, saves.rs, settings.rs
+│   │       ├── dev_tools.rs, analytics.rs, scenario.rs
+│   │       └── message_log.rs
+│   ├── terminal/           roguelike-terminal: crossterm frontend
+│   │   ├── Cargo.toml      depends on core
+│   │   └── src/
+│   │       ├── main.rs
+│   │       ├── render.rs   (CrosstermRenderer)
+│   │       └── input.rs    (crossterm key translation)
+│   ├── mcp/                roguelike-mcp: MCP server
+│   │   ├── Cargo.toml      depends on core + rmcp + tokio
+│   │   └── src/
+│   │       ├── main.rs
+│   │       └── mcp_server.rs
+│   └── gba/                (future: GBA frontend)
+│   └── vita/               (future: PS Vita frontend)
+```
+
+Type aliases in `crates/core/src/types.rs` centralize platform-sensitive sizing:
 
 ```rust
 pub type Coord = i32;  // position/dimension in tile units
@@ -12,15 +45,14 @@ pub type Pos = (Coord, Coord);  // (x, y) tile position
 pub type Stat = i32;   // character stat (HP, ATK, DEF, damage)
 ```
 
-Five source files import `crossterm` (the terminal library). Everything else is pure game logic with no platform dependencies.
+Only the `terminal` crate imports `crossterm`. Only the `mcp` crate imports `rmcp`/`tokio`. The `core` crate has zero platform dependencies.
 
-| File | Platform dependency | Role |
-|------|-------------------|------|
-| `entity.rs` | `crossterm::style::Color` | Entity data (Color only) |
-| `data.rs` | `crossterm::style::Color` | Monster templates (Color only) |
-| `input.rs` | `crossterm::event::*` | Keyboard → GameCommand translation |
-| `render.rs` | `crossterm::*` | Terminal rendering |
-| `main.rs` | `crossterm::*` | Terminal lifecycle |
+### Completed prerequisites
+
+- [x] **Platform abstraction** — `Renderer` and `InputSource` traits in `core/src/platform.rs`
+- [x] **Abstract Color** — `GameColor` enum in `core/src/types.rs`; crossterm removed from `entity.rs` and `data.rs`
+- [x] **Move `GameCommand`** — `command.rs` in core; terminal's `input.rs` only does key translation
+- [x] **Workspace split** — three crates: core, terminal, mcp
 
 ## Why Not Branches
 
@@ -31,16 +63,12 @@ Maintaining a separate branch per platform (e.g. `gba`, `web`) creates constant 
 - Platform-specific fixes can't be tested against other platforms in CI
 - Drift accumulates — ports fall behind main
 
-## Architecture: Workspace + Feature Flags
+## Feature Flags for Type Sizing
 
-### Phase 1: Feature flags (minimal change)
-
-Add feature flags to `Cargo.toml` for type sizing without restructuring:
+For platforms that need different type sizes (GBA, C64), add feature flags to the core crate:
 
 ```toml
 [features]
-default = ["terminal"]
-terminal = ["dep:crossterm"]
 gba = []
 ```
 
@@ -54,60 +82,18 @@ pub type Coord = i16;
 pub type Coord = i32;
 ```
 
-Same branch, same code. `cargo build --features gba` compiles with `i16` coordinates. CI tests all feature combinations.
-
-### Phase 2: Workspace split (when adding a second frontend)
-
-Split the single crate into a workspace with a shared core:
-
-```
-roguelike/
-├── Cargo.toml              (workspace root)
-├── crates/
-│   ├── core/               (game logic, zero platform deps)
-│   │   ├── Cargo.toml
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── types.rs    ← Coord, Stat, Pos + feature flags
-│   │       ├── game.rs
-│   │       ├── map.rs
-│   │       ├── combat.rs
-│   │       ├── ai.rs
-│   │       ├── fov.rs
-│   │       ├── pathfinding.rs
-│   │       ├── spawn.rs
-│   │       ├── entity.rs   ← Color abstracted (see below)
-│   │       ├── data.rs     ← Color abstracted
-│   │       └── message_log.rs
-│   ├── terminal/           (crossterm frontend)
-│   │   ├── Cargo.toml      depends on core
-│   │   └── src/
-│   │       ├── main.rs     ← current main.rs
-│   │       ├── render.rs   ← current render.rs
-│   │       └── input.rs    ← keyboard portion of current input.rs
-│   ├── mcp/                (MCP server frontend)
-│   │   ├── Cargo.toml      depends on core + rmcp + tokio
-│   │   └── src/
-│   │       ├── main.rs     ← current bin/mcp_server.rs
-│   │       └── mcp.rs      ← current mcp.rs
-│   └── gba/                (GBA frontend, future)
-│       ├── Cargo.toml      depends on core with features = ["gba"]
-│       └── src/
-│           ├── main.rs
-│           ├── render.rs   (GBA tile renderer)
-│           └── input.rs    (GBA button mapping)
-```
+Same branch, same code. The frontend crate selects the feature via `Cargo.toml`. CI tests all feature combinations.
 
 ### What stays in core
 
 Everything that doesn't touch a platform API:
 
-- Game state, turns, commands (`game.rs`, `GameCommand` enum from `input.rs`)
+- Game state, turns, commands (`game.rs`, `GameCommand` enum from `command.rs`)
 - Map generation, rooms, tiles (`map.rs`)
 - Combat, AI, FOV, pathfinding, spawning
 - Entity data, monster templates, game config
-- Message log
-- Type aliases
+- Message log, menus, settings, saves
+- Type aliases and `GameColor`
 
 ### What moves to frontend crates
 
@@ -115,13 +101,12 @@ Anything that talks to hardware or external services:
 
 - **Terminal crate**: crossterm rendering, keyboard input, terminal lifecycle
 - **MCP crate**: rmcp server, tokio runtime, JSON serialization of game state
-- **GBA crate**: GBA tile/sprite rendering, button input, no-std setup
+- **GBA crate** (future): GBA tile/sprite rendering, button input, no-std setup
+- **Vita crate** (future): vita-sdk rendering, hardware buttons, memory card saves
 
-## Abstracting Color
+## Color Abstraction
 
-The one snag is `crossterm::style::Color` used in `entity.rs` and `data.rs`. These are core data files that shouldn't depend on crossterm. Two options:
-
-### Option A: Core-defined color enum (recommended)
+Colors use a core-defined `GameColor` enum (Option A from the original design):
 
 ```rust
 // core/src/types.rs
@@ -131,27 +116,19 @@ pub enum GameColor {
     Green,
     DarkGreen,
     DarkRed,
-    // add as needed
+    Rgb(u8, u8, u8),
+    // ...
 }
 ```
 
-Each frontend maps `GameColor` to its platform color type. Simple, no dependencies.
-
-### Option B: RGB tuple
-
-```rust
-// core/src/types.rs
-pub type Color = (u8, u8, u8);
-```
-
-More flexible but loses named colors. GBA has a limited palette, so named colors with per-platform mapping (Option A) is usually better.
+Each frontend maps `GameColor` to its platform color type. The terminal crate's `render.rs` has `to_crossterm_color()` for this.
 
 ## Type Sizing by Platform
 
 Expected type sizes per target:
 
-| Type | Terminal / Web | GBA | C64 (hypothetical) |
-|------|---------------|-----|---------------------|
+| Type | Terminal / Web / Vita | GBA | C64 (hypothetical) |
+|------|----------------------|-----|---------------------|
 | `Coord` | `i32` | `i16` | `i8` |
 | `Stat` | `i32` | `i8` | `i8` |
 | `Pos` | `(i32, i32)` | `(i16, i16)` | `(i8, i8)` |
@@ -166,13 +143,3 @@ All development happens on one branch:
 2. **New platform?** Add a new crate under `crates/`, implement rendering and input
 3. **Type sizing?** Feature flag on `core`'s `types.rs` — the frontend crate selects it via `Cargo.toml`
 4. **CI** builds all frontends in a matrix — catches cross-platform breakage immediately
-
-## Prerequisites
-
-Before the workspace split, complete these roadmap items:
-
-1. **Platform abstraction** — define `Renderer` and `InputSource` traits in core
-2. **Abstract Color** — remove `crossterm::style::Color` from `entity.rs` and `data.rs`
-3. **Move `GameCommand`** — the enum is already platform-agnostic; ensure `input.rs` only re-exports it and keeps keyboard translation separate
-
-The type aliases (`Coord`, `Stat`, `Pos`) are already in place. The `crossterm` imports identify exactly where to cut.

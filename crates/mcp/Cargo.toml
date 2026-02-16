@@ -1,0 +1,18 @@
+[package]
+name = "roguelike-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+roguelike-core = { path = "../core", default-features = false, features = [] }
+rmcp = { version = "0.15", features = ["server", "transport-io", "schemars"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[[bin]]
+name = "mcp_server"
+path = "src/main.rs"

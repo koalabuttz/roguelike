@@ -3,13 +3,13 @@ name: CI
 on:
   push:
     paths:
-      - 'src/**'
+      - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/**'
   pull_request:
     paths:
-      - 'src/**'
+      - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/**'
@@ -26,8 +26,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - run: cargo fmt --check
-      - run: cargo clippy -- -D warnings
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace -- -D warnings
 
   test:
     name: Test (${{ matrix.name }})
@@ -47,7 +47,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test
+      - run: cargo test --workspace
 
   audit:
     name: Audit

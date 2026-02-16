@@ -6,11 +6,11 @@ use crossterm::{
     terminal,
 };
 
-use crate::game::GameState;
-use crate::map::{self, Tile};
-use crate::platform::Renderer;
-use crate::settings::Settings;
-use crate::types::{Coord, GameColor};
+use roguelike_core::game::GameState;
+use roguelike_core::map::{self, Tile};
+use roguelike_core::platform::Renderer;
+use roguelike_core::settings::Settings;
+use roguelike_core::types::{Coord, GameColor};
 
 /// Map a platform-independent `GameColor` to a crossterm terminal color.
 fn to_crossterm_color(c: GameColor) -> Color {

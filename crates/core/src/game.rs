@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::ai;
 use crate::combat;
+use crate::command::GameCommand;
 use crate::data;
 use crate::entity::{Entity, EntityKind};
 use crate::fov;
-use crate::input::GameCommand;
 use crate::map;
 use crate::message_log::MessageLog;
 use crate::pathfinding;

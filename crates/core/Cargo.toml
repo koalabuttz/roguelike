@@ -1,0 +1,22 @@
+[package]
+name = "roguelike-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["dev-tools"]
+dev-tools = []
+
+[dependencies]
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[[bin]]
+name = "headless"
+path = "src/bin/headless.rs"
+required-features = ["dev-tools"]

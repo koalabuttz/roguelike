@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+use crate::command::GameCommand;
 use crate::data;
 use crate::entity::Entity;
 use crate::game::GameState;
-use crate::input::GameCommand;
 use crate::map::Tile;
 use crate::types::{Coord, Stat};
 

@@ -1,11 +1,14 @@
 use std::io::stdout;
 use std::time::Duration;
 
+mod input;
+mod render;
+
 #[cfg(all(debug_assertions, feature = "dev-tools"))]
-use roguelike::dev_tools::{self, DevCommand, DevSession};
-use roguelike::{
-    game, input, menu, menu::MenuAction, platform::Renderer, render, saves::SlotMetadata, settings,
-    settings::Platform, types::Coord,
+use roguelike_core::dev_tools::{self, DevCommand, DevSession};
+use roguelike_core::{
+    command::GameCommand, game, menu, menu::MenuAction, platform::Renderer, saves::SlotMetadata,
+    settings, settings::Platform, types::Coord,
 };
 
 use crossterm::{
@@ -436,11 +439,11 @@ fn main() -> std::io::Result<()> {
 
                 if let Some(cmd) = input::translate_key(key, settings.vi_keys, settings.numpad) {
                     match cmd {
-                        input::GameCommand::Quit => {
+                        GameCommand::Quit => {
                             app_state = AppState::Paused(menu::pause_menu(settings.casual_mode));
                         }
 
-                        input::GameCommand::Autorun { dx, dy } => {
+                        GameCommand::Autorun { dx, dy } => {
                             let stepper = state.start_autorun(dx, dy);
                             #[cfg(all(debug_assertions, feature = "dev-tools"))]
                             let fov_off = dev_session.fov_disabled;
@@ -466,7 +469,7 @@ fn main() -> std::io::Result<()> {
                             }
                         }
 
-                        input::GameCommand::AutoExplore => match state.start_auto_explore() {
+                        GameCommand::AutoExplore => match state.start_auto_explore() {
                             Ok((stepper, _tx, _ty)) => {
                                 #[cfg(all(debug_assertions, feature = "dev-tools"))]
                                 let fov_off = dev_session.fov_disabled;

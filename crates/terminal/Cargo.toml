@@ -1,0 +1,18 @@
+[package]
+name = "roguelike-terminal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["dev-tools"]
+dev-tools = ["roguelike-core/dev-tools"]
+
+[dependencies]
+roguelike-core = { path = "../core" }
+crossterm = "0.28"
+serde_json = { workspace = true }
+
+[[bin]]
+name = "roguelike"
+path = "src/main.rs"

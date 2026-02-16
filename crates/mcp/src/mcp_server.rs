@@ -8,12 +8,12 @@ use rmcp::{
 };
 use tokio::sync::Mutex;
 
-use crate::data::CONFIG;
-use crate::game::{
+use roguelike_core::command::GameCommand;
+use roguelike_core::data::CONFIG;
+use roguelike_core::game::{
     AutoExploreResult, AutoFightResult, AutorunResult, AutorunStopReason, GameState,
 };
-use crate::input::GameCommand;
-use crate::types::{Coord, Pos};
+use roguelike_core::types::{Coord, Pos};
 
 /// Per-session state: game state plus configuration set at `new_game` time.
 struct GameSession {
@@ -294,8 +294,9 @@ impl RoguelikeMcpServer {
             .map_err(|e| McpError::invalid_request(e, None))?;
         let observation = state.observe();
         let frontier_count = state.frontier_tiles().len() as i32;
-        let json = format_auto_explore_response(&observation, &explore_result, frontier_count, compact)
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let json =
+            format_auto_explore_response(&observation, &explore_result, frontier_count, compact)
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
@@ -351,7 +352,10 @@ impl RoguelikeMcpServer {
         // Preserve compact setting from the current session.
         let mut guard = self.session.lock().await;
         let compact = guard.as_ref().map(|s| s.compact).unwrap_or(false);
-        *guard = Some(GameSession { state: loaded, compact });
+        *guard = Some(GameSession {
+            state: loaded,
+            compact,
+        });
 
         let mut value = serde_json::to_value(&observation)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -504,7 +508,7 @@ pub fn parse_action(action: &str) -> Option<GameCommand> {
 
 /// Build a JSON response that merges the observation with auto-fight metadata.
 fn format_auto_fight_response(
-    observation: &crate::game::GameObservation,
+    observation: &roguelike_core::game::GameObservation,
     fight: &AutoFightResult,
     compact: bool,
 ) -> Result<String, serde_json::Error> {
@@ -538,7 +542,7 @@ fn format_auto_fight_response(
 
 /// Build a JSON response that merges the observation with autorun metadata.
 fn format_response(
-    observation: &crate::game::GameObservation,
+    observation: &roguelike_core::game::GameObservation,
     autorun: &AutorunResult,
     frontier_tiles: &[Pos],
     compact: bool,
@@ -573,7 +577,7 @@ fn format_response(
 /// loop and the server picks the best frontier automatically — the coordinate
 /// list is dead weight here. Use `get_explored_map` for the full list.
 fn format_auto_explore_response(
-    observation: &crate::game::GameObservation,
+    observation: &roguelike_core::game::GameObservation,
     explore: &AutoExploreResult,
     frontier_count: i32,
     compact: bool,
@@ -620,7 +624,7 @@ fn format_auto_explore_response(
 
 /// Serialize a `GameObservation`, optionally stripping the map for compact mode.
 fn serialize_observation(
-    observation: &crate::game::GameObservation,
+    observation: &roguelike_core::game::GameObservation,
     compact: bool,
 ) -> Result<String, McpError> {
     let mut value = serde_json::to_value(observation)
@@ -628,8 +632,7 @@ fn serialize_observation(
     if compact {
         strip_map(&mut value);
     }
-    serde_json::to_string(&value)
-        .map_err(|e| McpError::internal_error(e.to_string(), None))
+    serde_json::to_string(&value).map_err(|e| McpError::internal_error(e.to_string(), None))
 }
 
 /// Remove the `map` field from a serialized observation to save tokens.
@@ -796,11 +799,11 @@ mod tests {
 
     #[test]
     fn auto_fight_response_omits_map_ascii() {
-        use crate::data;
-        use crate::entity::Entity;
-        use crate::fov;
-        use crate::map::{Map, Tile};
-        use crate::message_log::MessageLog;
+        use roguelike_core::data;
+        use roguelike_core::entity::Entity;
+        use roguelike_core::fov;
+        use roguelike_core::map::{Map, Tile};
+        use roguelike_core::message_log::MessageLog;
 
         // Build a minimal game with a goblin adjacent to the player.
         let mut m = Map::new(20, 20);

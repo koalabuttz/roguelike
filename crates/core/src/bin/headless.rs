@@ -36,16 +36,16 @@
 
 use std::collections::HashSet;
 
-use roguelike::analytics::{
+use roguelike_core::analytics::{
     self, ConfigOverrides, DamageFlow, GameAnalytics, SweepConfig, SweepPoint,
 };
-use roguelike::dev_tools::{
+use roguelike_core::command::GameCommand;
+use roguelike_core::dev_tools::{
     BatchRunStats, DevSession, GoldenReplay, Replay, ReplayResult, after_step, golden_from_session,
 };
-use roguelike::game::GameState;
-use roguelike::input::GameCommand;
-use roguelike::map::MapPreset;
-use roguelike::types::{Coord, Pos, Stat};
+use roguelike_core::game::GameState;
+use roguelike_core::map::MapPreset;
+use roguelike_core::types::{Coord, Pos, Stat};
 
 /// Common configuration for batch and single-game runs.
 struct RunConfig {
@@ -744,8 +744,8 @@ fn next_explore_path(gs: &GameState) -> Option<Vec<Pos>> {
     let py = gs.entities[0].y;
     let frontier_set: HashSet<Pos> = frontiers.into_iter().collect();
     let (tx, ty) =
-        roguelike::pathfinding::nearest_by_cost(&gs.map, px, py, &frontier_set, &gs.explored)?;
-    roguelike::pathfinding::find_path(&gs.map, px, py, tx, ty, &gs.explored)
+        roguelike_core::pathfinding::nearest_by_cost(&gs.map, px, py, &frontier_set, &gs.explored)?;
+    roguelike_core::pathfinding::find_path(&gs.map, px, py, tx, ty, &gs.explored)
 }
 
 fn run_replay(path: &str) {

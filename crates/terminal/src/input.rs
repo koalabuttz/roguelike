@@ -1,30 +1,8 @@
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use serde::{Deserialize, Serialize};
-
-use crate::platform::{InputSource, MenuCommand};
-use crate::types::Coord;
-
-/// A platform-independent game command.
-///
-/// Input adapters (keyboard, controller, replay, network) produce these;
-/// game logic consumes them. No module outside `input` should match on
-/// raw key events.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GameCommand {
-    Move {
-        dx: Coord,
-        dy: Coord,
-    },
-    /// Keep moving in a direction until something interesting happens.
-    Autorun {
-        dx: Coord,
-        dy: Coord,
-    },
-    AutoExplore,
-    Wait,
-    Quit,
-}
+use roguelike_core::command::GameCommand;
+use roguelike_core::platform::MenuCommand;
+use roguelike_core::types::Coord;
 
 /// Resolve a key to a direction `(dx, dy)` and whether it triggers autorun.
 ///
@@ -115,45 +93,6 @@ pub fn translate_menu_key(key: KeyEvent) -> Option<MenuCommand> {
         KeyCode::Enter | KeyCode::Char(' ') => Some(MenuCommand::Select),
         KeyCode::Esc | KeyCode::Char('q') => Some(MenuCommand::Back),
         _ => None,
-    }
-}
-
-/// Terminal input source backed by crossterm.
-///
-/// Blocks on `crossterm::event::read()` and translates key events into
-/// platform-independent commands.
-pub struct CrosstermInput {
-    pub vi_keys: bool,
-    pub numpad: bool,
-}
-
-impl InputSource for CrosstermInput {
-    fn next_command(&mut self) -> Option<GameCommand> {
-        loop {
-            if let Ok(Event::Key(
-                key @ KeyEvent {
-                    kind: KeyEventKind::Press,
-                    ..
-                },
-            )) = event::read()
-            {
-                return translate_key(key, self.vi_keys, self.numpad);
-            }
-        }
-    }
-
-    fn next_menu_command(&mut self) -> Option<MenuCommand> {
-        loop {
-            if let Ok(Event::Key(
-                key @ KeyEvent {
-                    kind: KeyEventKind::Press,
-                    ..
-                },
-            )) = event::read()
-            {
-                return translate_menu_key(key);
-            }
-        }
     }
 }
 

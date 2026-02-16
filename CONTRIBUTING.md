@@ -19,9 +19,9 @@ By submitting a pull request, you agree that your contributions may be included 
 All of the following must pass:
 
 ```sh
-cargo fmt --check
-cargo clippy -- -D warnings
-cargo test
+cargo fmt --all --check
+cargo clippy --workspace -- -D warnings
+cargo test --workspace
 ```
 
 CI runs these automatically on every pull request.
@@ -29,7 +29,7 @@ CI runs these automatically on every pull request.
 If golden replay tests fail after an intentional gameplay change, regenerate them:
 
 ```sh
-cargo run --bin headless -- --regenerate-goldens tests/golden_replays/
+cargo run --bin headless -- --regenerate-goldens crates/core/tests/golden_replays/
 ```
 
 ## Development Workflow
@@ -91,15 +91,15 @@ The project has three levels of testing. Use the appropriate level for each type
 
 ### Unit Tests (module-level)
 
-Standard `#[test]` functions inside each module's `#[cfg(test)] mod tests` block. These test individual functions and methods in isolation. Run with `cargo test --lib`.
+Standard `#[test]` functions inside each module's `#[cfg(test)] mod tests` block. These test individual functions and methods in isolation. Run with `cargo test -p roguelike-core --lib`.
 
 ### Scenario Tests (balance assertions)
 
-Use the scenario framework (`src/scenario.rs`) when testing how gameplay changes affect balance. Scenarios use a fluent builder API to set up specific game states and assert outcomes:
+Use the scenario framework (`crates/core/src/scenario.rs`) when testing how gameplay changes affect balance. Scenarios use a fluent builder API to set up specific game states and assert outcomes:
 
 ```rust
-use roguelike::scenario::Scenario;
-use roguelike::map::MapPreset;
+use roguelike_core::scenario::Scenario;
+use roguelike_core::map::MapPreset;
 
 #[test]
 fn new_monster_is_survivable() {
@@ -119,33 +119,33 @@ Run methods: `.run_turns(n)` (auto-fight AI), `.run_auto_fight(n)` (fight adjace
 
 Assertions: `.assert_alive()`, `.assert_dead()`, `.assert_hp(n)`, `.assert_hp_between(min, max)`, `.assert_kills(n)`, `.assert_monsters_alive(n)`, `.assert_turns(n)`, `.assert_turns_less_than(n)`. All are chainable.
 
-Add scenario tests to `tests/scenarios.rs` when:
+Add scenario tests to `crates/core/tests/scenarios.rs` when:
 - Changing monster stats, player stats, or combat formulas
 - Adding new monster types
 - Modifying regeneration, spawning, or AI behavior
 
 ### Golden Replay Tests (regression detection)
 
-Golden replays are stored recordings of full game playthroughs with their expected final state. They detect when a code change unintentionally alters gameplay. Located in `tests/golden_replays/`.
+Golden replays are stored recordings of full game playthroughs with their expected final state. They detect when a code change unintentionally alters gameplay. Located in `crates/core/tests/golden_replays/`.
 
 **When golden tests fail**: If the change was intentional (e.g., you rebalanced damage), regenerate:
 
 ```sh
-cargo run --bin headless -- --regenerate-goldens tests/golden_replays/
+cargo run --bin headless -- --regenerate-goldens crates/core/tests/golden_replays/
 ```
 
 **Adding a new golden**: Use the headless runner to generate one:
 
 ```sh
-cargo run --bin headless -- --save-golden tests/golden_replays/seed_99_arena.json --seed 99 --preset arena
+cargo run --bin headless -- --save-golden crates/core/tests/golden_replays/seed_99_arena.json --seed 99 --preset arena
 ```
 
-Then add a corresponding test in `tests/golden_replays.rs`:
+Then add a corresponding test in `crates/core/tests/golden_replays.rs`:
 
 ```rust
 #[test]
 fn golden_seed_99_arena() {
-    load_and_verify("tests/golden_replays/seed_99_arena.json");
+    load_and_verify(&format!("{}/seed_99_arena.json", GOLDEN_DIR));
 }
 ```
 

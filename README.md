@@ -17,39 +17,39 @@ The game adapts to your terminal size automatically.
 ## Testing
 
 ```sh
-cargo test                       # All tests: 304 unit + 13 integration
-cargo test --lib                 # 304 unit tests across 17 modules
-cargo test --test golden_replays # 5 golden replay regression tests
-cargo test --test scenarios      # 8 balance integration tests
-cargo clippy -- -D warnings
-cargo fmt --check
+cargo test --workspace               # All tests: 320 unit + 13 integration
+cargo test -p roguelike-core --lib    # Unit tests across core modules
+cargo test -p roguelike-core --test golden_replays # 5 golden replay regression tests
+cargo test -p roguelike-core --test scenarios      # 8 balance integration tests
+cargo clippy --workspace -- -D warnings
+cargo fmt --all --check
 ```
 
 ### Test Categories
 
 | Category | Command | What it checks |
 |----------|---------|----------------|
-| Unit tests | `cargo test --lib` | Module-level logic across all 17 modules |
-| Golden replays | `cargo test --test golden_replays` | Deterministic replay regression — detects unintended gameplay changes |
-| Scenario tests | `cargo test --test scenarios` | Balance properties — e.g., "player survives 2 goblins", "troll kills weak player" |
+| Unit tests | `cargo test -p roguelike-core --lib` | Module-level logic across core modules |
+| Golden replays | `cargo test -p roguelike-core --test golden_replays` | Deterministic replay regression — detects unintended gameplay changes |
+| Scenario tests | `cargo test -p roguelike-core --test scenarios` | Balance properties — e.g., "player survives 2 goblins", "troll kills weak player" |
 
 ### Golden Replays
 
-Golden replays are stored game recordings with their expected outcomes (`tests/golden_replays/*.json`). After any code change, re-running them detects if game behavior has diverged. If a change is intentional (e.g., rebalancing monster stats), regenerate the goldens:
+Golden replays are stored game recordings with their expected outcomes (`crates/core/tests/golden_replays/*.json`). After any code change, re-running them detects if game behavior has diverged. If a change is intentional (e.g., rebalancing monster stats), regenerate the goldens:
 
 ```sh
-cargo run --bin headless -- --regenerate-goldens tests/golden_replays/
+cargo run --bin headless -- --regenerate-goldens crates/core/tests/golden_replays/
 ```
 
 To add a new golden replay:
 
 ```sh
-cargo run --bin headless -- --save-golden tests/golden_replays/seed_99_arena.json --seed 99 --preset arena
+cargo run --bin headless -- --save-golden crates/core/tests/golden_replays/seed_99_arena.json --seed 99 --preset arena
 ```
 
 ### Scenario Tests
 
-Scenario tests use a fluent builder API to compose specific game states and assert outcomes. They live in `tests/scenarios.rs` and are the recommended way to test balance changes:
+Scenario tests use a fluent builder API to compose specific game states and assert outcomes. They live in `crates/core/tests/scenarios.rs` and are the recommended way to test balance changes:
 
 ```rust
 Scenario::new(20, 20, 42)
@@ -105,7 +105,7 @@ To use with Claude Desktop, add to your `claude_desktop_config.json`:
   "mcpServers": {
     "roguelike": {
       "command": "cargo",
-      "args": ["run", "--bin", "mcp_server", "--manifest-path", "/path/to/roguelike/Cargo.toml"]
+      "args": ["run", "--bin", "mcp_server", "--manifest-path", "/path/to/roguelike/crates/mcp/Cargo.toml"]
     }
   }
 }
@@ -139,10 +139,10 @@ cargo run --bin headless -- --games 50 --analytics --analysis
 cargo run --bin headless -- --sweep sweep.json
 
 # Save a golden replay for regression testing:
-cargo run --bin headless -- --save-golden tests/golden_replays/my_test.json --seed 42
+cargo run --bin headless -- --save-golden crates/core/tests/golden_replays/my_test.json --seed 42
 
 # Regenerate all golden replays after an intentional gameplay change:
-cargo run --bin headless -- --regenerate-goldens tests/golden_replays/
+cargo run --bin headless -- --regenerate-goldens crates/core/tests/golden_replays/
 
 # Replay a recorded game:
 cargo run --bin headless -- --replay replay.json
@@ -301,7 +301,7 @@ The MCP server supports a `compact` mode (`new_game` with `compact=true`) that o
 
 ## Adding a New Monster
 
-All content lives in `src/data.rs`. To add a monster:
+All content lives in `crates/core/src/data.rs`. To add a monster:
 
 1. Define a template constant:
 
@@ -328,37 +328,31 @@ If it needs new AI, add a variant to `AiBehavior` in `src/entity.rs` and impleme
 ## Project Structure
 
 ```
-src/
-  lib.rs           Library root — re-exports all modules
-  main.rs          Terminal game entry point
-  input.rs         GameCommand enum, key-to-command translation
-  game.rs          GameState struct, step(), observe(), core game logic
-  data.rs          Monster templates, spawn table, config constants
-  entity.rs        Entity struct, EntityKind, AiBehavior enum
-  ai.rs            Monster AI system (dispatches on AiBehavior)
-  combat.rs        Melee attack resolution
-  spawn.rs         Monster spawning using weighted tables
-  map.rs           Map struct and dungeon generation
-  fov.rs           Field of view (recursive shadowcasting)
-  pathfinding.rs   A* pathfinding for monsters and MCP navigation
-  platform.rs      Renderer and InputSource traits (platform abstraction)
-  render.rs        Terminal rendering (implements Renderer)
-  menu.rs          Title screen, pause menu, settings UI
-  saves.rs         Save slot metadata for menu display
-  settings.rs      Platform-aware settings (casual mode, display options)
-  dev_tools.rs     Debug console, map presets, replay export, golden replays (dev-tools feature)
-  analytics.rs     Combat analytics, snapshot/diff tracking, parameter sweeps (dev-tools feature)
-  scenario.rs      Fluent scenario builder for balance testing (dev-tools feature)
-  message_log.rs   Message log
-  types.rs         Type aliases (Coord, Stat, Pos) and GameColor enum
-  mcp.rs           MCP server — tools for LLM-driven play
-  bin/
-    mcp_server.rs  MCP server binary entry point
-    headless.rs    Automated headless runner with analytics, sweeps, goldens (dev-tools feature)
-tests/
-  golden_replays.rs       Integration tests for golden replay verification
-  scenarios.rs            Balance integration tests using the scenario framework
-  golden_replays/         Stored golden replay JSON files (committed to repo)
+crates/
+  core/                     roguelike-core: game logic, zero platform deps
+    src/
+      lib.rs                Library root — re-exports all modules
+      command.rs            GameCommand enum (platform-independent)
+      game.rs               GameState struct, step(), observe(), core game logic
+      map.rs, combat.rs, ai.rs, fov.rs, pathfinding.rs, spawn.rs
+      entity.rs, data.rs, types.rs, message_log.rs
+      platform.rs           Renderer and InputSource traits
+      menu.rs, saves.rs, settings.rs
+      dev_tools.rs, analytics.rs, scenario.rs  (dev-tools feature)
+      bin/headless.rs       Automated headless runner
+    tests/
+      golden_replays.rs     Golden replay regression tests
+      scenarios.rs          Balance integration tests
+      golden_replays/       Stored golden replay JSON files
+  terminal/                 roguelike-terminal: crossterm frontend
+    src/
+      main.rs               Terminal game entry point
+      input.rs              Crossterm key-to-command translation
+      render.rs             Terminal rendering (implements Renderer)
+  mcp/                      roguelike-mcp: MCP server
+    src/
+      main.rs               MCP server entry point
+      mcp_server.rs         MCP tools for LLM-driven play
 tools/
   visualize.py            Python/matplotlib analytics visualizer (batch, sweep, analysis modes)
   llm_playtest.py         Dual-backend LLM playtesting (claude-code CLI or Anthropic API) with parallel execution
@@ -368,7 +362,7 @@ tools/
 
 ## Configuration
 
-Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
+Game-wide tuning knobs are in `crates/core/src/data.rs` under `GameConfig`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -444,6 +438,7 @@ Design principles (not checkboxes — follow these always):
 - [x] **CI matrix** — Tests on Linux (x86_64 + ARM64), macOS (ARM64), Windows (x86_64) in GitHub Actions
 - [ ] **Web (WASM)** — Browser-based play via wasm-pack + xterm.js; enables browser spectating and leaderboards
 - [ ] **Game Boy Advance** — Native ARM via `thumbv4t-none-eabi` target + `gba` crate; no_std, fixed-size containers
+- [ ] **PS Vita** — Native ARM via vita-sdk + vitasdk-sys; hardware buttons, OLED display, memory card saves
 - [ ] **SSH server** — Server-side play via russh, NetHack-server style (players connect via SSH)
 - [ ] **Commodore 64** — Native 6502 via rust-mos; no_std, fixed-size containers, 8-bit types, C64 screen/keyboard I/O
 

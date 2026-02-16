@@ -5,7 +5,9 @@
 //! it means the change altered game behavior — intentional changes should
 //! regenerate the goldens via `--regenerate-goldens`.
 
-use roguelike::dev_tools::GoldenReplay;
+use roguelike_core::dev_tools::GoldenReplay;
+
+const GOLDEN_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden_replays");
 
 fn load_and_verify(path: &str) {
     let json =
@@ -19,28 +21,27 @@ fn load_and_verify(path: &str) {
 
 #[test]
 fn golden_seed_42_default() {
-    load_and_verify("tests/golden_replays/seed_42_default.json");
+    load_and_verify(&format!("{}/seed_42_default.json", GOLDEN_DIR));
 }
 
 #[test]
 fn golden_seed_42_arena() {
-    load_and_verify("tests/golden_replays/seed_42_arena.json");
+    load_and_verify(&format!("{}/seed_42_arena.json", GOLDEN_DIR));
 }
 
 #[test]
 fn golden_seed_100_corridor() {
-    load_and_verify("tests/golden_replays/seed_100_corridor.json");
+    load_and_verify(&format!("{}/seed_100_corridor.json", GOLDEN_DIR));
 }
 
 #[test]
 fn golden_seed_7_labyrinth() {
-    load_and_verify("tests/golden_replays/seed_7_labyrinth.json");
+    load_and_verify(&format!("{}/seed_7_labyrinth.json", GOLDEN_DIR));
 }
 
 #[test]
 fn all_golden_replays_pass() {
-    let dir = "tests/golden_replays";
-    let entries = std::fs::read_dir(dir).expect("failed to read golden_replays directory");
+    let entries = std::fs::read_dir(GOLDEN_DIR).expect("failed to read golden_replays directory");
 
     let mut count = 0;
     let mut failures = Vec::new();
@@ -60,7 +61,7 @@ fn all_golden_replays_pass() {
         }
     }
 
-    assert!(count > 0, "No golden replay files found in {}", dir);
+    assert!(count > 0, "No golden replay files found in {}", GOLDEN_DIR);
     if !failures.is_empty() {
         panic!(
             "{} of {} golden replays failed:\n{}",

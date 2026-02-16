@@ -1,4 +1,4 @@
-use crate::input::GameCommand;
+use crate::command::GameCommand;
 use crate::types::{Coord, GameColor};
 
 /// A platform-independent command for menu navigation.

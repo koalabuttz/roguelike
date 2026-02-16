@@ -46,8 +46,8 @@ Builds on the core systems to add depth, platforms, and accessibility.
 
 | Item | Blocks | Impact | Effort | Notes |
 |------|--------|--------|--------|-------|
-| Platform abstraction | ~5 items | Low | M | Required before any platform port. Do alongside input abstraction. |
-| Type aliases | ~2 items | None | S | 30-minute refactor. Enables platform-specific type sizing. |
+| ~~Platform abstraction~~ | ~~&zwj;~5 items~~ | ~~Low~~ | ~~M~~ | ~~Required before any platform port. Do alongside input abstraction.~~ Done. |
+| ~~Type aliases~~ | ~~&zwj;~2 items~~ | ~~None~~ | ~~S~~ | ~~30-minute refactor. Enables platform-specific type sizing.~~ Done. |
 | Controller support | ~1 item | High | M | Requires input abstraction. Enables couch play, Steam Deck. |
 | Replay system | ~2 items | Medium | M | Requires seeded RNG. Unlocks spectating and seed sharing. |
 | Auto-explore | 0 | High | M | Major QoL. Requires A*. Benefits all players, essential for motor accessibility. |
@@ -104,6 +104,7 @@ Significant investment. May depend on earlier tiers being complete.
 | Scripting | 0 | Medium | XL | Lua/Rhai embedding. Only if community content demands it. |
 | Map editor | 0 | Low | L | For hand-crafted content if needed. |
 | Game Boy Advance | 0 | Low | XL | Requires no_std rewrite of data structures. |
+| PS Vita | 0 | Low | L | Native ARM via vita-sdk; hardware buttons, OLED display, memory card saves. |
 | Commodore 64 | 0 | Low | XL | Requires no_std, 8-bit types, custom toolchain. |
 
 ## Critical Path
@@ -123,7 +124,7 @@ Input abstraction
   → Controller support
     → Steam Deck
 
-  → Platform abstraction
+  → Platform abstraction ✓
     → WASM (web)
       → Spectating / Leaderboards
 

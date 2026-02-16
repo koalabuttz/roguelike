@@ -481,7 +481,7 @@ mod tests {
     use crate::fov;
     use crate::map::{Map, Tile};
     use crate::message_log::MessageLog;
-    use crate::{data, input::GameCommand};
+    use crate::{command::GameCommand, data};
 
     fn test_game() -> GameState {
         let mut m = Map::new(20, 20);

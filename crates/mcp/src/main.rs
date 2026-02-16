@@ -2,7 +2,8 @@ use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 use tracing_subscriber::EnvFilter;
 
-use roguelike::mcp::RoguelikeMcpServer;
+mod mcp_server;
+use mcp_server::RoguelikeMcpServer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -5,6 +5,7 @@ pub enum Platform {
     Terminal,
     Mcp,
     Gba,
+    Vita,
     C64,
 }
 
@@ -34,6 +35,10 @@ impl Setting {
                     | Setting::ShowKeybindHints
             ),
             Platform::Gba => !matches!(
+                self,
+                Setting::AutosaveFrequency | Setting::ViKeys | Setting::Numpad
+            ),
+            Platform::Vita => !matches!(
                 self,
                 Setting::AutosaveFrequency | Setting::ViKeys | Setting::Numpad
             ),
@@ -122,6 +127,18 @@ impl Settings {
                 message_log_lines: 4,
             },
             Platform::Gba => Settings {
+                casual_mode: false,
+                show_explored_pct: false,
+                show_coordinates: false,
+                show_keybind_hints: true,
+                show_corpses: true,
+                vi_keys: false,
+                numpad: false,
+                autosave_frequency: 1,
+                animation_speed_ms: 50,
+                message_log_lines: 4,
+            },
+            Platform::Vita => Settings {
                 casual_mode: false,
                 show_explored_pct: false,
                 show_coordinates: false,
@@ -248,6 +265,26 @@ mod tests {
         assert_eq!(default.autosave_frequency, terminal.autosave_frequency);
         assert_eq!(default.animation_speed_ms, terminal.animation_speed_ms);
         assert_eq!(default.message_log_lines, terminal.message_log_lines);
+    }
+
+    #[test]
+    fn vita_defaults() {
+        let s = Settings::defaults_for(Platform::Vita);
+        assert!(!s.casual_mode);
+        assert!(!s.vi_keys);
+        assert!(!s.numpad);
+        assert_eq!(s.animation_speed_ms, 50);
+        assert!(s.show_keybind_hints);
+        assert!(s.show_corpses);
+    }
+
+    #[test]
+    fn vita_no_autosave_vi_numpad() {
+        assert!(!Setting::AutosaveFrequency.is_available(Platform::Vita));
+        assert!(!Setting::ViKeys.is_available(Platform::Vita));
+        assert!(!Setting::Numpad.is_available(Platform::Vita));
+        assert!(Setting::AnimationSpeed.is_available(Platform::Vita));
+        assert!(Setting::CasualMode.is_available(Platform::Vita));
     }
 
     #[test]

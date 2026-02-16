@@ -48,8 +48,9 @@ except ImportError:
 class McpClient:
     """Communicates with the roguelike MCP server over stdio JSON-RPC."""
 
-    def __init__(self, binary_path):
+    def __init__(self, binary_path, env=None):
         self.binary_path = binary_path
+        self.env = env
         self.process = None
         self._request_id = 0
 
@@ -60,6 +61,7 @@ class McpClient:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=self.env,
         )
         # Send initialize handshake.
         result = self._call("initialize", {
@@ -303,7 +305,8 @@ def play_game_api(mcp_binary, model, seed, max_tool_calls=60):
     analytics = pa.new_game_analytics(seed)
     analytics["llm_metrics"]["model"] = model
 
-    client = McpClient(str(mcp_binary))
+    env = {**os.environ, "ROGUELIKE_SPECTATE_PATH": f"/tmp/roguelike-spectate-{seed}.txt"}
+    client = McpClient(str(mcp_binary), env=env)
     try:
         client.start()
         api_client = anthropic.Anthropic()
@@ -493,7 +496,9 @@ def play_game_claude_code(mcp_config_path, seed, max_budget=2.00):
     ]
 
     # Strip CLAUDECODE env var — nested claude refuses to start otherwise.
+    # Set per-game spectate path so parallel games don't clobber each other.
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    env["ROGUELIKE_SPECTATE_PATH"] = f"/tmp/roguelike-spectate-{seed}.txt"
 
     try:
         proc = subprocess.run(

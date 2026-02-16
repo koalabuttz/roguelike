@@ -700,26 +700,14 @@ impl GameState {
             .collect();
 
         // --- game stats ---
-        let kills = self.entities.iter().skip(1).filter(|e| !e.alive).count() as i32;
+        let kills = self.kill_count();
         let rooms_found = self
             .map
             .rooms
             .iter()
             .filter(|r| self.explored.contains(&r.center()))
             .count() as i32;
-        let floor_count = self.map.known_floor_count();
-        let explored_floors = self
-            .explored
-            .iter()
-            .filter(|&&(x, y)| {
-                self.map.in_bounds(x, y) && self.map.tiles[self.map.idx(x, y)] == map::Tile::Floor
-            })
-            .count() as i32;
-        let explored_pct = if floor_count > 0 {
-            (explored_floors * 100) / floor_count
-        } else {
-            0
-        };
+        let explored_pct = self.explored_pct();
 
         GameObservation {
             player_hp: player.hp,
@@ -738,11 +726,27 @@ impl GameState {
     }
 
     /// Extract lightweight metadata for save-slot display.
-    ///
-    /// Uses the same explored-percentage formula as `observe()`.
     pub fn extract_metadata(&self) -> crate::saves::SlotMetadata {
         let player = &self.entities[0];
+        crate::saves::SlotMetadata {
+            turn_count: self.turn_count,
+            player_hp: player.hp,
+            player_max_hp: player.max_hp,
+            explored_pct: self.explored_pct(),
+        }
+    }
+
+    /// Number of dead (non-player) entities.
+    pub fn kill_count(&self) -> i32 {
+        self.entities.iter().skip(1).filter(|e| !e.alive).count() as i32
+    }
+
+    /// Percentage of floor tiles the player has explored (0–100).
+    pub fn explored_pct(&self) -> i32 {
         let floor_count = self.map.known_floor_count();
+        if floor_count == 0 {
+            return 0;
+        }
         let explored_floors = self
             .explored
             .iter()
@@ -750,17 +754,7 @@ impl GameState {
                 self.map.in_bounds(x, y) && self.map.tiles[self.map.idx(x, y)] == map::Tile::Floor
             })
             .count() as i32;
-        let explored_pct = if floor_count > 0 {
-            (explored_floors * 100) / floor_count
-        } else {
-            0
-        };
-        crate::saves::SlotMetadata {
-            turn_count: self.turn_count,
-            player_hp: player.hp,
-            player_max_hp: player.max_hp,
-            explored_pct,
-        }
+        (explored_floors * 100) / floor_count
     }
 
     /// Find frontier tiles: explored floor tiles adjacent to at least one

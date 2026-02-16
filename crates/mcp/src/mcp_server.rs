@@ -10,10 +10,13 @@ use tokio::sync::Mutex;
 
 use roguelike_core::command::GameCommand;
 use roguelike_core::data::CONFIG;
+use roguelike_core::exploration_graph;
 use roguelike_core::game::{
     AutoExploreResult, AutoFightResult, AutorunResult, AutorunStopReason, GameState,
 };
 use roguelike_core::types::{Coord, Pos};
+
+use crate::spectate::SpectatorWriter;
 
 /// Per-session state: game state plus configuration set at `new_game` time.
 struct GameSession {
@@ -31,6 +34,7 @@ struct GameSession {
 pub struct RoguelikeMcpServer {
     session: Arc<Mutex<Option<GameSession>>>,
     save_slot: Arc<Mutex<Option<String>>>,
+    spectator: Arc<SpectatorWriter>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -77,6 +81,7 @@ impl RoguelikeMcpServer {
         Self {
             session: Arc::new(Mutex::new(None)),
             save_slot: Arc::new(Mutex::new(None)),
+            spectator: Arc::new(SpectatorWriter::new()),
             tool_router: Self::tool_router(),
         }
     }
@@ -106,10 +111,12 @@ impl RoguelikeMcpServer {
         };
         state.update_fov();
         let observation = state.observe();
-        *self.session.lock().await = Some(GameSession { state, compact });
-
         let mut json_value = serde_json::to_value(&observation)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        inject_exploration_graph(&mut json_value, &state);
+        self.spectator.write_frame(&state);
+        *self.session.lock().await = Some(GameSession { state, compact });
+
         if compact {
             strip_map(&mut json_value);
         }
@@ -128,7 +135,7 @@ impl RoguelikeMcpServer {
         })?;
 
         let observation = session.state.observe();
-        let json = serialize_observation(&observation, session.compact)?;
+        let json = serialize_observation(&observation, session.compact, &session.state)?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
@@ -158,8 +165,9 @@ impl RoguelikeMcpServer {
             let fight_result = state
                 .auto_fight()
                 .map_err(|e| McpError::invalid_request(e, None))?;
+            self.spectator.write_frame(state);
             let observation = state.observe();
-            let json = format_auto_fight_response(&observation, &fight_result, compact)
+            let json = format_auto_fight_response(&observation, &fight_result, compact, state)
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
             return Ok(CallToolResult::success(vec![Content::text(json)]));
         }
@@ -182,15 +190,17 @@ impl RoguelikeMcpServer {
         // Autorun: loop internally and return final state with metadata.
         if let GameCommand::Autorun { dx, dy } = cmd {
             let autorun_result = state.autorun(dx, dy);
+            self.spectator.write_frame(state);
             let observation = state.observe();
             let frontiers = state.frontier_tiles();
-            let json = format_response(&observation, &autorun_result, &frontiers, compact)
+            let json = format_response(&observation, &autorun_result, &frontiers, compact, state)
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
             return Ok(CallToolResult::success(vec![Content::text(json)]));
         }
 
         let explored_before = state.explored.len() as i32;
         let step_result = state.step(cmd);
+        self.spectator.write_frame(state);
         let new_tiles_revealed = state.explored.len() as i32 - explored_before;
         let observation = state.observe();
         let frontiers = state.frontier_tiles();
@@ -204,6 +214,7 @@ impl RoguelikeMcpServer {
         }
         replace_messages(&mut value, &step_result.new_messages);
         inject_frontier_exits(&mut value, &frontiers);
+        inject_exploration_graph(&mut value, state);
         if compact {
             strip_map(&mut value);
         }
@@ -229,12 +240,13 @@ impl RoguelikeMcpServer {
             .iter()
             .map(|&(x, y)| serde_json::json!({"x": x, "y": y}))
             .collect();
-        let response = serde_json::json!({
+        let mut response = serde_json::json!({
             "explored_map": map_lines,
             "x": player.x,
             "y": player.y,
             "frontier_exits": frontier_exits,
         });
+        inject_exploration_graph(&mut response, state);
         let json = serde_json::to_string(&response)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
@@ -264,9 +276,10 @@ impl RoguelikeMcpServer {
         let pathfind_result = state
             .pathfind_to(params.x, params.y)
             .map_err(|e| McpError::invalid_request(e, None))?;
+        self.spectator.write_frame(state);
         let observation = state.observe();
         let frontiers = state.frontier_tiles();
-        let json = format_response(&observation, &pathfind_result, &frontiers, compact)
+        let json = format_response(&observation, &pathfind_result, &frontiers, compact, state)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -292,10 +305,11 @@ impl RoguelikeMcpServer {
         let explore_result = state
             .auto_explore()
             .map_err(|e| McpError::invalid_request(e, None))?;
+        self.spectator.write_frame(state);
         let observation = state.observe();
         let frontier_count = state.frontier_tiles().len() as i32;
         let json =
-            format_auto_explore_response(&observation, &explore_result, frontier_count, compact)
+            format_auto_explore_response(&observation, &explore_result, frontier_count, compact, state)
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -349,6 +363,13 @@ impl RoguelikeMcpServer {
         let loaded = GameState::load_from_json(&save_json)
             .map_err(|e| McpError::internal_error(format!("Deserialization failed: {e}"), None))?;
         let observation = loaded.observe();
+        let mut value = serde_json::to_value(&observation)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        if let serde_json::Value::Object(ref mut map) = value {
+            map.insert("loaded".into(), serde_json::Value::Bool(true));
+        }
+        inject_exploration_graph(&mut value, &loaded);
+        self.spectator.write_frame(&loaded);
         // Preserve compact setting from the current session.
         let mut guard = self.session.lock().await;
         let compact = guard.as_ref().map(|s| s.compact).unwrap_or(false);
@@ -357,11 +378,6 @@ impl RoguelikeMcpServer {
             compact,
         });
 
-        let mut value = serde_json::to_value(&observation)
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        if let serde_json::Value::Object(ref mut map) = value {
-            map.insert("loaded".into(), serde_json::Value::Bool(true));
-        }
         if compact {
             strip_map(&mut value);
         }
@@ -511,6 +527,7 @@ fn format_auto_fight_response(
     observation: &roguelike_core::game::GameObservation,
     fight: &AutoFightResult,
     compact: bool,
+    state: &GameState,
 ) -> Result<String, serde_json::Error> {
     let mut value = serde_json::to_value(observation)?;
     if let serde_json::Value::Object(ref mut map) = value {
@@ -534,6 +551,7 @@ fn format_auto_fight_response(
         );
     }
     replace_messages(&mut value, &fight.messages);
+    inject_exploration_graph(&mut value, state);
     if compact {
         strip_map(&mut value);
     }
@@ -546,6 +564,7 @@ fn format_response(
     autorun: &AutorunResult,
     frontier_tiles: &[Pos],
     compact: bool,
+    state: &GameState,
 ) -> Result<String, serde_json::Error> {
     let mut value = serde_json::to_value(observation)?;
     if let serde_json::Value::Object(ref mut map) = value {
@@ -564,6 +583,7 @@ fn format_response(
     }
     replace_messages(&mut value, &autorun.messages);
     inject_frontier_exits(&mut value, frontier_tiles);
+    inject_exploration_graph(&mut value, state);
     if compact {
         strip_map(&mut value);
     }
@@ -581,6 +601,7 @@ fn format_auto_explore_response(
     explore: &AutoExploreResult,
     frontier_count: i32,
     compact: bool,
+    state: &GameState,
 ) -> Result<String, serde_json::Error> {
     let mut value = serde_json::to_value(observation)?;
     if let serde_json::Value::Object(ref mut map) = value {
@@ -616,6 +637,7 @@ fn format_auto_explore_response(
         }
     }
     replace_messages(&mut value, &explore.movement.messages);
+    inject_exploration_graph(&mut value, state);
     if compact {
         strip_map(&mut value);
     }
@@ -626,9 +648,11 @@ fn format_auto_explore_response(
 fn serialize_observation(
     observation: &roguelike_core::game::GameObservation,
     compact: bool,
+    state: &GameState,
 ) -> Result<String, McpError> {
     let mut value = serde_json::to_value(observation)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+    inject_exploration_graph(&mut value, state);
     if compact {
         strip_map(&mut value);
     }
@@ -651,6 +675,18 @@ fn replace_messages(value: &mut serde_json::Value, messages: &[String]) {
             "messages".into(),
             serde_json::to_value(messages).unwrap_or_default(),
         );
+    }
+}
+
+/// Inject the exploration graph into a JSON response if the map has 2+ rooms.
+fn inject_exploration_graph(value: &mut serde_json::Value, state: &GameState) {
+    if state.map.rooms.len() >= 2 {
+        let graph = exploration_graph::build_exploration_graph(state);
+        if let Ok(graph_value) = serde_json::to_value(&graph)
+            && let serde_json::Value::Object(map) = value
+        {
+            map.insert("exploration".into(), graph_value);
+        }
     }
 }
 
@@ -834,7 +870,7 @@ mod tests {
 
         let fight = state.auto_fight().unwrap();
         let obs = state.observe();
-        let json_str = format_auto_fight_response(&obs, &fight, false).unwrap();
+        let json_str = format_auto_fight_response(&obs, &fight, false, &state).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
         // map should be removed from auto_fight responses.

@@ -7,6 +7,7 @@ pub mod data;
 #[cfg(feature = "dev-tools")]
 pub mod dev_tools;
 pub mod entity;
+pub mod exploration_graph;
 pub mod fov;
 pub mod game;
 pub mod map;

@@ -3,6 +3,7 @@ use rmcp::transport::stdio;
 use tracing_subscriber::EnvFilter;
 
 mod mcp_server;
+mod spectate;
 use mcp_server::RoguelikeMcpServer;
 
 #[tokio::main]

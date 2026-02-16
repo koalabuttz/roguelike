@@ -55,6 +55,7 @@ jobs:
           mkdir -p dist
           cp "${src}/mcp_server${{ matrix.suffix }}" "dist/mcp_server-${{ matrix.os_label }}-${{ matrix.arch_label }}${{ matrix.suffix }}"
           cp "${src}/roguelike${{ matrix.suffix }}" "dist/roguelike-${{ matrix.os_label }}-${{ matrix.arch_label }}${{ matrix.suffix }}"
+          cp "${src}/headless${{ matrix.suffix }}" "dist/headless-${{ matrix.os_label }}-${{ matrix.arch_label }}${{ matrix.suffix }}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -78,8 +79,20 @@ jobs:
       - name: List artifacts
         run: ls -lhR artifacts
 
+      - name: Generate checksums
+        run: cd artifacts && sha256sum * > SHA256SUMS.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          body: |
+            ## Binaries
+            | Binary | Description |
+            |--------|-------------|
+            | `roguelike-*` | Terminal game |
+            | `mcp_server-*` | MCP server for LLM play |
+            | `headless-*` | Automated playtesting runner |
+
+            Verify: `sha256sum -c SHA256SUMS.txt`
           files: artifacts/*

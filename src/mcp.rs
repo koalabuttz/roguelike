@@ -15,16 +15,22 @@ use crate::game::{
 use crate::input::GameCommand;
 use crate::types::{Coord, Pos};
 
+/// Per-session state: game state plus configuration set at `new_game` time.
+struct GameSession {
+    state: GameState,
+    /// Omit ASCII map from observations to reduce response size.
+    compact: bool,
+}
+
 /// MCP server that wraps a roguelike game session.
 ///
-/// Holds an `Option<GameState>` behind a mutex: `None` until `new_game` is
-/// called, then `Some(state)` for the duration of the game. Calling `new_game`
-/// again resets the state.
+/// Holds an `Option<GameSession>` behind a mutex: `None` until `new_game` is
+/// called, then `Some(session)` for the duration of the game. Calling
+/// `new_game` again resets the session.
 #[derive(Clone)]
 pub struct RoguelikeMcpServer {
-    state: Arc<Mutex<Option<GameState>>>,
+    session: Arc<Mutex<Option<GameSession>>>,
     save_slot: Arc<Mutex<Option<String>>>,
-    compact: Arc<Mutex<bool>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -69,9 +75,8 @@ impl Default for RoguelikeMcpServer {
 impl RoguelikeMcpServer {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(None)),
+            session: Arc::new(Mutex::new(None)),
             save_slot: Arc::new(Mutex::new(None)),
-            compact: Arc::new(Mutex::new(false)),
             tool_router: Self::tool_router(),
         }
     }
@@ -94,7 +99,6 @@ impl RoguelikeMcpServer {
         }
 
         let compact = params.compact.unwrap_or(false);
-        *self.compact.lock().await = compact;
 
         let mut state = match params.seed {
             Some(seed) => GameState::with_seed(width, height, seed),
@@ -102,7 +106,7 @@ impl RoguelikeMcpServer {
         };
         state.update_fov();
         let observation = state.observe();
-        *self.state.lock().await = Some(state);
+        *self.session.lock().await = Some(GameSession { state, compact });
 
         let mut json_value = serde_json::to_value(&observation)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -118,28 +122,29 @@ impl RoguelikeMcpServer {
         description = "Observe the current visible game state. Returns player stats, an ASCII map of visible tiles, a list of visible monsters with their stats, and the recent message log. Note: act, pathfind_to, auto_explore, and auto_fight already return observations. Use observe only to check state without taking an action."
     )]
     async fn observe(&self) -> Result<CallToolResult, McpError> {
-        let guard = self.state.lock().await;
-        let state = guard.as_ref().ok_or_else(|| {
+        let guard = self.session.lock().await;
+        let session = guard.as_ref().ok_or_else(|| {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
 
-        let observation = state.observe();
-        let compact = *self.compact.lock().await;
-        let json = serialize_observation(&observation, compact)?;
+        let observation = session.state.observe();
+        let json = serialize_observation(&observation, session.compact)?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
     #[tool(
-        description = "Take an action in the game. Valid actions: 'move_north', 'move_south', 'move_east', 'move_west', 'move_northeast', 'move_northwest', 'move_southeast', 'move_southwest', 'wait'. Moving into a monster attacks it. Returns the resulting game state after the action and any monster turns. Also supports autorun: 'autorun_north', 'autorun_south', 'autorun_east', 'autorun_west', 'autorun_northeast', 'autorun_northwest', 'autorun_southeast', 'autorun_southwest'. Autorun keeps moving in that direction until hitting a wall, spotting a new monster, taking damage, or reaching a corridor junction/room entrance. Use autorun to traverse long corridors efficiently. Also supports 'auto_fight' to resolve combat with an adjacent monster in one call — fights the weakest adjacent monster to the death. Response includes game stats: kills, rooms_found, explored_pct."
+        description = "Take an action in the game. Valid actions: 'move_north', 'move_south', 'move_east', 'move_west', 'move_northeast', 'move_northwest', 'move_southeast', 'move_southwest', 'wait'. Moving into a monster attacks it. Returns the resulting game state after the action and any monster turns. Also supports autorun: 'autorun_north', 'autorun_south', 'autorun_east', 'autorun_west', 'autorun_northeast', 'autorun_northwest', 'autorun_southeast', 'autorun_southwest'. Autorun keeps moving in that direction until hitting a wall, spotting a new monster, taking damage, or reaching a corridor junction/room entrance. Use autorun to traverse long corridors efficiently. Also supports 'auto_fight' to resolve combat with an adjacent monster in one call — fights the weakest adjacent monster to the death. Response includes game stats: kills, rooms_found, explored."
     )]
     async fn act(
         &self,
         Parameters(params): Parameters<ActParams>,
     ) -> Result<CallToolResult, McpError> {
-        let mut guard = self.state.lock().await;
-        let state = guard.as_mut().ok_or_else(|| {
+        let mut guard = self.session.lock().await;
+        let session = guard.as_mut().ok_or_else(|| {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
+        let compact = session.compact;
+        let state = &mut session.state;
 
         if state.game_over {
             return Err(McpError::invalid_request(
@@ -154,7 +159,7 @@ impl RoguelikeMcpServer {
                 .auto_fight()
                 .map_err(|e| McpError::invalid_request(e, None))?;
             let observation = state.observe();
-            let json = format_auto_fight_response(&observation, &fight_result)
+            let json = format_auto_fight_response(&observation, &fight_result, compact)
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
             return Ok(CallToolResult::success(vec![Content::text(json)]));
         }
@@ -173,8 +178,6 @@ impl RoguelikeMcpServer {
                 None,
             )
         })?;
-
-        let compact = *self.compact.lock().await;
 
         // Autorun: loop internally and return final state with metadata.
         if let GameCommand::Autorun { dx, dy } = cmd {
@@ -213,10 +216,11 @@ impl RoguelikeMcpServer {
         description = "Get the full explored map — all tiles the player has ever seen. Unlike observe (which shows only current FOV), this shows the complete explored dungeon. Entity glyphs only appear at current positions if in FOV. Frontier tiles (explored floor adjacent to unexplored) are marked with '~' to show where further exploration is possible. The response includes frontier_exits coordinates for easy navigation with pathfind_to."
     )]
     async fn get_explored_map(&self) -> Result<CallToolResult, McpError> {
-        let guard = self.state.lock().await;
-        let state = guard.as_ref().ok_or_else(|| {
+        let guard = self.session.lock().await;
+        let session = guard.as_ref().ok_or_else(|| {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
+        let state = &session.state;
 
         let map_lines = state.explored_map();
         let player = &state.entities[0];
@@ -243,10 +247,12 @@ impl RoguelikeMcpServer {
         &self,
         Parameters(params): Parameters<PathfindParams>,
     ) -> Result<CallToolResult, McpError> {
-        let mut guard = self.state.lock().await;
-        let state = guard.as_mut().ok_or_else(|| {
+        let mut guard = self.session.lock().await;
+        let session = guard.as_mut().ok_or_else(|| {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
+        let compact = session.compact;
+        let state = &mut session.state;
 
         if state.game_over {
             return Err(McpError::invalid_request(
@@ -255,7 +261,6 @@ impl RoguelikeMcpServer {
             ));
         }
 
-        let compact = *self.compact.lock().await;
         let pathfind_result = state
             .pathfind_to(params.x, params.y)
             .map_err(|e| McpError::invalid_request(e, None))?;
@@ -267,13 +272,15 @@ impl RoguelikeMcpServer {
     }
 
     #[tool(
-        description = "Automatically explore the dungeon. Finds the nearest frontier tile (edge of explored area) and pathfinds to it. Equivalent to get_explored_map + pathfind_to in one call. Stops for monsters, damage, or when the frontier is reached. Returns observation with frontier_count, new_tiles_revealed, and explore target coordinates."
+        description = "Automatically explore the dungeon. Finds the nearest frontier tile (edge of explored area) and pathfinds to it. Equivalent to get_explored_map + pathfind_to in one call. Stops for monsters, damage, or when the frontier is reached. Returns observation with frontiers count, new_tiles revealed, and target_x/target_y explore coordinates."
     )]
     async fn auto_explore(&self) -> Result<CallToolResult, McpError> {
-        let mut guard = self.state.lock().await;
-        let state = guard.as_mut().ok_or_else(|| {
+        let mut guard = self.session.lock().await;
+        let session = guard.as_mut().ok_or_else(|| {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
+        let compact = session.compact;
+        let state = &mut session.state;
 
         if state.game_over {
             return Err(McpError::invalid_request(
@@ -282,7 +289,6 @@ impl RoguelikeMcpServer {
             ));
         }
 
-        let compact = *self.compact.lock().await;
         let explore_result = state
             .auto_explore()
             .map_err(|e| McpError::invalid_request(e, None))?;
@@ -297,12 +303,13 @@ impl RoguelikeMcpServer {
         description = "Save the current game state. Stores the game in an in-memory save slot (one slot, overwrites previous save). Returns turn count, HP, seed, and save size."
     )]
     async fn save_game(&self) -> Result<CallToolResult, McpError> {
-        // Lock state, serialize, drop state lock before acquiring save_slot lock.
+        // Lock session, serialize, drop lock before acquiring save_slot lock.
         let json = {
-            let guard = self.state.lock().await;
-            let state = guard.as_ref().ok_or_else(|| {
+            let guard = self.session.lock().await;
+            let session = guard.as_ref().ok_or_else(|| {
                 McpError::invalid_request("No game in progress. Call new_game first.", None)
             })?;
+            let state = &session.state;
             let json = state.save_to_json().map_err(|e| {
                 McpError::internal_error(format!("Serialization failed: {e}"), None)
             })?;
@@ -330,7 +337,7 @@ impl RoguelikeMcpServer {
         description = "Load a previously saved game state. Replaces the current game with the saved state. Returns the observation of the restored state."
     )]
     async fn load_game(&self) -> Result<CallToolResult, McpError> {
-        // Lock save_slot, clone JSON, drop save_slot lock before acquiring state lock.
+        // Lock save_slot, clone JSON, drop save_slot lock before acquiring session lock.
         let save_json = {
             let guard = self.save_slot.lock().await;
             guard.as_ref().cloned().ok_or_else(|| {
@@ -338,11 +345,13 @@ impl RoguelikeMcpServer {
             })?
         };
 
-        let compact = *self.compact.lock().await;
         let loaded = GameState::load_from_json(&save_json)
             .map_err(|e| McpError::internal_error(format!("Deserialization failed: {e}"), None))?;
         let observation = loaded.observe();
-        *self.state.lock().await = Some(loaded);
+        // Preserve compact setting from the current session.
+        let mut guard = self.session.lock().await;
+        let compact = guard.as_ref().map(|s| s.compact).unwrap_or(false);
+        *guard = Some(GameSession { state: loaded, compact });
 
         let mut value = serde_json::to_value(&observation)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -497,10 +506,11 @@ pub fn parse_action(action: &str) -> Option<GameCommand> {
 fn format_auto_fight_response(
     observation: &crate::game::GameObservation,
     fight: &AutoFightResult,
+    compact: bool,
 ) -> Result<String, serde_json::Error> {
     let mut value = serde_json::to_value(observation)?;
     if let serde_json::Value::Object(ref mut map) = value {
-        // Remove bulky map data — combat doesn't move the player.
+        // Always remove map from auto_fight — combat doesn't move the player.
         map.remove("map");
         map.insert(
             "fight_rounds".into(),
@@ -520,6 +530,9 @@ fn format_auto_fight_response(
         );
     }
     replace_messages(&mut value, &fight.messages);
+    if compact {
+        strip_map(&mut value);
+    }
     serde_json::to_string(&value)
 }
 
@@ -818,7 +831,7 @@ mod tests {
 
         let fight = state.auto_fight().unwrap();
         let obs = state.observe();
-        let json_str = format_auto_fight_response(&obs, &fight).unwrap();
+        let json_str = format_auto_fight_response(&obs, &fight, false).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
         // map should be removed from auto_fight responses.

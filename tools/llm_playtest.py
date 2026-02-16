@@ -268,42 +268,30 @@ When the game ends, write 1-2 sentence strategy_notes summarizing key decisions.
 # Game loop
 # ---------------------------------------------------------------------------
 
-def _strip_old_maps(messages):
-    """Remove 'map' from all tool_result JSON except the last user message.
+def _strip_maps_from_message(msg):
+    """Remove 'map' from tool_result JSON blocks in a single user message.
 
-    This prevents stale ASCII maps from accumulating in the context window.
-    Only the most recent tool results retain their map data.
+    Called incrementally: when new tool results are appended to the conversation,
+    the previous user message gets its map data stripped.  This keeps only the
+    latest tool results' maps intact while avoiding O(n) re-scanning of all
+    messages each iteration.
     """
-    # Find the last user message index.
-    last_user_idx = -1
-    for i in range(len(messages) - 1, -1, -1):
-        if isinstance(messages[i], dict) and messages[i].get("role") == "user":
-            content = messages[i].get("content")
-            if isinstance(content, list):
-                last_user_idx = i
-                break
-
-    for i, msg in enumerate(messages):
-        if i >= last_user_idx:
-            break
-        if not isinstance(msg, dict) or msg.get("role") != "user":
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "tool_result":
             continue
-        content = msg.get("content")
-        if not isinstance(content, list):
+        raw = block.get("content", "")
+        if not isinstance(raw, str) or '"map"' not in raw:
             continue
-        for block in content:
-            if not isinstance(block, dict) or block.get("type") != "tool_result":
-                continue
-            raw = block.get("content", "")
-            if not isinstance(raw, str) or '"map"' not in raw:
-                continue
-            try:
-                data = json.loads(raw)
-                if isinstance(data, dict) and "map" in data:
-                    del data["map"]
-                    block["content"] = json.dumps(data)
-            except (json.JSONDecodeError, TypeError):
-                pass
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict) and "map" in data:
+                del data["map"]
+                block["content"] = json.dumps(data)
+        except (json.JSONDecodeError, TypeError):
+            pass
 
 
 def play_game_api(mcp_binary, model, seed, max_tool_calls=60):
@@ -332,10 +320,9 @@ def play_game_api(mcp_binary, model, seed, max_tool_calls=60):
         total_input_tokens = 0
         total_output_tokens = 0
 
-        while tool_calls < max_tool_calls:
-            # Strip map from old tool results to reduce context size.
-            _strip_old_maps(messages)
+        last_tool_results_msg = None
 
+        while tool_calls < max_tool_calls:
             response = api_client.messages.create(
                 model=model,
                 max_tokens=1024,
@@ -398,6 +385,7 @@ def play_game_api(mcp_binary, model, seed, max_tool_calls=60):
                         analytics["llm_metrics"]["decision_count"] += 1
 
                     current_kills = result.get("kills", last_kills)
+                    # MCP responses use short key "explored"; analytics dicts use "explored_pct".
                     current_explored = result.get("explored", last_explored)
 
                     if current_kills == last_kills and current_explored == last_explored:
@@ -427,7 +415,13 @@ def play_game_api(mcp_binary, model, seed, max_tool_calls=60):
             if not tool_results:
                 break
 
-            messages.append({"role": "user", "content": tool_results})
+            # Strip map data from previous tool results before adding new ones.
+            # Only the latest tool results retain map data to save context tokens.
+            if last_tool_results_msg is not None:
+                _strip_maps_from_message(last_tool_results_msg)
+            user_msg = {"role": "user", "content": tool_results}
+            messages.append(user_msg)
+            last_tool_results_msg = user_msg
 
             if last_observation.get("game_over", False):
                 break
@@ -768,6 +762,7 @@ def _resolve_mcp_config(config_path=None):
         )
         sys.exit(1)
 
+    import atexit
     import tempfile
     config = {
         "mcpServers": {
@@ -782,6 +777,7 @@ def _resolve_mcp_config(config_path=None):
     )
     json.dump(config, tmp)
     tmp.close()
+    atexit.register(lambda p=tmp.name: os.unlink(p) if os.path.exists(p) else None)
     return Path(tmp.name)
 
 

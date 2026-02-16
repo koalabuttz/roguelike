@@ -173,7 +173,7 @@ fn dump_stats(gs: &GameState, session: &DevSession) -> String {
         explored_floors,
         floor_count,
         if floor_count > 0 {
-            (explored_floors as i32 * 100) / floor_count
+            (explored_floors as Stat * 100) / floor_count
         } else {
             0
         },
@@ -243,13 +243,17 @@ pub struct Replay {
 
 impl Replay {
     /// Build a replay from the current game + recorded commands.
-    pub fn from_session(gs: &GameState, session: &DevSession) -> Self {
+    pub fn from_session(
+        gs: &GameState,
+        session: &DevSession,
+        preset: Option<crate::map::MapPreset>,
+    ) -> Self {
         Replay {
             seed: gs.seed,
             width: gs.map.width,
             height: gs.map.height,
             commands: session.command_log.clone(),
-            preset: None,
+            preset,
         }
     }
 
@@ -521,7 +525,7 @@ mod tests {
         };
         gs.step(GameCommand::Move { dx: 1, dy: 0 });
         after_step(&mut gs, &mut session, GameCommand::Move { dx: 1, dy: 0 });
-        let replay = Replay::from_session(&gs, &session);
+        let replay = Replay::from_session(&gs, &session, None);
         let json = serde_json::to_string_pretty(&replay).unwrap();
         let loaded: Replay = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.seed, 0);
@@ -539,7 +543,7 @@ mod tests {
             gs.step(GameCommand::Wait);
             after_step(&mut gs, &mut session, GameCommand::Wait);
         }
-        let replay = Replay::from_session(&gs, &session);
+        let replay = Replay::from_session(&gs, &session, None);
         let result = replay.execute();
         assert_eq!(result.final_turn, gs.turn_count);
     }

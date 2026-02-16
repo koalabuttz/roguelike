@@ -252,7 +252,7 @@ impl Map {
         let spawn_room = Rect::new(1, 1, self.width - 3, self.height - 3);
         self.rooms.push(spawn_room);
 
-        let _ = rng; // consume rng for signature consistency
+        let _ = rng; // suppress unused parameter warning — rng is in the signature for trait consistency
         let (cx, cy) = self.rooms[0].center();
         (cx, cy)
     }
@@ -266,12 +266,7 @@ impl Map {
         }
         // Register as rooms so spawn works.
         let left = Rect::new(0, mid_y - 1, self.width / 3, 2);
-        let right = Rect::new(
-            (self.width * 2 / 3) as Coord,
-            mid_y - 1,
-            self.width / 3 - 1,
-            2,
-        );
+        let right = Rect::new(self.width * 2 / 3, mid_y - 1, self.width / 3 - 1, 2);
         // Carve room floors too (so interior check works).
         self.carve_room(&left);
         self.carve_room(&right);

@@ -7,7 +7,7 @@
 //!
 //! ```sh
 //! # Run 100 games with random seeds, 80x40 map:
-//! cargo run --bin headless -- --games 100 --width 80 --height 40
+//! cargo run --bin headless -- --games 100 --width 80 -H 40
 //!
 //! # Run with a specific seed:
 //! cargo run --bin headless -- --seed 42 --games 1
@@ -22,10 +22,13 @@
 //! cargo run --bin headless -- --games 10 --save-replays
 //! ```
 
-use roguelike::dev_tools::{BatchRunStats, DevSession, Replay, ReplayResult};
+use std::collections::HashSet;
+
+use roguelike::dev_tools::{BatchRunStats, DevSession, Replay, ReplayResult, after_step};
 use roguelike::game::GameState;
+use roguelike::input::GameCommand;
 use roguelike::map::MapPreset;
-use roguelike::types::{Coord, Stat};
+use roguelike::types::{Coord, Pos, Stat};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -50,7 +53,7 @@ fn main() {
                 i += 1;
                 width = args[i].parse().expect("invalid --width value");
             }
-            "--height" | "-h" => {
+            "--height" | "-H" => {
                 i += 1;
                 height = args[i].parse().expect("invalid --height value");
             }
@@ -156,43 +159,59 @@ fn run_single_game(
         None => GameState::with_seed(width, height, seed),
     };
 
-    let session = DevSession {
+    let mut session = DevSession {
         recording: save_replay,
         ..DevSession::default()
     };
 
-    let mut turns = 0;
-    while !gs.game_over && turns < max_turns {
-        // Strategy: auto-fight if adjacent, otherwise auto-explore.
-        if gs.has_adjacent_monster() {
-            match gs.auto_fight() {
-                Ok(_) => {}
-                Err(_) => {
-                    // No adjacent monster despite check — just wait.
-                    gs.step(roguelike::input::GameCommand::Wait);
-                }
+    // Current exploration path (recomputed when exhausted or interrupted).
+    let mut path: Vec<Pos> = Vec::new();
+    let mut path_idx: usize = 0;
+
+    while !gs.game_over && gs.turn_count < max_turns {
+        let cmd = if gs.has_adjacent_monster() {
+            // Attack weakest adjacent monster.
+            path.clear();
+            fight_command(&gs)
+        } else if path_idx < path.len() {
+            // Follow current exploration path.
+            let (nx, ny) = path[path_idx];
+            path_idx += 1;
+            GameCommand::Move {
+                dx: nx - gs.entities[0].x,
+                dy: ny - gs.entities[0].y,
             }
         } else {
-            match gs.auto_explore() {
-                Ok(_) => {}
-                Err(_) => {
-                    // Fully explored or stuck — wait out remaining turns.
-                    gs.step(roguelike::input::GameCommand::Wait);
-                }
+            // Compute new path to nearest frontier.
+            path.clear();
+            path_idx = 0;
+            if let Some(p) = next_explore_path(&gs) {
+                path = p;
             }
-        }
-        turns = gs.turn_count;
+            if !path.is_empty() {
+                let (nx, ny) = path[0];
+                path_idx = 1;
+                GameCommand::Move {
+                    dx: nx - gs.entities[0].x,
+                    dy: ny - gs.entities[0].y,
+                }
+            } else {
+                GameCommand::Wait
+            }
+        };
+
+        gs.step(cmd);
+        after_step(&mut gs, &mut session, cmd);
     }
 
     if save_replay {
-        let replay = Replay::from_session(&gs, &session);
+        let replay = Replay::from_session(&gs, &session, preset);
         let filename = format!("replay_{}.json", seed);
         if let Ok(json) = serde_json::to_string_pretty(&replay) {
             let _ = std::fs::write(&filename, json);
             eprintln!("  Saved replay to {}", filename);
         }
     }
-    let _ = session; // consumed
 
     let kills = gs.entities.iter().skip(1).filter(|e| !e.alive).count() as Stat;
     ReplayResult {
@@ -202,6 +221,36 @@ fn run_single_game(
         final_turn: gs.turn_count,
         kills,
     }
+}
+
+/// Pick the move command to attack the weakest adjacent monster.
+fn fight_command(gs: &GameState) -> GameCommand {
+    let px = gs.entities[0].x;
+    let py = gs.entities[0].y;
+    gs.entities
+        .iter()
+        .enumerate()
+        .filter(|(i, e)| *i != 0 && e.alive && (e.x - px).abs() <= 1 && (e.y - py).abs() <= 1)
+        .min_by_key(|(_, e)| e.hp)
+        .map(|(_, e)| GameCommand::Move {
+            dx: (e.x - px).signum(),
+            dy: (e.y - py).signum(),
+        })
+        .unwrap_or(GameCommand::Wait)
+}
+
+/// Compute an A* path to the nearest exploration frontier.
+fn next_explore_path(gs: &GameState) -> Option<Vec<Pos>> {
+    let frontiers = gs.frontier_tiles();
+    if frontiers.is_empty() {
+        return None;
+    }
+    let px = gs.entities[0].x;
+    let py = gs.entities[0].y;
+    let frontier_set: HashSet<Pos> = frontiers.into_iter().collect();
+    let (tx, ty) =
+        roguelike::pathfinding::nearest_by_cost(&gs.map, px, py, &frontier_set, &gs.explored)?;
+    roguelike::pathfinding::find_path(&gs.map, px, py, tx, ty, &gs.explored)
 }
 
 fn run_replay(path: &str) {
@@ -248,7 +297,7 @@ USAGE:
 OPTIONS:
     -n, --games N          Number of games to run (default: 10)
     -w, --width N          Map width (default: 80)
-    -h, --height N         Map height (default: 40)
+    -H, --height N         Map height (default: 40)
     -s, --seed N           Starting seed (increments per game)
     -p, --preset NAME      Map preset: arena, corridor, labyrinth, single_room, open_field
     -t, --max-turns N      Max turns per game (default: 500)

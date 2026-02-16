@@ -166,6 +166,20 @@ cargo run --bin headless -- --sweep sweep.json
 
 This is useful during development but doesn't replace automated tests.
 
+### Visualization Tools
+
+The `tools/` directory contains Python scripts for analytics visualization. These require a virtual environment:
+
+```sh
+python3 -m venv tools/.venv
+source tools/.venv/bin/activate
+pip install -r tools/requirements.txt
+```
+
+Alternatively, use the built-in `--report` flag on the headless runner to generate HTML reports without Python.
+
+See the [README](README.md#visualization) for full usage examples.
+
 ## Adding a Monster
 
 The simplest way to contribute content — see the [README](README.md#adding-a-new-monster) for a step-by-step guide.

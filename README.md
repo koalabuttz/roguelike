@@ -162,6 +162,7 @@ cargo run --bin headless -- --replay replay.json
 | `--save-replays` | Save replay JSON for each game |
 | `--analytics` | Collect per-game combat analytics (snapshot/diff each step) |
 | `--analysis` | With `--analytics`, compute difficulty metrics and monster correlations |
+| `--report FILE` | Generate self-contained HTML report with charts (requires `--analytics` or `--sweep`) |
 | `--sweep FILE` | Run parameter sweep from JSON config |
 | `--save-golden FILE` | Save run as golden replay JSON for regression testing |
 | `--regenerate-goldens DIR` | Re-execute all goldens in a directory, update expected outcomes |
@@ -185,6 +186,46 @@ Sweeps test how game balance changes across different player configurations:
 ```
 
 Supported sweep parameters: `player_hp`, `player_attack`, `player_defense`, `regen_interval`, `max_monsters_per_room`.
+
+### Visualization
+
+Two tools for visualizing analytics output:
+
+**HTML Report** (built-in, zero dependencies):
+
+```sh
+# Basic report with charts and insights:
+cargo run --bin headless -- --games 100 --analytics --report report.html
+
+# Full report with analysis (monster danger, damage flow):
+cargo run --bin headless -- --games 100 --analytics --analysis --report report.html
+
+# Sweep report:
+cargo run --bin headless -- --sweep sweep.json --report sweep_report.html
+```
+
+Opens in any browser. Uses Chart.js (loaded from CDN) with a dark theme.
+
+**Python charts** (`tools/visualize.py`, requires matplotlib):
+
+```sh
+# Setup (one-time):
+python3 -m venv tools/.venv
+source tools/.venv/bin/activate
+pip install -r tools/requirements.txt
+
+# Batch analytics -> PNGs:
+cargo run --bin headless -- --games 100 --analytics | python3 tools/visualize.py batch
+
+# Sweep results -> PNGs:
+cargo run --bin headless -- --sweep sweep.json | python3 tools/visualize.py sweep
+
+# Analysis data -> PNGs:
+cargo run --bin headless -- --games 100 --analytics --analysis 2>analysis.json
+python3 tools/visualize.py analysis analysis.json
+```
+
+Output PNGs are saved to `tools/output/` (or `--output-dir DIR`). Both tools also print text insights to stdout.
 
 ## Gameplay
 
@@ -264,6 +305,9 @@ tests/
   golden_replays.rs       Integration tests for golden replay verification
   scenarios.rs            Balance integration tests using the scenario framework
   golden_replays/         Stored golden replay JSON files (committed to repo)
+tools/
+  visualize.py            Python/matplotlib analytics visualizer (batch, sweep, analysis modes)
+  requirements.txt        Python dependencies (matplotlib)
 ```
 
 ## Configuration

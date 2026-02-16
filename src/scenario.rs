@@ -7,7 +7,10 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```rust,no_run
+//! use roguelike::scenario::Scenario;
+//! use roguelike::map::MapPreset;
+//!
 //! Scenario::new(20, 20, 42)
 //!     .preset(MapPreset::SingleRoom)
 //!     .kill_all()
@@ -256,8 +259,7 @@ impl ScenarioResult {
         assert!(
             self.gs.game_over,
             "Expected player to be dead, but they survived with {} HP after {} turns",
-            self.gs.entities[0].hp,
-            self.turns_run,
+            self.gs.entities[0].hp, self.turns_run,
         );
         self
     }
@@ -297,13 +299,7 @@ impl ScenarioResult {
 
     /// Assert exactly `expected` monsters were killed.
     pub fn assert_kills(self, expected: Stat) -> Self {
-        let kills = self
-            .gs
-            .entities
-            .iter()
-            .skip(1)
-            .filter(|e| !e.alive)
-            .count() as Stat;
+        let kills = self.gs.entities.iter().skip(1).filter(|e| !e.alive).count() as Stat;
         assert_eq!(
             kills, expected,
             "Expected {} kills, got {}",
@@ -314,13 +310,7 @@ impl ScenarioResult {
 
     /// Assert exactly `expected` monsters are still alive.
     pub fn assert_monsters_alive(self, expected: Stat) -> Self {
-        let alive = self
-            .gs
-            .entities
-            .iter()
-            .skip(1)
-            .filter(|e| e.alive)
-            .count() as Stat;
+        let alive = self.gs.entities.iter().skip(1).filter(|e| e.alive).count() as Stat;
         assert_eq!(
             alive, expected,
             "Expected {} monsters alive, got {}",
@@ -344,7 +334,8 @@ impl ScenarioResult {
         assert!(
             self.turns_run < max,
             "Expected fewer than {} turns, got {}",
-            max, self.turns_run,
+            max,
+            self.turns_run,
         );
         self
     }

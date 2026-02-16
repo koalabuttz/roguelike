@@ -8,10 +8,10 @@
 use roguelike::dev_tools::GoldenReplay;
 
 fn load_and_verify(path: &str) {
-    let json = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("Failed to read {}: {}", path, e));
-    let golden: GoldenReplay = serde_json::from_str(&json)
-        .unwrap_or_else(|e| panic!("Failed to parse {}: {}", path, e));
+    let json =
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read {}: {}", path, e));
+    let golden: GoldenReplay =
+        serde_json::from_str(&json).unwrap_or_else(|e| panic!("Failed to parse {}: {}", path, e));
     if let Err(msg) = golden.verify() {
         panic!("{}", msg);
     }

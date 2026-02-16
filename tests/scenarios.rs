@@ -108,7 +108,10 @@ fn scenario_produces_analytics() {
         .set_player_attack(100)
         .run_turns(50);
 
-    let analytics = result.analytics.as_ref().expect("analytics should be present");
+    let analytics = result
+        .analytics
+        .as_ref()
+        .expect("analytics should be present");
     assert_eq!(analytics.seed, 42);
     assert!(!analytics.game_over);
     assert!(analytics.kills_by_type.get("Goblin").copied().unwrap_or(0) >= 1);

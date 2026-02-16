@@ -129,10 +129,7 @@ pub fn diff_combat(
                     .or_insert(0) += damage;
 
                 if killed {
-                    *analytics
-                        .kills_by_type
-                        .entry(name.clone())
-                        .or_insert(0) += 1;
+                    *analytics.kills_by_type.entry(name.clone()).or_insert(0) += 1;
                     if analytics.first_kill_turn.is_none() {
                         analytics.first_kill_turn = Some(turn);
                     }
@@ -166,18 +163,11 @@ pub fn finalize_analytics(analytics: &mut GameAnalytics, gs: &GameState) {
     analytics.game_over = gs.game_over;
     analytics.monsters_spawned = (gs.entities.len() - 1) as Stat;
 
-    let floor_count = gs
-        .map
-        .tiles
-        .iter()
-        .filter(|t| **t == Tile::Floor)
-        .count() as Stat;
+    let floor_count = gs.map.tiles.iter().filter(|t| **t == Tile::Floor).count() as Stat;
     let explored_floors = gs
         .explored
         .iter()
-        .filter(|&&(x, y)| {
-            gs.map.in_bounds(x, y) && gs.map.tiles[gs.map.idx(x, y)] == Tile::Floor
-        })
+        .filter(|&&(x, y)| gs.map.in_bounds(x, y) && gs.map.tiles[gs.map.idx(x, y)] == Tile::Floor)
         .count() as Stat;
     analytics.explored_pct = if floor_count > 0 {
         (explored_floors * 100) / floor_count
@@ -335,57 +325,69 @@ pub fn monster_correlations(games: &[GameAnalytics]) -> Vec<MonsterCorrelation> 
             .collect();
 
         for monster in &encountered {
-            let entry = all_types
-                .entry((*monster).clone())
-                .or_insert((0, 0, 0));
+            let entry = all_types.entry((*monster).clone()).or_insert((0, 0, 0));
             entry.0 += 1; // encountered
             if g.game_over {
                 entry.1 += 1; // died
             }
-            entry.2 += g
-                .damage_taken_by_type
-                .get(*monster)
-                .copied()
-                .unwrap_or(0);
+            entry.2 += g.damage_taken_by_type.get(*monster).copied().unwrap_or(0);
         }
     }
 
     all_types
         .into_iter()
-        .map(|(monster_type, (encounters, deaths, total_damage))| MonsterCorrelation {
-            monster_type,
-            death_rate_when_encountered: if encounters > 0 {
-                deaths as f64 / encounters as f64
-            } else {
-                0.0
+        .map(
+            |(monster_type, (encounters, deaths, total_damage))| MonsterCorrelation {
+                monster_type,
+                death_rate_when_encountered: if encounters > 0 {
+                    deaths as f64 / encounters as f64
+                } else {
+                    0.0
+                },
+                avg_damage_dealt: if encounters > 0 {
+                    total_damage as f64 / encounters as f64
+                } else {
+                    0.0
+                },
             },
-            avg_damage_dealt: if encounters > 0 {
-                total_damage as f64 / encounters as f64
-            } else {
-                0.0
-            },
-        })
+        )
         .collect()
+}
+
+/// A single entry in the damage flow: total damage from one entity type to another.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DamageFlowEntry {
+    pub attacker: String,
+    pub defender: String,
+    pub total_damage: Stat,
 }
 
 /// Aggregate damage flow between entity types.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DamageFlow {
-    /// (attacker_type, defender_type) -> total damage across all games.
-    pub flows: HashMap<(String, String), Stat>,
+    pub flows: Vec<DamageFlowEntry>,
 }
 
 /// Compute the total damage flow from combat logs across all games.
 pub fn damage_flow(games: &[GameAnalytics]) -> DamageFlow {
-    let mut flows: HashMap<(String, String), Stat> = HashMap::new();
+    let mut map: HashMap<(String, String), Stat> = HashMap::new();
 
     for g in games {
         for event in &g.combat_log {
-            *flows
-                .entry((event.attacker_name.clone(), event.defender_name.clone()))
+            *map.entry((event.attacker_name.clone(), event.defender_name.clone()))
                 .or_insert(0) += event.damage;
         }
     }
+
+    let mut flows: Vec<DamageFlowEntry> = map
+        .into_iter()
+        .map(|((attacker, defender), total_damage)| DamageFlowEntry {
+            attacker,
+            defender,
+            total_damage,
+        })
+        .collect();
+    flows.sort_by(|a, b| b.total_damage.cmp(&a.total_damage));
 
     DamageFlow { flows }
 }
@@ -517,8 +519,7 @@ mod tests {
     #[test]
     fn snapshot_captures_all_entities() {
         let mut gs = test_game();
-        gs.entities
-            .push(Entity::from_template(&data::GOBLIN, 3, 3));
+        gs.entities.push(Entity::from_template(&data::GOBLIN, 3, 3));
         let snap = snapshot_entities(&gs);
         assert_eq!(snap.len(), 2);
         assert_eq!(snap[0].0, "Player");
@@ -528,8 +529,7 @@ mod tests {
     #[test]
     fn diff_detects_monster_damage() {
         let mut gs = test_game();
-        gs.entities
-            .push(Entity::from_template(&data::GOBLIN, 6, 5));
+        gs.entities.push(Entity::from_template(&data::GOBLIN, 6, 5));
         let before = snapshot_entities(&gs);
 
         // Player attacks goblin (step also runs monster turn, so both take damage).
@@ -553,8 +553,7 @@ mod tests {
     fn diff_detects_player_damage() {
         let mut gs = test_game();
         // Place goblin adjacent so it attacks on monster turn.
-        gs.entities
-            .push(Entity::from_template(&data::GOBLIN, 6, 5));
+        gs.entities.push(Entity::from_template(&data::GOBLIN, 6, 5));
         gs.update_fov();
 
         let before = snapshot_entities(&gs);
@@ -576,8 +575,7 @@ mod tests {
     fn diff_detects_kill() {
         let mut gs = test_game();
         gs.entities[0].attack = 100; // one-shot everything
-        gs.entities
-            .push(Entity::from_template(&data::GOBLIN, 6, 5));
+        gs.entities.push(Entity::from_template(&data::GOBLIN, 6, 5));
 
         let before = snapshot_entities(&gs);
         gs.step(GameCommand::Move { dx: 1, dy: 0 });
@@ -697,20 +695,19 @@ mod tests {
         });
 
         let flow = damage_flow(&[a]);
-        assert_eq!(
-            *flow
-                .flows
-                .get(&("Player".to_string(), "Goblin".to_string()))
-                .unwrap(),
-            5
-        );
-        assert_eq!(
-            *flow
-                .flows
-                .get(&("Goblin".to_string(), "Player".to_string()))
-                .unwrap(),
-            1
-        );
+        let player_to_goblin = flow
+            .flows
+            .iter()
+            .find(|e| e.attacker == "Player" && e.defender == "Goblin")
+            .expect("expected Player->Goblin flow");
+        assert_eq!(player_to_goblin.total_damage, 5);
+
+        let goblin_to_player = flow
+            .flows
+            .iter()
+            .find(|e| e.attacker == "Goblin" && e.defender == "Player")
+            .expect("expected Goblin->Player flow");
+        assert_eq!(goblin_to_player.total_damage, 1);
     }
 
     #[test]

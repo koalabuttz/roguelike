@@ -37,7 +37,7 @@
 use std::collections::HashSet;
 
 use roguelike::analytics::{
-    self, ConfigOverrides, GameAnalytics, SweepConfig, SweepPoint,
+    self, ConfigOverrides, DamageFlow, GameAnalytics, SweepConfig, SweepPoint,
 };
 use roguelike::dev_tools::{
     BatchRunStats, DevSession, GoldenReplay, Replay, ReplayResult, after_step, golden_from_session,
@@ -46,6 +46,17 @@ use roguelike::game::GameState;
 use roguelike::input::GameCommand;
 use roguelike::map::MapPreset;
 use roguelike::types::{Coord, Pos, Stat};
+
+/// Common configuration for batch and single-game runs.
+struct RunConfig {
+    games: Stat,
+    width: Coord,
+    height: Coord,
+    seed: Option<u64>,
+    preset: Option<MapPreset>,
+    max_turns: Stat,
+    save_replays: bool,
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -63,6 +74,7 @@ fn main() {
     let mut save_golden_path: Option<String> = None;
     let mut regenerate_goldens_dir: Option<String> = None;
     let mut analysis_enabled = false;
+    let mut report_path: Option<String> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -116,6 +128,10 @@ fn main() {
             "--analysis" => {
                 analysis_enabled = true;
             }
+            "--report" => {
+                i += 1;
+                report_path = Some(args[i].clone());
+            }
             "--help" => {
                 print_help();
                 return;
@@ -143,51 +159,42 @@ fn main() {
 
     // Mode 3: Parameter sweep.
     if let Some(path) = sweep_path {
-        run_sweep(&path, analytics_enabled, analysis_enabled);
+        run_sweep(
+            &path,
+            analytics_enabled,
+            analysis_enabled,
+            report_path.as_deref(),
+        );
         return;
     }
 
     // Mode 4: Save golden replay (single game).
     if let Some(golden_path) = save_golden_path {
         let game_seed = seed.unwrap_or_else(rand::random::<u64>);
-        run_and_save_golden(
-            width,
-            height,
-            game_seed,
-            preset,
-            max_turns,
-            &golden_path,
-        );
+        run_and_save_golden(width, height, game_seed, preset, max_turns, &golden_path);
         return;
     }
 
+    let config = RunConfig {
+        games,
+        width,
+        height,
+        seed,
+        preset,
+        max_turns,
+        save_replays,
+    };
+
     // Mode 5: Batch run (with optional analytics).
     if analytics_enabled {
-        run_batch_with_analytics(
-            games,
-            width,
-            height,
-            seed,
-            preset,
-            max_turns,
-            save_replays,
-            analysis_enabled,
-        );
+        run_batch_with_analytics(&config, analysis_enabled, report_path.as_deref());
     } else {
-        run_batch(games, width, height, seed, preset, max_turns, save_replays);
+        run_batch(&config);
     }
 }
 
 /// Original batch run — no analytics overhead.
-fn run_batch(
-    games: Stat,
-    width: Coord,
-    height: Coord,
-    seed: Option<u64>,
-    preset: Option<MapPreset>,
-    max_turns: Stat,
-    save_replays: bool,
-) {
+fn run_batch(config: &RunConfig) {
     let mut stats = BatchRunStats {
         games_played: 0,
         games_won: 0,
@@ -199,11 +206,18 @@ fn run_batch(
         seeds_used: Vec::new(),
     };
 
-    for game_num in 0..games {
-        let game_seed = seed.unwrap_or_else(rand::random::<u64>) + game_num as u64;
+    for game_num in 0..config.games {
+        let game_seed = config.seed.unwrap_or_else(rand::random::<u64>) + game_num as u64;
         stats.seeds_used.push(game_seed);
 
-        let result = run_single_game(width, height, game_seed, preset, max_turns, save_replays);
+        let result = run_single_game(
+            config.width,
+            config.height,
+            game_seed,
+            config.preset,
+            config.max_turns,
+            config.save_replays,
+        );
 
         stats.games_played += 1;
         stats.total_turns += result.turns_played;
@@ -217,7 +231,7 @@ fn run_batch(
         eprint!(
             "\rGame {}/{}: seed={} turns={} kills={} {}",
             game_num + 1,
-            games,
+            config.games,
             game_seed,
             result.turns_played,
             result.kills,
@@ -238,35 +252,26 @@ fn run_batch(
 }
 
 /// Batch run with per-game analytics collection.
-fn run_batch_with_analytics(
-    games: Stat,
-    width: Coord,
-    height: Coord,
-    seed: Option<u64>,
-    preset: Option<MapPreset>,
-    max_turns: Stat,
-    save_replays: bool,
-    analysis_enabled: bool,
-) {
+fn run_batch_with_analytics(config: &RunConfig, analysis_enabled: bool, report_path: Option<&str>) {
     let mut all_analytics: Vec<GameAnalytics> = Vec::new();
 
-    for game_num in 0..games {
-        let game_seed = seed.unwrap_or_else(rand::random::<u64>) + game_num as u64;
+    for game_num in 0..config.games {
+        let game_seed = config.seed.unwrap_or_else(rand::random::<u64>) + game_num as u64;
 
         let game_analytics = run_single_game_tracked(
-            width,
-            height,
+            config.width,
+            config.height,
             game_seed,
-            preset,
-            max_turns,
-            save_replays,
+            config.preset,
+            config.max_turns,
+            config.save_replays,
             &ConfigOverrides::default(),
         );
 
         eprint!(
             "\rGame {}/{}: seed={} turns={} kills={} {}",
             game_num + 1,
-            games,
+            config.games,
             game_seed,
             game_analytics.turns,
             game_analytics.kills_by_type.values().sum::<Stat>(),
@@ -287,8 +292,11 @@ fn run_batch_with_analytics(
         serde_json::to_string_pretty(&batch_stats).expect("failed to serialize stats")
     );
 
-    if analysis_enabled {
-        let preset_name = preset.map(|p| format!("{:?}", p)).unwrap_or_else(|| "default".to_string());
+    let analysis_data = if analysis_enabled {
+        let preset_name = config
+            .preset
+            .map(|p| format!("{:?}", p))
+            .unwrap_or_else(|| "default".to_string());
         let difficulty = analytics::preset_difficulty(&preset_name, &all_analytics);
         let correlations = analytics::monster_correlations(&all_analytics);
         let flow = analytics::damage_flow(&all_analytics);
@@ -300,13 +308,22 @@ fn run_batch_with_analytics(
         );
         eprintln!(
             "{}",
-            serde_json::to_string_pretty(&correlations)
-                .expect("failed to serialize correlations")
+            serde_json::to_string_pretty(&correlations).expect("failed to serialize correlations")
         );
         eprintln!(
             "{}",
             serde_json::to_string_pretty(&flow).expect("failed to serialize flow")
         );
+
+        Some((correlations, flow))
+    } else {
+        None
+    };
+
+    if let Some(path) = report_path {
+        let (correlations, flow) =
+            analysis_data.unwrap_or_else(|| (Vec::new(), analytics::damage_flow(&[])));
+        generate_html_report(path, &batch_stats, &correlations, &flow, None);
     }
 }
 
@@ -520,7 +537,9 @@ fn run_and_save_golden(
         after_step(&mut gs, &mut session, cmd);
     }
 
-    let preset_name = preset.map(|p| format!("{:?}", p)).unwrap_or_else(|| "default".to_string());
+    let preset_name = preset
+        .map(|p| format!("{:?}", p))
+        .unwrap_or_else(|| "default".to_string());
     let name = format!("seed_{}_{}", seed, preset_name.to_lowercase());
     let description = format!(
         "Seed {}, {}x{}, preset={}, max_turns={}",
@@ -581,8 +600,7 @@ fn regenerate_goldens(dir: &str, max_turns: Stat) {
             let new_result = golden.replay.execute();
             golden.expected = new_result;
 
-            let updated_json =
-                serde_json::to_string_pretty(&golden).expect("failed to serialize");
+            let updated_json = serde_json::to_string_pretty(&golden).expect("failed to serialize");
             std::fs::write(&path, updated_json).expect("failed to write");
             eprintln!(
                 "  Regenerated: {} (turns={}, kills={}, {})",
@@ -602,7 +620,12 @@ fn regenerate_goldens(dir: &str, max_turns: Stat) {
 }
 
 /// Run a parameter sweep from a JSON config file.
-fn run_sweep(path: &str, analytics_enabled: bool, analysis_enabled: bool) {
+fn run_sweep(
+    path: &str,
+    analytics_enabled: bool,
+    analysis_enabled: bool,
+    report_path: Option<&str>,
+) {
     let json = std::fs::read_to_string(path).expect("failed to read sweep config");
     let config: SweepConfig = serde_json::from_str(&json).expect("failed to parse sweep config");
 
@@ -683,6 +706,16 @@ fn run_sweep(path: &str, analytics_enabled: bool, analysis_enabled: bool) {
             );
         }
     }
+
+    if let Some(report) = report_path {
+        generate_html_report(
+            report,
+            &analytics::aggregate(&[]),
+            &[],
+            &analytics::damage_flow(&[]),
+            Some(&results),
+        );
+    }
 }
 
 /// Pick the move command to attack the weakest adjacent monster.
@@ -749,6 +782,541 @@ fn parse_preset(s: &str) -> MapPreset {
     }
 }
 
+// ---------------------------------------------------------------------------
+// HTML Report Generation
+// ---------------------------------------------------------------------------
+
+struct Insight {
+    category: &'static str,
+    title: String,
+    detail: String,
+}
+
+fn generate_insights(
+    stats: &analytics::EnhancedBatchStats,
+    correlations: &[analytics::MonsterCorrelation],
+    flow: &DamageFlow,
+    sweep: Option<&[SweepPoint]>,
+) -> Vec<Insight> {
+    let mut insights = Vec::new();
+
+    // Balance assessment.
+    let assessment = if stats.win_rate >= 0.7 {
+        "easy"
+    } else if stats.win_rate >= 0.4 {
+        "balanced"
+    } else {
+        "hard"
+    };
+    if stats.games > 0 {
+        insights.push(Insight {
+            category: "balance",
+            title: "Balance Assessment".to_string(),
+            detail: format!(
+                "Difficulty is {} -- win rate {:.0}% ({} games)",
+                assessment,
+                stats.win_rate * 100.0,
+                stats.games,
+            ),
+        });
+    }
+
+    // Most dangerous monster.
+    if let Some(worst) = correlations.iter().max_by(|a, b| {
+        a.death_rate_when_encountered
+            .partial_cmp(&b.death_rate_when_encountered)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    }) {
+        insights.push(Insight {
+            category: "danger",
+            title: "Most Dangerous Monster".to_string(),
+            detail: format!(
+                "{} -- {:.0}% death rate, avg {:.1} damage",
+                worst.monster_type,
+                worst.death_rate_when_encountered * 100.0,
+                worst.avg_damage_dealt,
+            ),
+        });
+    }
+
+    // Most killed monster.
+    if let Some((name, count)) = stats
+        .kills_by_type
+        .iter()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+    {
+        insights.push(Insight {
+            category: "efficiency",
+            title: "Most Killed Monster".to_string(),
+            detail: format!("{} -- avg {:.1} kills/game", name, count),
+        });
+    }
+
+    // Damage efficiency.
+    let total_dealt: f64 = stats.damage_dealt_by_type.values().sum();
+    let total_taken: f64 = stats.damage_taken_by_type.values().sum();
+    if total_taken > 0.0 {
+        let ratio = total_dealt / total_taken;
+        insights.push(Insight {
+            category: "efficiency",
+            title: "Damage Efficiency".to_string(),
+            detail: format!("Player deals {:.1}x more damage than received", ratio),
+        });
+    }
+
+    // Actionable suggestion from correlations.
+    if let Some(worst) = correlations
+        .iter()
+        .filter(|c| c.death_rate_when_encountered > 0.7)
+        .max_by(|a, b| {
+            a.death_rate_when_encountered
+                .partial_cmp(&b.death_rate_when_encountered)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    {
+        insights.push(Insight {
+            category: "danger",
+            title: "Actionable Suggestion".to_string(),
+            detail: format!(
+                "Consider reducing {} HP -- {:.0}% death rate when encountered",
+                worst.monster_type,
+                worst.death_rate_when_encountered * 100.0,
+            ),
+        });
+    }
+
+    // Sweep threshold.
+    if let Some(sweep_points) = sweep {
+        for pt in sweep_points {
+            let overrides = &pt.overrides;
+            let wr = pt.stats.win_rate;
+            let params: Vec<String> = [
+                overrides.player_hp.map(|v| format!("player_hp={}", v)),
+                overrides
+                    .player_attack
+                    .map(|v| format!("player_attack={}", v)),
+                overrides
+                    .player_defense
+                    .map(|v| format!("player_defense={}", v)),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            if (0.48..=0.52).contains(&wr) && !params.is_empty() {
+                insights.push(Insight {
+                    category: "threshold",
+                    title: "Survivability Threshold".to_string(),
+                    detail: format!(
+                        "Win rate crosses 50% at {} (actual: {:.0}%)",
+                        params.join(", "),
+                        wr * 100.0,
+                    ),
+                });
+                break;
+            }
+        }
+    }
+
+    // Damage flow insight.
+    if let Some(top) = flow.flows.first() {
+        insights.push(Insight {
+            category: "efficiency",
+            title: "Highest Damage Flow".to_string(),
+            detail: format!(
+                "{} -> {} ({} total damage)",
+                top.attacker, top.defender, top.total_damage,
+            ),
+        });
+    }
+
+    insights
+}
+
+fn generate_html_report(
+    path: &str,
+    stats: &analytics::EnhancedBatchStats,
+    correlations: &[analytics::MonsterCorrelation],
+    flow: &DamageFlow,
+    sweep: Option<&[SweepPoint]>,
+) {
+    let insights = generate_insights(stats, correlations, flow, sweep);
+
+    let stats_json = serde_json::to_string(stats).expect("failed to serialize stats");
+    let correlations_json =
+        serde_json::to_string(correlations).expect("failed to serialize correlations");
+    let flow_json = serde_json::to_string(flow).expect("failed to serialize flow");
+    let sweep_json = sweep
+        .map(|s| serde_json::to_string(s).expect("failed to serialize sweep"))
+        .unwrap_or_else(|| "null".to_string());
+
+    let mut insights_html = String::new();
+    for insight in &insights {
+        let icon = match insight.category {
+            "danger" => "&#9760;",     // skull
+            "balance" => "&#9878;",    // scales
+            "efficiency" => "&#9889;", // lightning
+            "threshold" => "&#9733;",  // star
+            _ => "&#8226;",            // bullet
+        };
+        insights_html.push_str(&format!(
+            r#"<div class="insight-card"><span class="insight-icon">{}</span><div><strong>{}</strong><br><span class="insight-detail">{}</span></div></div>"#,
+            icon, insight.title, insight.detail,
+        ));
+    }
+
+    let html = format!(
+        r##"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roguelike Analytics Report</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: "Courier New", "Consolas", monospace;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }}
+        h1 {{
+            text-align: center;
+            color: #e94560;
+            margin-bottom: 8px;
+            font-size: 28px;
+        }}
+        .subtitle {{
+            text-align: center;
+            color: #888;
+            margin-bottom: 24px;
+            font-size: 12px;
+        }}
+        .summary-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-bottom: 24px;
+        }}
+        .summary-card {{
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+        }}
+        .summary-card .value {{
+            font-size: 32px;
+            font-weight: bold;
+            color: #53d8fb;
+        }}
+        .summary-card .label {{
+            font-size: 12px;
+            color: #888;
+            margin-top: 4px;
+        }}
+        .insights-panel {{
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }}
+        .insights-panel h2 {{
+            color: #f5a623;
+            margin-bottom: 12px;
+            font-size: 18px;
+        }}
+        .insight-card {{
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #0f3460;
+        }}
+        .insight-card:last-child {{ border-bottom: none; }}
+        .insight-icon {{ font-size: 20px; min-width: 28px; text-align: center; }}
+        .insight-detail {{ color: #aaa; font-size: 13px; }}
+        .chart-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }}
+        .chart-container {{
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 8px;
+            padding: 16px;
+        }}
+        .chart-container h3 {{
+            color: #53d8fb;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }}
+        canvas {{ max-width: 100%; }}
+        footer {{
+            text-align: center;
+            color: #555;
+            font-size: 11px;
+            margin-top: 24px;
+        }}
+    </style>
+</head>
+<body>
+    <h1>Roguelike Analytics Report</h1>
+    <div class="subtitle">Generated by headless runner</div>
+
+    <div class="summary-grid">
+        <div class="summary-card">
+            <div class="value" id="win-rate">--</div>
+            <div class="label">Win Rate</div>
+        </div>
+        <div class="summary-card">
+            <div class="value" id="avg-turns">--</div>
+            <div class="label">Avg Turns</div>
+        </div>
+        <div class="summary-card">
+            <div class="value" id="avg-kills">--</div>
+            <div class="label">Avg Kills</div>
+        </div>
+        <div class="summary-card">
+            <div class="value" id="avg-explored">--</div>
+            <div class="label">Avg Explored</div>
+        </div>
+    </div>
+
+    <div class="insights-panel">
+        <h2>Insights</h2>
+        {insights_html}
+    </div>
+
+    <div class="chart-grid">
+        <div class="chart-container">
+            <h3>Kills by Monster Type</h3>
+            <canvas id="killsByType"></canvas>
+        </div>
+        <div class="chart-container">
+            <h3>Damage Dealt vs Taken</h3>
+            <canvas id="damageComparison"></canvas>
+        </div>
+        <div class="chart-container" id="dangerContainer" style="display:none">
+            <h3>Monster Danger Ranking</h3>
+            <canvas id="monsterDanger"></canvas>
+        </div>
+        <div class="chart-container" id="flowContainer" style="display:none">
+            <h3>Damage Flow (Attacker -> Defender)</h3>
+            <canvas id="damageFlow"></canvas>
+        </div>
+        <div class="chart-container" id="sweepWinRateContainer" style="display:none">
+            <h3>Win Rate vs Parameter</h3>
+            <canvas id="sweepWinRate"></canvas>
+        </div>
+        <div class="chart-container" id="sweepTurnsContainer" style="display:none">
+            <h3>Avg Turns vs Parameter</h3>
+            <canvas id="sweepTurns"></canvas>
+        </div>
+    </div>
+
+    <footer>Roguelike Analytics &mdash; headless runner report</footer>
+
+    <script>
+        const STATS = {stats_json};
+        const CORRELATIONS = {correlations_json};
+        const FLOW = {flow_json};
+        const SWEEP = {sweep_json};
+
+        const COLORS = ['#e94560', '#0f3460', '#53d8fb', '#f5a623', '#a29bfe', '#6c5ce7'];
+        const chartDefaults = {{
+            responsive: true,
+            plugins: {{
+                legend: {{ labels: {{ color: '#e0e0e0', font: {{ family: 'monospace' }} }} }},
+            }},
+            scales: {{
+                x: {{ ticks: {{ color: '#e0e0e0' }}, grid: {{ color: '#0f3460' }} }},
+                y: {{ ticks: {{ color: '#e0e0e0' }}, grid: {{ color: '#0f3460' }} }},
+            }},
+        }};
+
+        // Summary cards
+        document.getElementById('win-rate').textContent =
+            (STATS.win_rate * 100).toFixed(0) + '%';
+        document.getElementById('avg-turns').textContent =
+            STATS.avg_turns.toFixed(0);
+        document.getElementById('avg-kills').textContent =
+            STATS.avg_kills.toFixed(1);
+        document.getElementById('avg-explored').textContent =
+            STATS.avg_explored_pct.toFixed(0) + '%';
+
+        // Kills by type
+        if (STATS.kills_by_type && Object.keys(STATS.kills_by_type).length > 0) {{
+            const labels = Object.keys(STATS.kills_by_type).sort();
+            new Chart(document.getElementById('killsByType'), {{
+                type: 'bar',
+                data: {{
+                    labels: labels,
+                    datasets: [{{
+                        label: 'Avg Kills/Game',
+                        data: labels.map(l => STATS.kills_by_type[l]),
+                        backgroundColor: labels.map((_, i) => COLORS[i % COLORS.length]),
+                    }}],
+                }},
+                options: chartDefaults,
+            }});
+        }}
+
+        // Damage comparison
+        const allTypes = [...new Set([
+            ...Object.keys(STATS.damage_dealt_by_type || {{}}),
+            ...Object.keys(STATS.damage_taken_by_type || {{}}),
+        ])].sort();
+        if (allTypes.length > 0) {{
+            new Chart(document.getElementById('damageComparison'), {{
+                type: 'bar',
+                data: {{
+                    labels: allTypes,
+                    datasets: [
+                        {{
+                            label: 'Dealt to',
+                            data: allTypes.map(t => (STATS.damage_dealt_by_type || {{}})[t] || 0),
+                            backgroundColor: '#e94560',
+                        }},
+                        {{
+                            label: 'Taken from',
+                            data: allTypes.map(t => (STATS.damage_taken_by_type || {{}})[t] || 0),
+                            backgroundColor: '#53d8fb',
+                        }},
+                    ],
+                }},
+                options: chartDefaults,
+            }});
+        }}
+
+        // Monster danger scatter
+        if (CORRELATIONS && CORRELATIONS.length > 0) {{
+            document.getElementById('dangerContainer').style.display = '';
+            new Chart(document.getElementById('monsterDanger'), {{
+                type: 'scatter',
+                data: {{
+                    datasets: CORRELATIONS.map((m, i) => ({{
+                        label: m.monster_type,
+                        data: [{{ x: m.avg_damage_dealt, y: m.death_rate_when_encountered * 100 }}],
+                        backgroundColor: COLORS[i % COLORS.length],
+                        pointRadius: 8,
+                    }})),
+                }},
+                options: {{
+                    ...chartDefaults,
+                    scales: {{
+                        x: {{ ...chartDefaults.scales.x, title: {{ display: true, text: 'Avg Damage', color: '#e0e0e0' }} }},
+                        y: {{ ...chartDefaults.scales.y, title: {{ display: true, text: 'Death Rate %', color: '#e0e0e0' }} }},
+                    }},
+                }},
+            }});
+        }}
+
+        // Damage flow heatmap (as bar chart since Chart.js doesn't have native heatmap)
+        if (FLOW && FLOW.flows && FLOW.flows.length > 0) {{
+            document.getElementById('flowContainer').style.display = '';
+            const flowLabels = FLOW.flows.map(f => f.attacker + ' -> ' + f.defender);
+            new Chart(document.getElementById('damageFlow'), {{
+                type: 'bar',
+                data: {{
+                    labels: flowLabels,
+                    datasets: [{{
+                        label: 'Total Damage',
+                        data: FLOW.flows.map(f => f.total_damage),
+                        backgroundColor: FLOW.flows.map((_, i) => COLORS[i % COLORS.length]),
+                    }}],
+                }},
+                options: {{
+                    ...chartDefaults,
+                    indexAxis: 'y',
+                }},
+            }});
+        }}
+
+        // Sweep charts
+        if (SWEEP && SWEEP.length > 0) {{
+            // Group by parameter
+            const axes = {{}};
+            SWEEP.forEach(pt => {{
+                const ov = pt.overrides || {{}};
+                for (const [param, value] of Object.entries(ov)) {{
+                    if (value !== null) {{
+                        if (!axes[param]) axes[param] = [];
+                        axes[param].push({{ value, stats: pt.stats }});
+                    }}
+                }}
+            }});
+
+            if (Object.keys(axes).length > 0) {{
+                document.getElementById('sweepWinRateContainer').style.display = '';
+                document.getElementById('sweepTurnsContainer').style.display = '';
+
+                const wrDatasets = [];
+                const turnsDatasets = [];
+                let colorIdx = 0;
+                for (const [param, entries] of Object.entries(axes)) {{
+                    entries.sort((a, b) => a.value - b.value);
+                    const c = COLORS[colorIdx++ % COLORS.length];
+                    wrDatasets.push({{
+                        label: param,
+                        data: entries.map(e => ({{ x: e.value, y: e.stats.win_rate * 100 }})),
+                        borderColor: c,
+                        backgroundColor: c,
+                        fill: false,
+                    }});
+                    turnsDatasets.push({{
+                        label: param,
+                        data: entries.map(e => ({{ x: e.value, y: e.stats.avg_turns }})),
+                        borderColor: c,
+                        backgroundColor: c,
+                        fill: false,
+                    }});
+                }}
+
+                new Chart(document.getElementById('sweepWinRate'), {{
+                    type: 'line',
+                    data: {{ datasets: wrDatasets }},
+                    options: {{
+                        ...chartDefaults,
+                        scales: {{
+                            x: {{ ...chartDefaults.scales.x, type: 'linear', title: {{ display: true, text: 'Parameter Value', color: '#e0e0e0' }} }},
+                            y: {{ ...chartDefaults.scales.y, title: {{ display: true, text: 'Win Rate %', color: '#e0e0e0' }} }},
+                        }},
+                    }},
+                }});
+
+                new Chart(document.getElementById('sweepTurns'), {{
+                    type: 'line',
+                    data: {{ datasets: turnsDatasets }},
+                    options: {{
+                        ...chartDefaults,
+                        scales: {{
+                            x: {{ ...chartDefaults.scales.x, type: 'linear', title: {{ display: true, text: 'Parameter Value', color: '#e0e0e0' }} }},
+                            y: {{ ...chartDefaults.scales.y, title: {{ display: true, text: 'Avg Turns', color: '#e0e0e0' }} }},
+                        }},
+                    }},
+                }});
+            }}
+        }}
+    </script>
+</body>
+</html>"##,
+        insights_html = insights_html,
+        stats_json = stats_json,
+        correlations_json = correlations_json,
+        flow_json = flow_json,
+        sweep_json = sweep_json,
+    );
+
+    std::fs::write(path, html).expect("failed to write HTML report");
+    eprintln!("Report written to {}", path);
+}
+
 fn print_help() {
     eprintln!(
         "headless - automated roguelike playtester
@@ -770,6 +1338,7 @@ OPTIONS:
         --save-golden FILE     Save run as golden replay JSON
         --regenerate-goldens DIR  Re-execute all goldens in dir, update expected outcomes
         --analysis             With --analytics, compute correlations/difficulty metrics
+        --report FILE          Generate self-contained HTML report with charts
         --help                 Show this help message"
     );
 }

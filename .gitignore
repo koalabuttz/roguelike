@@ -15,6 +15,10 @@ claude.md
 savegame*.json
 settings.json
 
+# Tools
+tools/.venv/
+tools/output/
+
 # OS artifacts
 Thumbs.db
 .DS_Store

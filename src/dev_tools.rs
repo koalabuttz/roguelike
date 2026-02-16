@@ -699,13 +699,8 @@ mod tests {
             gs.step(GameCommand::Wait);
             after_step(&mut gs, &mut session, GameCommand::Wait);
         }
-        let golden = golden_from_session(
-            "seed_42",
-            "Standard dungeon, 5 waits",
-            &gs,
-            &session,
-            None,
-        );
+        let golden =
+            golden_from_session("seed_42", "Standard dungeon, 5 waits", &gs, &session, None);
         // Serialize and deserialize.
         let json = serde_json::to_string_pretty(&golden).unwrap();
         let loaded: GoldenReplay = serde_json::from_str(&json).unwrap();

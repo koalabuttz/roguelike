@@ -1,6 +1,8 @@
 pub mod ai;
 pub mod combat;
 pub mod data;
+#[cfg(feature = "dev-tools")]
+pub mod dev_tools;
 pub mod entity;
 pub mod fov;
 pub mod game;

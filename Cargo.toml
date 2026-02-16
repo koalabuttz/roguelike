@@ -4,6 +4,10 @@ version = "0.1.1"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
+[features]
+default = ["dev-tools"]
+dev-tools = []
+
 [dependencies]
 crossterm = "0.28"
 rand = "0.8"
@@ -21,3 +25,8 @@ path = "src/main.rs"
 [[bin]]
 name = "mcp_server"
 path = "src/bin/mcp_server.rs"
+
+[[bin]]
+name = "headless"
+path = "src/bin/headless.rs"
+required-features = ["dev-tools"]

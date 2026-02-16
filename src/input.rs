@@ -1,5 +1,7 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+use serde::{Deserialize, Serialize};
+
 use crate::platform::{InputSource, MenuCommand};
 use crate::types::Coord;
 
@@ -8,7 +10,7 @@ use crate::types::Coord;
 /// Input adapters (keyboard, controller, replay, network) produce these;
 /// game logic consumes them. No module outside `input` should match on
 /// raw key events.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GameCommand {
     Move {
         dx: Coord,

@@ -1,6 +1,8 @@
 use std::io::stdout;
 use std::time::Duration;
 
+#[cfg(all(debug_assertions, feature = "dev-tools"))]
+use roguelike::dev_tools::{self, DevCommand, DevSession};
 use roguelike::{
     game, input, menu, menu::MenuAction, platform::Renderer, render, saves::SlotMetadata, settings,
     settings::Platform, types::Coord,
@@ -191,6 +193,8 @@ fn main() -> std::io::Result<()> {
     let map_height = (rows as i32) - 1 - settings.message_log_lines as i32;
     let mut game_state: Option<game::GameState> = None;
     let mut autosave_buf: Option<String> = None;
+    #[cfg(all(debug_assertions, feature = "dev-tools"))]
+    let mut dev_session = DevSession::default();
     let has_save = has_save_for_title(settings.casual_mode);
     let mut app_state = AppState::Title(menu::title_menu(has_save, settings.casual_mode));
 
@@ -403,6 +407,26 @@ fn main() -> std::io::Result<()> {
                 }
 
                 let key = wait_for_keypress()?;
+
+                // Debug keybindings (debug builds with dev-tools feature).
+                #[cfg(all(debug_assertions, feature = "dev-tools"))]
+                {
+                    use crossterm::event::KeyCode;
+                    let dev_cmd = match key.code {
+                        KeyCode::F(1) => Some(DevCommand::DumpStats),
+                        KeyCode::F(2) => Some(DevCommand::ToggleFov),
+                        KeyCode::F(3) => Some(DevCommand::ToggleGodMode),
+                        KeyCode::F(4) => Some(DevCommand::RevealMap),
+                        KeyCode::F(5) => Some(DevCommand::KillAll),
+                        _ => None,
+                    };
+                    if let Some(cmd) = dev_cmd {
+                        let msg = dev_tools::exec_dev(state, &mut dev_session, cmd);
+                        state.log.add(&msg);
+                        continue;
+                    }
+                }
+
                 if let Some(cmd) = input::translate_key(key, settings.vi_keys, settings.numpad) {
                     match cmd {
                         input::GameCommand::Quit => {

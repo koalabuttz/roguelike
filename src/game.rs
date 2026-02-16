@@ -278,6 +278,48 @@ impl GameState {
         Self::with_seed(width, height, rand::random::<u64>())
     }
 
+    /// Create a new game using a named map preset.
+    ///
+    /// Presets produce deterministic topologies for testing and development.
+    /// Monster spawning still uses the seed for placement within rooms.
+    pub fn with_preset(width: Coord, height: Coord, seed: u64, preset: map::MapPreset) -> Self {
+        let cfg = &data::CONFIG;
+        let mut master = StdRng::seed_from_u64(seed);
+        let mut map_rng = StdRng::from_rng(&mut master).unwrap();
+        let mut spawn_rng = StdRng::from_rng(&mut master).unwrap();
+
+        let mut map = map::Map::new(width, height);
+        let (px, py) = map.from_preset(preset, &mut map_rng);
+
+        let mut entities = vec![Entity::player(px, py)];
+        let monsters = spawn::spawn_monsters(
+            &map,
+            data::SPAWN_TABLE,
+            cfg.max_monsters_per_room,
+            &mut spawn_rng,
+        );
+        entities.extend(monsters);
+
+        let visible = fov::compute_fov(&map, px, py, cfg.fov_radius);
+        let explored = visible.clone();
+
+        let mut log = MessageLog::new();
+        log.add(format!("Welcome! Map preset: {:?}", preset));
+
+        GameState {
+            map,
+            entities,
+            fov_radius: cfg.fov_radius,
+            visible,
+            explored,
+            log,
+            game_over: false,
+            turn_count: 0,
+            seed,
+            dirty: false,
+        }
+    }
+
     /// Create a new game with a specific seed for reproducible dungeons.
     ///
     /// The seed determines map layout and monster placement. Separate RNG

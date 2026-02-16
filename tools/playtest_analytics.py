@@ -56,13 +56,13 @@ def new_game_analytics(seed):
 def update_fight_analytics(analytics, response):
     """Record damage dealt/taken from an auto_fight MCP response.
 
-    The response dict should contain: auto_fight_target, auto_fight_rounds,
-    auto_fight_player_hp_lost, auto_fight_target_killed, kills.
+    The response dict should contain: fight_target, fight_rounds,
+    fight_hp_lost, fight_target_killed, kills.
     """
-    target = response.get("auto_fight_target", "Unknown")
-    rounds = response.get("auto_fight_rounds", 0)
-    hp_lost = response.get("auto_fight_player_hp_lost", 0)
-    killed = response.get("auto_fight_target_killed", False)
+    target = response.get("fight_target", "Unknown")
+    rounds = response.get("fight_rounds", 0)
+    hp_lost = response.get("fight_hp_lost", 0)
+    killed = response.get("fight_target_killed", False)
     total_kills = response.get("kills", 0)
 
     # Damage taken from this monster.
@@ -92,8 +92,8 @@ def update_fight_analytics(analytics, response):
 
 def finalize_game(analytics, last_observation, llm_metrics=None):
     """Fill final fields from the last observation and optional LLM metrics."""
-    analytics["final_hp"] = last_observation.get("player_hp", 0)
-    analytics["explored_pct"] = last_observation.get("explored_pct", 0)
+    analytics["final_hp"] = last_observation.get("hp", 0)
+    analytics["explored_pct"] = last_observation.get("explored", 0)
     analytics["game_over"] = last_observation.get("game_over", False)
     # Turns: use kills as a proxy if not tracked directly — the observation
     # doesn't expose turn_count, but we track tool calls as a rough measure.

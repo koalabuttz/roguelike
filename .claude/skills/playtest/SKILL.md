@@ -24,8 +24,10 @@ Run LLM-driven roguelike playtesting using `tools/llm_playtest.py` with the `cla
 2. Run the playtest script via Bash:
 
 ```bash
-python3 tools/llm_playtest.py --backend claude-code -n COUNT --parallel PARALLEL [--seed SEED]
+python3 tools/llm_playtest.py --backend claude-code -n COUNT --parallel PARALLEL [--seed SEED] [--max-budget BUDGET]
 ```
+
+Default budget is $2.00/game. The script uses compact mode (no ASCII map in responses) and short field names to minimize token cost.
 
 3. The script handles everything: game execution, analytics collection, incremental result saving, and prints a summary table with per-game strategy notes.
 

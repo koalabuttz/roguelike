@@ -88,7 +88,7 @@ The server communicates over stdio and exposes these tools:
 
 | Tool | Description |
 |------|-------------|
-| `new_game` | Start a game (optional `width`/`height`/`seed` params) |
+| `new_game` | Start a game (optional `width`/`height`/`seed`/`compact` params) |
 | `observe` | Get visible state: map, entities, HP, messages |
 | `act` | Take an action: move, wait, autorun, or auto\_fight |
 | `pathfind_to` | A\* pathfind to a target tile; stops for monsters or damage |
@@ -229,7 +229,9 @@ Output PNGs are saved to `tools/output/` (or `--output-dir DIR`). Both tools als
 
 ### LLM Playtesting
 
-Two tools for strategic LLM-driven playtesting, where an LLM plays the game making tactical decisions (fight, flee, explore) rather than the headless runner's simple auto-explore + auto-fight AI:
+Strategic LLM-driven playtesting where an LLM plays the game making tactical decisions (fight, flee, explore) rather than the headless runner's simple auto-explore + auto-fight AI.
+
+The system prompt teaches the LLM combat math (ATK - DEF = damage per round, compute rounds-to-kill vs rounds-to-die) and recovery strategies (corridor running for safe regen, corner kiting to kill tough monsters). The LLM chooses between aggressive, cautious, and exploratory strategies based on each encounter.
 
 **`/playtest` skill** (Claude Code, interactive):
 
@@ -241,34 +243,43 @@ Two tools for strategic LLM-driven playtesting, where an LLM plays the game maki
 /playtest 10 --seed 42
 ```
 
-The skill uses the connected MCP server directly — Claude plays each game strategically, deciding when to fight vs retreat based on HP and monster type. Results are saved to `tools/output/llm_playtest_results.json`.
+The skill uses the connected MCP server directly. Results are saved to `tools/output/llm_playtest_results.json`.
 
-**`tools/llm_playtest.py`** (standalone, unattended):
+**`tools/llm_playtest.py`** (standalone, dual-backend, unattended):
 
 ```sh
 # Setup:
 pip install -r tools/requirements.txt
 cargo build --release --bin mcp_server
 
-# Run 50 games with default model:
-ANTHROPIC_API_KEY=... python3 tools/llm_playtest.py -n 50
+# Claude Code backend (uses `claude` CLI, parallel execution):
+python3 tools/llm_playtest.py --backend claude-code -n 10 --parallel 5
 
-# Use specific model and seed, generate charts:
-python3 tools/llm_playtest.py -n 20 -m claude-sonnet-4-20250514 -s 42 --report
+# API backend (uses Anthropic API directly):
+ANTHROPIC_API_KEY=... python3 tools/llm_playtest.py --backend api -n 50
 
-# Custom output path:
-python3 tools/llm_playtest.py -n 100 -o results.json
+# Reproducible runs with specific seeds:
+python3 tools/llm_playtest.py --backend claude-code -n 5 --seed 63519 --parallel 5
+
+# Custom budget and output path:
+python3 tools/llm_playtest.py --backend claude-code -n 10 --max-budget 2.00 -o results.json
 ```
 
-The script spawns the MCP server as a subprocess and drives games through the Anthropic API's tool_use loop. Each game gets a fresh conversation. Requires `ANTHROPIC_API_KEY`.
+Two backends:
+- **`claude-code`**: Spawns `claude -p` subprocesses with MCP config. Supports parallel execution. Default budget: $2.00/game.
+- **`api`**: Direct Anthropic API tool_use loop with a local MCP server subprocess. Strips map data from old tool results to reduce context growth. Requires `ANTHROPIC_API_KEY`.
 
-Both tools output `EnhancedBatchStats`-compatible JSON, so `tools/visualize.py batch` and `--report` work with their results:
+Per-game analytics include token usage (input, output, cache creation, cache read), cost, tool call counts, and strategy notes. Both backends output `EnhancedBatchStats`-compatible JSON:
 
 ```sh
 cat tools/output/llm_playtest_results.json | \
   python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['batch_stats']))" | \
   python3 tools/visualize.py batch
 ```
+
+#### Token Optimization
+
+The MCP server supports a `compact` mode (`new_game` with `compact=true`) that omits the ASCII map from all observation responses, significantly reducing token usage for LLM agents that only need stats and entity info. Observation field names are also shortened (e.g., `player_hp` → `hp`, `visible_entities` → `entities`) to reduce per-turn overhead. The API backend additionally strips map data from old conversation turns to limit context window growth.
 
 ## Gameplay
 
@@ -350,7 +361,7 @@ tests/
   golden_replays/         Stored golden replay JSON files (committed to repo)
 tools/
   visualize.py            Python/matplotlib analytics visualizer (batch, sweep, analysis modes)
-  llm_playtest.py         Standalone LLM playtesting via Anthropic API + MCP server subprocess
+  llm_playtest.py         Dual-backend LLM playtesting (claude-code CLI or Anthropic API) with parallel execution
   playtest_analytics.py   Shared analytics module for LLM playtesting tools
   requirements.txt        Python dependencies (matplotlib, anthropic)
 ```
@@ -448,7 +459,7 @@ Design principles (not checkboxes — follow these always):
 - [x] **Scenario framework** — Fluent builder API for composing specific game states and asserting balance outcomes
 - [x] **Golden replay regression** — Stored deterministic replays with expected results; detects unintended gameplay changes
 - [x] **Parameter sweeps** — Sweep across player stats (HP, ATK, DEF) to find balance boundaries; JSON config, structured output
-- [x] **LLM playtesting** — Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; compares AI decision-making against dumb auto-explore baseline
+- [x] **LLM playtesting** — Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; dual backends (Claude Code CLI + Anthropic API), parallel execution, contextual strategy prompt with combat math, token usage tracking, compact mode for cost optimization
 - [ ] **Debug overlay** — Visualize AI state, FOV boundaries, pathfinding routes
 - [ ] **Map editor** — Visual tool for designing and testing dungeon layouts
 

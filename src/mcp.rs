@@ -24,6 +24,7 @@ use crate::types::{Coord, Pos};
 pub struct RoguelikeMcpServer {
     state: Arc<Mutex<Option<GameState>>>,
     save_slot: Arc<Mutex<Option<String>>>,
+    compact: Arc<Mutex<bool>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -37,6 +38,9 @@ pub struct NewGameParams {
     /// is generated. Use the same seed to replay a dungeon with identical
     /// layout and monster placement.
     pub seed: Option<u64>,
+    /// If true, omit the ASCII map from observations to reduce response size.
+    /// Useful for LLM agents that only need stats and entity info.
+    pub compact: Option<bool>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -67,6 +71,7 @@ impl RoguelikeMcpServer {
         Self {
             state: Arc::new(Mutex::new(None)),
             save_slot: Arc::new(Mutex::new(None)),
+            compact: Arc::new(Mutex::new(false)),
             tool_router: Self::tool_router(),
         }
     }
@@ -88,6 +93,9 @@ impl RoguelikeMcpServer {
             ));
         }
 
+        let compact = params.compact.unwrap_or(false);
+        *self.compact.lock().await = compact;
+
         let mut state = match params.seed {
             Some(seed) => GameState::with_seed(width, height, seed),
             None => GameState::new(width, height),
@@ -96,7 +104,12 @@ impl RoguelikeMcpServer {
         let observation = state.observe();
         *self.state.lock().await = Some(state);
 
-        let json = serde_json::to_string(&observation)
+        let mut json_value = serde_json::to_value(&observation)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        if compact {
+            strip_map(&mut json_value);
+        }
+        let json = serde_json::to_string(&json_value)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -111,8 +124,8 @@ impl RoguelikeMcpServer {
         })?;
 
         let observation = state.observe();
-        let json = serde_json::to_string(&observation)
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let compact = *self.compact.lock().await;
+        let json = serialize_observation(&observation, compact)?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
@@ -161,12 +174,14 @@ impl RoguelikeMcpServer {
             )
         })?;
 
+        let compact = *self.compact.lock().await;
+
         // Autorun: loop internally and return final state with metadata.
         if let GameCommand::Autorun { dx, dy } = cmd {
             let autorun_result = state.autorun(dx, dy);
             let observation = state.observe();
             let frontiers = state.frontier_tiles();
-            let json = format_autorun_response(&observation, &autorun_result, &frontiers)
+            let json = format_response(&observation, &autorun_result, &frontiers, compact)
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
             return Ok(CallToolResult::success(vec![Content::text(json)]));
         }
@@ -180,12 +195,15 @@ impl RoguelikeMcpServer {
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         if let serde_json::Value::Object(ref mut map) = value {
             map.insert(
-                "new_tiles_revealed".into(),
+                "new_tiles".into(),
                 serde_json::Value::Number(new_tiles_revealed.into()),
             );
         }
         replace_messages(&mut value, &step_result.new_messages);
         inject_frontier_exits(&mut value, &frontiers);
+        if compact {
+            strip_map(&mut value);
+        }
         let json = serde_json::to_string(&value)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
@@ -209,8 +227,8 @@ impl RoguelikeMcpServer {
             .collect();
         let response = serde_json::json!({
             "explored_map": map_lines,
-            "player_x": player.x,
-            "player_y": player.y,
+            "x": player.x,
+            "y": player.y,
             "frontier_exits": frontier_exits,
         });
         let json = serde_json::to_string(&response)
@@ -237,12 +255,13 @@ impl RoguelikeMcpServer {
             ));
         }
 
+        let compact = *self.compact.lock().await;
         let pathfind_result = state
             .pathfind_to(params.x, params.y)
             .map_err(|e| McpError::invalid_request(e, None))?;
         let observation = state.observe();
         let frontiers = state.frontier_tiles();
-        let json = format_autorun_response(&observation, &pathfind_result, &frontiers)
+        let json = format_response(&observation, &pathfind_result, &frontiers, compact)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -263,12 +282,13 @@ impl RoguelikeMcpServer {
             ));
         }
 
+        let compact = *self.compact.lock().await;
         let explore_result = state
             .auto_explore()
             .map_err(|e| McpError::invalid_request(e, None))?;
         let observation = state.observe();
         let frontier_count = state.frontier_tiles().len() as i32;
-        let json = format_auto_explore_response(&observation, &explore_result, frontier_count)
+        let json = format_auto_explore_response(&observation, &explore_result, frontier_count, compact)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -290,8 +310,8 @@ impl RoguelikeMcpServer {
             let info = serde_json::json!({
                 "saved": true,
                 "turn_count": state.turn_count,
-                "player_hp": player.hp,
-                "player_max_hp": player.max_hp,
+                "hp": player.hp,
+                "max_hp": player.max_hp,
                 "seed": state.seed,
                 "save_size_bytes": json.len(),
             });
@@ -318,6 +338,7 @@ impl RoguelikeMcpServer {
             })?
         };
 
+        let compact = *self.compact.lock().await;
         let loaded = GameState::load_from_json(&save_json)
             .map_err(|e| McpError::internal_error(format!("Deserialization failed: {e}"), None))?;
         let observation = loaded.observe();
@@ -327,6 +348,9 @@ impl RoguelikeMcpServer {
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         if let serde_json::Value::Object(ref mut map) = value {
             map.insert("loaded".into(), serde_json::Value::Bool(true));
+        }
+        if compact {
+            strip_map(&mut value);
         }
         let json = serde_json::to_string(&value)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -477,21 +501,21 @@ fn format_auto_fight_response(
     let mut value = serde_json::to_value(observation)?;
     if let serde_json::Value::Object(ref mut map) = value {
         // Remove bulky map data — combat doesn't move the player.
-        map.remove("map_ascii");
+        map.remove("map");
         map.insert(
-            "auto_fight_rounds".into(),
+            "fight_rounds".into(),
             serde_json::Value::Number(fight.rounds.into()),
         );
         map.insert(
-            "auto_fight_target".into(),
+            "fight_target".into(),
             serde_json::Value::String(fight.target_name.clone()),
         );
         map.insert(
-            "auto_fight_target_killed".into(),
+            "fight_target_killed".into(),
             serde_json::Value::Bool(fight.target_killed),
         );
         map.insert(
-            "auto_fight_player_hp_lost".into(),
+            "fight_hp_lost".into(),
             serde_json::Value::Number(fight.player_hp_lost.into()),
         );
     }
@@ -500,28 +524,32 @@ fn format_auto_fight_response(
 }
 
 /// Build a JSON response that merges the observation with autorun metadata.
-fn format_autorun_response(
+fn format_response(
     observation: &crate::game::GameObservation,
     autorun: &AutorunResult,
     frontier_tiles: &[Pos],
+    compact: bool,
 ) -> Result<String, serde_json::Error> {
     let mut value = serde_json::to_value(observation)?;
     if let serde_json::Value::Object(ref mut map) = value {
         map.insert(
-            "autorun_steps".into(),
+            "steps".into(),
             serde_json::Value::Number(autorun.steps_taken.into()),
         );
         map.insert(
-            "autorun_stop_reason".into(),
+            "stop_reason".into(),
             serde_json::to_value(autorun.stop_reason)?,
         );
         map.insert(
-            "new_tiles_revealed".into(),
+            "new_tiles".into(),
             serde_json::Value::Number(autorun.new_tiles_revealed.into()),
         );
     }
     replace_messages(&mut value, &autorun.messages);
     inject_frontier_exits(&mut value, frontier_tiles);
+    if compact {
+        strip_map(&mut value);
+    }
     serde_json::to_string(&value)
 }
 
@@ -535,31 +563,32 @@ fn format_auto_explore_response(
     observation: &crate::game::GameObservation,
     explore: &AutoExploreResult,
     frontier_count: i32,
+    compact: bool,
 ) -> Result<String, serde_json::Error> {
     let mut value = serde_json::to_value(observation)?;
     if let serde_json::Value::Object(ref mut map) = value {
         map.insert(
-            "autorun_steps".into(),
+            "steps".into(),
             serde_json::Value::Number(explore.movement.steps_taken.into()),
         );
         map.insert(
-            "autorun_stop_reason".into(),
+            "stop_reason".into(),
             serde_json::to_value(explore.movement.stop_reason)?,
         );
         map.insert(
-            "new_tiles_revealed".into(),
+            "new_tiles".into(),
             serde_json::Value::Number(explore.movement.new_tiles_revealed.into()),
         );
         map.insert(
-            "explore_target_x".into(),
+            "target_x".into(),
             serde_json::Value::Number(explore.target_x.into()),
         );
         map.insert(
-            "explore_target_y".into(),
+            "target_y".into(),
             serde_json::Value::Number(explore.target_y.into()),
         );
         map.insert(
-            "frontier_count".into(),
+            "frontiers".into(),
             serde_json::Value::Number(frontier_count.into()),
         );
         // Flag dead ends: reached the frontier target but found nothing new beyond it.
@@ -570,7 +599,31 @@ fn format_auto_explore_response(
         }
     }
     replace_messages(&mut value, &explore.movement.messages);
+    if compact {
+        strip_map(&mut value);
+    }
     serde_json::to_string(&value)
+}
+
+/// Serialize a `GameObservation`, optionally stripping the map for compact mode.
+fn serialize_observation(
+    observation: &crate::game::GameObservation,
+    compact: bool,
+) -> Result<String, McpError> {
+    let mut value = serde_json::to_value(observation)
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+    if compact {
+        strip_map(&mut value);
+    }
+    serde_json::to_string(&value)
+        .map_err(|e| McpError::internal_error(e.to_string(), None))
+}
+
+/// Remove the `map` field from a serialized observation to save tokens.
+fn strip_map(value: &mut serde_json::Value) {
+    if let serde_json::Value::Object(map) = value {
+        map.remove("map");
+    }
 }
 
 /// Replace `recent_messages` in a serialized observation with only the messages
@@ -579,7 +632,7 @@ fn format_auto_explore_response(
 fn replace_messages(value: &mut serde_json::Value, messages: &[String]) {
     if let serde_json::Value::Object(map) = value {
         map.insert(
-            "recent_messages".into(),
+            "messages".into(),
             serde_json::to_value(messages).unwrap_or_default(),
         );
     }
@@ -768,14 +821,14 @@ mod tests {
         let json_str = format_auto_fight_response(&obs, &fight).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
-        // map_ascii should be removed from auto_fight responses.
-        assert!(parsed.get("map_ascii").is_none());
+        // map should be removed from auto_fight responses.
+        assert!(parsed.get("map").is_none());
         // But combat metadata should be present.
-        assert!(parsed.get("auto_fight_rounds").is_some());
-        assert!(parsed.get("auto_fight_target").is_some());
-        assert!(parsed.get("auto_fight_target_killed").is_some());
-        assert!(parsed.get("auto_fight_player_hp_lost").is_some());
+        assert!(parsed.get("fight_rounds").is_some());
+        assert!(parsed.get("fight_target").is_some());
+        assert!(parsed.get("fight_target_killed").is_some());
+        assert!(parsed.get("fight_hp_lost").is_some());
         // Player stats should still be present.
-        assert!(parsed.get("player_hp").is_some());
+        assert!(parsed.get("hp").is_some());
     }
 }

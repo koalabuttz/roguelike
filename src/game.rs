@@ -62,17 +62,25 @@ pub struct AutorunResult {
 /// A snapshot of the visible game state, suitable for serialization.
 #[derive(Serialize)]
 pub struct GameObservation {
+    #[serde(rename = "hp")]
     pub player_hp: Stat,
+    #[serde(rename = "max_hp")]
     pub player_max_hp: Stat,
+    #[serde(rename = "x")]
     pub player_x: Coord,
+    #[serde(rename = "y")]
     pub player_y: Coord,
+    #[serde(rename = "map")]
     pub map_ascii: Vec<String>,
+    #[serde(rename = "entities")]
     pub visible_entities: Vec<EntityInfo>,
+    #[serde(rename = "messages")]
     pub recent_messages: Vec<String>,
     pub game_over: bool,
     // --- game stats ---
     pub kills: i32,
     pub rooms_found: i32,
+    #[serde(rename = "explored")]
     pub explored_pct: i32,
     pub seed: u64,
 }

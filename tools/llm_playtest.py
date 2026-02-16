@@ -164,6 +164,7 @@ TOOL_SCHEMAS = [
                 "width": {"type": "integer", "description": "Map width (default 80)"},
                 "height": {"type": "integer", "description": "Map height (default 40)"},
                 "seed": {"type": "integer", "description": "Random seed"},
+                "compact": {"type": "boolean", "description": "Omit ASCII map from responses"},
             },
         },
     },
@@ -220,33 +221,90 @@ TOOL_SCHEMAS = [
 ]
 
 SYSTEM_PROMPT = """\
-You are playtesting a roguelike dungeon crawler. Play strategically to survive \
-and explore the dungeon fully.
+You are playtesting a roguelike dungeon crawler. Your goal: survive and explore \
+as much of the dungeon as possible.
 
-Strategy guidelines:
-- Use auto_explore for all movement (maximizes tiles per tool call)
-- Use auto_fight (via act with action "auto_fight") for all combat
-- HP > 15 or monster is Goblin/Orc: fight
-- HP <= 10 and monster is Troll: retreat (pathfind away, then auto_explore)
-- HP 10-15: fight Goblins, avoid Trolls, judge Orcs by remaining HP
-- You regenerate 1 HP every 3 turns — retreating to explore recovers HP
-- Target: complete the game in 15-30 tool calls
+## Combat Math
+Before engaging any monster, reason about the fight:
+- Your damage per round = your ATK - monster DEF
+- Monster damage per round = monster ATK - your DEF
+- Rounds to kill monster = ceil(monster HP / your damage)
+- Rounds until you die = ceil(your HP / monster damage)
+- If rounds-to-kill >= rounds-to-die, you WILL die. Retreat immediately.
 
-Game flow:
-1. Call new_game to start (seed will be provided in the first user message)
-2. Loop: auto_explore → when monster spotted, decide fight/flee → auto_fight or retreat → repeat
-3. Game ends when game_over=true (you died) or explored_pct is high and no frontiers remain
+## Strategies (choose based on situation)
+- **Aggressive**: Engage when you clearly win the damage race and have HP buffer. \
+Good for: Goblins, Orcs at high HP.
+- **Cautious**: Only fight when rounds-to-kill is well under rounds-to-die. \
+Retreat from anything close. Good for: mid-HP, unknown threats.
+- **Exploratory**: Prioritize map coverage. Avoid fights unless forced or trivial. \
+Good for: low HP, after tough fights, late-game cleanup.
 
-Keep responses extremely brief — state your action and reasoning in 1 sentence.
-When the game ends (game_over=true or fully explored), write a 1-2 sentence \
-summary of key decisions: tactical retreats, close calls, what killed you, or \
-how you cleared the dungeon. This is your strategy_notes for the run.\
+Adapt your strategy fluidly — reassess after every encounter.
+
+## Recovering HP
+You regenerate 1 HP every 3 turns of movement. Two ways to regen safely:
+- **Corridor running**: When a monster chases you in a straight line, it stays \
+1 tile behind and never attacks — you take zero damage while moving. Just keep \
+running and you regen. Good for: healing up with a troll on your tail.
+- **Corner kiting**: Hit a tough monster, duck around a corner to break line of \
+sight (monsters freeze when outside your FOV radius of 8). Regen, come back, \
+repeat. This can kill even trolls: hit for 2, retreat, regen 4 HP over 12 turns, \
+repeat 10x. Good for: rooms and junctions where corners are available.
+
+## Tools & Flow
+1. Call new_game to start (seed provided in first message, always pass compact=true)
+2. Use auto_explore for all movement (maximizes tiles per call)
+3. Use auto_fight (via act) for fights you commit to
+4. To retreat: pathfind_to a tile away from the monster, then auto_explore to regen
+5. Game ends when game_over=true or no frontiers remain
+
+Keep responses extremely brief — 1 sentence: your action and reasoning.
+When the game ends, write 1-2 sentence strategy_notes summarizing key decisions.\
 """
 
 
 # ---------------------------------------------------------------------------
 # Game loop
 # ---------------------------------------------------------------------------
+
+def _strip_old_maps(messages):
+    """Remove 'map' from all tool_result JSON except the last user message.
+
+    This prevents stale ASCII maps from accumulating in the context window.
+    Only the most recent tool results retain their map data.
+    """
+    # Find the last user message index.
+    last_user_idx = -1
+    for i in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[i], dict) and messages[i].get("role") == "user":
+            content = messages[i].get("content")
+            if isinstance(content, list):
+                last_user_idx = i
+                break
+
+    for i, msg in enumerate(messages):
+        if i >= last_user_idx:
+            break
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            raw = block.get("content", "")
+            if not isinstance(raw, str) or '"map"' not in raw:
+                continue
+            try:
+                data = json.loads(raw)
+                if isinstance(data, dict) and "map" in data:
+                    del data["map"]
+                    block["content"] = json.dumps(data)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
 
 def play_game_api(mcp_binary, model, seed, max_tool_calls=60):
     """Play a single game via the Anthropic API tool_use loop.
@@ -271,8 +329,13 @@ def play_game_api(mcp_binary, model, seed, max_tool_calls=60):
         stall_count = 0
         last_kills = 0
         last_explored = 0
+        total_input_tokens = 0
+        total_output_tokens = 0
 
         while tool_calls < max_tool_calls:
+            # Strip map from old tool results to reduce context size.
+            _strip_old_maps(messages)
+
             response = api_client.messages.create(
                 model=model,
                 max_tokens=1024,
@@ -280,6 +343,11 @@ def play_game_api(mcp_binary, model, seed, max_tool_calls=60):
                 tools=TOOL_SCHEMAS,
                 messages=messages,
             )
+
+            # Accumulate token usage.
+            if hasattr(response, "usage") and response.usage:
+                total_input_tokens += getattr(response.usage, "input_tokens", 0)
+                total_output_tokens += getattr(response.usage, "output_tokens", 0)
 
             # Process the response content blocks.
             assistant_content = response.content
@@ -330,7 +398,7 @@ def play_game_api(mcp_binary, model, seed, max_tool_calls=60):
                         analytics["llm_metrics"]["decision_count"] += 1
 
                     current_kills = result.get("kills", last_kills)
-                    current_explored = result.get("explored_pct", last_explored)
+                    current_explored = result.get("explored", last_explored)
 
                     if current_kills == last_kills and current_explored == last_explored:
                         stall_count += 1
@@ -368,6 +436,10 @@ def play_game_api(mcp_binary, model, seed, max_tool_calls=60):
                 break
 
         # Finalize analytics.
+        analytics["llm_metrics"]["token_usage"] = {
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens,
+        }
         analytics["turns"] = last_observation.get("kills", 0)  # rough proxy
         pa.finalize_game(analytics, last_observation)
 
@@ -399,7 +471,7 @@ _ALLOWED_MCP_TOOLS = [
 ]
 
 
-def play_game_claude_code(mcp_config_path, seed, max_budget=0.50):
+def play_game_claude_code(mcp_config_path, seed, max_budget=2.00):
     """Play a single game via the Claude Code CLI.
 
     Spawns `claude -p` as a subprocess with MCP config, parses the JSON
@@ -550,15 +622,23 @@ def _parse_claude_code_output(raw_output, analytics):
 
                 last_observation = obs
 
-                # Detect auto_fight results by the auto_fight_target field.
-                if "auto_fight_target" in obs:
+                # Detect auto_fight results by the fight_target field.
+                if "fight_target" in obs:
                     pa.update_fight_analytics(analytics, obs)
 
-        # Result message — extract cost info.
+        # Result message — extract cost and token info.
         elif msg_type == "result":
             cost = msg.get("total_cost_usd")
             if cost is not None:
                 analytics["llm_metrics"]["cost_usd"] = cost
+            usage = msg.get("usage", {})
+            if usage:
+                analytics["llm_metrics"]["token_usage"] = {
+                    "input_tokens": usage.get("input_tokens", 0),
+                    "output_tokens": usage.get("output_tokens", 0),
+                    "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0),
+                    "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0),
+                }
 
     analytics["llm_metrics"]["tool_calls"] = tool_calls
     analytics["turns"] = last_observation.get("kills", 0)
@@ -599,9 +679,15 @@ def _run_batch(play_fn, game_args_list, output_path, meta, parallel=1):
             print(f"  Game {idx + 1}/{total} (seed={analytics['seed']}): "
                   f"ERROR ({elapsed:.1f}s) — {error}")
         else:
+            token_info = ""
+            tu = analytics["llm_metrics"].get("token_usage", {})
+            if tu:
+                tok_in = tu.get("input_tokens", 0) + tu.get("cache_creation_input_tokens", 0) + tu.get("cache_read_input_tokens", 0)
+                tok_out = tu.get("output_tokens", 0)
+                token_info = f" tokens={tok_in + tok_out:,}"
             print(f"  Game {idx + 1}/{total} (seed={analytics['seed']}): "
                   f"{status} | HP={hp} kills={kills} explored={explored}% "
-                  f"calls={calls} ({elapsed:.1f}s)")
+                  f"calls={calls}{token_info} ({elapsed:.1f}s)")
             if notes:
                 print(f"    \u2192 {notes}")
 
@@ -727,8 +813,8 @@ def main():
                         help="Path to MCP server binary (api backend)")
     parser.add_argument("--mcp-config", default=None,
                         help="MCP config JSON for claude-code (auto-detected if omitted)")
-    parser.add_argument("--max-budget", type=float, default=0.50,
-                        help="Max USD per game for claude-code (default: 0.50)")
+    parser.add_argument("--max-budget", type=float, default=2.00,
+                        help="Max USD per game for claude-code (default: 2.00)")
     parser.add_argument("--report", action="store_true", help="Run visualize.py after completion")
     parser.add_argument("--max-tool-calls", type=int, default=60, help="Max tool calls per game (api backend)")
     args = parser.parse_args()

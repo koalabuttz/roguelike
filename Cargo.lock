@@ -589,7 +589,7 @@ dependencies = [
 
 [[package]]
 name = "roguelike-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "rand",
  "serde",
@@ -598,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "roguelike-mcp"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "rmcp",
  "roguelike-core",
@@ -611,7 +611,7 @@ dependencies = [
 
 [[package]]
 name = "roguelike-terminal"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "crossterm",
  "roguelike-core",

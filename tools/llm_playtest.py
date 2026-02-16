@@ -1,27 +1,33 @@
 #!/usr/bin/env python3
-"""LLM-driven roguelike playtesting via the Anthropic API.
+"""LLM-driven roguelike playtesting with dual backends.
 
-Spawns the MCP server as a subprocess and drives games through the Anthropic
-API's tool_use loop. Each game gets a fresh conversation to avoid context
-overflow. Outputs EnhancedBatchStats-compatible JSON for use with
-tools/visualize.py and the headless runner's --report flag.
+Supports two backends:
+  - api:         Anthropic API with a local MCP server subprocess (requires SDK)
+  - claude-code: Claude Code CLI with --mcp-config (requires `claude` in PATH)
+
+Both backends produce identical EnhancedBatchStats-compatible JSON for use with
+tools/visualize.py and the headless runner's --report flag.  Games can be run
+in parallel via --parallel N (especially useful with the claude-code backend).
 
 Usage:
-    # Run 50 games with default model:
+    # Anthropic API (default):
     ANTHROPIC_API_KEY=... python3 tools/llm_playtest.py -n 50
 
-    # Use specific model and seed:
-    python3 tools/llm_playtest.py -n 20 -m claude-sonnet-4-20250514 -s 42
+    # Claude Code backend:
+    python3 tools/llm_playtest.py -n 10 --backend claude-code
 
-    # Custom output, generate charts after:
-    python3 tools/llm_playtest.py -n 100 -o results.json --report
+    # Parallel execution (4 concurrent games):
+    python3 tools/llm_playtest.py -n 10 --backend claude-code --parallel 4
 """
 
 import argparse
 import json
+import os
+import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 # Allow importing playtest_analytics from the same directory.
@@ -30,16 +36,9 @@ import playtest_analytics as pa
 
 try:
     import anthropic
+    HAS_ANTHROPIC = True
 except ImportError:
-    print(
-        "ERROR: anthropic SDK is required. Install it with:\n"
-        "  pip install anthropic>=0.40\n"
-        "Or use the tools venv:\n"
-        "  source tools/.venv/bin/activate\n"
-        "  pip install -r tools/requirements.txt",
-        file=sys.stderr,
-    )
-    sys.exit(1)
+    HAS_ANTHROPIC = False
 
 
 # ---------------------------------------------------------------------------
@@ -249,234 +248,559 @@ how you cleared the dungeon. This is your strategy_notes for the run.\
 # Game loop
 # ---------------------------------------------------------------------------
 
-def play_game(client, api_client, model, seed, max_tool_calls=60):
+def play_game_api(mcp_binary, model, seed, max_tool_calls=60):
     """Play a single game via the Anthropic API tool_use loop.
 
+    Self-contained: creates its own McpClient and anthropic.Anthropic client.
     Returns the per-game analytics dict.
     """
     analytics = pa.new_game_analytics(seed)
     analytics["llm_metrics"]["model"] = model
 
-    messages = [
-        {"role": "user", "content": f"Play a new game with seed {seed}. Start by calling new_game with that seed."},
-    ]
+    client = McpClient(str(mcp_binary))
+    try:
+        client.start()
+        api_client = anthropic.Anthropic()
 
-    tool_calls = 0
-    last_observation = {}
-    stall_count = 0
-    last_kills = 0
-    last_explored = 0
+        messages = [
+            {"role": "user", "content": f"Play a new game with seed {seed}. Start by calling new_game with that seed."},
+        ]
 
-    while tool_calls < max_tool_calls:
-        response = api_client.messages.create(
-            model=model,
-            max_tokens=1024,
-            system=SYSTEM_PROMPT,
-            tools=TOOL_SCHEMAS,
-            messages=messages,
-        )
+        tool_calls = 0
+        last_observation = {}
+        stall_count = 0
+        last_kills = 0
+        last_explored = 0
 
-        # Process the response content blocks.
-        assistant_content = response.content
-        messages.append({"role": "assistant", "content": assistant_content})
+        while tool_calls < max_tool_calls:
+            response = api_client.messages.create(
+                model=model,
+                max_tokens=1024,
+                system=SYSTEM_PROMPT,
+                tools=TOOL_SCHEMAS,
+                messages=messages,
+            )
 
-        # Check for stop_reason — if end_turn with no tool_use, game is done.
-        if response.stop_reason == "end_turn":
-            break
+            # Process the response content blocks.
+            assistant_content = response.content
+            messages.append({"role": "assistant", "content": assistant_content})
 
-        # Capture text blocks as strategy notes.
-        for block in assistant_content:
-            if block.type == "text" and block.text.strip():
-                # Keep the last substantive text as strategy notes.
-                analytics["llm_metrics"]["strategy_notes"] = block.text.strip()
+            # Check for stop_reason — if end_turn with no tool_use, game is done.
+            if response.stop_reason == "end_turn":
+                break
 
-        # Process each tool_use block.
-        tool_results = []
-        for block in assistant_content:
-            if block.type != "tool_use":
-                continue
+            # Capture text blocks as strategy notes.
+            for block in assistant_content:
+                if block.type == "text" and block.text.strip():
+                    analytics["llm_metrics"]["strategy_notes"] = block.text.strip()
 
-            tool_calls += 1
-            analytics["llm_metrics"]["tool_calls"] = tool_calls
-            tool_name = block.name
-            tool_input = block.input
+            # Process each tool_use block.
+            tool_results = []
+            for block in assistant_content:
+                if block.type != "tool_use":
+                    continue
 
-            # Execute against MCP server.
-            try:
-                result = client.call_tool(tool_name, tool_input)
-            except RuntimeError as e:
-                # MCP error — return error to the LLM.
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": f"Error: {e}",
-                    "is_error": True,
-                })
-                continue
+                tool_calls += 1
+                analytics["llm_metrics"]["tool_calls"] = tool_calls
+                tool_name = block.name
+                tool_input = block.input
 
-            # Track analytics from the response.
-            if isinstance(result, dict):
-                last_observation = result
-
-                if tool_name == "auto_explore":
-                    analytics["llm_metrics"]["auto_explore_calls"] += 1
-                elif tool_name == "act" and tool_input.get("action") == "auto_fight":
-                    pa.update_fight_analytics(analytics, result)
-                elif tool_name not in ("new_game", "get_rules", "observe",
-                                        "get_explored_map"):
-                    analytics["llm_metrics"]["decision_count"] += 1
-
-                # Update running turn count from kills (proxy).
-                current_kills = result.get("kills", last_kills)
-                current_explored = result.get("explored_pct", last_explored)
-
-                # Stall detection: no progress for 10 calls.
-                if current_kills == last_kills and current_explored == last_explored:
-                    stall_count += 1
-                else:
-                    stall_count = 0
-                last_kills = current_kills
-                last_explored = current_explored
-
-                if stall_count >= 10:
-                    break
-
-                # Game over check.
-                if result.get("game_over", False):
+                # Execute against MCP server.
+                try:
+                    result = client.call_tool(tool_name, tool_input)
+                except RuntimeError as e:
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": json.dumps(result),
+                        "content": f"Error: {e}",
+                        "is_error": True,
                     })
-                    break
-            else:
-                # String result (e.g., get_rules).
-                pass
+                    continue
 
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": json.dumps(result) if isinstance(result, dict) else str(result),
-            })
+                # Track analytics from the response.
+                if isinstance(result, dict):
+                    last_observation = result
 
-        if not tool_results:
-            break
+                    if tool_name == "auto_explore":
+                        analytics["llm_metrics"]["auto_explore_calls"] += 1
+                    elif tool_name == "act" and tool_input.get("action") == "auto_fight":
+                        pa.update_fight_analytics(analytics, result)
+                    elif tool_name not in ("new_game", "get_rules", "observe",
+                                            "get_explored_map"):
+                        analytics["llm_metrics"]["decision_count"] += 1
 
-        messages.append({"role": "user", "content": tool_results})
+                    current_kills = result.get("kills", last_kills)
+                    current_explored = result.get("explored_pct", last_explored)
 
-        # Break if game is over.
-        if last_observation.get("game_over", False):
-            break
+                    if current_kills == last_kills and current_explored == last_explored:
+                        stall_count += 1
+                    else:
+                        stall_count = 0
+                    last_kills = current_kills
+                    last_explored = current_explored
 
-        if stall_count >= 10:
-            break
+                    if stall_count >= 10:
+                        break
 
-    # Finalize analytics.
-    analytics["turns"] = last_observation.get("kills", 0)  # rough proxy
-    pa.finalize_game(analytics, last_observation)
+                    if result.get("game_over", False):
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": json.dumps(result),
+                        })
+                        break
+
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": json.dumps(result) if isinstance(result, dict) else str(result),
+                })
+
+            if not tool_results:
+                break
+
+            messages.append({"role": "user", "content": tool_results})
+
+            if last_observation.get("game_over", False):
+                break
+
+            if stall_count >= 10:
+                break
+
+        # Finalize analytics.
+        analytics["turns"] = last_observation.get("kills", 0)  # rough proxy
+        pa.finalize_game(analytics, last_observation)
+
+    except Exception as e:
+        analytics["error"] = str(e)
+        analytics["game_over"] = True
+        analytics["llm_metrics"]["strategy_notes"] = f"Error: {e}"
+    finally:
+        try:
+            client.stop()
+        except Exception:
+            pass
 
     return analytics
 
 
 # ---------------------------------------------------------------------------
-# CLI and batch runner
+# Claude Code backend
 # ---------------------------------------------------------------------------
+
+_ALLOWED_MCP_TOOLS = [
+    "mcp__roguelike__new_game",
+    "mcp__roguelike__act",
+    "mcp__roguelike__auto_explore",
+    "mcp__roguelike__pathfind_to",
+    "mcp__roguelike__observe",
+    "mcp__roguelike__get_explored_map",
+    "mcp__roguelike__get_rules",
+]
+
+
+def play_game_claude_code(mcp_config_path, seed, max_budget=0.50):
+    """Play a single game via the Claude Code CLI.
+
+    Spawns `claude -p` as a subprocess with MCP config, parses the JSON
+    output array for analytics.  Returns the per-game analytics dict.
+    """
+    analytics = pa.new_game_analytics(seed)
+    analytics["llm_metrics"]["model"] = "claude-code"
+
+    user_prompt = (
+        f"Play a new game with seed {seed}. "
+        f"Start by calling new_game with that seed."
+    )
+
+    cmd = [
+        "claude", "-p",
+        "--output-format", "json",
+        "--system-prompt", SYSTEM_PROMPT,
+        "--mcp-config", str(mcp_config_path),
+        "--strict-mcp-config",
+        "--dangerously-skip-permissions",
+        "--no-session-persistence",
+        "--max-turns", "200",
+        "--max-budget-usd", str(max_budget),
+        "--allowedTools", ",".join(_ALLOWED_MCP_TOOLS),
+    ]
+
+    # Strip CLAUDECODE env var — nested claude refuses to start otherwise.
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            input=user_prompt,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            env=env,
+        )
+        if proc.returncode != 0 and not proc.stdout.strip():
+            stderr_snippet = (proc.stderr or "")[:500]
+            analytics["error"] = f"claude exited {proc.returncode}: {stderr_snippet}"
+            analytics["game_over"] = True
+            analytics["llm_metrics"]["strategy_notes"] = analytics["error"]
+        else:
+            _parse_claude_code_output(proc.stdout, analytics)
+    except subprocess.TimeoutExpired:
+        analytics["error"] = "timeout"
+        analytics["game_over"] = True
+        analytics["llm_metrics"]["strategy_notes"] = "Game timed out (600s)"
+    except Exception as e:
+        analytics["error"] = str(e)
+        analytics["game_over"] = True
+        analytics["llm_metrics"]["strategy_notes"] = f"Error: {e}"
+
+    return analytics
+
+
+def _parse_claude_code_output(raw_output, analytics):
+    """Parse JSON output from ``claude -p --output-format json``.
+
+    The output is a JSON array of message objects, each with a ``type``
+    field (system, assistant, user, result).  We extract tool_use blocks
+    (for counting), tool_result content (for game observations and fight
+    analytics), and text blocks (for strategy notes).
+    """
+    if not raw_output or not raw_output.strip():
+        analytics["error"] = "empty output from claude"
+        analytics["game_over"] = True
+        return
+
+    try:
+        messages = json.loads(raw_output)
+    except json.JSONDecodeError as e:
+        analytics["error"] = f"JSON parse error: {e}"
+        analytics["game_over"] = True
+        return
+
+    if not isinstance(messages, list):
+        # Might be a single result object — wrap it.
+        messages = [messages]
+
+    last_observation = {}
+    tool_calls = 0
+
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        msg_type = msg.get("type", "")
+
+        # Assistant messages contain tool_use and text blocks.
+        if msg_type == "assistant":
+            content = msg.get("message", {}).get("content", [])
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                block_type = block.get("type", "")
+
+                if block_type == "tool_use":
+                    tool_calls += 1
+                    tool_name = block.get("name", "")
+                    # Strip mcp__roguelike__ prefix for matching.
+                    short_name = tool_name.replace("mcp__roguelike__", "")
+                    tool_input = block.get("input", {})
+
+                    if short_name == "auto_explore":
+                        analytics["llm_metrics"]["auto_explore_calls"] += 1
+                    elif short_name == "act" and tool_input.get("action") == "auto_fight":
+                        pass  # Counted via update_fight_analytics below.
+                    elif short_name not in ("new_game", "get_rules", "observe",
+                                            "get_explored_map"):
+                        analytics["llm_metrics"]["decision_count"] += 1
+
+                elif block_type == "text":
+                    text = block.get("text", "").strip()
+                    if text:
+                        analytics["llm_metrics"]["strategy_notes"] = text
+
+        # User messages contain tool_result blocks.
+        elif msg_type == "user":
+            content = msg.get("message", {}).get("content", [])
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") != "tool_result":
+                    continue
+                raw_content = block.get("content", "")
+                # tool_result content may be a string or a list of content blocks.
+                text_content = ""
+                if isinstance(raw_content, str):
+                    text_content = raw_content
+                elif isinstance(raw_content, list):
+                    for item in raw_content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            text_content = item.get("text", "")
+                            break
+
+                if not text_content:
+                    continue
+                try:
+                    obs = json.loads(text_content)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+                if not isinstance(obs, dict):
+                    continue
+
+                last_observation = obs
+
+                # Detect auto_fight results by the auto_fight_target field.
+                if "auto_fight_target" in obs:
+                    pa.update_fight_analytics(analytics, obs)
+
+        # Result message — extract cost info.
+        elif msg_type == "result":
+            cost = msg.get("total_cost_usd")
+            if cost is not None:
+                analytics["llm_metrics"]["cost_usd"] = cost
+
+    analytics["llm_metrics"]["tool_calls"] = tool_calls
+    analytics["turns"] = last_observation.get("kills", 0)
+    pa.finalize_game(analytics, last_observation)
+
+
+# ---------------------------------------------------------------------------
+# Batch runner
+# ---------------------------------------------------------------------------
+
+def _run_batch(play_fn, game_args_list, output_path, meta, parallel=1):
+    """Run a batch of games, writing incremental results.
+
+    play_fn: callable that takes **kwargs and returns analytics dict
+    game_args_list: list of kwarg dicts for play_fn
+    output_path: path to write JSON results
+    meta: metadata dict for results file
+    parallel: number of concurrent games (1 = sequential)
+    """
+    all_analytics = []
+    total = len(game_args_list)
+
+    def _run_one(idx, kwargs):
+        game_start = time.time()
+        analytics = play_fn(**kwargs)
+        elapsed = time.time() - game_start
+        return idx, analytics, elapsed
+
+    def _report(idx, analytics, elapsed):
+        status = "DIED" if analytics["game_over"] else "SURVIVED"
+        kills = sum(analytics["kills_by_type"].values())
+        hp = analytics["final_hp"]
+        explored = analytics["explored_pct"]
+        calls = analytics["llm_metrics"]["tool_calls"]
+        notes = analytics["llm_metrics"]["strategy_notes"]
+        error = analytics.get("error", "")
+        if error:
+            print(f"  Game {idx + 1}/{total} (seed={analytics['seed']}): "
+                  f"ERROR ({elapsed:.1f}s) — {error}")
+        else:
+            print(f"  Game {idx + 1}/{total} (seed={analytics['seed']}): "
+                  f"{status} | HP={hp} kills={kills} explored={explored}% "
+                  f"calls={calls} ({elapsed:.1f}s)")
+            if notes:
+                print(f"    \u2192 {notes}")
+
+    try:
+        if parallel <= 1:
+            # Sequential — backward-compatible output.
+            for idx, kwargs in enumerate(game_args_list):
+                _, analytics, elapsed = _run_one(idx, kwargs)
+                all_analytics.append(analytics)
+                _report(idx, analytics, elapsed)
+                meta["games_completed"] = len(all_analytics)
+                pa.write_results(output_path, all_analytics, meta)
+        else:
+            # Parallel execution.
+            with ThreadPoolExecutor(max_workers=parallel) as executor:
+                futures = {
+                    executor.submit(_run_one, idx, kwargs): idx
+                    for idx, kwargs in enumerate(game_args_list)
+                }
+                try:
+                    for future in as_completed(futures):
+                        idx, analytics, elapsed = future.result()
+                        all_analytics.append(analytics)
+                        _report(idx, analytics, elapsed)
+                        meta["games_completed"] = len(all_analytics)
+                        pa.write_results(output_path, all_analytics, meta)
+                except KeyboardInterrupt:
+                    print("\nInterrupted — cancelling remaining games...")
+                    executor.shutdown(wait=False, cancel_futures=True)
+    except KeyboardInterrupt:
+        print("\nInterrupted.")
+
+    return all_analytics
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def _resolve_mcp_binary(path_str):
+    """Resolve the MCP server binary path, trying relative to project root."""
+    path = Path(path_str)
+    if path.exists():
+        return path
+    project_root = Path(__file__).parent.parent
+    path = project_root / path_str
+    if path.exists():
+        return path
+    return None
+
+
+def _resolve_mcp_config(config_path=None):
+    """Resolve the MCP config path for the claude-code backend.
+
+    If config_path is given, use it directly.  Otherwise, search for
+    .mcp.json in the project root and its parent.
+    """
+    if config_path:
+        p = Path(config_path)
+        if p.exists():
+            return p
+        print(f"ERROR: MCP config not found at {config_path}", file=sys.stderr)
+        sys.exit(1)
+
+    project_root = Path(__file__).parent.parent
+    for d in [project_root, project_root.parent]:
+        candidate = d / ".mcp.json"
+        if candidate.exists():
+            return candidate
+
+    # No .mcp.json found — generate a temporary one pointing at the binary.
+    mcp_binary = _resolve_mcp_binary("target/release/mcp_server")
+    if mcp_binary is None:
+        print(
+            "ERROR: No .mcp.json found and MCP binary not available.\n"
+            "Either create .mcp.json or build: cargo build --release --bin mcp_server",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    import tempfile
+    config = {
+        "mcpServers": {
+            "roguelike": {
+                "command": str(mcp_binary.resolve()),
+                "args": [],
+            }
+        }
+    }
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", prefix="mcp_config_", delete=False,
+    )
+    json.dump(config, tmp)
+    tmp.close()
+    return Path(tmp.name)
+
 
 def main():
     parser = argparse.ArgumentParser(
-        description="LLM-driven roguelike playtesting via Anthropic API",
+        description="LLM-driven roguelike playtesting",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
+            "  # Anthropic API (default):\n"
             "  python3 tools/llm_playtest.py -n 50\n"
-            "  python3 tools/llm_playtest.py -n 20 -m claude-sonnet-4-20250514 -s 42\n"
-            "  python3 tools/llm_playtest.py -n 100 -o results.json --report\n"
+            "\n"
+            "  # Claude Code backend:\n"
+            "  python3 tools/llm_playtest.py -n 10 --backend claude-code\n"
+            "\n"
+            "  # Parallel execution:\n"
+            "  python3 tools/llm_playtest.py -n 10 --backend claude-code --parallel 4\n"
         ),
     )
     parser.add_argument("-n", "--games", type=int, default=10, help="Number of games (default: 10)")
-    parser.add_argument("-m", "--model", default="claude-sonnet-4-20250514", help="Anthropic model ID")
+    parser.add_argument("-m", "--model", default="claude-sonnet-4-20250514", help="Anthropic model ID (api backend)")
     parser.add_argument("-s", "--seed", type=int, default=None, help="Starting seed (increments per game)")
     parser.add_argument("-o", "--output", default="tools/output/llm_playtest_results.json", help="Output JSON path")
-    parser.add_argument("--mcp-binary", default="target/release/mcp_server", help="Path to MCP server binary")
+    parser.add_argument("--backend", choices=["api", "claude-code"], default="api",
+                        help="Backend to use (default: api)")
+    parser.add_argument("--parallel", type=int, default=1,
+                        help="Concurrent games (default: 1)")
+    parser.add_argument("--mcp-binary", default="target/release/mcp_server",
+                        help="Path to MCP server binary (api backend)")
+    parser.add_argument("--mcp-config", default=None,
+                        help="MCP config JSON for claude-code (auto-detected if omitted)")
+    parser.add_argument("--max-budget", type=float, default=0.50,
+                        help="Max USD per game for claude-code (default: 0.50)")
     parser.add_argument("--report", action="store_true", help="Run visualize.py after completion")
-    parser.add_argument("--max-tool-calls", type=int, default=60, help="Max tool calls per game (default: 60)")
+    parser.add_argument("--max-tool-calls", type=int, default=60, help="Max tool calls per game (api backend)")
     args = parser.parse_args()
 
-    # Resolve MCP binary path.
-    mcp_binary = Path(args.mcp_binary)
-    if not mcp_binary.exists():
-        # Try relative to project root.
-        project_root = Path(__file__).parent.parent
-        mcp_binary = project_root / args.mcp_binary
-    if not mcp_binary.exists():
-        print(f"ERROR: MCP server binary not found at {args.mcp_binary}", file=sys.stderr)
-        print("Build it first: cargo build --release --bin mcp_server", file=sys.stderr)
-        sys.exit(1)
+    # Validate backend-specific requirements.
+    if args.backend == "api":
+        if not HAS_ANTHROPIC:
+            print(
+                "ERROR: anthropic SDK is required for the api backend.\n"
+                "  pip install anthropic>=0.40\n"
+                "Or use --backend claude-code instead.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        mcp_binary = _resolve_mcp_binary(args.mcp_binary)
+        if mcp_binary is None:
+            print(f"ERROR: MCP server binary not found at {args.mcp_binary}", file=sys.stderr)
+            print("Build it first: cargo build --release --bin mcp_server", file=sys.stderr)
+            sys.exit(1)
+    else:
+        if not shutil.which("claude"):
+            print(
+                "ERROR: 'claude' CLI not found in PATH.\n"
+                "Install Claude Code: https://docs.anthropic.com/en/docs/claude-code",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        mcp_config = _resolve_mcp_config(args.mcp_config)
 
-    # Initialize.
-    api_client = anthropic.Anthropic()
-    client = McpClient(str(mcp_binary))
-    all_analytics = []
     start_seed = args.seed if args.seed is not None else int(time.time()) % 100000
 
-    print(f"LLM Playtest: {args.games} games, model={args.model}, start_seed={start_seed}")
+    backend_label = args.backend
+    if args.backend == "api":
+        backend_label = f"api ({args.model})"
+
+    print(f"LLM Playtest: {args.games} games, backend={backend_label}, "
+          f"start_seed={start_seed}, parallel={args.parallel}")
     print(f"Output: {args.output}")
     print()
 
-    try:
-        client.start()
-        print("MCP server started successfully.")
+    # Build per-game argument lists.
+    game_args_list = []
+    for i in range(args.games):
+        seed = start_seed + i
+        if args.backend == "api":
+            game_args_list.append({
+                "mcp_binary": mcp_binary,
+                "model": args.model,
+                "seed": seed,
+                "max_tool_calls": args.max_tool_calls,
+            })
+        else:
+            game_args_list.append({
+                "mcp_config_path": mcp_config,
+                "seed": seed,
+                "max_budget": args.max_budget,
+            })
 
-        for i in range(args.games):
-            seed = start_seed + i
-            print(f"  Game {i + 1}/{args.games} (seed={seed})...", end=" ", flush=True)
-            game_start = time.time()
+    play_fn = play_game_api if args.backend == "api" else play_game_claude_code
+    meta = {
+        "backend": args.backend,
+        "model": args.model if args.backend == "api" else "claude-code",
+        "start_seed": start_seed,
+        "games_requested": args.games,
+        "games_completed": 0,
+        "parallel": args.parallel,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
 
-            try:
-                analytics = play_game(
-                    client, api_client, args.model, seed, args.max_tool_calls,
-                )
-                elapsed = time.time() - game_start
-                all_analytics.append(analytics)
-
-                status = "DIED" if analytics["game_over"] else "SURVIVED"
-                kills = sum(analytics["kills_by_type"].values())
-                hp = analytics["final_hp"]
-                explored = analytics["explored_pct"]
-                calls = analytics["llm_metrics"]["tool_calls"]
-                notes = analytics["llm_metrics"]["strategy_notes"]
-                print(
-                    f"{status} | HP={hp} kills={kills} explored={explored}% "
-                    f"calls={calls} ({elapsed:.1f}s)"
-                )
-                if notes:
-                    print(f"    \u2192 {notes}")
-
-                # Write intermediate results for crash safety.
-                meta = {
-                    "model": args.model,
-                    "start_seed": start_seed,
-                    "games_requested": args.games,
-                    "games_completed": len(all_analytics),
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                }
-                pa.write_results(args.output, all_analytics, meta)
-
-            except Exception as e:
-                print(f"ERROR: {e}")
-                # Try to restart the MCP server for next game.
-                try:
-                    client.stop()
-                except Exception:
-                    pass
-                client = McpClient(str(mcp_binary))
-                client.start()
-                continue
-
-    except KeyboardInterrupt:
-        print("\nInterrupted.")
-    finally:
-        client.stop()
+    all_analytics = _run_batch(
+        play_fn, game_args_list, args.output, meta, parallel=args.parallel,
+    )
 
     if not all_analytics:
         print("No games completed.")
@@ -495,7 +819,8 @@ def main():
         status = "DIED" if g["game_over"] else "SURVIVED"
         kills = sum(g["kills_by_type"].values())
         notes = g["llm_metrics"].get("strategy_notes", "")
-        print(f"  Game {i + 1} (seed={g['seed']}): {status} | HP={g['final_hp']} kills={kills} explored={g['explored_pct']}%")
+        print(f"  Game {i + 1} (seed={g['seed']}): {status} | HP={g['final_hp']} "
+              f"kills={kills} explored={g['explored_pct']}%")
         if notes:
             print(f"    \u2192 {notes}")
     print()

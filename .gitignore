@@ -18,6 +18,7 @@ settings.json
 # Tools
 tools/.venv/
 tools/output/
+__pycache__/
 
 # OS artifacts
 Thumbs.db

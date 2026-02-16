@@ -180,6 +180,12 @@ Alternatively, use the built-in `--report` flag on the headless runner to genera
 
 See the [README](README.md#visualization) for full usage examples.
 
+### LLM Playtesting
+
+The `tools/llm_playtest.py` script requires an `ANTHROPIC_API_KEY` environment variable. This drives games through the Anthropic API, letting an LLM play strategically instead of using the dumb auto-explore AI. See the [README](README.md#llm-playtesting) for usage.
+
+The `/playtest` skill works in Claude Code sessions with the MCP server connected — no API key needed since Claude Code uses its own session.
+
 ## Adding a Monster
 
 The simplest way to contribute content — see the [README](README.md#adding-a-new-monster) for a step-by-step guide.

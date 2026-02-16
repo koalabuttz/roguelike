@@ -227,6 +227,49 @@ python3 tools/visualize.py analysis analysis.json
 
 Output PNGs are saved to `tools/output/` (or `--output-dir DIR`). Both tools also print text insights to stdout.
 
+### LLM Playtesting
+
+Two tools for strategic LLM-driven playtesting, where an LLM plays the game making tactical decisions (fight, flee, explore) rather than the headless runner's simple auto-explore + auto-fight AI:
+
+**`/playtest` skill** (Claude Code, interactive):
+
+```sh
+# Play 5 games (default) using MCP tools in the current session:
+/playtest
+
+# Play 10 games with a specific starting seed:
+/playtest 10 --seed 42
+```
+
+The skill uses the connected MCP server directly — Claude plays each game strategically, deciding when to fight vs retreat based on HP and monster type. Results are saved to `tools/output/llm_playtest_results.json`.
+
+**`tools/llm_playtest.py`** (standalone, unattended):
+
+```sh
+# Setup:
+pip install -r tools/requirements.txt
+cargo build --release --bin mcp_server
+
+# Run 50 games with default model:
+ANTHROPIC_API_KEY=... python3 tools/llm_playtest.py -n 50
+
+# Use specific model and seed, generate charts:
+python3 tools/llm_playtest.py -n 20 -m claude-sonnet-4-20250514 -s 42 --report
+
+# Custom output path:
+python3 tools/llm_playtest.py -n 100 -o results.json
+```
+
+The script spawns the MCP server as a subprocess and drives games through the Anthropic API's tool_use loop. Each game gets a fresh conversation. Requires `ANTHROPIC_API_KEY`.
+
+Both tools output `EnhancedBatchStats`-compatible JSON, so `tools/visualize.py batch` and `--report` work with their results:
+
+```sh
+cat tools/output/llm_playtest_results.json | \
+  python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['batch_stats']))" | \
+  python3 tools/visualize.py batch
+```
+
 ## Gameplay
 
 - `@` is you. Monsters appear as colored letters (`g`oblin, `o`rc, `T`roll).
@@ -307,7 +350,9 @@ tests/
   golden_replays/         Stored golden replay JSON files (committed to repo)
 tools/
   visualize.py            Python/matplotlib analytics visualizer (batch, sweep, analysis modes)
-  requirements.txt        Python dependencies (matplotlib)
+  llm_playtest.py         Standalone LLM playtesting via Anthropic API + MCP server subprocess
+  playtest_analytics.py   Shared analytics module for LLM playtesting tools
+  requirements.txt        Python dependencies (matplotlib, anthropic)
 ```
 
 ## Configuration
@@ -403,6 +448,7 @@ Design principles (not checkboxes — follow these always):
 - [x] **Scenario framework** — Fluent builder API for composing specific game states and asserting balance outcomes
 - [x] **Golden replay regression** — Stored deterministic replays with expected results; detects unintended gameplay changes
 - [x] **Parameter sweeps** — Sweep across player stats (HP, ATK, DEF) to find balance boundaries; JSON config, structured output
+- [x] **LLM playtesting** — Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; compares AI decision-making against dumb auto-explore baseline
 - [ ] **Debug overlay** — Visualize AI state, FOV boundaries, pathfinding routes
 - [ ] **Map editor** — Visual tool for designing and testing dungeon layouts
 

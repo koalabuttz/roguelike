@@ -268,13 +268,63 @@ impl Replay {
 }
 
 /// Summary of a replay execution or headless run.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayResult {
     pub turns_played: Stat,
     pub game_over: bool,
     pub final_hp: Stat,
     pub final_turn: Stat,
     pub kills: Stat,
+}
+
+/// A golden replay: a recorded game with its expected outcome.
+///
+/// Used for regression testing — re-execute the replay after code changes
+/// and verify the result hasn't diverged.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoldenReplay {
+    pub name: String,
+    pub description: String,
+    pub replay: Replay,
+    pub expected: ReplayResult,
+}
+
+impl GoldenReplay {
+    /// Execute the replay and compare against the expected result.
+    ///
+    /// Returns `Ok(())` if the result matches, or `Err(message)` describing
+    /// the divergence.
+    pub fn verify(&self) -> Result<(), String> {
+        let actual = self.replay.execute();
+        if actual == self.expected {
+            Ok(())
+        } else {
+            Err(format!(
+                "Golden replay '{}' diverged!\n  Expected: {:?}\n  Actual:   {:?}",
+                self.name, self.expected, actual
+            ))
+        }
+    }
+}
+
+/// Create a golden replay from a completed game session.
+///
+/// Captures the current replay and its result as a golden snapshot.
+pub fn golden_from_session(
+    name: &str,
+    description: &str,
+    gs: &GameState,
+    session: &DevSession,
+    preset: Option<crate::map::MapPreset>,
+) -> GoldenReplay {
+    let replay = Replay::from_session(gs, session, preset);
+    let expected = replay.execute();
+    GoldenReplay {
+        name: name.to_string(),
+        description: description.to_string(),
+        replay,
+        expected,
+    }
 }
 
 /// Result of a headless batch run.
@@ -583,5 +633,83 @@ mod tests {
         assert!(gs.entities[0].alive);
         assert!(gs.map.is_walkable(gs.entities[0].x, gs.entities[0].y));
         assert!(gs.log.recent(1)[0].contains("Arena"));
+    }
+
+    // --- Golden replay tests ---
+
+    #[test]
+    fn replay_result_partial_eq() {
+        let a = ReplayResult {
+            turns_played: 10,
+            game_over: false,
+            final_hp: 25,
+            final_turn: 10,
+            kills: 3,
+        };
+        let b = a.clone();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn golden_replay_verify_passes() {
+        let mut gs = test_game();
+        let mut session = DevSession {
+            recording: true,
+            ..DevSession::default()
+        };
+        for _ in 0..3 {
+            gs.step(GameCommand::Move { dx: 1, dy: 0 });
+            after_step(&mut gs, &mut session, GameCommand::Move { dx: 1, dy: 0 });
+        }
+        let golden = golden_from_session("test", "test golden", &gs, &session, None);
+        assert!(golden.verify().is_ok());
+    }
+
+    #[test]
+    fn golden_replay_verify_detects_mismatch() {
+        let golden = GoldenReplay {
+            name: "bad".to_string(),
+            description: "intentionally wrong".to_string(),
+            replay: Replay {
+                seed: 42,
+                width: 40,
+                height: 30,
+                commands: vec![GameCommand::Wait, GameCommand::Wait],
+                preset: None,
+            },
+            expected: ReplayResult {
+                turns_played: 999,
+                game_over: true,
+                final_hp: -1,
+                final_turn: 999,
+                kills: 100,
+            },
+        };
+        assert!(golden.verify().is_err());
+    }
+
+    #[test]
+    fn golden_from_session_roundtrip() {
+        let mut gs = GameState::with_seed(40, 30, 42);
+        let mut session = DevSession {
+            recording: true,
+            ..DevSession::default()
+        };
+        for _ in 0..5 {
+            gs.step(GameCommand::Wait);
+            after_step(&mut gs, &mut session, GameCommand::Wait);
+        }
+        let golden = golden_from_session(
+            "seed_42",
+            "Standard dungeon, 5 waits",
+            &gs,
+            &session,
+            None,
+        );
+        // Serialize and deserialize.
+        let json = serde_json::to_string_pretty(&golden).unwrap();
+        let loaded: GoldenReplay = serde_json::from_str(&json).unwrap();
+        assert!(loaded.verify().is_ok());
+        assert_eq!(loaded.name, "seed_42");
     }
 }

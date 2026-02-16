@@ -1,0 +1,904 @@
+{
+  "name": "seed_100_corridor",
+  "description": "Seed 100, 80x40, preset=Corridor, max_turns=500",
+  "replay": {
+    "seed": 100,
+    "width": 80,
+    "height": 40,
+    "commands": [
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "Move": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait",
+      "Wait"
+    ],
+    "preset": "corridor"
+  },
+  "expected": {
+    "turns_played": 500,
+    "game_over": false,
+    "final_hp": 30,
+    "final_turn": 500,
+    "kills": 2
+  }
+}

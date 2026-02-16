@@ -17,9 +17,48 @@ The game adapts to your terminal size automatically.
 ## Testing
 
 ```sh
-cargo test          # 274 unit tests across 15 modules
+cargo test                       # All tests: 304 unit + 13 integration
+cargo test --lib                 # 304 unit tests across 17 modules
+cargo test --test golden_replays # 5 golden replay regression tests
+cargo test --test scenarios      # 8 balance integration tests
 cargo clippy -- -D warnings
 cargo fmt --check
+```
+
+### Test Categories
+
+| Category | Command | What it checks |
+|----------|---------|----------------|
+| Unit tests | `cargo test --lib` | Module-level logic across all 17 modules |
+| Golden replays | `cargo test --test golden_replays` | Deterministic replay regression — detects unintended gameplay changes |
+| Scenario tests | `cargo test --test scenarios` | Balance properties — e.g., "player survives 2 goblins", "troll kills weak player" |
+
+### Golden Replays
+
+Golden replays are stored game recordings with their expected outcomes (`tests/golden_replays/*.json`). After any code change, re-running them detects if game behavior has diverged. If a change is intentional (e.g., rebalancing monster stats), regenerate the goldens:
+
+```sh
+cargo run --bin headless -- --regenerate-goldens tests/golden_replays/
+```
+
+To add a new golden replay:
+
+```sh
+cargo run --bin headless -- --save-golden tests/golden_replays/seed_99_arena.json --seed 99 --preset arena
+```
+
+### Scenario Tests
+
+Scenario tests use a fluent builder API to compose specific game states and assert outcomes. They live in `tests/scenarios.rs` and are the recommended way to test balance changes:
+
+```rust
+Scenario::new(20, 20, 42)
+    .preset(MapPreset::SingleRoom)
+    .kill_all()
+    .spawn("troll", 4, 5)
+    .set_player_hp(10)
+    .run_turns(50)
+    .assert_dead();
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
@@ -81,6 +120,71 @@ npx @modelcontextprotocol/inspector cargo run --bin mcp_server
 ```
 
 This opens a web UI where you can manually invoke tools and verify responses. Useful for debugging tool implementations or testing changes before integrating with Claude Desktop.
+
+## Headless Runner (Automated Playtesting)
+
+The headless runner plays games automatically using auto-explore + auto-fight AI. It requires the `dev-tools` feature (enabled by default).
+
+```sh
+# Run 100 games, output aggregate JSON stats:
+cargo run --bin headless -- --games 100
+
+# Run with analytics (per-monster damage/kill tracking):
+cargo run --bin headless -- --games 50 --analytics
+
+# Run with analytics + difficulty analysis:
+cargo run --bin headless -- --games 50 --analytics --analysis
+
+# Run a parameter sweep (vary player stats, measure win rate):
+cargo run --bin headless -- --sweep sweep.json
+
+# Save a golden replay for regression testing:
+cargo run --bin headless -- --save-golden tests/golden_replays/my_test.json --seed 42
+
+# Regenerate all golden replays after an intentional gameplay change:
+cargo run --bin headless -- --regenerate-goldens tests/golden_replays/
+
+# Replay a recorded game:
+cargo run --bin headless -- --replay replay.json
+```
+
+### CLI Flags
+
+| Flag | Description |
+|------|-------------|
+| `-n`, `--games N` | Number of games to run (default: 10) |
+| `-w`, `--width N` | Map width (default: 80) |
+| `-H`, `--height N` | Map height (default: 40) |
+| `-s`, `--seed N` | Starting seed (increments per game) |
+| `-p`, `--preset NAME` | Map preset: `arena`, `corridor`, `labyrinth`, `single_room`, `open_field` |
+| `-t`, `--max-turns N` | Max turns per game (default: 500) |
+| `-r`, `--replay FILE` | Replay a recorded game from JSON |
+| `--save-replays` | Save replay JSON for each game |
+| `--analytics` | Collect per-game combat analytics (snapshot/diff each step) |
+| `--analysis` | With `--analytics`, compute difficulty metrics and monster correlations |
+| `--sweep FILE` | Run parameter sweep from JSON config |
+| `--save-golden FILE` | Save run as golden replay JSON for regression testing |
+| `--regenerate-goldens DIR` | Re-execute all goldens in a directory, update expected outcomes |
+
+### Parameter Sweep Config
+
+Sweeps test how game balance changes across different player configurations:
+
+```json
+{
+  "axes": [
+    { "param": "player_hp", "values": [10, 20, 30] },
+    { "param": "player_attack", "values": [3, 5, 7] }
+  ],
+  "games_per_point": 10,
+  "width": 80,
+  "height": 40,
+  "max_turns": 500,
+  "preset": null
+}
+```
+
+Supported sweep parameters: `player_hp`, `player_attack`, `player_defense`, `regen_interval`, `max_monsters_per_room`.
 
 ## Gameplay
 
@@ -147,13 +251,19 @@ src/
   menu.rs          Title screen, pause menu, settings UI
   saves.rs         Save slot metadata for menu display
   settings.rs      Platform-aware settings (casual mode, display options)
-  dev_tools.rs     Debug console, map presets, replay export (dev-tools feature)
+  dev_tools.rs     Debug console, map presets, replay export, golden replays (dev-tools feature)
+  analytics.rs     Combat analytics, snapshot/diff tracking, parameter sweeps (dev-tools feature)
+  scenario.rs      Fluent scenario builder for balance testing (dev-tools feature)
   message_log.rs   Message log
   types.rs         Type aliases (Coord, Stat, Pos) and GameColor enum
   mcp.rs           MCP server — tools for LLM-driven play
   bin/
     mcp_server.rs  MCP server binary entry point
-    headless.rs    Automated headless runner for playtesting (dev-tools feature)
+    headless.rs    Automated headless runner with analytics, sweeps, goldens (dev-tools feature)
+tests/
+  golden_replays.rs       Integration tests for golden replay verification
+  scenarios.rs            Balance integration tests using the scenario framework
+  golden_replays/         Stored golden replay JSON files (committed to repo)
 ```
 
 ## Configuration
@@ -222,7 +332,7 @@ Design principles (not checkboxes — follow these always):
 - Every sound cue must have a text/visual equivalent; no game-critical info through sound alone
 
 ### Networking
-- [ ] **Replay system** — Record and playback games deterministically
+- [x] **Replay system** — Record and playback games deterministically
 - [ ] **Shared leaderboard** — REST API for score submission
 - [ ] **Daily challenges** — Everyone plays the same seed, compare scores
 - [ ] **Seed sharing** — Share a seed as a code/URL, others play the same dungeon
@@ -244,9 +354,12 @@ Design principles (not checkboxes — follow these always):
 
 ### Developer Tools
 - [x] **Debug console** — In-game console (`dev-tools` feature): teleport, god mode, FOV toggle, spawn monsters, stat editing, replay export
-- [x] **Headless runner** — Automated playtesting binary with JSON stats output: run N games, configurable seeds/presets, replay support
+- [x] **Headless runner** — Automated playtesting binary with JSON stats output: run N games, configurable seeds/presets, replay support, analytics, parameter sweeps, golden replay management
+- [x] **Balance telemetry** — Per-game combat analytics via snapshot/diff, aggregate statistics, per-monster-type damage/kill tracking, difficulty metrics
+- [x] **Scenario framework** — Fluent builder API for composing specific game states and asserting balance outcomes
+- [x] **Golden replay regression** — Stored deterministic replays with expected results; detects unintended gameplay changes
+- [x] **Parameter sweeps** — Sweep across player stats (HP, ATK, DEF) to find balance boundaries; JSON config, structured output
 - [ ] **Debug overlay** — Visualize AI state, FOV boundaries, pathfinding routes
-- [ ] **Balance telemetry** — Aggregate statistics across many headless runs (death causes, kill rates, run length distributions)
 - [ ] **Map editor** — Visual tool for designing and testing dungeon layouts
 
 ### Polish

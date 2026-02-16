@@ -1,4 +1,6 @@
 pub mod ai;
+#[cfg(feature = "dev-tools")]
+pub mod analytics;
 pub mod combat;
 pub mod data;
 #[cfg(feature = "dev-tools")]
@@ -15,6 +17,8 @@ pub mod pathfinding;
 pub mod platform;
 pub mod render;
 pub mod saves;
+#[cfg(feature = "dev-tools")]
+pub mod scenario;
 pub mod settings;
 pub mod spawn;
 pub mod types;

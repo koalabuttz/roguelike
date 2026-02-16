@@ -17,7 +17,7 @@ The game adapts to your terminal size automatically.
 ## Testing
 
 ```sh
-cargo test          # 169 unit tests across 10 modules
+cargo test          # 274 unit tests across 15 modules
 cargo clippy -- -D warnings
 cargo fmt --check
 ```
@@ -30,10 +30,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 |--------|------|
 | Move cardinal | Arrow keys, `hjkl` (vi), numpad `2468` |
 | Move diagonal | `yubn` (vi), numpad `7913` |
+| Autorun | Shift+arrow, `HJKLYUBN` (vi uppercase), Shift+numpad |
+| Auto-explore | `o` |
 | Wait a turn | `.` or numpad `5` |
 | Quit | `q`, `Esc`, or `Ctrl+C` |
 
-Moving into a monster attacks it.
+Vi keys and numpad are opt-in via Settings. Moving into a monster attacks it. Autorun keeps moving until hitting a wall, spotting a monster, or reaching a junction.
 
 ## MCP Server (AI Play)
 
@@ -86,6 +88,9 @@ This opens a web UI where you can manually invoke tools and verify responses. Us
 - Monsters wake and chase you when they enter your field of view.
 - `%` marks a corpse. Dead monsters stay on the map.
 - The HP bar and message log are at the bottom of the screen.
+- **Title screen** lets you start a new game, load a save, or adjust settings.
+- **Classic mode** (default): NetHack-style save discipline — saving quits, death deletes the save.
+- **Casual mode**: 5 manual save slots, save without quitting, keep saves on death.
 
 ## Monsters
 
@@ -105,7 +110,7 @@ All content lives in `src/data.rs`. To add a monster:
 pub const DRAGON: MonsterTemplate = MonsterTemplate {
     name: "Dragon",
     glyph: 'D',
-    color: Color::Red,
+    color: GameColor::Red,
     hp: 40,
     attack: 10,
     defense: 5,
@@ -137,12 +142,18 @@ src/
   map.rs           Map struct and dungeon generation
   fov.rs           Field of view (recursive shadowcasting)
   pathfinding.rs   A* pathfinding for monsters and MCP navigation
-  render.rs        Terminal rendering
+  platform.rs      Renderer and InputSource traits (platform abstraction)
+  render.rs        Terminal rendering (implements Renderer)
+  menu.rs          Title screen, pause menu, settings UI
+  saves.rs         Save slot metadata for menu display
+  settings.rs      Platform-aware settings (casual mode, display options)
+  dev_tools.rs     Debug console, map presets, replay export (dev-tools feature)
   message_log.rs   Message log
   types.rs         Type aliases (Coord, Stat, Pos) and GameColor enum
   mcp.rs           MCP server — tools for LLM-driven play
   bin/
     mcp_server.rs  MCP server binary entry point
+    headless.rs    Automated headless runner for playtesting (dev-tools feature)
 ```
 
 ## Configuration
@@ -157,14 +168,17 @@ Game-wide tuning knobs are in `src/data.rs` under `GameConfig`:
 | `room_size_max` | 10 | Maximum room dimension |
 | `max_monsters_per_room` | 2 | Monster cap per room |
 | `ui_bottom_rows` | 5 | Rows reserved for status bar and log |
+| `max_autorun_steps` | 100 | Maximum steps per autorun command |
+| `regen_interval` | 3 | Turns between HP regeneration ticks |
 
 ## Dependencies
 
 - [crossterm](https://crates.io/crates/crossterm) 0.28 — cross-platform terminal manipulation
 - [rand](https://crates.io/crates/rand) 0.8 — random number generation
-- [serde](https://crates.io/crates/serde) 1 — serialization for game observations
+- [serde](https://crates.io/crates/serde) 1 / [serde_json](https://crates.io/crates/serde_json) 1 — serialization for save/load and game observations
 - [rmcp](https://crates.io/crates/rmcp) 0.15 — MCP server (official Rust SDK)
 - [tokio](https://crates.io/crates/tokio) 1 — async runtime for MCP server
+- [tracing](https://crates.io/crates/tracing) 0.1 / [tracing-subscriber](https://crates.io/crates/tracing-subscriber) 0.3 — structured logging for MCP server
 
 ## Roadmap
 
@@ -172,7 +186,7 @@ See [docs/roadmap-priority.md](docs/roadmap-priority.md) for a detailed breakdow
 
 ### Foundation (enables networking, platforms & advanced features)
 - [x] **Input abstraction** — `GameCommand` enum, decouple game logic from terminal input
-- [ ] **Platform abstraction** — Traits for input, rendering, and audio; game logic never imports platform-specific crates
+- [x] **Platform abstraction** — `Renderer` and `InputSource` traits; game logic never imports platform-specific crates
 - [x] **Type aliases** — `Coord`, `Stat` type aliases for coordinates and stats, enabling platform-specific sizing
 - [x] **Seeded RNG** — Separate RNG streams per system (map, combat, spawn, loot) for deterministic replay
 - [x] **Save/load** — Serialize/deserialize game state via serde
@@ -189,16 +203,16 @@ See [docs/roadmap-priority.md](docs/roadmap-priority.md) for a detailed breakdow
 ### UI/UX
 - [ ] **Controller support** — Gamepad input on all desktop platforms; d-pad/stick for movement, context-sensitive menus for actions
 - [ ] **Steam Deck** — Verified controller layout, Steam Input API integration
-- [ ] **Menus** — Inventory screen, character sheet, help screen (designed for both keyboard and controller)
+- [ ] **Menus** — Title screen and pause menu (done); inventory screen, character sheet, help screen still needed
 - [ ] **Look mode** — Cursor to examine tiles and entities
 - [ ] **Targeting** — Ranged attacks, spell targeting
-- [ ] **Options/settings** — Keybind customization, display preferences, difficulty modes
+- [ ] **Options/settings** — Classic/casual mode and display preferences (done); keybind customization and difficulty modes still needed
 
 ### Accessibility
 
 - [ ] **Visual** — Colorblind palettes, high-contrast mode, configurable glyphs, reduced clutter option
 - [ ] **Screen reader support** — Structured output for NVDA/JAWS/VoiceOver; braille display compatible
-- [ ] **Motor** — One-handed layouts, mouse-only play, adjustable input timing, auto-explore, macros
+- [ ] **Motor** — One-handed layouts, mouse-only play, adjustable input timing, auto-explore (done), macros
 - [ ] **Cognitive** — Granular difficulty toggles, scrollable message history, context-sensitive help (`?`)
 - [ ] **Character identity** — Player-chosen name and pronouns used in game text
 - [x] **Code of Conduct** — See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
@@ -229,8 +243,10 @@ Design principles (not checkboxes — follow these always):
 - [ ] **Scripting** — Embedded Lua or Rhai for custom AI, quests, and event handlers (future)
 
 ### Developer Tools
+- [x] **Debug console** — In-game console (`dev-tools` feature): teleport, god mode, FOV toggle, spawn monsters, stat editing, replay export
+- [x] **Headless runner** — Automated playtesting binary with JSON stats output: run N games, configurable seeds/presets, replay support
 - [ ] **Debug overlay** — Visualize AI state, FOV boundaries, pathfinding routes
-- [ ] **Balance telemetry** — Track average run length, death causes, monster kill rates
+- [ ] **Balance telemetry** — Aggregate statistics across many headless runs (death causes, kill rates, run length distributions)
 - [ ] **Map editor** — Visual tool for designing and testing dungeon layouts
 
 ### Polish

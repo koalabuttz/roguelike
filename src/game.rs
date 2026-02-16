@@ -290,6 +290,7 @@ impl GameState {
 
         let mut map = map::Map::new(width, height);
         let (px, py) = map.from_preset(preset, &mut map_rng);
+        map.compute_structural_walls();
 
         let mut entities = vec![Entity::player(px, py)];
         let monsters = spawn::spawn_monsters(
@@ -340,6 +341,7 @@ impl GameState {
             cfg.room_size_max,
             &mut map_rng,
         );
+        map.compute_structural_walls();
 
         let mut entities = vec![Entity::player(px, py)];
         let monsters = spawn::spawn_monsters(
@@ -388,6 +390,7 @@ impl GameState {
     /// (which is skipped during serialization as runtime-only derived state).
     pub fn load_from_json(json: &str) -> Result<Self, serde_json::Error> {
         let mut state: Self = serde_json::from_str(json)?;
+        state.map.compute_structural_walls();
         state.update_fov();
         Ok(state)
     }

@@ -112,7 +112,19 @@ fn render_map<W: Write>(w: &mut W, state: &GameState) -> std::io::Result<()> {
             let is_explored = state.explored.contains(&(x, y));
 
             if is_visible {
-                let tile = map.tiles[map.idx(x, y)];
+                let idx = map.idx(x, y);
+                let tile = map.tiles[idx];
+                // Skip filler walls that aren't adjacent to any floor tile.
+                if tile == Tile::Wall && !map.structural[idx] {
+                    queue!(
+                        w,
+                        cursor::MoveTo(x as u16, y as u16),
+                        SetForegroundColor(Color::Black),
+                        SetBackgroundColor(Color::Black),
+                        style::Print(' ')
+                    )?;
+                    continue;
+                }
                 let (ch, fg) = match tile {
                     Tile::Floor => ('.', Color::DarkGrey),
                     Tile::Wall => ('#', Color::White),
@@ -125,7 +137,19 @@ fn render_map<W: Write>(w: &mut W, state: &GameState) -> std::io::Result<()> {
                     style::Print(ch)
                 )?;
             } else if is_explored {
-                let tile = map.tiles[map.idx(x, y)];
+                let idx = map.idx(x, y);
+                let tile = map.tiles[idx];
+                // Skip filler walls in explored area too.
+                if tile == Tile::Wall && !map.structural[idx] {
+                    queue!(
+                        w,
+                        cursor::MoveTo(x as u16, y as u16),
+                        SetForegroundColor(Color::Black),
+                        SetBackgroundColor(Color::Black),
+                        style::Print(' ')
+                    )?;
+                    continue;
+                }
                 let ch = match tile {
                     Tile::Floor => '.',
                     Tile::Wall => '#',

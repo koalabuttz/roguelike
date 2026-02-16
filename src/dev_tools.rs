@@ -137,7 +137,7 @@ pub fn exec_dev(gs: &mut GameState, session: &mut DevSession, cmd: DevCommand) -
 
 /// Make all tiles visible — called after FOV toggle or after step() when
 /// FOV is disabled.
-fn apply_fov_override(gs: &mut GameState) {
+pub fn apply_fov_override(gs: &mut GameState) {
     for y in 0..gs.map.height {
         for x in 0..gs.map.width {
             gs.visible.insert((x, y));
@@ -485,8 +485,10 @@ mod tests {
     #[test]
     fn god_mode_prevents_death_via_after_step() {
         let mut gs = test_game();
-        let mut session = DevSession::default();
-        session.god_mode = true;
+        let mut session = DevSession {
+            god_mode: true,
+            ..Default::default()
+        };
         gs.entities[0].hp = 1;
         gs.entities[0].attack = 0;
         let mut monster = Entity::from_template(&data::TROLL, 6, 5);

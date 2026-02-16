@@ -65,15 +65,51 @@ pub struct Map {
     pub height: Coord,
     pub tiles: Vec<Tile>,
     pub rooms: Vec<Rect>,
+    /// Precomputed: `true` for wall tiles adjacent to at least one floor tile.
+    /// Computed once after generation via `compute_structural_walls()`.
+    /// Skipped in serialization — rebuilt on load.
+    #[serde(skip)]
+    pub structural: Vec<bool>,
 }
 
 impl Map {
     pub fn new(width: Coord, height: Coord) -> Self {
+        let n = (width * height) as usize;
         Map {
             width,
             height,
-            tiles: vec![Tile::Wall; (width * height) as usize],
+            tiles: vec![Tile::Wall; n],
             rooms: Vec::new(),
+            structural: vec![false; n],
+        }
+    }
+
+    /// Precompute which wall tiles are structural (adjacent to floor).
+    /// Call once after all carving is complete. O(W*H) one-time cost,
+    /// then `structural[idx]` is O(1) per tile during rendering.
+    pub fn compute_structural_walls(&mut self) {
+        let n = (self.width * self.height) as usize;
+        self.structural = vec![false; n];
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let idx = self.idx(x, y);
+                if self.tiles[idx] != Tile::Wall {
+                    continue;
+                }
+                'neighbors: for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        if dx == 0 && dy == 0 {
+                            continue;
+                        }
+                        let nx = x + dx;
+                        let ny = y + dy;
+                        if self.in_bounds(nx, ny) && self.tiles[self.idx(nx, ny)] == Tile::Floor {
+                            self.structural[idx] = true;
+                            break 'neighbors;
+                        }
+                    }
+                }
+            }
         }
     }
 

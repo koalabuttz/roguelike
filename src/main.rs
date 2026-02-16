@@ -36,10 +36,17 @@ fn animate_stepper(
     cols: Coord,
     rows: Coord,
     settings: &settings::Settings,
+    fov_disabled: bool,
 ) -> std::io::Result<()> {
     loop {
         match stepper.next_step(state) {
             game::StepOutcome::Continue => {
+                #[cfg(all(debug_assertions, feature = "dev-tools"))]
+                if fov_disabled {
+                    dev_tools::apply_fov_override(state);
+                }
+                #[cfg(not(all(debug_assertions, feature = "dev-tools")))]
+                let _ = fov_disabled;
                 render::render(stdout, state, cols, rows, settings)?;
                 // Frame pacing + interrupt detection.
                 if event::poll(Duration::from_millis(settings.animation_speed_ms as u64))? {
@@ -435,6 +442,10 @@ fn main() -> std::io::Result<()> {
 
                         input::GameCommand::Autorun { dx, dy } => {
                             let stepper = state.start_autorun(dx, dy);
+                            #[cfg(all(debug_assertions, feature = "dev-tools"))]
+                            let fov_off = dev_session.fov_disabled;
+                            #[cfg(not(all(debug_assertions, feature = "dev-tools")))]
+                            let fov_off = false;
                             animate_stepper(
                                 &mut stdout,
                                 state,
@@ -442,7 +453,10 @@ fn main() -> std::io::Result<()> {
                                 cols as i32,
                                 rows as i32,
                                 &settings,
+                                fov_off,
                             )?;
+                            #[cfg(all(debug_assertions, feature = "dev-tools"))]
+                            dev_tools::after_step(state, &mut dev_session, cmd);
                             // Autosave after autorun completes.
                             if state.dirty
                                 && let Ok(json) = state.save_to_json()
@@ -454,6 +468,10 @@ fn main() -> std::io::Result<()> {
 
                         input::GameCommand::AutoExplore => match state.start_auto_explore() {
                             Ok((stepper, _tx, _ty)) => {
+                                #[cfg(all(debug_assertions, feature = "dev-tools"))]
+                                let fov_off = dev_session.fov_disabled;
+                                #[cfg(not(all(debug_assertions, feature = "dev-tools")))]
+                                let fov_off = false;
                                 animate_stepper(
                                     &mut stdout,
                                     state,
@@ -461,7 +479,10 @@ fn main() -> std::io::Result<()> {
                                     cols as i32,
                                     rows as i32,
                                     &settings,
+                                    fov_off,
                                 )?;
+                                #[cfg(all(debug_assertions, feature = "dev-tools"))]
+                                dev_tools::after_step(state, &mut dev_session, cmd);
                                 // Autosave after auto-explore completes.
                                 if state.dirty
                                     && let Ok(json) = state.save_to_json()
@@ -477,6 +498,8 @@ fn main() -> std::io::Result<()> {
 
                         _ => {
                             state.step(cmd);
+                            #[cfg(all(debug_assertions, feature = "dev-tools"))]
+                            dev_tools::after_step(state, &mut dev_session, cmd);
                             // Autosave respecting frequency setting.
                             if state.dirty
                                 && (state.turn_count as u32)

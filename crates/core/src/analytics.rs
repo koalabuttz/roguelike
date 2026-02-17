@@ -432,9 +432,9 @@ pub fn apply_overrides(gs: &mut GameState, overrides: &ConfigOverrides) {
     if let Some(def) = overrides.player_defense {
         gs.entities[0].defense = def;
     }
-    // regen_interval and max_monsters_per_room are compile-time constants
-    // in data.rs, so they can't be overridden at runtime. These fields exist
-    // for future use when config becomes runtime-configurable.
+    if let Some(regen) = overrides.regen_interval {
+        gs.regen_interval = regen;
+    }
 }
 
 /// Result of a single sweep data point.
@@ -505,6 +505,8 @@ mod tests {
             turn_count: 0,
             seed: 42,
             dirty: false,
+            regen_interval: data::config().regen_interval,
+            max_autorun_steps: data::config().max_autorun_steps,
         }
     }
 
@@ -519,7 +521,8 @@ mod tests {
     #[test]
     fn snapshot_captures_all_entities() {
         let mut gs = test_game();
-        gs.entities.push(Entity::from_template(&data::GOBLIN, 3, 3));
+        gs.entities
+            .push(Entity::from_template(data::goblin(), 3, 3));
         let snap = snapshot_entities(&gs);
         assert_eq!(snap.len(), 2);
         assert_eq!(snap[0].0, "Player");
@@ -529,7 +532,8 @@ mod tests {
     #[test]
     fn diff_detects_monster_damage() {
         let mut gs = test_game();
-        gs.entities.push(Entity::from_template(&data::GOBLIN, 6, 5));
+        gs.entities
+            .push(Entity::from_template(data::goblin(), 6, 5));
         let before = snapshot_entities(&gs);
 
         // Player attacks goblin (step also runs monster turn, so both take damage).
@@ -553,7 +557,8 @@ mod tests {
     fn diff_detects_player_damage() {
         let mut gs = test_game();
         // Place goblin adjacent so it attacks on monster turn.
-        gs.entities.push(Entity::from_template(&data::GOBLIN, 6, 5));
+        gs.entities
+            .push(Entity::from_template(data::goblin(), 6, 5));
         gs.update_fov();
 
         let before = snapshot_entities(&gs);
@@ -575,7 +580,8 @@ mod tests {
     fn diff_detects_kill() {
         let mut gs = test_game();
         gs.entities[0].attack = 100; // one-shot everything
-        gs.entities.push(Entity::from_template(&data::GOBLIN, 6, 5));
+        gs.entities
+            .push(Entity::from_template(data::goblin(), 6, 5));
 
         let before = snapshot_entities(&gs);
         gs.step(GameCommand::Move { dx: 1, dy: 0 });

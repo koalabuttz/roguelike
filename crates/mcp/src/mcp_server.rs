@@ -9,7 +9,7 @@ use rmcp::{
 use tokio::sync::Mutex;
 
 use roguelike_core::command::GameCommand;
-use roguelike_core::data::CONFIG;
+use roguelike_core::data;
 use roguelike_core::exploration_graph;
 use roguelike_core::game::{
     AutoExploreResult, AutoFightResult, AutorunResult, AutorunStopReason, GameState,
@@ -308,9 +308,14 @@ impl RoguelikeMcpServer {
         self.spectator.write_frame(state);
         let observation = state.observe();
         let frontier_count = state.frontier_tiles().len() as i32;
-        let json =
-            format_auto_explore_response(&observation, &explore_result, frontier_count, compact, state)
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let json = format_auto_explore_response(
+            &observation,
+            &explore_result,
+            frontier_count,
+            compact,
+            state,
+        )
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
@@ -390,6 +395,19 @@ impl RoguelikeMcpServer {
         description = "Get the rules and mechanics of the roguelike game. Explains combat, movement, monsters, and field of view. Call this to understand the game before playing."
     )]
     async fn get_rules(&self) -> Result<CallToolResult, McpError> {
+        let game_data = data::defaults();
+        let cfg = &game_data.config;
+        let player = &game_data.player;
+
+        // Build monster table dynamically from data.
+        let mut monster_lines = String::new();
+        for m in &game_data.monsters {
+            monster_lines.push_str(&format!(
+                "             - {} ({}): HP {}, ATK {}, DEF {}\n",
+                m.name, m.glyph, m.hp, m.attack, m.defense,
+            ));
+        }
+
         let rules = format!(
             "# Roguelike Game Rules\n\
              \n\
@@ -408,7 +426,7 @@ impl RoguelikeMcpServer {
              - Uppercase letters = dangerous monsters (T=troll)\n\
              \n\
              ## Field of View\n\
-             You can only see tiles within radius {}. Monsters beyond your FOV\n\
+             You can only see tiles within radius {fov}. Monsters beyond your FOV\n\
              are hidden. Monsters only chase you once they enter your FOV.\n\
              \n\
              ## Combat\n\
@@ -416,19 +434,14 @@ impl RoguelikeMcpServer {
              If damage > 0, defender loses that many HP. At 0 HP, entity dies.\n\
              \n\
              ## Your Stats\n\
-             HP: 30, ATK: 5, DEF: 2\n\
+             HP: {php}, ATK: {patk}, DEF: {pdef}\n\
              \n\
              ## Monsters\n\
-             - Goblin (g): HP 6, ATK 3, DEF 0 -- weak, common\n\
-             - Orc (o): HP 12, ATK 4, DEF 1 -- moderate threat\n\
-             - Troll (T): HP 20, ATK 6, DEF 3 -- dangerous, very tanky\n\
+{monsters}\
              \n\
              ## Strategy Tips\n\
              - Fight in corridors to face one monster at a time.\n\
-             - Goblins deal 1 dmg/turn to you. You kill them in 2 hits.\n\
-             - Orcs deal 2 dmg/turn. 3 hits to kill.\n\
-             - Trolls deal 4 dmg/turn but take 10 hits to kill. Avoid if low HP.\n\
-             - You regenerate 1 HP every {} turns. Retreat and move to recover.\n\
+             - You regenerate 1 HP every {regen} turns. Retreat and move to recover.\n\
              \n\
              ## Available Tools\n\
              - **act** — move, wait, autorun, or auto_fight (see below)\n\
@@ -470,7 +483,12 @@ impl RoguelikeMcpServer {
              new_game to replay the same dungeon with identical layout and \
              monster placement. Share seeds to compare strategies on the \
              same map.",
-            CONFIG.fov_radius, CONFIG.regen_interval
+            fov = cfg.fov_radius,
+            php = player.hp,
+            patk = player.attack,
+            pdef = player.defense,
+            monsters = monster_lines,
+            regen = cfg.regen_interval,
         );
         Ok(CallToolResult::success(vec![Content::text(rules)]))
     }
@@ -850,7 +868,7 @@ mod tests {
             }
         }
         let player = Entity::player(5, 5);
-        let goblin = Entity::from_template(&data::GOBLIN, 6, 5);
+        let goblin = Entity::from_template(data::goblin(), 6, 5);
         let visible = fov::compute_fov(&m, 5, 5, 8);
         let explored = visible.clone();
 
@@ -865,6 +883,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            regen_interval: data::config().regen_interval,
+            max_autorun_steps: data::config().max_autorun_steps,
         };
         state.update_fov();
 

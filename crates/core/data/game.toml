@@ -1,0 +1,46 @@
+[player]
+hp = 30
+attack = 5
+defense = 2
+glyph = "@"
+color = "Yellow"
+
+[config]
+fov_radius = 8
+max_rooms = 30
+room_size_min = 4
+room_size_max = 10
+max_monsters_per_room = 2
+ui_bottom_rows = 5
+max_autorun_steps = 100
+regen_interval = 3
+
+[[monsters]]
+name = "Goblin"
+glyph = "g"
+color = "Green"
+hp = 6
+attack = 3
+defense = 0
+ai = "Chase"
+spawn_weight = 60
+
+[[monsters]]
+name = "Orc"
+glyph = "o"
+color = "DarkGreen"
+hp = 12
+attack = 4
+defense = 1
+ai = "Chase"
+spawn_weight = 30
+
+[[monsters]]
+name = "Troll"
+glyph = "T"
+color = "DarkRed"
+hp = 20
+attack = 6
+defense = 3
+ai = "Chase"
+spawn_weight = 10

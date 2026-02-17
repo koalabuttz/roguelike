@@ -144,9 +144,9 @@ pub fn build_exploration_graph(state: &GameState) -> ExplorationGraph {
 
 /// Check if (x, y) is within 1-tile buffer of any room.
 fn is_near_any_room(x: Coord, y: Coord, rooms: &[Rect]) -> bool {
-    rooms.iter().any(|r| {
-        x >= r.x1 - 1 && x <= r.x2 + 1 && y >= r.y1 - 1 && y <= r.y2 + 1
-    })
+    rooms
+        .iter()
+        .any(|r| x >= r.x1 - 1 && x <= r.x2 + 1 && y >= r.y1 - 1 && y <= r.y2 + 1)
 }
 
 /// Count walkable neighbors of a tile (8-directional).
@@ -299,6 +299,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            regen_interval: data::config().regen_interval,
+            max_autorun_steps: data::config().max_autorun_steps,
         }
     }
 
@@ -337,6 +339,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            regen_interval: data::config().regen_interval,
+            max_autorun_steps: data::config().max_autorun_steps,
         }
     }
 
@@ -377,7 +381,7 @@ mod tests {
     #[test]
     fn room_with_monster() {
         let mut gs = single_room_game();
-        let goblin = Entity::from_template(&data::GOBLIN, 6, 6);
+        let goblin = Entity::from_template(data::goblin(), 6, 6);
         gs.entities.push(goblin);
         gs.update_fov();
 
@@ -390,7 +394,7 @@ mod tests {
     #[test]
     fn room_with_corpse() {
         let mut gs = single_room_game();
-        let mut dead = Entity::from_template(&data::GOBLIN, 6, 6);
+        let mut dead = Entity::from_template(data::goblin(), 6, 6);
         dead.alive = false;
         gs.entities.push(dead);
 
@@ -441,14 +445,13 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            regen_interval: data::config().regen_interval,
+            max_autorun_steps: data::config().max_autorun_steps,
         };
 
         let graph = build_exploration_graph(&gs);
         // Room 0's east exit should connect to room 1
-        let east_exit = graph.rooms[0]
-            .exits
-            .iter()
-            .find(|e| e.direction == "east");
+        let east_exit = graph.rooms[0].exits.iter().find(|e| e.direction == "east");
         assert!(east_exit.is_some(), "Room 0 should have east exit");
         assert_eq!(east_exit.unwrap().target_room, Some(1));
     }
@@ -481,6 +484,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            regen_interval: data::config().regen_interval,
+            max_autorun_steps: data::config().max_autorun_steps,
         };
 
         let graph = build_exploration_graph(&gs);
@@ -499,7 +504,11 @@ mod tests {
         // (player at 5,5, center of room at 6,6 → distance 1)
         assert!(graph.rooms[0].distance.is_some());
         let dist = graph.rooms[0].distance.unwrap();
-        assert!(dist <= 2, "Distance to player's room should be small, got {}", dist);
+        assert!(
+            dist <= 2,
+            "Distance to player's room should be small, got {}",
+            dist
+        );
     }
 
     #[test]
@@ -525,7 +534,11 @@ mod tests {
         assert!(graph.rooms[1].explored);
         assert!(graph.rooms[1].distance.is_some());
         let dist = graph.rooms[1].distance.unwrap();
-        assert!(dist > 0, "Distance to other room should be positive, got {}", dist);
+        assert!(
+            dist > 0,
+            "Distance to other room should be positive, got {}",
+            dist
+        );
     }
 
     #[test]

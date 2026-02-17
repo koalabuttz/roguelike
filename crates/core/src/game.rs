@@ -262,6 +262,13 @@ pub struct EntityInfo {
     pub alive: bool,
 }
 
+fn default_regen_interval() -> i32 {
+    3
+}
+fn default_max_autorun_steps() -> i32 {
+    100
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct GameState {
     pub map: map::Map,
@@ -278,10 +285,15 @@ pub struct GameState {
     pub seed: u64,
     #[serde(skip)]
     pub dirty: bool,
+    #[serde(default = "default_regen_interval")]
+    pub regen_interval: i32,
+    #[serde(default = "default_max_autorun_steps")]
+    pub max_autorun_steps: i32,
 }
 
 impl GameState {
     /// Create a new game with a random seed.
+    #[cfg(feature = "data-files")]
     pub fn new(width: Coord, height: Coord) -> Self {
         Self::with_seed(width, height, rand::random::<u64>())
     }
@@ -290,8 +302,20 @@ impl GameState {
     ///
     /// Presets produce deterministic topologies for testing and development.
     /// Monster spawning still uses the seed for placement within rooms.
+    #[cfg(feature = "data-files")]
     pub fn with_preset(width: Coord, height: Coord, seed: u64, preset: map::MapPreset) -> Self {
-        let cfg = &data::CONFIG;
+        Self::with_preset_data(width, height, seed, preset, data::defaults())
+    }
+
+    /// Create a new game using a named map preset and custom game data.
+    pub fn with_preset_data(
+        width: Coord,
+        height: Coord,
+        seed: u64,
+        preset: map::MapPreset,
+        game_data: &data::GameData,
+    ) -> Self {
+        let cfg = &game_data.config;
         let mut master = StdRng::seed_from_u64(seed);
         let mut map_rng = StdRng::from_rng(&mut master).unwrap();
         let mut spawn_rng = StdRng::from_rng(&mut master).unwrap();
@@ -300,10 +324,10 @@ impl GameState {
         let (px, py) = map.from_preset(preset, &mut map_rng);
         map.compute_structural_walls();
 
-        let mut entities = vec![Entity::player(px, py)];
+        let mut entities = vec![Entity::player_from_def(&game_data.player, px, py)];
         let monsters = spawn::spawn_monsters(
             &map,
-            data::SPAWN_TABLE,
+            &game_data.monsters,
             cfg.max_monsters_per_room,
             &mut spawn_rng,
         );
@@ -326,6 +350,8 @@ impl GameState {
             turn_count: 0,
             seed,
             dirty: false,
+            regen_interval: cfg.regen_interval,
+            max_autorun_steps: cfg.max_autorun_steps,
         }
     }
 
@@ -334,8 +360,17 @@ impl GameState {
     /// The seed determines map layout and monster placement. Separate RNG
     /// streams ensure that changes to one system (e.g., spawn weights)
     /// don't alter another (e.g., map layout) for the same seed.
+    #[cfg(feature = "data-files")]
     pub fn with_seed(width: Coord, height: Coord, seed: u64) -> Self {
-        let cfg = &data::CONFIG;
+        Self::with_data(width, height, seed, data::defaults())
+    }
+
+    /// Create a new game with a specific seed and custom game data.
+    ///
+    /// This is the modding entry point — pass custom `GameData` to override
+    /// all balance values, monster definitions, and player stats.
+    pub fn with_data(width: Coord, height: Coord, seed: u64, game_data: &data::GameData) -> Self {
+        let cfg = &game_data.config;
 
         // Derive independent RNG streams from the master seed.
         let mut master = StdRng::seed_from_u64(seed);
@@ -351,10 +386,10 @@ impl GameState {
         );
         map.compute_structural_walls();
 
-        let mut entities = vec![Entity::player(px, py)];
+        let mut entities = vec![Entity::player_from_def(&game_data.player, px, py)];
         let monsters = spawn::spawn_monsters(
             &map,
-            data::SPAWN_TABLE,
+            &game_data.monsters,
             cfg.max_monsters_per_room,
             &mut spawn_rng,
         );
@@ -377,6 +412,8 @@ impl GameState {
             turn_count: 0,
             seed,
             dirty: false,
+            regen_interval: cfg.regen_interval,
+            max_autorun_steps: cfg.max_autorun_steps,
         }
     }
 
@@ -446,10 +483,7 @@ impl GameState {
     /// Heal the player by 1 HP if enough turns have passed (NetHack-style regen).
     fn apply_regen(&mut self) {
         let player = &mut self.entities[0];
-        if player.alive
-            && player.hp < player.max_hp
-            && self.turn_count % data::CONFIG.regen_interval == 0
-        {
+        if player.alive && player.hp < player.max_hp && self.turn_count % self.regen_interval == 0 {
             player.hp += 1;
         }
     }
@@ -485,7 +519,7 @@ impl GameState {
         AutorunStepper {
             mode: StepperMode::Directional { dx, dy },
             steps_taken: 0,
-            max_steps: data::CONFIG.max_autorun_steps,
+            max_steps: self.max_autorun_steps,
             all_messages: Vec::new(),
             explored_before: self.explored.len() as i32,
         }
@@ -502,7 +536,7 @@ impl GameState {
         Ok(AutorunStepper {
             mode: StepperMode::FollowPath { path, index: 0 },
             steps_taken: 0,
-            max_steps: data::CONFIG.max_autorun_steps,
+            max_steps: self.max_autorun_steps,
             all_messages: Vec::new(),
             explored_before: self.explored.len() as i32,
         })
@@ -877,6 +911,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            regen_interval: data::config().regen_interval,
+            max_autorun_steps: data::config().max_autorun_steps,
         }
     }
 
@@ -889,7 +925,7 @@ mod tests {
     #[test]
     fn entity_at_finds_living_entity() {
         let mut gs = test_game();
-        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        let monster = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(monster);
         assert_eq!(gs.entity_at(6, 5), Some(1));
     }
@@ -897,7 +933,7 @@ mod tests {
     #[test]
     fn entity_at_ignores_dead() {
         let mut gs = test_game();
-        let mut monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        let mut monster = Entity::from_template(data::goblin(), 6, 5);
         monster.alive = false;
         gs.entities.push(monster);
         assert_eq!(gs.entity_at(6, 5), None);
@@ -932,7 +968,7 @@ mod tests {
     #[test]
     fn player_attacks_monster() {
         let mut gs = test_game();
-        let monster = Entity::from_template(&data::ORC, 6, 5);
+        let monster = Entity::from_template(data::orc(), 6, 5);
         let monster_hp = monster.hp;
         gs.entities.push(monster);
         let acted = gs.player_move_or_attack(1, 0); // attack orc at (6,5)
@@ -994,7 +1030,7 @@ mod tests {
     #[test]
     fn step_includes_monster_turn() {
         let mut gs = test_game();
-        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        let monster = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(monster);
         gs.update_fov();
         let hp_before = gs.entities[0].hp;
@@ -1011,7 +1047,7 @@ mod tests {
         let mut gs = test_game();
         gs.entities[0].hp = 1;
         gs.entities[0].defense = 0;
-        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        let monster = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(monster);
         gs.update_fov();
         let result = gs.step(GameCommand::Wait);
@@ -1023,7 +1059,7 @@ mod tests {
     fn step_captures_only_new_messages() {
         let mut gs = test_game();
         gs.log.add("pre-existing message");
-        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        let monster = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(monster);
         gs.update_fov();
         let result = gs.step(GameCommand::Wait);
@@ -1061,7 +1097,7 @@ mod tests {
     #[test]
     fn observe_shows_visible_monsters() {
         let mut gs = test_game();
-        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        let monster = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(monster);
         gs.update_fov();
         let obs = gs.observe();
@@ -1074,7 +1110,7 @@ mod tests {
     fn observe_hides_non_visible_monsters() {
         let mut gs = test_game();
         // Place monster far away, outside the carved area and FOV
-        let monster = Entity::from_template(&data::GOBLIN, 19, 19);
+        let monster = Entity::from_template(data::goblin(), 19, 19);
         gs.entities.push(monster);
         gs.update_fov();
         let obs = gs.observe();
@@ -1084,7 +1120,7 @@ mod tests {
     #[test]
     fn observe_shows_corpses() {
         let mut gs = test_game();
-        let mut corpse = Entity::from_template(&data::GOBLIN, 6, 5);
+        let mut corpse = Entity::from_template(data::goblin(), 6, 5);
         corpse.alive = false;
         gs.entities.push(corpse);
         gs.update_fov();
@@ -1117,7 +1153,7 @@ mod tests {
     #[test]
     fn glyph_at_returns_alive_entity() {
         let mut gs = test_game();
-        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        let monster = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(monster);
         assert_eq!(gs.glyph_at(6, 5), Some('g'));
     }
@@ -1125,7 +1161,7 @@ mod tests {
     #[test]
     fn glyph_at_returns_corpse_for_dead() {
         let mut gs = test_game();
-        let mut monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        let mut monster = Entity::from_template(data::goblin(), 6, 5);
         monster.alive = false;
         gs.entities.push(monster);
         assert_eq!(gs.glyph_at(6, 5), Some('%'));
@@ -1134,10 +1170,10 @@ mod tests {
     #[test]
     fn glyph_at_alive_over_dead() {
         let mut gs = test_game();
-        let mut dead = Entity::from_template(&data::GOBLIN, 6, 5);
+        let mut dead = Entity::from_template(data::goblin(), 6, 5);
         dead.alive = false;
         gs.entities.push(dead);
-        let alive = Entity::from_template(&data::ORC, 6, 5);
+        let alive = Entity::from_template(data::orc(), 6, 5);
         gs.entities.push(alive);
         // Alive entity should win
         assert_eq!(gs.glyph_at(6, 5), Some('o'));
@@ -1174,6 +1210,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            regen_interval: data::config().regen_interval,
+            max_autorun_steps: data::config().max_autorun_steps,
         }
     }
 
@@ -1193,7 +1231,7 @@ mod tests {
         let mut gs = corridor_game();
         // Place a goblin at x=14, just outside FOV radius of 8 from (5,5).
         // After moving east a few tiles, the goblin enters FOV.
-        let monster = Entity::from_template(&data::GOBLIN, 14, 5);
+        let monster = Entity::from_template(data::goblin(), 14, 5);
         gs.entities.push(monster);
         let result = gs.autorun(1, 0);
         assert_eq!(result.stop_reason, AutorunStopReason::MonsterSpotted);
@@ -1205,7 +1243,7 @@ mod tests {
         let mut gs = corridor_game();
         // Place a goblin adjacent at (6, 5). Autorun should stop immediately
         // because a monster is right next to us — don't auto-attack.
-        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        let monster = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(monster);
         gs.update_fov();
         let result = gs.autorun(1, 0);
@@ -1243,6 +1281,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            regen_interval: data::config().regen_interval,
+            max_autorun_steps: data::config().max_autorun_steps,
         };
 
         let result = gs.autorun(1, 0);
@@ -1286,6 +1326,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            regen_interval: data::config().regen_interval,
+            max_autorun_steps: data::config().max_autorun_steps,
         };
 
         let result = gs.autorun(1, 0);
@@ -1318,11 +1360,13 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            regen_interval: data::config().regen_interval,
+            max_autorun_steps: data::config().max_autorun_steps,
         };
 
         let result = gs.autorun(1, 0);
         assert_eq!(result.stop_reason, AutorunStopReason::MaxSteps);
-        assert_eq!(result.steps_taken, data::CONFIG.max_autorun_steps);
+        assert_eq!(result.steps_taken, data::config().max_autorun_steps);
     }
 
     #[test]
@@ -1377,6 +1421,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            regen_interval: data::config().regen_interval,
+            max_autorun_steps: data::config().max_autorun_steps,
         };
 
         let result = gs.autorun(1, 0);
@@ -1413,6 +1459,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            regen_interval: data::config().regen_interval,
+            max_autorun_steps: data::config().max_autorun_steps,
         };
 
         let result = gs.autorun(1, 0);
@@ -1436,10 +1484,10 @@ mod tests {
     #[test]
     fn observe_stats_with_kills() {
         let mut gs = test_game();
-        let mut dead = Entity::from_template(&data::GOBLIN, 6, 5);
+        let mut dead = Entity::from_template(data::goblin(), 6, 5);
         dead.alive = false;
         gs.entities.push(dead);
-        let alive = Entity::from_template(&data::ORC, 7, 5);
+        let alive = Entity::from_template(data::orc(), 7, 5);
         gs.entities.push(alive);
         gs.update_fov();
         let obs = gs.observe();
@@ -1507,7 +1555,7 @@ mod tests {
     fn explored_map_hides_monsters_outside_fov() {
         let mut gs = test_game();
         // Place a monster far from player but technically in explored area
-        let monster = Entity::from_template(&data::GOBLIN, 3, 3);
+        let monster = Entity::from_template(data::goblin(), 3, 3);
         gs.entities.push(monster);
         gs.update_fov();
         // Verify the monster is in explored area but check if it's in FOV
@@ -1524,7 +1572,7 @@ mod tests {
     #[test]
     fn auto_fight_kills_goblin() {
         let mut gs = test_game();
-        let goblin = Entity::from_template(&data::GOBLIN, 6, 5);
+        let goblin = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(goblin);
         gs.update_fov();
         let result = gs.auto_fight().unwrap();
@@ -1540,7 +1588,7 @@ mod tests {
     #[test]
     fn auto_fight_kills_orc() {
         let mut gs = test_game();
-        let orc = Entity::from_template(&data::ORC, 6, 5);
+        let orc = Entity::from_template(data::orc(), 6, 5);
         gs.entities.push(orc);
         gs.update_fov();
         let result = gs.auto_fight().unwrap();
@@ -1565,9 +1613,9 @@ mod tests {
     fn auto_fight_picks_weakest_target() {
         let mut gs = test_game();
         // Place an orc (12 HP) and a goblin (6 HP) adjacent
-        let orc = Entity::from_template(&data::ORC, 4, 5);
+        let orc = Entity::from_template(data::orc(), 4, 5);
         gs.entities.push(orc);
-        let goblin = Entity::from_template(&data::GOBLIN, 6, 5);
+        let goblin = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(goblin);
         gs.update_fov();
         let result = gs.auto_fight().unwrap();
@@ -1581,7 +1629,7 @@ mod tests {
         let mut gs = test_game();
         gs.entities[0].hp = 5; // low HP
         gs.entities[0].defense = 0;
-        let troll = Entity::from_template(&data::TROLL, 6, 5);
+        let troll = Entity::from_template(data::troll(), 6, 5);
         gs.entities.push(troll);
         gs.update_fov();
         let result = gs.auto_fight().unwrap();
@@ -1596,7 +1644,7 @@ mod tests {
         let mut gs = test_game();
         gs.entities[0].hp = 20;
         // Advance to one turn before regen triggers
-        gs.turn_count = data::CONFIG.regen_interval - 1;
+        gs.turn_count = data::config().regen_interval - 1;
         let result = gs.step(GameCommand::Wait);
         assert!(result.action_taken);
         // turn_count is now regen_interval, so regen fires
@@ -1607,7 +1655,7 @@ mod tests {
     fn regen_does_not_heal_between_intervals() {
         let mut gs = test_game();
         gs.entities[0].hp = 20;
-        gs.turn_count = data::CONFIG.regen_interval; // just healed
+        gs.turn_count = data::config().regen_interval; // just healed
         let result = gs.step(GameCommand::Wait);
         assert!(result.action_taken);
         // turn_count is regen_interval + 1, not a multiple — no heal
@@ -1618,7 +1666,7 @@ mod tests {
     fn regen_does_not_exceed_max_hp() {
         let mut gs = test_game();
         // Already at full HP
-        gs.turn_count = data::CONFIG.regen_interval - 1;
+        gs.turn_count = data::config().regen_interval - 1;
         let hp_before = gs.entities[0].hp;
         assert_eq!(hp_before, gs.entities[0].max_hp);
         gs.step(GameCommand::Wait);
@@ -1630,9 +1678,9 @@ mod tests {
         let mut gs = test_game();
         gs.entities[0].hp = 1;
         gs.entities[0].defense = 0;
-        gs.turn_count = data::CONFIG.regen_interval - 1;
+        gs.turn_count = data::config().regen_interval - 1;
         // Place a monster that will kill the player
-        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        let monster = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(monster);
         gs.update_fov();
         gs.step(GameCommand::Wait);
@@ -1645,7 +1693,7 @@ mod tests {
     fn regen_accumulates_over_multiple_intervals() {
         let mut gs = test_game();
         gs.entities[0].hp = 20;
-        let interval = data::CONFIG.regen_interval;
+        let interval = data::config().regen_interval;
         // Run enough turns for 3 regen ticks
         for _ in 0..(interval * 3) {
             gs.step(GameCommand::Wait);
@@ -1757,7 +1805,7 @@ mod tests {
         let mut gs = test_game();
         // Place monster directly adjacent at (6, 5). The has_adjacent_monster
         // check fires before any steps are taken.
-        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        let monster = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(monster);
         gs.update_fov();
         let result = gs.pathfind_to(9, 5).unwrap();
@@ -1770,7 +1818,7 @@ mod tests {
         let mut gs = test_game();
         // Place monster 2 tiles away at (7, 5). Player steps to (6, 5),
         // monster is now adjacent and attacks during its turn → damage taken.
-        let monster = Entity::from_template(&data::GOBLIN, 7, 5);
+        let monster = Entity::from_template(data::goblin(), 7, 5);
         gs.entities.push(monster);
         gs.update_fov();
         let result = gs.pathfind_to(9, 5).unwrap();
@@ -1847,7 +1895,7 @@ mod tests {
     fn auto_explore_stops_for_monster() {
         let mut gs = corridor_game();
         // Place monster adjacent at (6, 5).
-        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        let monster = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(monster);
         gs.update_fov();
         let result = gs.auto_explore().unwrap();
@@ -1913,7 +1961,7 @@ mod tests {
     #[test]
     fn stepper_stops_for_adjacent_monster() {
         let mut gs = corridor_game();
-        let monster = Entity::from_template(&data::GOBLIN, 6, 5);
+        let monster = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(monster);
         gs.update_fov();
         let mut stepper = gs.start_autorun(1, 0);

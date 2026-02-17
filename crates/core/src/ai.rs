@@ -114,7 +114,7 @@ mod tests {
     }
 
     fn make_monster(x: i32, y: i32) -> Entity {
-        Entity::from_template(&data::GOBLIN, x, y)
+        Entity::from_template(data::goblin(), x, y)
     }
 
     #[test]

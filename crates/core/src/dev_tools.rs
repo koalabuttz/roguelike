@@ -85,11 +85,16 @@ pub fn exec_dev(gs: &mut GameState, session: &mut DevSession, cmd: DevCommand) -
             if !gs.map.is_walkable(x, y) {
                 return format!("Cannot spawn at ({}, {}): not walkable.", x, y);
             }
-            let template = match name.to_lowercase().as_str() {
-                "goblin" => &data::GOBLIN,
-                "orc" => &data::ORC,
-                "troll" => &data::TROLL,
-                _ => return format!("Unknown monster: '{}'. Use goblin, orc, or troll.", name),
+            let template = match data::defaults().monster_by_name(&name) {
+                Some(t) => t,
+                None => {
+                    let known: Vec<&str> = data::defaults()
+                        .monsters
+                        .iter()
+                        .map(|m| m.name.as_str())
+                        .collect();
+                    return format!("Unknown monster: '{}'. Known: {}.", name, known.join(", "));
+                }
             };
             gs.entities.push(Entity::from_template(template, x, y));
             format!("Spawned {} at ({}, {}).", template.name, x, y)
@@ -370,6 +375,8 @@ mod tests {
             turn_count: 0,
             seed: 0,
             dirty: false,
+            regen_interval: data::config().regen_interval,
+            max_autorun_steps: data::config().max_autorun_steps,
         }
     }
 
@@ -503,8 +510,9 @@ mod tests {
     fn kill_all_monsters() {
         let mut gs = test_game();
         let mut session = DevSession::default();
-        gs.entities.push(Entity::from_template(&data::GOBLIN, 3, 3));
-        gs.entities.push(Entity::from_template(&data::ORC, 4, 4));
+        gs.entities
+            .push(Entity::from_template(data::goblin(), 3, 3));
+        gs.entities.push(Entity::from_template(data::orc(), 4, 4));
         let msg = exec_dev(&mut gs, &mut session, DevCommand::KillAll);
         assert!(msg.contains("Killed 2"));
         assert!(gs.entities.iter().skip(1).all(|e| !e.alive));
@@ -541,7 +549,7 @@ mod tests {
         };
         gs.entities[0].hp = 1;
         gs.entities[0].attack = 0;
-        let mut monster = Entity::from_template(&data::TROLL, 6, 5);
+        let mut monster = Entity::from_template(data::troll(), 6, 5);
         monster.attack = 100;
         gs.entities.push(monster);
         gs.step(GameCommand::Wait);
@@ -618,7 +626,7 @@ mod tests {
         let mut gs = test_game();
         gs.entities[0].hp = 1;
         gs.entities[0].attack = 0;
-        let mut monster = Entity::from_template(&data::TROLL, 6, 5);
+        let mut monster = Entity::from_template(data::troll(), 6, 5);
         monster.attack = 100;
         gs.entities.push(monster);
         let commands: Vec<_> = (0..100).map(|_| GameCommand::Wait).collect();

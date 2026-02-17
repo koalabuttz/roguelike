@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-roguelike-core = { path = "../core", default-features = false, features = [] }
+roguelike-core = { path = "../core", default-features = false, features = ["data-files"] }
 rmcp = { version = "0.15", features = ["server", "transport-io", "schemars"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde = { workspace = true }

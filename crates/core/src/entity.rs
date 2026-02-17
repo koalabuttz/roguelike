@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::data::MonsterTemplate;
+use crate::data::{MonsterDef, PlayerDef};
 use crate::types::{Coord, GameColor, Stat};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -33,32 +33,40 @@ pub struct Entity {
 }
 
 impl Entity {
-    pub fn player(x: Coord, y: Coord) -> Self {
+    /// Create a player entity from a PlayerDef.
+    pub fn player_from_def(def: &PlayerDef, x: Coord, y: Coord) -> Self {
         Entity {
             x,
             y,
-            glyph: '@',
-            color: GameColor::Yellow,
+            glyph: def.glyph_char(),
+            color: def.game_color(),
             name: "Player".into(),
             kind: EntityKind::Player,
             ai: AiBehavior::None,
-            hp: 30,
-            max_hp: 30,
-            attack: 5,
-            defense: 2,
+            hp: def.hp,
+            max_hp: def.hp,
+            attack: def.attack,
+            defense: def.defense,
             alive: true,
         }
     }
 
-    pub fn from_template(template: &MonsterTemplate, x: Coord, y: Coord) -> Self {
+    /// Create a player entity with default stats.
+    #[cfg(feature = "data-files")]
+    pub fn player(x: Coord, y: Coord) -> Self {
+        use crate::data;
+        Self::player_from_def(&data::defaults().player, x, y)
+    }
+
+    pub fn from_template(template: &MonsterDef, x: Coord, y: Coord) -> Self {
         Entity {
             x,
             y,
-            glyph: template.glyph,
-            color: template.color,
-            name: template.name.into(),
+            glyph: template.glyph_char(),
+            color: template.game_color(),
+            name: template.name.clone(),
             kind: EntityKind::Monster,
-            ai: template.ai,
+            ai: template.ai_behavior(),
             hp: template.hp,
             max_hp: template.hp,
             attack: template.attack,
@@ -90,23 +98,23 @@ mod tests {
 
     #[test]
     fn from_template_copies_all_fields() {
-        let e = Entity::from_template(&data::GOBLIN, 3, 7);
+        let e = Entity::from_template(data::goblin(), 3, 7);
         assert_eq!(e.x, 3);
         assert_eq!(e.y, 7);
-        assert_eq!(e.glyph, data::GOBLIN.glyph);
-        assert_eq!(e.name, data::GOBLIN.name);
-        assert_eq!(e.hp, data::GOBLIN.hp);
-        assert_eq!(e.max_hp, data::GOBLIN.hp);
-        assert_eq!(e.attack, data::GOBLIN.attack);
-        assert_eq!(e.defense, data::GOBLIN.defense);
+        assert_eq!(e.glyph, data::goblin().glyph_char());
+        assert_eq!(e.name, data::goblin().name);
+        assert_eq!(e.hp, data::goblin().hp);
+        assert_eq!(e.max_hp, data::goblin().hp);
+        assert_eq!(e.attack, data::goblin().attack);
+        assert_eq!(e.defense, data::goblin().defense);
         assert_eq!(e.kind, EntityKind::Monster);
-        assert_eq!(e.ai, data::GOBLIN.ai);
+        assert_eq!(e.ai, data::goblin().ai_behavior());
         assert!(e.alive);
     }
 
     #[test]
     fn from_template_sets_hp_to_max_hp() {
-        let e = Entity::from_template(&data::TROLL, 0, 0);
+        let e = Entity::from_template(data::troll(), 0, 0);
         assert_eq!(e.hp, e.max_hp);
     }
 }

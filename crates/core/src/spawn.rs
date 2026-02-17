@@ -1,6 +1,6 @@
 use rand::Rng;
 
-use crate::data::SpawnEntry;
+use crate::data::MonsterDef;
 use crate::entity::Entity;
 use crate::map::Map;
 
@@ -8,13 +8,15 @@ use crate::map::Map;
 /// Uses the weighted spawn table to pick monster types.
 pub fn spawn_monsters(
     map: &Map,
-    table: &[SpawnEntry],
+    table: &[MonsterDef],
     max_per_room: i32,
     rng: &mut impl Rng,
 ) -> Vec<Entity> {
     let mut monsters = Vec::new();
 
-    let total_weight: u32 = table.iter().map(|e| e.weight).sum();
+    // Filter to entries with positive spawn weight.
+    let entries: Vec<&MonsterDef> = table.iter().filter(|m| m.spawn_weight > 0).collect();
+    let total_weight: u32 = entries.iter().map(|e| e.spawn_weight).sum();
     if total_weight == 0 {
         return monsters;
     }
@@ -26,12 +28,12 @@ pub fn spawn_monsters(
             let y = rng.gen_range(room.y1 + 1..room.y2);
 
             let mut roll = rng.gen_range(0..total_weight);
-            for entry in table {
-                if roll < entry.weight {
-                    monsters.push(Entity::from_template(entry.template, x, y));
+            for entry in &entries {
+                if roll < entry.spawn_weight {
+                    monsters.push(Entity::from_template(entry, x, y));
                     break;
                 }
-                roll -= entry.weight;
+                roll -= entry.spawn_weight;
             }
         }
     }
@@ -70,7 +72,7 @@ mod tests {
         ];
         let m = map_with_rooms(rooms);
         let mut rng = StdRng::seed_from_u64(42);
-        let monsters = spawn_monsters(&m, data::SPAWN_TABLE, 5, &mut rng);
+        let monsters = spawn_monsters(&m, &data::defaults().monsters, 5, &mut rng);
         assert!(monsters.is_empty());
     }
 
@@ -90,7 +92,7 @@ mod tests {
         // Run multiple seeds to get some spawns
         for seed in 0..10 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let monsters = spawn_monsters(&m, data::SPAWN_TABLE, 3, &mut rng);
+            let monsters = spawn_monsters(&m, &data::defaults().monsters, 3, &mut rng);
             for monster in &monsters {
                 assert!(monster.alive);
                 // Should be inside room 1 (room index 1): x in 21..28, y in 21..28

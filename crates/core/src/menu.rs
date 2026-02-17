@@ -42,6 +42,10 @@ pub enum MenuAction {
     CycleMessageLogLines,
     /// A save slot was selected (0-indexed slot number).
     SelectSlot(u8),
+    /// Enter a seed code to start a specific dungeon.
+    EnterSeed,
+    /// Cycle the color palette (for colorblind accessibility).
+    CycleColorPalette,
 }
 
 /// A single menu entry.
@@ -184,6 +188,11 @@ pub fn title_menu(has_save: bool, casual_mode: bool) -> Menu {
                 enabled: has_save,
             },
             MenuItem {
+                label: "Seed".to_string(),
+                action: MenuAction::EnterSeed,
+                enabled: true,
+            },
+            MenuItem {
                 label: "Settings".to_string(),
                 action: MenuAction::Settings,
                 enabled: true,
@@ -204,6 +213,11 @@ pub fn title_menu(has_save: bool, casual_mode: bool) -> Menu {
             MenuItem {
                 label: "New Game".to_string(),
                 action: MenuAction::NewGame,
+                enabled: true,
+            },
+            MenuItem {
+                label: "Seed".to_string(),
+                action: MenuAction::EnterSeed,
                 enabled: true,
             },
             MenuItem {
@@ -344,6 +358,14 @@ pub fn settings_menu(settings: &Settings, platform: Platform) -> Menu {
         items.push(MenuItem {
             label: label.to_string(),
             action: MenuAction::ToggleShowCorpses,
+            enabled: true,
+        });
+    }
+
+    if Setting::ColorPalette.is_available(platform) {
+        items.push(MenuItem {
+            label: format!("Palette: {}", settings.color_palette.display_name()),
+            action: MenuAction::CycleColorPalette,
             enabled: true,
         });
     }
@@ -746,24 +768,27 @@ mod tests {
     fn title_menu_classic_has_expected_items() {
         let menu = title_menu(false, false);
         assert_eq!(menu.title, "R O G U E L I K E");
-        assert_eq!(menu.items.len(), 4);
+        assert_eq!(menu.items.len(), 5);
         assert_eq!(menu.items[0].action, MenuAction::LoadGame); // "Continue"
         assert_eq!(menu.items[0].label, "Continue");
         assert_eq!(menu.items[1].action, MenuAction::NewGame);
-        assert_eq!(menu.items[2].action, MenuAction::Settings);
-        assert_eq!(menu.items[3].action, MenuAction::Quit);
+        assert_eq!(menu.items[2].action, MenuAction::EnterSeed);
+        assert_eq!(menu.items[2].label, "Seed");
+        assert_eq!(menu.items[3].action, MenuAction::Settings);
+        assert_eq!(menu.items[4].action, MenuAction::Quit);
     }
 
     #[test]
     fn title_menu_casual_has_expected_items() {
         let menu = title_menu(false, true);
         assert_eq!(menu.title, "R O G U E L I K E");
-        assert_eq!(menu.items.len(), 4);
+        assert_eq!(menu.items.len(), 5);
         assert_eq!(menu.items[0].action, MenuAction::NewGame);
         assert_eq!(menu.items[1].action, MenuAction::LoadGame);
         assert_eq!(menu.items[1].label, "Load Game");
-        assert_eq!(menu.items[2].action, MenuAction::Settings);
-        assert_eq!(menu.items[3].action, MenuAction::Quit);
+        assert_eq!(menu.items[2].action, MenuAction::EnterSeed);
+        assert_eq!(menu.items[3].action, MenuAction::Settings);
+        assert_eq!(menu.items[4].action, MenuAction::Quit);
     }
 
     #[test]
@@ -954,12 +979,13 @@ mod tests {
     fn settings_menu_mcp_hides_unavailable() {
         let s = Settings::defaults_for(Platform::Mcp);
         let menu = settings_menu(&s, Platform::Mcp);
-        // MCP should not have AnimationSpeed, ViKeys, Numpad, or ShowKeybindHints.
+        // MCP should not have AnimationSpeed, ViKeys, Numpad, ShowKeybindHints, or ColorPalette.
         let actions: Vec<_> = menu.items.iter().map(|i| i.action).collect();
         assert!(!actions.contains(&MenuAction::CycleAnimationSpeed));
         assert!(!actions.contains(&MenuAction::ToggleViKeys));
         assert!(!actions.contains(&MenuAction::ToggleNumpad));
         assert!(!actions.contains(&MenuAction::ToggleShowKeybindHints));
+        assert!(!actions.contains(&MenuAction::CycleColorPalette));
     }
 
     #[test]
@@ -972,6 +998,7 @@ mod tests {
         assert!(actions.contains(&MenuAction::ToggleShowCoordinates));
         assert!(actions.contains(&MenuAction::ToggleShowKeybindHints));
         assert!(actions.contains(&MenuAction::ToggleShowCorpses));
+        assert!(actions.contains(&MenuAction::CycleColorPalette));
         assert!(actions.contains(&MenuAction::ToggleViKeys));
         assert!(actions.contains(&MenuAction::ToggleNumpad));
         assert!(actions.contains(&MenuAction::CycleAnimationSpeed));

@@ -9,6 +9,40 @@ pub enum Platform {
     C64,
 }
 
+/// Color palette for accessibility (colorblind modes).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ColorPalette {
+    #[default]
+    Default,
+    Protanopia,
+    Deuteranopia,
+}
+
+impl ColorPalette {
+    pub const ALL: [ColorPalette; 3] = [
+        ColorPalette::Default,
+        ColorPalette::Protanopia,
+        ColorPalette::Deuteranopia,
+    ];
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            ColorPalette::Default => "Default",
+            ColorPalette::Protanopia => "Protanopia",
+            ColorPalette::Deuteranopia => "Deuteranopia",
+        }
+    }
+
+    pub fn next(self) -> ColorPalette {
+        match self {
+            ColorPalette::Default => ColorPalette::Protanopia,
+            ColorPalette::Protanopia => ColorPalette::Deuteranopia,
+            ColorPalette::Deuteranopia => ColorPalette::Default,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Setting {
     CasualMode,
@@ -21,6 +55,7 @@ pub enum Setting {
     AnimationSpeed,
     ViKeys,
     Numpad,
+    ColorPalette,
 }
 
 impl Setting {
@@ -33,6 +68,7 @@ impl Setting {
                     | Setting::ViKeys
                     | Setting::Numpad
                     | Setting::ShowKeybindHints
+                    | Setting::ColorPalette
             ),
             Platform::Gba => !matches!(
                 self,
@@ -69,6 +105,10 @@ fn default_message_log_lines() -> u8 {
     4
 }
 
+fn default_palette() -> ColorPalette {
+    ColorPalette::Default
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default)]
@@ -91,6 +131,8 @@ pub struct Settings {
     pub animation_speed_ms: u32,
     #[serde(default = "default_message_log_lines")]
     pub message_log_lines: u8,
+    #[serde(default = "default_palette")]
+    pub color_palette: ColorPalette,
 }
 
 impl Default for Settings {
@@ -113,6 +155,7 @@ impl Settings {
                 autosave_frequency: 1,
                 animation_speed_ms: 50,
                 message_log_lines: 4,
+                color_palette: ColorPalette::Default,
             },
             Platform::Mcp => Settings {
                 casual_mode: false,
@@ -125,6 +168,7 @@ impl Settings {
                 autosave_frequency: 1,
                 animation_speed_ms: 0,
                 message_log_lines: 4,
+                color_palette: ColorPalette::Default,
             },
             Platform::Gba => Settings {
                 casual_mode: false,
@@ -137,6 +181,7 @@ impl Settings {
                 autosave_frequency: 1,
                 animation_speed_ms: 50,
                 message_log_lines: 4,
+                color_palette: ColorPalette::Default,
             },
             Platform::Vita => Settings {
                 casual_mode: false,
@@ -149,6 +194,7 @@ impl Settings {
                 autosave_frequency: 1,
                 animation_speed_ms: 50,
                 message_log_lines: 4,
+                color_palette: ColorPalette::Default,
             },
             Platform::C64 => Settings {
                 casual_mode: false,
@@ -161,6 +207,7 @@ impl Settings {
                 autosave_frequency: 1,
                 animation_speed_ms: 0,
                 message_log_lines: 4,
+                color_palette: ColorPalette::Default,
             },
         }
     }
@@ -242,6 +289,7 @@ mod tests {
             Setting::AnimationSpeed,
             Setting::ViKeys,
             Setting::Numpad,
+            Setting::ColorPalette,
         ];
         for s in all {
             assert!(
@@ -299,5 +347,50 @@ mod tests {
         assert_eq!(loaded.autosave_frequency, 1);
         assert_eq!(loaded.animation_speed_ms, 50);
         assert_eq!(loaded.message_log_lines, 4);
+        assert_eq!(loaded.color_palette, ColorPalette::Default);
+    }
+
+    #[test]
+    fn color_palette_default_value() {
+        let s = Settings::default();
+        assert_eq!(s.color_palette, ColorPalette::Default);
+    }
+
+    #[test]
+    fn color_palette_cycle_order() {
+        assert_eq!(ColorPalette::Default.next(), ColorPalette::Protanopia);
+        assert_eq!(ColorPalette::Protanopia.next(), ColorPalette::Deuteranopia);
+        assert_eq!(ColorPalette::Deuteranopia.next(), ColorPalette::Default);
+    }
+
+    #[test]
+    fn color_palette_display_names() {
+        assert_eq!(ColorPalette::Default.display_name(), "Default");
+        assert_eq!(ColorPalette::Protanopia.display_name(), "Protanopia");
+        assert_eq!(ColorPalette::Deuteranopia.display_name(), "Deuteranopia");
+    }
+
+    #[test]
+    fn color_palette_serde_roundtrip() {
+        let original = Settings {
+            color_palette: ColorPalette::Protanopia,
+            ..Settings::default()
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let loaded: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.color_palette, ColorPalette::Protanopia);
+    }
+
+    #[test]
+    fn color_palette_not_available_on_mcp() {
+        assert!(!Setting::ColorPalette.is_available(Platform::Mcp));
+    }
+
+    #[test]
+    fn color_palette_available_on_terminal_gba_vita_c64() {
+        assert!(Setting::ColorPalette.is_available(Platform::Terminal));
+        assert!(Setting::ColorPalette.is_available(Platform::Gba));
+        assert!(Setting::ColorPalette.is_available(Platform::Vita));
+        assert!(Setting::ColorPalette.is_available(Platform::C64));
     }
 }

@@ -504,6 +504,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 42,
+            preset: None,
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,

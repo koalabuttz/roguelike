@@ -9,7 +9,7 @@ use crossterm::{
 use roguelike_core::game::GameState;
 use roguelike_core::map::{self, Tile};
 use roguelike_core::platform::Renderer;
-use roguelike_core::settings::Settings;
+use roguelike_core::settings::{ColorPalette, Settings};
 use roguelike_core::types::{Coord, GameColor};
 
 /// Map a platform-independent `GameColor` to a crossterm terminal color.
@@ -27,6 +27,57 @@ fn to_crossterm_color(c: GameColor) -> Color {
         GameColor::DarkBlue => Color::DarkBlue,
         GameColor::Cyan => Color::Cyan,
         GameColor::Rgb(r, g, b) => Color::Rgb { r, g, b },
+    }
+}
+
+/// Remap a `GameColor` for protanopia (no red cones — red/green confused).
+fn protanopia_color(c: GameColor) -> Color {
+    match c {
+        GameColor::Green => Color::Cyan,
+        GameColor::DarkGreen => Color::DarkBlue,
+        GameColor::Red => Color::Rgb {
+            r: 255,
+            g: 176,
+            b: 0,
+        },
+        GameColor::DarkRed => Color::Rgb {
+            r: 200,
+            g: 130,
+            b: 0,
+        },
+        _ => to_crossterm_color(c),
+    }
+}
+
+/// Remap a `GameColor` for deuteranopia (no green cones — similar confusion).
+fn deuteranopia_color(c: GameColor) -> Color {
+    match c {
+        GameColor::Green => Color::Cyan,
+        GameColor::DarkGreen => Color::Rgb {
+            r: 80,
+            g: 80,
+            b: 200,
+        },
+        GameColor::Red => Color::Rgb {
+            r: 255,
+            g: 140,
+            b: 0,
+        },
+        GameColor::DarkRed => Color::Rgb {
+            r: 200,
+            g: 100,
+            b: 0,
+        },
+        _ => to_crossterm_color(c),
+    }
+}
+
+/// Map a `GameColor` through the selected palette to a crossterm `Color`.
+fn palette_color(c: GameColor, palette: ColorPalette) -> Color {
+    match palette {
+        ColorPalette::Default => to_crossterm_color(c),
+        ColorPalette::Protanopia => protanopia_color(c),
+        ColorPalette::Deuteranopia => deuteranopia_color(c),
     }
 }
 
@@ -89,8 +140,9 @@ pub fn render<W: Write>(
     screen_height: Coord,
     settings: &Settings,
 ) -> std::io::Result<()> {
-    render_map(w, state)?;
-    render_entities(w, state, settings.show_corpses)?;
+    let pal = settings.color_palette;
+    render_map(w, state, pal)?;
+    render_entities(w, state, settings.show_corpses, pal)?;
     render_status_bar(w, state, screen_width, screen_height, settings)?;
     render_message_log(
         w,
@@ -98,13 +150,14 @@ pub fn render<W: Write>(
         screen_width,
         screen_height,
         settings.message_log_lines,
+        pal,
     )?;
 
     w.flush()?;
     Ok(())
 }
 
-fn render_map<W: Write>(w: &mut W, state: &GameState) -> std::io::Result<()> {
+fn render_map<W: Write>(w: &mut W, state: &GameState, pal: ColorPalette) -> std::io::Result<()> {
     let map = &state.map;
     for y in 0..map.height {
         for x in 0..map.width {
@@ -119,21 +172,21 @@ fn render_map<W: Write>(w: &mut W, state: &GameState) -> std::io::Result<()> {
                     queue!(
                         w,
                         cursor::MoveTo(x as u16, y as u16),
-                        SetForegroundColor(Color::Black),
-                        SetBackgroundColor(Color::Black),
+                        SetForegroundColor(palette_color(GameColor::Black, pal)),
+                        SetBackgroundColor(palette_color(GameColor::Black, pal)),
                         style::Print(' ')
                     )?;
                     continue;
                 }
                 let (ch, fg) = match tile {
-                    Tile::Floor => ('.', Color::DarkGrey),
-                    Tile::Wall => ('#', Color::White),
+                    Tile::Floor => ('.', palette_color(GameColor::DarkGrey, pal)),
+                    Tile::Wall => ('#', palette_color(GameColor::White, pal)),
                 };
                 queue!(
                     w,
                     cursor::MoveTo(x as u16, y as u16),
                     SetForegroundColor(fg),
-                    SetBackgroundColor(Color::Black),
+                    SetBackgroundColor(palette_color(GameColor::Black, pal)),
                     style::Print(ch)
                 )?;
             } else if is_explored {
@@ -144,8 +197,8 @@ fn render_map<W: Write>(w: &mut W, state: &GameState) -> std::io::Result<()> {
                     queue!(
                         w,
                         cursor::MoveTo(x as u16, y as u16),
-                        SetForegroundColor(Color::Black),
-                        SetBackgroundColor(Color::Black),
+                        SetForegroundColor(palette_color(GameColor::Black, pal)),
+                        SetBackgroundColor(palette_color(GameColor::Black, pal)),
                         style::Print(' ')
                     )?;
                     continue;
@@ -154,24 +207,20 @@ fn render_map<W: Write>(w: &mut W, state: &GameState) -> std::io::Result<()> {
                     Tile::Floor => '.',
                     Tile::Wall => '#',
                 };
-                let dim = Color::Rgb {
-                    r: 40,
-                    g: 40,
-                    b: 50,
-                };
+                let dim = palette_color(GameColor::Rgb(40, 40, 50), pal);
                 queue!(
                     w,
                     cursor::MoveTo(x as u16, y as u16),
                     SetForegroundColor(dim),
-                    SetBackgroundColor(Color::Black),
+                    SetBackgroundColor(palette_color(GameColor::Black, pal)),
                     style::Print(ch)
                 )?;
             } else {
                 queue!(
                     w,
                     cursor::MoveTo(x as u16, y as u16),
-                    SetForegroundColor(Color::Black),
-                    SetBackgroundColor(Color::Black),
+                    SetForegroundColor(palette_color(GameColor::Black, pal)),
+                    SetBackgroundColor(palette_color(GameColor::Black, pal)),
                     style::Print(' ')
                 )?;
             }
@@ -184,6 +233,7 @@ fn render_entities<W: Write>(
     w: &mut W,
     state: &GameState,
     show_corpses: bool,
+    pal: ColorPalette,
 ) -> std::io::Result<()> {
     if show_corpses {
         for entity in state.entities.iter() {
@@ -191,8 +241,8 @@ fn render_entities<W: Write>(
                 queue!(
                     w,
                     cursor::MoveTo(entity.x as u16, entity.y as u16),
-                    SetForegroundColor(Color::DarkRed),
-                    SetBackgroundColor(Color::Black),
+                    SetForegroundColor(palette_color(GameColor::DarkRed, pal)),
+                    SetBackgroundColor(palette_color(GameColor::Black, pal)),
                     style::Print('%')
                 )?;
             }
@@ -204,8 +254,8 @@ fn render_entities<W: Write>(
             queue!(
                 w,
                 cursor::MoveTo(entity.x as u16, entity.y as u16),
-                SetForegroundColor(to_crossterm_color(entity.color)),
-                SetBackgroundColor(Color::Black),
+                SetForegroundColor(palette_color(entity.color, pal)),
+                SetBackgroundColor(palette_color(GameColor::Black, pal)),
                 style::Print(entity.glyph)
             )?;
         }
@@ -238,12 +288,13 @@ fn render_status_bar<W: Write>(
     } else {
         0.0
     };
+    let pal = settings.color_palette;
     let hp_color = if hp_pct > 0.6 {
-        Color::Green
+        palette_color(GameColor::Green, pal)
     } else if hp_pct > 0.3 {
-        Color::Yellow
+        palette_color(GameColor::Yellow, pal)
     } else {
-        Color::Red
+        palette_color(GameColor::Red, pal)
     };
 
     let bar_filled: String = "\u{2588}".repeat(fill as usize);
@@ -301,7 +352,7 @@ fn render_status_bar<W: Write>(
         w,
         cursor::MoveTo(0, bar_row),
         SetForegroundColor(hp_color),
-        SetBackgroundColor(Color::DarkBlue),
+        SetBackgroundColor(palette_color(GameColor::DarkBlue, pal)),
         style::Print(truncated)
     )?;
 
@@ -314,6 +365,7 @@ fn render_message_log<W: Write>(
     screen_width: Coord,
     screen_height: Coord,
     message_log_lines: u8,
+    pal: ColorPalette,
 ) -> std::io::Result<()> {
     let n = message_log_lines as usize;
     let log_start_row = (screen_height - message_log_lines as i32) as u16;
@@ -331,16 +383,16 @@ fn render_message_log<W: Write>(
 
         let color =
             if i as usize + messages.len().saturating_sub(n) >= messages.len().saturating_sub(1) {
-                Color::White
+                palette_color(GameColor::White, pal)
             } else {
-                Color::Grey
+                palette_color(GameColor::Grey, pal)
             };
 
         queue!(
             w,
             cursor::MoveTo(0, row),
             SetForegroundColor(color),
-            SetBackgroundColor(Color::Black),
+            SetBackgroundColor(palette_color(GameColor::Black, pal)),
             style::Print(truncated)
         )?;
     }
@@ -352,9 +404,19 @@ fn render_message_log<W: Write>(
         queue!(
             w,
             cursor::MoveTo(x as u16, y as u16),
-            SetForegroundColor(Color::Red),
-            SetBackgroundColor(Color::Black),
+            SetForegroundColor(palette_color(GameColor::Red, pal)),
+            SetBackgroundColor(palette_color(GameColor::Black, pal)),
             style::Print(msg)
+        )?;
+
+        let seed_msg = format!("Seed: {}", state.seed_code());
+        let sx = (screen_width as usize).saturating_sub(seed_msg.len()) / 2;
+        queue!(
+            w,
+            cursor::MoveTo(sx as u16, (y + 1) as u16),
+            SetForegroundColor(palette_color(GameColor::Grey, pal)),
+            SetBackgroundColor(palette_color(GameColor::Black, pal)),
+            style::Print(seed_msg)
         )?;
     }
 

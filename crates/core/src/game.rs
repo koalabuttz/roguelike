@@ -13,6 +13,7 @@ use crate::fov;
 use crate::map;
 use crate::message_log::MessageLog;
 use crate::pathfinding;
+use crate::seed_code::{self, SeedParams};
 use crate::spawn;
 use crate::types::{Coord, Pos, Stat};
 
@@ -83,6 +84,7 @@ pub struct GameObservation {
     #[serde(rename = "explored")]
     pub explored_pct: i32,
     pub seed: u64,
+    pub seed_code: String,
 }
 
 /// Result of an auto-fight sequence — combat resolved in one call.
@@ -283,6 +285,9 @@ pub struct GameState {
     /// The seed used to generate this game. Enables reproducible dungeons,
     /// seed sharing, and deterministic replay.
     pub seed: u64,
+    /// The map preset used for this game, if any.
+    #[serde(default)]
+    pub preset: Option<map::MapPreset>,
     #[serde(skip)]
     pub dirty: bool,
     #[serde(default = "default_regen_interval")]
@@ -349,6 +354,7 @@ impl GameState {
             game_over: false,
             turn_count: 0,
             seed,
+            preset: Some(preset),
             dirty: false,
             regen_interval: cfg.regen_interval,
             max_autorun_steps: cfg.max_autorun_steps,
@@ -411,10 +417,21 @@ impl GameState {
             game_over: false,
             turn_count: 0,
             seed,
+            preset: None,
             dirty: false,
             regen_interval: cfg.regen_interval,
             max_autorun_steps: cfg.max_autorun_steps,
         }
+    }
+
+    /// Generate a shareable seed code for this game.
+    pub fn seed_code(&self) -> String {
+        seed_code::encode(&SeedParams {
+            seed: self.seed,
+            width: self.map.width,
+            height: self.map.height,
+            preset: self.preset,
+        })
     }
 
     pub fn update_fov(&mut self) {
@@ -756,6 +773,7 @@ impl GameState {
             rooms_found,
             explored_pct,
             seed: self.seed,
+            seed_code: self.seed_code(),
         }
     }
 
@@ -910,6 +928,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            preset: None,
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
@@ -1209,6 +1228,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            preset: None,
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
@@ -1280,6 +1300,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            preset: None,
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
@@ -1325,6 +1346,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            preset: None,
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
@@ -1359,6 +1381,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            preset: None,
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
@@ -1420,6 +1443,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            preset: None,
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
@@ -1458,6 +1482,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            preset: None,
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,

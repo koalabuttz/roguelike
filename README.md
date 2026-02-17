@@ -88,7 +88,7 @@ The server communicates over stdio and exposes these tools:
 
 | Tool | Description |
 |------|-------------|
-| `new_game` | Start a game (optional `width`/`height`/`seed`/`compact` params) |
+| `new_game` | Start a game (optional `width`/`height`/`seed`/`compact`/`seed_code` params) |
 | `observe` | Get visible state: map, entities, HP, messages |
 | `act` | Take an action: move, wait, autorun, or auto\_fight |
 | `pathfind_to` | A\* pathfind to a target tile; stops for monsters or damage |
@@ -287,7 +287,8 @@ The MCP server supports a `compact` mode (`new_game` with `compact=true`) that o
 - Monsters wake and chase you when they enter your field of view.
 - `%` marks a corpse. Dead monsters stay on the map.
 - The HP bar and message log are at the bottom of the screen.
-- **Title screen** lets you start a new game, load a save, or adjust settings.
+- **Title screen** lets you start a new game, enter a seed code, load a save, or adjust settings.
+- **Seed codes** are shown on the death screen and in MCP observations. Enter one from the title menu to replay the exact same dungeon. Format: `<base36_seed>[-<W>x<H>][preset_char]` — e.g., `r7z3kq`, `r7z3kq-120x60a`.
 - **Classic mode** (default): NetHack-style save discipline — saving quits, death deletes the save.
 - **Casual mode**: 5 manual save slots, save without quitting, keep saves on death.
 
@@ -337,6 +338,7 @@ crates/
       map.rs, combat.rs, ai.rs, fov.rs, pathfinding.rs, spawn.rs
       entity.rs, data.rs, types.rs, message_log.rs
       platform.rs           Renderer and InputSource traits
+      seed_code.rs          Shareable seed code encode/decode (base36)
       menu.rs, saves.rs, settings.rs
       dev_tools.rs, analytics.rs, scenario.rs  (dev-tools feature)
       bin/headless.rs       Automated headless runner
@@ -410,11 +412,11 @@ See [docs/roadmap-priority.md](docs/roadmap-priority.md) for a detailed breakdow
 - [ ] **Menus** — Title screen and pause menu (done); inventory screen, character sheet, help screen still needed
 - [ ] **Look mode** — Cursor to examine tiles and entities
 - [ ] **Targeting** — Ranged attacks, spell targeting
-- [ ] **Options/settings** — Classic/casual mode and display preferences (done); keybind customization and difficulty modes still needed
+- [ ] **Options/settings** — Classic/casual mode, display preferences, and colorblind palettes (done); keybind customization and difficulty modes still needed
 
 ### Accessibility
 
-- [ ] **Visual** — Colorblind palettes, high-contrast mode, configurable glyphs, reduced clutter option
+- [ ] **Visual** — ~~Colorblind palettes~~ (done: protanopia, deuteranopia), high-contrast mode, configurable glyphs, reduced clutter option
 - [ ] **Screen reader support** — Structured output for NVDA/JAWS/VoiceOver; braille display compatible
 - [ ] **Motor** — One-handed layouts, mouse-only play, adjustable input timing, auto-explore (done), macros
 - [ ] **Cognitive** — Granular difficulty toggles, scrollable message history, context-sensitive help (`?`)
@@ -429,7 +431,7 @@ Design principles (not checkboxes — follow these always):
 - [x] **Replay system** — Record and playback games deterministically
 - [ ] **Shared leaderboard** — REST API for score submission
 - [ ] **Daily challenges** — Everyone plays the same seed, compare scores
-- [ ] **Seed sharing** — Share a seed as a code/URL, others play the same dungeon
+- [x] **Seed sharing** — Share a seed code from the death screen or observations; enter it from the title menu to replay the same dungeon
 - [ ] **Live spectating** — Watch other players in real-time via WebSocket
 - [ ] **Bones files** — Dead players leave traces in others' dungeons
 

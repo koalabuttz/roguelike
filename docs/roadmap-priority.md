@@ -34,7 +34,7 @@ Fills out the core game loop and addresses high-value, low-effort improvements.
 | Experience/leveling | 0 | High | M | Progression within a run. |
 | Data-driven content | ~2 items | Medium | M | Move templates to RON/TOML. Unlocks hot reload and community content. |
 | Look mode | 0 | Medium | S | "What is that T?" Needed as monster variety grows. |
-| Colorblind modes | 0 | High | S | Trivial if colors are in data files. 8% of men affected by current palette. |
+| ~~Colorblind modes~~ | ~~0~~ | ~~High~~ | ~~S~~ | ~~Trivial if colors are in data files. 8% of men affected by current palette.~~ Done (protanopia, deuteranopia palettes in Settings). |
 | MCP autorun tuning | 0 | High | S | Autorun stops every 1 step inside rooms due to open-neighbor count. Only stop at meaningful decision points (corridor forks, room exits). [Playtest: 31% of tool calls wasted.](llm-playtest-2026-02-13.md) |
 | MCP pathfind_to tool | 0 | High | S | Walk to a visible/explored `(x, y)` via shortest path. Requires A*. Eliminates navigation fumbles. [Playtest: 19% of tool calls wasted.](llm-playtest-2026-02-13.md) |
 | MCP explored map tool | 0 | Medium | S | Return all previously-seen tiles so LLM can plan exploration routes instead of wandering. |
@@ -69,7 +69,7 @@ Features that build on a stable core and benefit from a wider feature set.
 |------|--------|--------|--------|-------|
 | Shared leaderboard | 0 | Medium | M | Requires a server/API. |
 | Daily challenges | 0 | Medium | M | Requires seeded RNG + leaderboard. |
-| Seed sharing | 0 | Medium | S | Falls out of seeded RNG almost for free. |
+| ~~Seed sharing~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~Falls out of seeded RNG almost for free.~~ Done (base36 seed codes, title menu entry, death screen display, MCP seed_code param). |
 | Steam Deck | 0 | Medium | M | Requires controller support. Steam Input API. |
 | MCP spectator mode (TCP) | ~1 item | Medium | M | Upgrade file-based spectator to TCP server on localhost. Multiple viewers, remote access, WebSocket upgrade path. Enables live spectating. [Design doc.](spectator-mode-options.md) |
 | Live spectating | 0 | High | L | Requires replay + networking. TCP spectator mode is a stepping stone. |

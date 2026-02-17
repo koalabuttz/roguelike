@@ -14,6 +14,7 @@ use roguelike_core::exploration_graph;
 use roguelike_core::game::{
     AutoExploreResult, AutoFightResult, AutorunResult, AutorunStopReason, GameState,
 };
+use roguelike_core::seed_code;
 use roguelike_core::types::{Coord, Pos};
 
 use crate::spectate::SpectatorWriter;
@@ -51,6 +52,10 @@ pub struct NewGameParams {
     /// If true, omit the ASCII map from observations to reduce response size.
     /// Useful for LLM agents that only need stats and entity info.
     pub compact: Option<bool>,
+    /// A seed code string (e.g. "r7z3kq" or "r7z3kq-120x60a") that encodes
+    /// seed, dimensions, and optional preset. If provided, overrides seed,
+    /// width, and height parameters.
+    pub seed_code: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -93,21 +98,39 @@ impl RoguelikeMcpServer {
         &self,
         Parameters(params): Parameters<NewGameParams>,
     ) -> Result<CallToolResult, McpError> {
-        let width = params.width.unwrap_or(80);
-        let height = params.height.unwrap_or(40);
-
-        if width < 20 || height < 15 {
-            return Err(McpError::invalid_params(
-                "Map must be at least 20x15 tiles",
-                None,
-            ));
-        }
-
         let compact = params.compact.unwrap_or(false);
 
-        let mut state = match params.seed {
-            Some(seed) => GameState::with_seed(width, height, seed),
-            None => GameState::new(width, height),
+        let mut state = if let Some(ref code) = params.seed_code {
+            let decoded = seed_code::decode(code)
+                .map_err(|e| McpError::invalid_params(format!("Invalid seed code: {e}"), None))?;
+
+            if decoded.width < 20 || decoded.height < 15 {
+                return Err(McpError::invalid_params(
+                    "Map must be at least 20x15 tiles",
+                    None,
+                ));
+            }
+
+            if let Some(preset) = decoded.preset {
+                GameState::with_preset(decoded.width, decoded.height, decoded.seed, preset)
+            } else {
+                GameState::with_seed(decoded.width, decoded.height, decoded.seed)
+            }
+        } else {
+            let width = params.width.unwrap_or(80);
+            let height = params.height.unwrap_or(40);
+
+            if width < 20 || height < 15 {
+                return Err(McpError::invalid_params(
+                    "Map must be at least 20x15 tiles",
+                    None,
+                ));
+            }
+
+            match params.seed {
+                Some(seed) => GameState::with_seed(width, height, seed),
+                None => GameState::new(width, height),
+            }
         };
         state.update_fov();
         let observation = state.observe();
@@ -479,10 +502,12 @@ impl RoguelikeMcpServer {
              (percentage of map explored), and seed (for reproducible dungeons).\n\
              \n\
              ## Seed Sharing\n\
-             Every game has a seed (shown in observations). Pass a seed to \
-             new_game to replay the same dungeon with identical layout and \
-             monster placement. Share seeds to compare strategies on the \
-             same map.",
+             Every game has a seed_code (shown in observations) that encodes \
+             the seed, dimensions, and optional preset into a compact string. \
+             Pass seed_code to new_game to replay the exact same dungeon. \
+             Format: base36_seed[-WxH][preset_char] where preset chars are \
+             a=Arena, c=Corridor, l=Labyrinth, s=SingleRoom, f=OpenField. \
+             Examples: 'r7z3kq', 'r7z3kq-120x60', 'r7z3kq-a', 'r7z3kq-120x60a'.",
             fov = cfg.fov_radius,
             php = player.hp,
             patk = player.attack,
@@ -882,6 +907,7 @@ mod tests {
             game_over: false,
             turn_count: 0,
             seed: 0,
+            preset: None,
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,

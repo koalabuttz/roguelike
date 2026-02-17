@@ -18,6 +18,7 @@ pub mod platform;
 pub mod saves;
 #[cfg(feature = "dev-tools")]
 pub mod scenario;
+pub mod seed_code;
 pub mod settings;
 pub mod spawn;
 pub mod types;

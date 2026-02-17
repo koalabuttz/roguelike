@@ -8,13 +8,14 @@ mod render;
 use roguelike_core::dev_tools::{self, DevCommand, DevSession};
 use roguelike_core::{
     command::GameCommand, game, menu, menu::MenuAction, platform::Renderer, saves::SlotMetadata,
-    settings, settings::Platform, types::Coord,
+    seed_code, settings, settings::Platform, types::Coord,
 };
 
 use crossterm::{
     cursor,
-    event::{self, Event, KeyEvent, KeyEventKind},
-    execute,
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
+    execute, queue,
+    style::{self, Color, SetBackgroundColor, SetForegroundColor},
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
@@ -73,6 +74,73 @@ fn wait_for_keypress() -> std::io::Result<KeyEvent> {
         ) = event::read()?
         {
             return Ok(key);
+        }
+    }
+}
+
+/// Show a text input dialog. Returns `Some(text)` on Enter, `None` on Esc.
+fn text_input_dialog<W: std::io::Write>(
+    w: &mut W,
+    prompt: &str,
+    hint: &str,
+) -> std::io::Result<Option<String>> {
+    let mut input = String::new();
+    loop {
+        let (cols, rows) = terminal::size()?;
+        let cx = cols as i32 / 2;
+        let cy = rows as i32 / 2;
+
+        // Clear screen.
+        queue!(
+            w,
+            terminal::Clear(terminal::ClearType::All),
+            cursor::MoveTo(0, 0)
+        )?;
+
+        // Prompt.
+        let px = (cx - prompt.len() as i32 / 2).max(0);
+        queue!(
+            w,
+            cursor::MoveTo(px as u16, (cy - 2) as u16),
+            SetForegroundColor(Color::Cyan),
+            SetBackgroundColor(Color::Black),
+            style::Print(prompt)
+        )?;
+
+        // Input field with cursor.
+        let display = format!("> {}_", input);
+        let ix = (cx - display.len() as i32 / 2).max(0);
+        queue!(
+            w,
+            cursor::MoveTo(ix as u16, cy as u16),
+            SetForegroundColor(Color::Yellow),
+            SetBackgroundColor(Color::Black),
+            style::Print(&display)
+        )?;
+
+        // Hint.
+        let hx = (cx - hint.len() as i32 / 2).max(0);
+        queue!(
+            w,
+            cursor::MoveTo(hx as u16, (cy + 2) as u16),
+            SetForegroundColor(Color::DarkGrey),
+            SetBackgroundColor(Color::Black),
+            style::Print(hint)
+        )?;
+
+        w.flush()?;
+
+        let key = wait_for_keypress()?;
+        match key.code {
+            KeyCode::Esc => return Ok(None),
+            KeyCode::Enter => return Ok(Some(input)),
+            KeyCode::Backspace => {
+                input.pop();
+            }
+            KeyCode::Char(c) if c.is_ascii_alphanumeric() || c == '-' => {
+                input.push(c);
+            }
+            _ => {}
         }
     }
 }
@@ -239,6 +307,56 @@ fn main() -> std::io::Result<()> {
                     autosave_buf = None;
                     app_state = AppState::Playing;
                 }
+                MenuAction::EnterSeed => {
+                    match text_input_dialog(
+                        &mut stdout,
+                        "Enter Seed Code",
+                        "e.g. r7z3kq or r7z3kq-120x60a | Esc to cancel",
+                    )? {
+                        Some(code) if !code.is_empty() => match seed_code::decode(&code) {
+                            Ok(params) => {
+                                let h = (rows as i32) - 1 - settings.message_log_lines as i32;
+                                let gs = if let Some(preset) = params.preset {
+                                    game::GameState::with_preset(
+                                        params.width,
+                                        params.height.min(h),
+                                        params.seed,
+                                        preset,
+                                    )
+                                } else {
+                                    game::GameState::with_seed(
+                                        params.width,
+                                        params.height.min(h),
+                                        params.seed,
+                                    )
+                                };
+                                game_state = Some(gs);
+                                autosave_buf = None;
+                                app_state = AppState::Playing;
+                            }
+                            Err(msg) => {
+                                let mut err_menu = menu::confirm_menu(&format!("Error: {msg}"));
+                                err_menu.selected = 0;
+                                err_menu.items = vec![menu::MenuItem {
+                                    label: "OK".to_string(),
+                                    action: MenuAction::Back,
+                                    enabled: true,
+                                }];
+                                let _ = run_menu(&mut err_menu, &mut renderer)?;
+                                let has_save = has_save_for_title(settings.casual_mode);
+                                app_state = AppState::Title(menu::title_menu(
+                                    has_save,
+                                    settings.casual_mode,
+                                ));
+                            }
+                        },
+                        _ => {
+                            let has_save = has_save_for_title(settings.casual_mode);
+                            app_state =
+                                AppState::Title(menu::title_menu(has_save, settings.casual_mode));
+                        }
+                    }
+                }
                 MenuAction::LoadGame => {
                     if settings.casual_mode {
                         // Show load-slot picker.
@@ -376,6 +494,10 @@ fn main() -> std::io::Result<()> {
                                     6 => 8,
                                     _ => 2,
                                 };
+                                save_settings(&settings);
+                            }
+                            MenuAction::CycleColorPalette => {
+                                settings.color_palette = settings.color_palette.next();
                                 save_settings(&settings);
                             }
                             _ => break,

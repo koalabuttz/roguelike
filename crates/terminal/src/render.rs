@@ -12,6 +12,9 @@ use roguelike_core::platform::Renderer;
 use roguelike_core::settings::{ColorPalette, Settings};
 use roguelike_core::types::{Coord, GameColor};
 
+#[cfg(all(debug_assertions, feature = "dev-tools"))]
+use roguelike_core::dev_tools::OverlayCell;
+
 /// Map a platform-independent `GameColor` to a crossterm terminal color.
 fn to_crossterm_color(c: GameColor) -> Color {
     match c {
@@ -420,5 +423,24 @@ fn render_message_log<W: Write>(
         )?;
     }
 
+    Ok(())
+}
+
+#[cfg(all(debug_assertions, feature = "dev-tools"))]
+pub fn render_overlay<W: Write>(
+    w: &mut W,
+    cells: &[OverlayCell],
+    pal: ColorPalette,
+) -> std::io::Result<()> {
+    for cell in cells {
+        queue!(
+            w,
+            cursor::MoveTo(cell.x as u16, cell.y as u16),
+            SetForegroundColor(palette_color(cell.color, pal)),
+            SetBackgroundColor(palette_color(GameColor::Black, pal)),
+            style::Print(cell.ch)
+        )?;
+    }
+    w.flush()?;
     Ok(())
 }

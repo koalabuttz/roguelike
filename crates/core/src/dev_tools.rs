@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::command::GameCommand;
@@ -5,7 +7,30 @@ use crate::data;
 use crate::entity::Entity;
 use crate::game::GameState;
 use crate::map::Tile;
-use crate::types::{Coord, Stat};
+use crate::pathfinding;
+use crate::types::{Coord, GameColor, Pos, Stat};
+
+/// Overlay layers for the debug visualization system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OverlayLayer {
+    /// FOV boundary — tiles at the edge of the visible set.
+    Fov,
+    /// Monster AI targets — greedy chase candidates for each visible monster.
+    MonsterTargets,
+    /// A* pathfinding — path to nearest frontier or to a movable cursor.
+    Pathfinding,
+    /// Exploration frontiers — tiles at the boundary of explored territory.
+    Frontiers,
+}
+
+/// A single overlay cell to draw on top of the normal map.
+#[derive(Debug, Clone)]
+pub struct OverlayCell {
+    pub x: Coord,
+    pub y: Coord,
+    pub ch: char,
+    pub color: GameColor,
+}
 
 /// Commands available only during development / debug builds.
 ///
@@ -33,6 +58,10 @@ pub enum DevCommand {
     DumpStats,
     /// Toggle god mode — player takes no damage.
     ToggleGodMode,
+    /// Toggle a debug overlay layer.
+    ToggleOverlay(OverlayLayer),
+    /// Reload game data from CWD `game.toml`.
+    ReloadData,
 }
 
 /// Debug state owned by the caller (main loop, headless runner), not by
@@ -47,6 +76,14 @@ pub struct DevSession {
     pub command_log: Vec<GameCommand>,
     /// Whether recording is active.
     pub recording: bool,
+    /// Bitfield of active overlay layers (bit 0=Fov, 1=MonsterTargets,
+    /// 2=Pathfinding, 3=Frontiers).
+    pub overlay_flags: u8,
+    /// Cursor position for pathfinding overlay cursor mode.
+    /// `None` = frontier mode, `Some(pos)` = cursor mode.
+    pub overlay_cursor: Option<Pos>,
+    /// Custom game data loaded from disk (used by Spawn and hot reload).
+    pub game_data: Option<data::GameData>,
 }
 
 /// Execute a dev command against the game state. Returns a user-facing message.
@@ -85,14 +122,15 @@ pub fn exec_dev(gs: &mut GameState, session: &mut DevSession, cmd: DevCommand) -
             if !gs.map.is_walkable(x, y) {
                 return format!("Cannot spawn at ({}, {}): not walkable.", x, y);
             }
-            let template = match data::defaults().monster_by_name(&name) {
+            let game_data: &data::GameData = match &session.game_data {
+                Some(d) => d,
+                None => data::defaults(),
+            };
+            let template = match game_data.monster_by_name(&name) {
                 Some(t) => t,
                 None => {
-                    let known: Vec<&str> = data::defaults()
-                        .monsters
-                        .iter()
-                        .map(|m| m.name.as_str())
-                        .collect();
+                    let known: Vec<&str> =
+                        game_data.monsters.iter().map(|m| m.name.as_str()).collect();
                     return format!("Unknown monster: '{}'. Known: {}.", name, known.join(", "));
                 }
             };
@@ -135,6 +173,75 @@ pub fn exec_dev(gs: &mut GameState, session: &mut DevSession, cmd: DevCommand) -
                 "God mode enabled (invulnerable).".to_string()
             } else {
                 "God mode disabled.".to_string()
+            }
+        }
+        DevCommand::ToggleOverlay(layer) => {
+            let bit = match layer {
+                OverlayLayer::Fov => 0,
+                OverlayLayer::MonsterTargets => 1,
+                OverlayLayer::Pathfinding => 2,
+                OverlayLayer::Frontiers => 3,
+            };
+
+            if layer == OverlayLayer::Pathfinding {
+                let is_on = session.overlay_flags & (1 << bit) != 0;
+                if !is_on {
+                    // OFF -> frontier mode.
+                    session.overlay_flags |= 1 << bit;
+                    session.overlay_cursor = None;
+                    "Pathfinding overlay: frontier mode.".to_string()
+                } else if session.overlay_cursor.is_none() {
+                    // Frontier mode -> cursor mode.
+                    session.overlay_cursor = Some((gs.entities[0].x, gs.entities[0].y));
+                    "Pathfinding overlay: cursor mode (arrows to move, Esc to exit).".to_string()
+                } else {
+                    // Cursor mode -> OFF.
+                    session.overlay_flags &= !(1 << bit);
+                    session.overlay_cursor = None;
+                    "Pathfinding overlay off.".to_string()
+                }
+            } else {
+                session.overlay_flags ^= 1 << bit;
+                let name = match layer {
+                    OverlayLayer::Fov => "FOV boundary",
+                    OverlayLayer::MonsterTargets => "Monster targets",
+                    OverlayLayer::Pathfinding => unreachable!(),
+                    OverlayLayer::Frontiers => "Frontiers",
+                };
+                if session.overlay_flags & (1 << bit) != 0 {
+                    format!("{} overlay on.", name)
+                } else {
+                    format!("{} overlay off.", name)
+                }
+            }
+        }
+        DevCommand::ReloadData => {
+            let old_data = session
+                .game_data
+                .clone()
+                .unwrap_or_else(|| data::defaults().clone());
+            let new_data = data::load_game_data();
+
+            // Apply config changes to game state.
+            gs.regen_interval = new_data.config.regen_interval;
+            gs.max_autorun_steps = new_data.config.max_autorun_steps;
+            let fov_changed = gs.fov_radius != new_data.config.fov_radius;
+            gs.fov_radius = new_data.config.fov_radius;
+            if fov_changed {
+                gs.update_fov();
+                if session.fov_disabled {
+                    apply_fov_override(gs);
+                }
+            }
+
+            // Generate diff report.
+            let diffs = data::diff_game_data(&old_data, &new_data);
+            session.game_data = Some(new_data);
+
+            if diffs.is_empty() {
+                "Data reloaded (no changes detected).".to_string()
+            } else {
+                format!("Data reloaded: {}", diffs.join("; "))
             }
         }
     }
@@ -206,6 +313,128 @@ pub fn after_step(gs: &mut GameState, session: &mut DevSession, cmd: GameCommand
     if session.fov_disabled {
         apply_fov_override(gs);
     }
+}
+
+/// Compute overlay cells for all active overlay layers.
+///
+/// Returns an empty vec when no overlays are enabled. The caller (renderer)
+/// draws each cell at its position with its color on top of the normal map.
+pub fn compute_overlay(gs: &GameState, session: &DevSession) -> Vec<OverlayCell> {
+    let mut cells = Vec::new();
+
+    if session.overlay_flags == 0 {
+        return cells;
+    }
+
+    // Layer 0: FOV boundary — tiles at the edge of the visible set.
+    if session.overlay_flags & (1 << 0) != 0 {
+        for &(x, y) in &gs.visible {
+            let at_boundary = (-1..=1i32).any(|dy| {
+                (-1..=1i32)
+                    .any(|dx| (dx != 0 || dy != 0) && !gs.visible.contains(&(x + dx, y + dy)))
+            });
+            if at_boundary {
+                cells.push(OverlayCell {
+                    x,
+                    y,
+                    ch: '*',
+                    color: GameColor::Cyan,
+                });
+            }
+        }
+    }
+
+    // Layer 1: Monster targets — greedy chase candidates for each visible monster.
+    if session.overlay_flags & (1 << 1) != 0 {
+        let px = gs.entities[0].x;
+        let py = gs.entities[0].y;
+        for entity in gs.entities.iter().skip(1) {
+            if !entity.alive || !gs.visible.contains(&(entity.x, entity.y)) {
+                continue;
+            }
+            let mx = entity.x;
+            let my = entity.y;
+            let step_x = (px - mx).signum();
+            let step_y = (py - my).signum();
+            // Same candidate logic as chase_ai in ai.rs.
+            let candidates = [
+                (mx + step_x, my + step_y),
+                (mx + step_x, my),
+                (mx, my + step_y),
+            ];
+            for (cx, cy) in candidates {
+                if gs.map.is_walkable(cx, cy) {
+                    cells.push(OverlayCell {
+                        x: cx,
+                        y: cy,
+                        ch: '.',
+                        color: GameColor::Rgb(255, 0, 255), // magenta
+                    });
+                }
+            }
+        }
+    }
+
+    // Layer 2: Pathfinding — A* path to cursor or nearest frontier.
+    if session.overlay_flags & (1 << 2) != 0 {
+        let px = gs.entities[0].x;
+        let py = gs.entities[0].y;
+
+        let path = if let Some((tx, ty)) = session.overlay_cursor {
+            // Cursor mode: path to cursor position.
+            pathfinding::find_path(&gs.map, px, py, tx, ty, &gs.explored)
+        } else {
+            // Frontier mode: path to nearest frontier.
+            let frontiers = gs.frontier_tiles();
+            if !frontiers.is_empty() {
+                let frontier_set: HashSet<Pos> = frontiers.into_iter().collect();
+                if let Some((tx, ty)) =
+                    pathfinding::nearest_by_cost(&gs.map, px, py, &frontier_set, &gs.explored)
+                {
+                    pathfinding::find_path(&gs.map, px, py, tx, ty, &gs.explored)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some(path) = path {
+            for (px, py) in path {
+                cells.push(OverlayCell {
+                    x: px,
+                    y: py,
+                    ch: '+',
+                    color: GameColor::Rgb(80, 130, 255), // bright blue
+                });
+            }
+        }
+
+        // Draw cursor marker if in cursor mode.
+        if let Some((cx, cy)) = session.overlay_cursor {
+            cells.push(OverlayCell {
+                x: cx,
+                y: cy,
+                ch: 'X',
+                color: GameColor::Rgb(255, 255, 0), // bright yellow
+            });
+        }
+    }
+
+    // Layer 3: Frontiers — exploration boundary tiles.
+    if session.overlay_flags & (1 << 3) != 0 {
+        for (fx, fy) in gs.frontier_tiles() {
+            cells.push(OverlayCell {
+                x: fx,
+                y: fy,
+                ch: '~',
+                color: GameColor::Yellow,
+            });
+        }
+    }
+
+    cells
 }
 
 /// Replay a sequence of commands on a game state. Returns a summary.
@@ -715,5 +944,187 @@ mod tests {
         let loaded: GoldenReplay = serde_json::from_str(&json).unwrap();
         assert!(loaded.verify().is_ok());
         assert_eq!(loaded.name, "seed_42");
+    }
+
+    // --- Overlay tests ---
+
+    #[test]
+    fn toggle_overlay_sets_and_clears_flag() {
+        let mut gs = test_game();
+        let mut session = DevSession::default();
+        assert_eq!(session.overlay_flags, 0);
+
+        exec_dev(
+            &mut gs,
+            &mut session,
+            DevCommand::ToggleOverlay(OverlayLayer::Fov),
+        );
+        assert_ne!(session.overlay_flags & 1, 0);
+
+        exec_dev(
+            &mut gs,
+            &mut session,
+            DevCommand::ToggleOverlay(OverlayLayer::Fov),
+        );
+        assert_eq!(session.overlay_flags & 1, 0);
+    }
+
+    #[test]
+    fn compute_overlay_empty_when_disabled() {
+        let gs = test_game();
+        let session = DevSession::default();
+        let cells = compute_overlay(&gs, &session);
+        assert!(cells.is_empty());
+    }
+
+    #[test]
+    fn compute_overlay_fov_boundary_only_at_edges() {
+        let gs = test_game();
+        let mut session = DevSession::default();
+        session.overlay_flags = 1 << 0; // FOV layer
+        let cells = compute_overlay(&gs, &session);
+        assert!(!cells.is_empty());
+        // Every cell must be visible and have at least one non-visible neighbor.
+        for cell in &cells {
+            assert_eq!(cell.ch, '*');
+            assert!(gs.visible.contains(&(cell.x, cell.y)));
+            let has_non_visible = (-1..=1i32).any(|dy| {
+                (-1..=1i32).any(|dx| {
+                    (dx != 0 || dy != 0) && !gs.visible.contains(&(cell.x + dx, cell.y + dy))
+                })
+            });
+            assert!(
+                has_non_visible,
+                "({},{}) is not at FOV boundary",
+                cell.x, cell.y
+            );
+        }
+    }
+
+    #[test]
+    fn compute_overlay_monster_targets_near_monsters() {
+        let mut gs = test_game();
+        let monster = Entity::from_template(data::goblin(), 3, 3);
+        gs.entities.push(monster);
+        gs.update_fov();
+        let mut session = DevSession::default();
+        session.overlay_flags = 1 << 1; // Monster targets layer
+        let cells = compute_overlay(&gs, &session);
+        // Should have target cells near the monster.
+        assert!(!cells.is_empty());
+        for cell in &cells {
+            assert_eq!(cell.ch, '.');
+            // Target cells should be near the monster (within 1 tile).
+            let near = (cell.x - 3).abs() <= 1 && (cell.y - 3).abs() <= 1;
+            assert!(
+                near,
+                "target ({},{}) not near monster (3,3)",
+                cell.x, cell.y
+            );
+        }
+    }
+
+    #[test]
+    fn compute_overlay_frontiers_matches_frontier_tiles() {
+        let gs = test_game();
+        let frontiers = gs.frontier_tiles();
+        let mut session = DevSession::default();
+        session.overlay_flags = 1 << 3; // Frontiers layer
+        let cells = compute_overlay(&gs, &session);
+        assert_eq!(cells.len(), frontiers.len());
+        for cell in &cells {
+            assert_eq!(cell.ch, '~');
+            assert!(frontiers.contains(&(cell.x, cell.y)));
+        }
+    }
+
+    #[test]
+    fn compute_overlay_pathfinding_with_frontier() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let mut session = DevSession::default();
+        session.overlay_flags = 1 << 2; // Pathfinding layer
+        // No cursor → frontier mode.
+        let frontiers = gs.frontier_tiles();
+        if !frontiers.is_empty() {
+            let cells = compute_overlay(&gs, &session);
+            // Should have path cells ('+') leading toward a frontier.
+            assert!(cells.iter().any(|c| c.ch == '+'));
+        }
+    }
+
+    #[test]
+    fn compute_overlay_pathfinding_with_cursor() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let mut session = DevSession::default();
+        session.overlay_flags = 1 << 2; // Pathfinding layer
+        session.overlay_cursor = Some((8, 5)); // Cursor at (8, 5)
+        let cells = compute_overlay(&gs, &session);
+        // Should have path cells and a cursor marker 'X'.
+        assert!(cells.iter().any(|c| c.ch == '+'));
+        assert!(cells.iter().any(|c| c.ch == 'X' && c.x == 8 && c.y == 5));
+    }
+
+    // --- Reload data tests ---
+
+    #[test]
+    fn reload_data_updates_config_fields() {
+        let mut gs = test_game();
+        let mut session = DevSession::default();
+        // Pre-load custom data with different config values.
+        let mut custom = data::defaults().clone();
+        custom.config.regen_interval = 10;
+        custom.config.max_autorun_steps = 50;
+        custom.config.fov_radius = 5;
+        session.game_data = Some(custom);
+        // ReloadData reads from disk (no file → defaults), but we verify that
+        // exec_dev applies the new data's config fields to gs.
+        let msg = exec_dev(&mut gs, &mut session, DevCommand::ReloadData);
+        // After reload (no CWD file → defaults), gs should have default values.
+        assert_eq!(gs.regen_interval, data::config().regen_interval);
+        assert_eq!(gs.max_autorun_steps, data::config().max_autorun_steps);
+        assert_eq!(gs.fov_radius, data::config().fov_radius);
+        assert!(msg.contains("reloaded"));
+    }
+
+    #[test]
+    fn reload_data_fov_updates_on_radius_change() {
+        let mut gs = test_game();
+        let mut session = DevSession::default();
+        // Set a different fov_radius so reload triggers update_fov.
+        gs.fov_radius = 3;
+        gs.update_fov();
+        let visible_before = gs.visible.len();
+        let msg = exec_dev(&mut gs, &mut session, DevCommand::ReloadData);
+        // After reload, fov_radius should be restored to default (8).
+        assert_eq!(gs.fov_radius, data::config().fov_radius);
+        // With a larger FOV radius, more tiles should be visible.
+        assert!(gs.visible.len() >= visible_before);
+        assert!(msg.contains("reloaded"));
+    }
+
+    #[test]
+    fn reload_data_spawn_uses_reloaded_data() {
+        let mut gs = test_game();
+        let mut session = DevSession::default();
+        // Load custom data with a different Goblin HP.
+        let mut custom = data::defaults().clone();
+        if let Some(goblin) = custom.monsters.iter_mut().find(|m| m.name == "Goblin") {
+            goblin.hp = 99;
+        }
+        session.game_data = Some(custom);
+        // Spawn should use session data.
+        let msg = exec_dev(
+            &mut gs,
+            &mut session,
+            DevCommand::Spawn {
+                name: "goblin".to_string(),
+                x: 3,
+                y: 3,
+            },
+        );
+        assert!(msg.contains("Spawned Goblin"));
+        assert_eq!(gs.entities.last().unwrap().hp, 99);
     }
 }

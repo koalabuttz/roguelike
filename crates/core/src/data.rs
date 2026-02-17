@@ -4,7 +4,7 @@ use crate::entity::AiBehavior;
 use crate::types::{Coord, GameColor, Stat};
 
 /// Top-level game data — player stats, config knobs, and monster definitions.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct GameData {
     pub player: PlayerDef,
     pub config: GameConfig,
@@ -12,7 +12,7 @@ pub struct GameData {
 }
 
 /// Player template — starting stats and appearance.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct PlayerDef {
     pub hp: Stat,
     pub attack: Stat,
@@ -22,7 +22,7 @@ pub struct PlayerDef {
 }
 
 /// Defines a type of monster — all stats, appearance, AI, and spawn weight.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct MonsterDef {
     pub name: String,
     pub glyph: String,
@@ -35,7 +35,7 @@ pub struct MonsterDef {
 }
 
 /// Game-wide tuning knobs — change these to rebalance without touching logic.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct GameConfig {
     pub fov_radius: Coord,
     pub max_rooms: i32,
@@ -110,6 +110,7 @@ fn parse_color(s: &str) -> GameColor {
 
 #[cfg(feature = "data-files")]
 mod data_files {
+    use std::collections::HashSet;
     use std::sync::LazyLock;
 
     use super::*;
@@ -153,6 +154,114 @@ mod data_files {
         defaults()
             .monster_by_name("Troll")
             .expect("Troll not found in game data")
+    }
+
+    /// Load game data from CWD `game.toml`, falling back to compiled-in defaults.
+    ///
+    /// This is the modding entry point: players can drop a `game.toml` in the
+    /// working directory to override all balance values, monster definitions,
+    /// and player stats.
+    pub fn load_game_data() -> GameData {
+        match std::fs::read_to_string("game.toml") {
+            Ok(content) => match parse_game_data(&content) {
+                Ok(data) => {
+                    eprintln!("[data] Loaded game.toml from current directory.");
+                    data
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[data] Warning: game.toml parse error: {}. Using defaults.",
+                        e
+                    );
+                    defaults().clone()
+                }
+            },
+            Err(_) => defaults().clone(),
+        }
+    }
+
+    /// Compare two `GameData` instances and return human-readable diff lines.
+    ///
+    /// Reports config field changes, player stat changes, monster stat changes,
+    /// and added/removed monsters.
+    pub fn diff_game_data(old: &GameData, new: &GameData) -> Vec<String> {
+        let mut diffs = Vec::new();
+
+        // Config changes.
+        macro_rules! diff_config {
+            ($field:ident) => {
+                if old.config.$field != new.config.$field {
+                    diffs.push(format!(
+                        "{} {} -> {}",
+                        stringify!($field),
+                        old.config.$field,
+                        new.config.$field
+                    ));
+                }
+            };
+        }
+        diff_config!(fov_radius);
+        diff_config!(max_rooms);
+        diff_config!(room_size_min);
+        diff_config!(room_size_max);
+        diff_config!(max_monsters_per_room);
+        diff_config!(ui_bottom_rows);
+        diff_config!(max_autorun_steps);
+        diff_config!(regen_interval);
+
+        // Player stat changes.
+        if old.player.hp != new.player.hp {
+            diffs.push(format!("Player HP {} -> {}", old.player.hp, new.player.hp));
+        }
+        if old.player.attack != new.player.attack {
+            diffs.push(format!(
+                "Player ATK {} -> {}",
+                old.player.attack, new.player.attack
+            ));
+        }
+        if old.player.defense != new.player.defense {
+            diffs.push(format!(
+                "Player DEF {} -> {}",
+                old.player.defense, new.player.defense
+            ));
+        }
+
+        // Added/removed monsters.
+        let old_names: HashSet<&str> = old.monsters.iter().map(|m| m.name.as_str()).collect();
+        let new_names: HashSet<&str> = new.monsters.iter().map(|m| m.name.as_str()).collect();
+
+        let mut added: Vec<&str> = new_names.difference(&old_names).copied().collect();
+        added.sort();
+        let mut removed: Vec<&str> = old_names.difference(&new_names).copied().collect();
+        removed.sort();
+
+        if !added.is_empty() {
+            diffs.push(format!("Added: {}", added.join(", ")));
+        }
+        if !removed.is_empty() {
+            diffs.push(format!("Removed: {}", removed.join(", ")));
+        }
+
+        // Monster stat changes for existing monsters.
+        for new_m in &new.monsters {
+            if let Some(old_m) = old.monster_by_name(&new_m.name) {
+                let mut changes = Vec::new();
+                if old_m.hp != new_m.hp {
+                    changes.push(format!("HP {} -> {}", old_m.hp, new_m.hp));
+                }
+                if old_m.attack != new_m.attack {
+                    changes.push(format!("ATK {} -> {}", old_m.attack, new_m.attack));
+                }
+                if old_m.defense != new_m.defense {
+                    changes.push(format!("DEF {} -> {}", old_m.defense, new_m.defense));
+                }
+                if !changes.is_empty() {
+                    diffs.push(format!("{} {}", new_m.name, changes.join(", ")));
+                }
+            }
+        }
+
+        diffs
     }
 }
 
@@ -214,5 +323,50 @@ mod tests {
     fn spawn_weights_sum_to_100() {
         let total: u32 = defaults().monsters.iter().map(|m| m.spawn_weight).sum();
         assert_eq!(total, 100);
+    }
+
+    #[test]
+    fn load_game_data_returns_defaults_without_file() {
+        // When no CWD game.toml exists, load_game_data returns the same as defaults().
+        let loaded = load_game_data();
+        let expected = defaults();
+        assert_eq!(loaded.player, expected.player);
+        assert_eq!(loaded.config, expected.config);
+        assert_eq!(loaded.monsters, expected.monsters);
+    }
+
+    #[test]
+    fn diff_game_data_detects_config_changes() {
+        let old = defaults().clone();
+        let mut new = old.clone();
+        new.config.regen_interval = 5;
+        new.config.fov_radius = 12;
+        let diffs = diff_game_data(&old, &new);
+        assert!(diffs.iter().any(|d| d.contains("regen_interval")));
+        assert!(diffs.iter().any(|d| d.contains("fov_radius")));
+        assert!(diffs.iter().any(|d| d.contains("5")));
+        assert!(diffs.iter().any(|d| d.contains("12")));
+    }
+
+    #[test]
+    fn diff_game_data_detects_monster_changes() {
+        let old = defaults().clone();
+        let mut new = old.clone();
+        // Change Troll HP.
+        if let Some(troll) = new.monsters.iter_mut().find(|m| m.name == "Troll") {
+            troll.hp = 25;
+            troll.attack = 8;
+        }
+        let diffs = diff_game_data(&old, &new);
+        assert!(diffs.iter().any(|d| d.contains("Troll")));
+        assert!(diffs.iter().any(|d| d.contains("HP 20 -> 25")));
+        assert!(diffs.iter().any(|d| d.contains("ATK 6 -> 8")));
+    }
+
+    #[test]
+    fn diff_game_data_identical_returns_empty() {
+        let data = defaults().clone();
+        let diffs = diff_game_data(&data, &data);
+        assert!(diffs.is_empty());
     }
 }

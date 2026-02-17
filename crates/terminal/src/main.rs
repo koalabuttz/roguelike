@@ -5,10 +5,10 @@ mod input;
 mod render;
 
 #[cfg(all(debug_assertions, feature = "dev-tools"))]
-use roguelike_core::dev_tools::{self, DevCommand, DevSession};
+use roguelike_core::dev_tools::{self, DevCommand, DevSession, OverlayLayer};
 use roguelike_core::{
-    command::GameCommand, game, menu, menu::MenuAction, platform::Renderer, saves::SlotMetadata,
-    seed_code, settings, settings::Platform, types::Coord,
+    command::GameCommand, data, game, menu, menu::MenuAction, platform::Renderer,
+    saves::SlotMetadata, seed_code, settings, settings::Platform, types::Coord,
 };
 
 use crossterm::{
@@ -267,6 +267,7 @@ fn main() -> std::io::Result<()> {
     let (cols, rows) = terminal::size()?;
 
     let mut settings = load_settings();
+    let mut game_data = data::load_game_data();
     // Map height = terminal rows - status bar (1) - message log lines.
     let map_height = (rows as i32) - 1 - settings.message_log_lines as i32;
     let mut game_state: Option<game::GameState> = None;
@@ -303,7 +304,11 @@ fn main() -> std::io::Result<()> {
                             }
                         }
                     }
-                    game_state = Some(game::GameState::new(cols as i32, map_height));
+                    game_state = Some(game::GameState::new_with_data(
+                        cols as i32,
+                        map_height,
+                        &game_data,
+                    ));
                     autosave_buf = None;
                     app_state = AppState::Playing;
                 }
@@ -317,17 +322,19 @@ fn main() -> std::io::Result<()> {
                             Ok(params) => {
                                 let h = (rows as i32) - 1 - settings.message_log_lines as i32;
                                 let gs = if let Some(preset) = params.preset {
-                                    game::GameState::with_preset(
+                                    game::GameState::with_preset_data(
                                         params.width,
                                         params.height.min(h),
                                         params.seed,
                                         preset,
+                                        &game_data,
                                     )
                                 } else {
-                                    game::GameState::with_seed(
+                                    game::GameState::with_data(
                                         params.width,
                                         params.height.min(h),
                                         params.seed,
+                                        &game_data,
                                     )
                                 };
                                 game_state = Some(gs);
@@ -524,6 +531,12 @@ fn main() -> std::io::Result<()> {
 
                 render::render(&mut stdout, state, cols as i32, rows as i32, &settings)?;
 
+                #[cfg(all(debug_assertions, feature = "dev-tools"))]
+                if dev_session.overlay_flags != 0 {
+                    let cells = dev_tools::compute_overlay(state, &dev_session);
+                    render::render_overlay(&mut stdout, &cells, settings.color_palette)?;
+                }
+
                 if state.game_over {
                     // Game-over: any key returns to title.
                     wait_for_keypress()?;
@@ -544,17 +557,61 @@ fn main() -> std::io::Result<()> {
                 #[cfg(all(debug_assertions, feature = "dev-tools"))]
                 {
                     use crossterm::event::KeyCode;
+
+                    // Handle overlay cursor mode input first (arrow keys move cursor,
+                    // Esc exits cursor mode back to frontier mode).
+                    if dev_session.overlay_cursor.is_some() {
+                        let cursor_handled = match key.code {
+                            KeyCode::Up => {
+                                dev_session.overlay_cursor.as_mut().unwrap().1 -= 1;
+                                true
+                            }
+                            KeyCode::Down => {
+                                dev_session.overlay_cursor.as_mut().unwrap().1 += 1;
+                                true
+                            }
+                            KeyCode::Left => {
+                                dev_session.overlay_cursor.as_mut().unwrap().0 -= 1;
+                                true
+                            }
+                            KeyCode::Right => {
+                                dev_session.overlay_cursor.as_mut().unwrap().0 += 1;
+                                true
+                            }
+                            KeyCode::Esc => {
+                                dev_session.overlay_cursor = None;
+                                state.log.add("Pathfinding overlay: frontier mode.");
+                                true
+                            }
+                            _ => false,
+                        };
+                        if cursor_handled {
+                            continue;
+                        }
+                    }
+
                     let dev_cmd = match key.code {
                         KeyCode::F(1) => Some(DevCommand::DumpStats),
                         KeyCode::F(2) => Some(DevCommand::ToggleFov),
                         KeyCode::F(3) => Some(DevCommand::ToggleGodMode),
                         KeyCode::F(4) => Some(DevCommand::RevealMap),
                         KeyCode::F(5) => Some(DevCommand::KillAll),
+                        KeyCode::F(6) => Some(DevCommand::ToggleOverlay(OverlayLayer::Fov)),
+                        KeyCode::F(7) => {
+                            Some(DevCommand::ToggleOverlay(OverlayLayer::MonsterTargets))
+                        }
+                        KeyCode::F(8) => Some(DevCommand::ToggleOverlay(OverlayLayer::Pathfinding)),
+                        KeyCode::F(9) => Some(DevCommand::ToggleOverlay(OverlayLayer::Frontiers)),
+                        KeyCode::F(10) => Some(DevCommand::ReloadData),
                         _ => None,
                     };
                     if let Some(cmd) = dev_cmd {
+                        let is_reload = matches!(cmd, DevCommand::ReloadData);
                         let msg = dev_tools::exec_dev(state, &mut dev_session, cmd);
                         state.log.add(&msg);
+                        if is_reload && let Some(ref d) = dev_session.game_data {
+                            game_data = d.clone();
+                        }
                         continue;
                     }
                 }

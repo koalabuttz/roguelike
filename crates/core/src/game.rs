@@ -303,6 +303,11 @@ impl GameState {
         Self::with_seed(width, height, rand::random::<u64>())
     }
 
+    /// Create a new game with a random seed and custom game data.
+    pub fn new_with_data(width: Coord, height: Coord, game_data: &data::GameData) -> Self {
+        Self::with_data(width, height, rand::random::<u64>(), game_data)
+    }
+
     /// Create a new game using a named map preset.
     ///
     /// Presets produce deterministic topologies for testing and development.

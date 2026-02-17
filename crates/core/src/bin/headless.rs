@@ -40,6 +40,7 @@ use roguelike_core::analytics::{
     self, ConfigOverrides, DamageFlow, GameAnalytics, SweepConfig, SweepPoint,
 };
 use roguelike_core::command::GameCommand;
+use roguelike_core::data::{self, GameData};
 use roguelike_core::dev_tools::{
     BatchRunStats, DevSession, GoldenReplay, Replay, ReplayResult, after_step, golden_from_session,
 };
@@ -145,6 +146,8 @@ fn main() {
         i += 1;
     }
 
+    let game_data = data::load_game_data();
+
     // Mode 1: Replay a recorded game.
     if let Some(path) = replay_path {
         run_replay(&path);
@@ -164,6 +167,7 @@ fn main() {
             analytics_enabled,
             analysis_enabled,
             report_path.as_deref(),
+            &game_data,
         );
         return;
     }
@@ -171,7 +175,15 @@ fn main() {
     // Mode 4: Save golden replay (single game).
     if let Some(golden_path) = save_golden_path {
         let game_seed = seed.unwrap_or_else(rand::random::<u64>);
-        run_and_save_golden(width, height, game_seed, preset, max_turns, &golden_path);
+        run_and_save_golden(
+            width,
+            height,
+            game_seed,
+            preset,
+            max_turns,
+            &golden_path,
+            &game_data,
+        );
         return;
     }
 
@@ -187,14 +199,19 @@ fn main() {
 
     // Mode 5: Batch run (with optional analytics).
     if analytics_enabled {
-        run_batch_with_analytics(&config, analysis_enabled, report_path.as_deref());
+        run_batch_with_analytics(
+            &config,
+            analysis_enabled,
+            report_path.as_deref(),
+            &game_data,
+        );
     } else {
-        run_batch(&config);
+        run_batch(&config, &game_data);
     }
 }
 
 /// Original batch run — no analytics overhead.
-fn run_batch(config: &RunConfig) {
+fn run_batch(config: &RunConfig, game_data: &GameData) {
     let mut stats = BatchRunStats {
         games_played: 0,
         games_won: 0,
@@ -217,6 +234,7 @@ fn run_batch(config: &RunConfig) {
             config.preset,
             config.max_turns,
             config.save_replays,
+            game_data,
         );
 
         stats.games_played += 1;
@@ -252,7 +270,12 @@ fn run_batch(config: &RunConfig) {
 }
 
 /// Batch run with per-game analytics collection.
-fn run_batch_with_analytics(config: &RunConfig, analysis_enabled: bool, report_path: Option<&str>) {
+fn run_batch_with_analytics(
+    config: &RunConfig,
+    analysis_enabled: bool,
+    report_path: Option<&str>,
+    game_data: &GameData,
+) {
     let mut all_analytics: Vec<GameAnalytics> = Vec::new();
 
     for game_num in 0..config.games {
@@ -266,6 +289,7 @@ fn run_batch_with_analytics(config: &RunConfig, analysis_enabled: bool, report_p
             config.max_turns,
             config.save_replays,
             &ConfigOverrides::default(),
+            game_data,
         );
 
         eprint!(
@@ -328,6 +352,7 @@ fn run_batch_with_analytics(config: &RunConfig, analysis_enabled: bool, report_p
 }
 
 /// Run a single game with analytics tracking (snapshot/diff each step).
+#[allow(clippy::too_many_arguments)]
 fn run_single_game_tracked(
     width: Coord,
     height: Coord,
@@ -336,10 +361,11 @@ fn run_single_game_tracked(
     max_turns: Stat,
     save_replay: bool,
     overrides: &ConfigOverrides,
+    game_data: &GameData,
 ) -> GameAnalytics {
     let mut gs = match preset {
-        Some(p) => GameState::with_preset(width, height, seed, p),
-        None => GameState::with_seed(width, height, seed),
+        Some(p) => GameState::with_preset_data(width, height, seed, p, game_data),
+        None => GameState::with_data(width, height, seed, game_data),
     };
 
     analytics::apply_overrides(&mut gs, overrides);
@@ -412,10 +438,11 @@ fn run_single_game(
     preset: Option<MapPreset>,
     max_turns: Stat,
     save_replay: bool,
+    game_data: &GameData,
 ) -> ReplayResult {
     let mut gs = match preset {
-        Some(p) => GameState::with_preset(width, height, seed, p),
-        None => GameState::with_seed(width, height, seed),
+        Some(p) => GameState::with_preset_data(width, height, seed, p, game_data),
+        None => GameState::with_data(width, height, seed, game_data),
     };
 
     let mut session = DevSession {
@@ -490,10 +517,11 @@ fn run_and_save_golden(
     preset: Option<MapPreset>,
     max_turns: Stat,
     output_path: &str,
+    game_data: &GameData,
 ) {
     let mut gs = match preset {
-        Some(p) => GameState::with_preset(width, height, seed, p),
-        None => GameState::with_seed(width, height, seed),
+        Some(p) => GameState::with_preset_data(width, height, seed, p, game_data),
+        None => GameState::with_data(width, height, seed, game_data),
     };
 
     let mut session = DevSession {
@@ -625,6 +653,7 @@ fn run_sweep(
     analytics_enabled: bool,
     analysis_enabled: bool,
     report_path: Option<&str>,
+    game_data: &GameData,
 ) {
     let json = std::fs::read_to_string(path).expect("failed to read sweep config");
     let config: SweepConfig = serde_json::from_str(&json).expect("failed to parse sweep config");
@@ -653,6 +682,7 @@ fn run_sweep(
                     config.max_turns,
                     false,
                     overrides,
+                    game_data,
                 );
                 point_analytics.push(ga);
             } else {
@@ -665,6 +695,7 @@ fn run_sweep(
                     config.max_turns,
                     false,
                     overrides,
+                    game_data,
                 );
                 point_analytics.push(ga);
             }

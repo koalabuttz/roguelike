@@ -36,6 +36,7 @@ pub struct RoguelikeMcpServer {
     session: Arc<Mutex<Option<GameSession>>>,
     save_slot: Arc<Mutex<Option<String>>>,
     spectator: Arc<SpectatorWriter>,
+    game_data: Arc<data::GameData>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -87,6 +88,7 @@ impl RoguelikeMcpServer {
             session: Arc::new(Mutex::new(None)),
             save_slot: Arc::new(Mutex::new(None)),
             spectator: Arc::new(SpectatorWriter::new()),
+            game_data: Arc::new(data::load_game_data()),
             tool_router: Self::tool_router(),
         }
     }
@@ -100,6 +102,7 @@ impl RoguelikeMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let compact = params.compact.unwrap_or(false);
 
+        let gd = &self.game_data;
         let mut state = if let Some(ref code) = params.seed_code {
             let decoded = seed_code::decode(code)
                 .map_err(|e| McpError::invalid_params(format!("Invalid seed code: {e}"), None))?;
@@ -112,9 +115,9 @@ impl RoguelikeMcpServer {
             }
 
             if let Some(preset) = decoded.preset {
-                GameState::with_preset(decoded.width, decoded.height, decoded.seed, preset)
+                GameState::with_preset_data(decoded.width, decoded.height, decoded.seed, preset, gd)
             } else {
-                GameState::with_seed(decoded.width, decoded.height, decoded.seed)
+                GameState::with_data(decoded.width, decoded.height, decoded.seed, gd)
             }
         } else {
             let width = params.width.unwrap_or(80);
@@ -128,8 +131,8 @@ impl RoguelikeMcpServer {
             }
 
             match params.seed {
-                Some(seed) => GameState::with_seed(width, height, seed),
-                None => GameState::new(width, height),
+                Some(seed) => GameState::with_data(width, height, seed, gd),
+                None => GameState::new_with_data(width, height, gd),
             }
         };
         state.update_fov();

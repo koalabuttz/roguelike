@@ -78,7 +78,7 @@ Features that build on a stable core and benefit from a wider feature set.
 | Options/settings | 0 | Medium | M | Grows naturally as features accumulate. |
 | Targeting | 0 | Medium | M | Needed for ranged magic. Distinct UI mode. |
 | Hot reload | 0 | Medium | S | Requires data-driven content. Dev QoL. |
-| Balance telemetry | 0 | Medium | M | Useful once there's enough content to balance. |
+| ~~Balance telemetry~~ | ~~0~~ | ~~Medium~~ | ~~M~~ | ~~Useful once there's enough content to balance.~~ Done (per-game analytics, aggregate stats, CI balance workflow with baseline diffing). |
 | Mouse-only play | 0 | Medium | M | Click-to-move + menus. Benefits touchscreen too. |
 | Adjustable input timing | 0 | Low | S | Config option for players who need it. |
 | Sound effects | 0 | Medium | M | Rodio + SoundEvent. |

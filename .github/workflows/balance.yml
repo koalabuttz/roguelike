@@ -1,0 +1,132 @@
+name: Balance Check
+
+on:
+  push:
+    paths:
+      - 'crates/core/src/combat.rs'
+      - 'crates/core/src/entity.rs'
+      - 'crates/core/src/spawn.rs'
+      - 'crates/core/src/map.rs'
+      - 'crates/core/src/game.rs'
+      - 'crates/core/src/ai.rs'
+      - 'crates/core/src/data.rs'
+      - 'crates/core/data/game.toml'
+      - 'crates/core/src/analytics.rs'
+      - 'crates/core/src/bin/headless.rs'
+      - '.github/workflows/balance.yml'
+      - 'tools/balance_diff.py'
+  pull_request:
+    paths:
+      - 'crates/core/src/combat.rs'
+      - 'crates/core/src/entity.rs'
+      - 'crates/core/src/spawn.rs'
+      - 'crates/core/src/map.rs'
+      - 'crates/core/src/game.rs'
+      - 'crates/core/src/ai.rs'
+      - 'crates/core/src/data.rs'
+      - 'crates/core/data/game.toml'
+      - 'crates/core/src/analytics.rs'
+      - 'crates/core/src/bin/headless.rs'
+      - '.github/workflows/balance.yml'
+      - 'tools/balance_diff.py'
+
+permissions:
+  pull-requests: write
+
+jobs:
+  balance:
+    name: Balance Report
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore baseline cache
+        id: baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: balance-baseline.json
+          key: balance-baseline-${{ github.ref_name }}-latest
+          restore-keys: |
+            balance-baseline-main-latest
+            balance-baseline-main-
+
+      - name: Build headless (release)
+        run: cargo build --release --bin headless
+
+      - name: Run default preset (500 games)
+        run: |
+          ./target/release/headless \
+            --games 500 --seed 1 --analytics --analysis \
+            --report balance-report-default.html \
+            > stats-default.json
+
+      - name: Run arena preset (50 games)
+        run: |
+          ./target/release/headless \
+            --games 50 --seed 1 --preset arena --analytics \
+            --report balance-report-arena.html \
+            > stats-arena.json
+
+      - name: Run corridor preset (50 games)
+        run: |
+          ./target/release/headless \
+            --games 50 --seed 1 --preset corridor --analytics \
+            --report balance-report-corridor.html \
+            > stats-corridor.json
+
+      - name: Combine stats
+        run: |
+          python3 -c "
+          import json, sys
+          combined = {}
+          for name in ['default', 'arena', 'corridor']:
+              with open(f'stats-{name}.json') as f:
+                  combined[name] = json.load(f)
+          json.dump(combined, sys.stdout, indent=2)
+          " > balance-stats.json
+
+      - name: Compare with baseline
+        if: steps.baseline.outputs.cache-hit == 'true'
+        run: |
+          python3 tools/balance_diff.py balance-baseline.json balance-stats.json > balance-diff.md
+          cat balance-diff.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: No baseline available
+        if: steps.baseline.outputs.cache-hit != 'true'
+        run: |
+          echo "<!-- balance-check -->" > balance-diff.md
+          echo "## Balance Check Results" >> balance-diff.md
+          echo "**No baseline available** — this run establishes the baseline." >> balance-diff.md
+          cat balance-diff.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && steps.baseline.outputs.cache-hit == 'true'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: balance-diff.md
+          comment-tag: balance-check
+
+      - name: Update baseline
+        run: cp balance-stats.json balance-baseline.json
+
+      - name: Save baseline cache
+        uses: actions/cache/save@v4
+        with:
+          path: balance-baseline.json
+          key: balance-baseline-${{ github.ref_name }}-latest
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: balance-reports
+          retention-days: 14
+          path: |
+            balance-report-*.html
+            balance-stats.json
+            balance-diff.md

@@ -223,6 +223,15 @@ cargo run --bin headless -- --sweep sweep.json --report sweep_report.html
 
 Opens in any browser. Uses Chart.js (loaded from CDN) with a dark theme.
 
+**Balance diff** (`tools/balance_diff.py`, stdlib only):
+
+```sh
+# Compare two combined stats JSON files and output a markdown diff:
+python3 tools/balance_diff.py baseline.json current.json
+```
+
+Compares win rate, avg turns/kills/HP/explored across presets, flags per-monster damage changes >= 5%, and emits a verdict: STABLE, MINOR SHIFT, or BALANCE SHIFT. Used automatically by the CI balance workflow.
+
 **Python charts** (`tools/visualize.py`, requires matplotlib):
 
 ```sh
@@ -243,6 +252,19 @@ python3 tools/visualize.py analysis analysis.json
 ```
 
 Output PNGs are saved to `tools/output/` (or `--output-dir DIR`). Both tools also print text insights to stdout.
+
+### CI Balance Check
+
+The `.github/workflows/balance.yml` workflow runs automatically when gameplay-relevant files change (combat, entity, spawn, map, AI, data, analytics, headless). It:
+
+1. Builds the headless runner in release mode
+2. Runs 3 presets with deterministic seeds: default (500 games), arena (50), corridor (50)
+3. Compares against a cached baseline from the previous run
+4. Posts a balance diff to the workflow run's **Summary tab** (visible on every push)
+5. On PRs, also posts/updates a comment with the diff
+6. Uploads HTML reports and stats as artifacts (14-day retention)
+
+The diff classifies changes as **STABLE**, **MINOR SHIFT** (2pp+ win rate or 5%+ avg turns), or **BALANCE SHIFT** (5pp+ win rate or 10%+ turns/kills). Since all runs use `--seed 1`, results are deterministic — any delta means actual gameplay behavior changed.
 
 ### LLM Playtesting
 
@@ -370,9 +392,12 @@ crates/
       mcp_server.rs         MCP tools for LLM-driven play
 tools/
   visualize.py            Python/matplotlib analytics visualizer (batch, sweep, analysis modes)
+  balance_diff.py         Balance diff tool — compares stats JSON, outputs markdown verdict (stdlib only)
   llm_playtest.py         Dual-backend LLM playtesting (claude-code CLI or Anthropic API) with parallel execution
   playtest_analytics.py   Shared analytics module for LLM playtesting tools
   requirements.txt        Python dependencies (matplotlib, anthropic)
+.github/workflows/
+  balance.yml             CI balance check — runs headless presets, diffs against baseline, posts to PR/summary
 ```
 
 ## Configuration
@@ -473,6 +498,7 @@ Design principles (not checkboxes — follow these always):
 - [x] **Parameter sweeps** — Sweep across player stats (HP, ATK, DEF) to find balance boundaries; JSON config, structured output
 - [x] **LLM playtesting** — Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; dual backends (Claude Code CLI + Anthropic API), parallel execution, contextual strategy prompt with combat math, token usage tracking, compact mode for cost optimization
 - [x] **Debug overlay** — Visualize FOV boundaries, monster AI targets, A\* pathfinding routes, and exploration frontiers as colored overlays; toggle layers with F6–F9, cursor mode for interactive pathfinding
+- [x] **CI balance check** — GitHub Actions workflow runs headless presets on every gameplay change, diffs against cached baseline, posts verdict (STABLE/MINOR SHIFT/BALANCE SHIFT) to workflow summary and PR comments
 - [ ] **Map editor** — Visual tool for designing and testing dungeon layouts
 
 ### Polish

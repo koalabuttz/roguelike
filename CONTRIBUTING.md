@@ -166,6 +166,27 @@ cargo run --bin headless -- --sweep sweep.json
 
 This is useful during development but doesn't replace automated tests.
 
+### CI Balance Check
+
+When you push changes to gameplay-relevant files (combat, entity, spawn, map, AI, data, analytics, headless), the `balance.yml` workflow runs automatically. It:
+
+- Runs 500 default + 50 arena + 50 corridor games with deterministic seeds
+- Compares results against the previous baseline cached in CI
+- Posts a balance diff to the workflow run's **Summary tab**
+- On PRs, posts/updates a comment with the verdict: **STABLE**, **MINOR SHIFT**, or **BALANCE SHIFT**
+
+You can also run the diff tool locally to preview what CI will report:
+
+```sh
+# Run headless twice (before and after your change), then compare:
+cargo run --release --bin headless -- --games 500 --seed 1 --analytics > before.json
+# ... make your gameplay change ...
+cargo run --release --bin headless -- --games 500 --seed 1 --analytics > after.json
+python3 -c "import json,sys; json.dump({'default':json.load(open('before.json'))},sys.stdout)" > baseline.json
+python3 -c "import json,sys; json.dump({'default':json.load(open('after.json'))},sys.stdout)" > current.json
+python3 tools/balance_diff.py baseline.json current.json
+```
+
 ### Visualization Tools
 
 The `tools/` directory contains Python scripts for analytics visualization. These require a virtual environment:

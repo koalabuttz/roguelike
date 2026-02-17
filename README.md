@@ -76,6 +76,23 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 Vi keys and numpad are opt-in via Settings. Moving into a monster attacks it. Autorun keeps moving until hitting a wall, spotting a monster, or reaching a junction.
 
+### Debug Keys (dev-tools build only)
+
+| Key | Action |
+|-----|--------|
+| `F1` | Dump stats |
+| `F2` | Toggle FOV |
+| `F3` | Toggle god mode |
+| `F4` | Reveal map |
+| `F5` | Kill all monsters |
+| `F6` | Toggle FOV boundary overlay |
+| `F7` | Toggle monster targets overlay |
+| `F8` | Toggle pathfinding overlay |
+| `F9` | Toggle frontiers overlay |
+| `F10` | Reload `game.toml` (hot reload) |
+
+In pathfinding overlay mode (`F8`), arrow keys move a cursor to visualize the A\* path to any tile. Press `Esc` to return to frontier mode.
+
 ## MCP Server (AI Play)
 
 An LLM agent (like Claude) can play the game through the [Model Context Protocol](https://modelcontextprotocol.io/) server.
@@ -302,29 +319,25 @@ The MCP server supports a `compact` mode (`new_game` with `compact=true`) that o
 
 ## Adding a New Monster
 
-All content lives in `crates/core/src/data.rs`. To add a monster:
+**Without recompiling** — add a `[[monsters]]` entry to `game.toml` in the working directory:
 
-1. Define a template constant:
-
-```rust
-pub const DRAGON: MonsterTemplate = MonsterTemplate {
-    name: "Dragon",
-    glyph: 'D',
-    color: GameColor::Red,
-    hp: 40,
-    attack: 10,
-    defense: 5,
-    ai: AiBehavior::Chase,
-};
+```toml
+[[monsters]]
+name = "Dragon"
+glyph = "D"
+color = "Red"
+hp = 40
+attack = 10
+defense = 5
+ai = "Chase"
+spawn_weight = 5
 ```
 
-2. Add it to the spawn table:
+The terminal, headless runner, and MCP server load `game.toml` on startup. In dev-tools builds, press `F10` to hot-reload without restarting.
 
-```rust
-SpawnEntry { template: &DRAGON, weight: 5 },
-```
+**Compiled-in** — edit `crates/core/data/game.toml` (the embedded defaults) to add monsters permanently.
 
-If it needs new AI, add a variant to `AiBehavior` in `src/entity.rs` and implement it in `src/ai.rs`.
+If a monster needs new AI, add a variant to `AiBehavior` in `src/entity.rs` and implement it in `src/ai.rs`.
 
 ## Project Structure
 
@@ -364,7 +377,9 @@ tools/
 
 ## Configuration
 
-Game-wide tuning knobs are in `crates/core/src/data.rs` under `GameConfig`:
+Game-wide tuning knobs are defined in `crates/core/data/game.toml` (compiled into the binary as defaults). To override any value, place a `game.toml` in the working directory — the terminal, headless runner, and MCP server all load it on startup. In dev-tools builds, press `F10` to hot-reload changes without restarting.
+
+Configurable fields under `[config]`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -445,8 +460,8 @@ Design principles (not checkboxes — follow these always):
 - [ ] **Commodore 64** — Native 6502 via rust-mos; no_std, fixed-size containers, 8-bit types, C64 screen/keyboard I/O
 
 ### Modding
-- [ ] **Data-driven content** — Move templates to external files (RON/TOML); add monsters/items without recompiling
-- [ ] **Hot reload** — Reload data files during development without restarting
+- [x] **Data-driven content** — Game balance data in TOML; drop a `game.toml` in the working directory to override player stats, config knobs, and monster definitions without recompiling
+- [x] **Hot reload** — Press F10 (`dev-tools` build) to reload `game.toml` at runtime; diffs changes and applies updated config, FOV radius, and monster stats to the live game
 - [ ] **Scripting** — Embedded Lua or Rhai for custom AI, quests, and event handlers (future)
 
 ### Developer Tools
@@ -457,7 +472,7 @@ Design principles (not checkboxes — follow these always):
 - [x] **Golden replay regression** — Stored deterministic replays with expected results; detects unintended gameplay changes
 - [x] **Parameter sweeps** — Sweep across player stats (HP, ATK, DEF) to find balance boundaries; JSON config, structured output
 - [x] **LLM playtesting** — Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; dual backends (Claude Code CLI + Anthropic API), parallel execution, contextual strategy prompt with combat math, token usage tracking, compact mode for cost optimization
-- [ ] **Debug overlay** — Visualize AI state, FOV boundaries, pathfinding routes
+- [x] **Debug overlay** — Visualize FOV boundaries, monster AI targets, A\* pathfinding routes, and exploration frontiers as colored overlays; toggle layers with F6–F9, cursor mode for interactive pathfinding
 - [ ] **Map editor** — Visual tool for designing and testing dungeon layouts
 
 ### Polish

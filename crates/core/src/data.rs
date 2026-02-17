@@ -115,6 +115,15 @@ mod data_files {
 
     use super::*;
 
+    /// Known color names — must match the arms of `parse_color()` above.
+    const KNOWN_COLORS: &[&str] = &[
+        "Black", "White", "Grey", "DarkGrey", "Red", "DarkRed", "Green", "DarkGreen", "Yellow",
+        "DarkBlue", "Cyan",
+    ];
+
+    /// Known AI behavior names — must match the arms of `MonsterDef::ai_behavior()`.
+    const KNOWN_AI: &[&str] = &["chase"];
+
     const DEFAULT_TOML: &str = include_str!("../data/game.toml");
 
     static DEFAULT_DATA: LazyLock<GameData> =
@@ -166,6 +175,10 @@ mod data_files {
             Ok(content) => match parse_game_data(&content) {
                 Ok(data) => {
                     eprintln!("[data] Loaded game.toml from current directory.");
+                    let warnings = validate_game_data(&data);
+                    for w in &warnings {
+                        eprintln!("[data] Warning: {}", w);
+                    }
                     data
                 }
                 Err(e) => {
@@ -177,6 +190,109 @@ mod data_files {
                 }
             },
             Err(_) => defaults().clone(),
+        }
+    }
+
+    /// Validate game data and return warnings for suspicious values.
+    ///
+    /// Returns an empty `Vec` when everything looks correct. Warnings are
+    /// informational — a game.toml with odd values still loads and plays.
+    pub fn validate_game_data(data: &GameData) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        // --- Player validation ---
+        if data.player.hp <= 0 {
+            warnings.push(format!("Player HP must be > 0 (got {})", data.player.hp));
+        }
+        if data.player.attack < 0 {
+            warnings.push(format!(
+                "Player attack must be >= 0 (got {})",
+                data.player.attack
+            ));
+        }
+        if data.player.defense < 0 {
+            warnings.push(format!(
+                "Player defense must be >= 0 (got {})",
+                data.player.defense
+            ));
+        }
+        validate_glyph("Player", &data.player.glyph, &mut warnings);
+        validate_color("Player", &data.player.color, &mut warnings);
+
+        // --- Config validation ---
+        if data.config.fov_radius <= 0 {
+            warnings.push(format!(
+                "fov_radius must be > 0 (got {})",
+                data.config.fov_radius
+            ));
+        }
+        if data.config.room_size_min > data.config.room_size_max {
+            warnings.push(format!(
+                "room_size_min ({}) > room_size_max ({})",
+                data.config.room_size_min, data.config.room_size_max
+            ));
+        }
+        if data.config.max_rooms <= 0 {
+            warnings.push(format!(
+                "max_rooms must be > 0 (got {})",
+                data.config.max_rooms
+            ));
+        }
+        if data.config.max_monsters_per_room < 0 {
+            warnings.push(format!(
+                "max_monsters_per_room must be >= 0 (got {})",
+                data.config.max_monsters_per_room
+            ));
+        }
+
+        // --- Monster validation ---
+        let mut seen_names: HashSet<String> = HashSet::new();
+        for m in &data.monsters {
+            let lower = m.name.to_lowercase();
+            if !seen_names.insert(lower) {
+                warnings.push(format!("Duplicate monster name: {}", m.name));
+            }
+            if m.hp <= 0 {
+                warnings.push(format!("Monster '{}' HP must be > 0 (got {})", m.name, m.hp));
+            }
+            if m.spawn_weight == 0 {
+                warnings.push(format!(
+                    "Monster '{}' spawn_weight must be > 0 (got 0)",
+                    m.name
+                ));
+            }
+            validate_glyph(&m.name, &m.glyph, &mut warnings);
+            validate_color(&m.name, &m.color, &mut warnings);
+            validate_ai(&m.name, &m.ai, &mut warnings);
+        }
+
+        warnings
+    }
+
+    fn validate_glyph(entity: &str, glyph: &str, warnings: &mut Vec<String>) {
+        let count = glyph.chars().count();
+        if count == 0 {
+            warnings.push(format!("{entity} glyph is empty"));
+        } else if count > 1 {
+            warnings.push(format!(
+                "{entity} glyph should be 1 char (got {count}: \"{glyph}\")"
+            ));
+        }
+    }
+
+    fn validate_color(entity: &str, color: &str, warnings: &mut Vec<String>) {
+        if !KNOWN_COLORS.contains(&color) {
+            warnings.push(format!(
+                "{entity} has unknown color \"{color}\" (will default to White)"
+            ));
+        }
+    }
+
+    fn validate_ai(monster: &str, ai: &str, warnings: &mut Vec<String>) {
+        if !KNOWN_AI.contains(&ai.to_lowercase().as_str()) {
+            warnings.push(format!(
+                "Monster '{monster}' has unknown AI \"{ai}\" (will default to None)"
+            ));
         }
     }
 
@@ -368,5 +484,109 @@ mod tests {
         let data = defaults().clone();
         let diffs = diff_game_data(&data, &data);
         assert!(diffs.is_empty());
+    }
+
+    // --- Validation tests ---
+
+    #[test]
+    fn validate_defaults_has_no_warnings() {
+        let data = defaults();
+        let warnings = validate_game_data(data);
+        assert!(warnings.is_empty(), "Expected no warnings, got: {:?}", warnings);
+    }
+
+    #[test]
+    fn validate_catches_negative_hp() {
+        let mut data = defaults().clone();
+        data.player.hp = -1;
+        let warnings = validate_game_data(&data);
+        assert!(warnings.iter().any(|w| w.contains("Player HP")));
+    }
+
+    #[test]
+    fn validate_catches_zero_monster_hp() {
+        let mut data = defaults().clone();
+        data.monsters[0].hp = 0;
+        let warnings = validate_game_data(&data);
+        assert!(warnings.iter().any(|w| w.contains("HP must be > 0")));
+    }
+
+    #[test]
+    fn validate_catches_unknown_color() {
+        let mut data = defaults().clone();
+        data.player.color = "Magenta".to_string();
+        let warnings = validate_game_data(&data);
+        assert!(warnings.iter().any(|w| w.contains("unknown color")));
+    }
+
+    #[test]
+    fn validate_catches_unknown_ai() {
+        let mut data = defaults().clone();
+        data.monsters[0].ai = "Wander".to_string();
+        let warnings = validate_game_data(&data);
+        assert!(warnings.iter().any(|w| w.contains("unknown AI")));
+    }
+
+    #[test]
+    fn validate_catches_multi_char_glyph() {
+        let mut data = defaults().clone();
+        data.player.glyph = "@@".to_string();
+        let warnings = validate_game_data(&data);
+        assert!(warnings.iter().any(|w| w.contains("1 char")));
+    }
+
+    #[test]
+    fn validate_catches_empty_glyph() {
+        let mut data = defaults().clone();
+        data.monsters[0].glyph = "".to_string();
+        let warnings = validate_game_data(&data);
+        assert!(warnings.iter().any(|w| w.contains("glyph is empty")));
+    }
+
+    #[test]
+    fn validate_catches_room_size_inversion() {
+        let mut data = defaults().clone();
+        data.config.room_size_min = 12;
+        data.config.room_size_max = 4;
+        let warnings = validate_game_data(&data);
+        assert!(warnings.iter().any(|w| w.contains("room_size_min")));
+    }
+
+    #[test]
+    fn validate_catches_zero_fov_radius() {
+        let mut data = defaults().clone();
+        data.config.fov_radius = 0;
+        let warnings = validate_game_data(&data);
+        assert!(warnings.iter().any(|w| w.contains("fov_radius")));
+    }
+
+    #[test]
+    fn validate_catches_zero_spawn_weight() {
+        let mut data = defaults().clone();
+        data.monsters[0].spawn_weight = 0;
+        let warnings = validate_game_data(&data);
+        assert!(warnings.iter().any(|w| w.contains("spawn_weight")));
+    }
+
+    #[test]
+    fn validate_catches_duplicate_monster_names() {
+        let mut data = defaults().clone();
+        let dup = data.monsters[0].clone();
+        data.monsters.push(dup);
+        let warnings = validate_game_data(&data);
+        assert!(warnings.iter().any(|w| w.contains("Duplicate monster name")));
+    }
+
+    #[test]
+    fn validate_case_insensitive_ai() {
+        let mut data = defaults().clone();
+        data.monsters[0].ai = "chase".to_string();
+        let warnings = validate_game_data(&data);
+        // "chase" (lowercase) matches ai_behavior() and should not warn.
+        assert!(
+            !warnings.iter().any(|w| w.contains("unknown AI")),
+            "chase should be valid AI, got warnings: {:?}",
+            warnings
+        );
     }
 }

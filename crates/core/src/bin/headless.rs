@@ -76,10 +76,14 @@ fn main() {
     let mut regenerate_goldens_dir: Option<String> = None;
     let mut analysis_enabled = false;
     let mut report_path: Option<String> = None;
+    let mut validate_mode = false;
 
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
+            "--validate" => {
+                validate_mode = true;
+            }
             "--games" | "-n" => {
                 i += 1;
                 games = args[i].parse().expect("invalid --games value");
@@ -144,6 +148,22 @@ fn main() {
             }
         }
         i += 1;
+    }
+
+    // Mode 0: Validate game data and exit.
+    if validate_mode {
+        let game_data = data::load_game_data();
+        let warnings = data::validate_game_data(&game_data);
+        if warnings.is_empty() {
+            eprintln!("No warnings.");
+            std::process::exit(0);
+        } else {
+            for w in &warnings {
+                eprintln!("Warning: {}", w);
+            }
+            eprintln!("{} warning(s) found.", warnings.len());
+            std::process::exit(1);
+        }
     }
 
     let game_data = data::load_game_data();
@@ -1370,6 +1390,7 @@ OPTIONS:
         --regenerate-goldens DIR  Re-execute all goldens in dir, update expected outcomes
         --analysis             With --analytics, compute correlations/difficulty metrics
         --report FILE          Generate self-contained HTML report with charts
+        --validate             Validate game.toml and exit (0=ok, 1=warnings)
         --help                 Show this help message"
     );
 }

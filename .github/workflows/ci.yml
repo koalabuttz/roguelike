@@ -49,6 +49,26 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --workspace
 
+  bench:
+    name: Benchmark
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: target/criterion
+          key: criterion-${{ hashFiles('crates/core/benches/**') }}
+          restore-keys: criterion-
+      - run: cargo bench -p roguelike-core
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: criterion-report
+          path: target/criterion
+          retention-days: 30
+
   audit:
     name: Audit
     runs-on: ubuntu-latest

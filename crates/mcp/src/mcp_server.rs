@@ -24,6 +24,10 @@ struct GameSession {
     state: GameState,
     /// Omit ASCII map from observations to reduce response size.
     compact: bool,
+    /// Cached hash of the exploration graph inputs. When `None`, the graph has
+    /// never been sent. When `Some(h)`, `h` is the fingerprint from the last
+    /// time a full graph was injected.
+    last_graph_hash: Option<u64>,
 }
 
 /// MCP server that wraps a roguelike game session.
@@ -139,9 +143,14 @@ impl RoguelikeMcpServer {
         let observation = state.observe();
         let mut json_value = serde_json::to_value(&observation)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        inject_exploration_graph(&mut json_value, &state);
+        let mut last_graph_hash = None;
+        inject_exploration_graph_delta(&mut json_value, &state, &mut last_graph_hash, true);
         self.spectator.write_frame(&state);
-        *self.session.lock().await = Some(GameSession { state, compact });
+        *self.session.lock().await = Some(GameSession {
+            state,
+            compact,
+            last_graph_hash,
+        });
 
         if compact {
             strip_map(&mut json_value);
@@ -155,13 +164,18 @@ impl RoguelikeMcpServer {
         description = "Observe the current visible game state. Returns player stats, an ASCII map of visible tiles, a list of visible monsters with their stats, and the recent message log. Note: act, pathfind_to, auto_explore, and auto_fight already return observations. Use observe only to check state without taking an action."
     )]
     async fn observe(&self) -> Result<CallToolResult, McpError> {
-        let guard = self.session.lock().await;
-        let session = guard.as_ref().ok_or_else(|| {
+        let mut guard = self.session.lock().await;
+        let session = guard.as_mut().ok_or_else(|| {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
 
         let observation = session.state.observe();
-        let json = serialize_observation(&observation, session.compact, &session.state)?;
+        let json = serialize_observation(
+            &observation,
+            session.compact,
+            &session.state,
+            &mut session.last_graph_hash,
+        )?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
@@ -176,25 +190,32 @@ impl RoguelikeMcpServer {
         let session = guard.as_mut().ok_or_else(|| {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
-        let compact = session.compact;
-        let state = &mut session.state;
 
-        if state.game_over {
+        if session.state.game_over {
             return Err(McpError::invalid_request(
                 "Game is over. Call new_game to start a new game.",
                 None,
             ));
         }
 
+        let compact = session.compact;
+
         // Auto-fight: resolve adjacent combat in one call.
         if params.action == "auto_fight" {
-            let fight_result = state
+            let fight_result = session
+                .state
                 .auto_fight()
                 .map_err(|e| McpError::invalid_request(e, None))?;
-            self.spectator.write_frame(state);
-            let observation = state.observe();
-            let json = format_auto_fight_response(&observation, &fight_result, compact, state)
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            self.spectator.write_frame(&session.state);
+            let observation = session.state.observe();
+            let json = format_auto_fight_response(
+                &observation,
+                &fight_result,
+                compact,
+                &session.state,
+                &mut session.last_graph_hash,
+            )
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
             return Ok(CallToolResult::success(vec![Content::text(json)]));
         }
 
@@ -215,21 +236,28 @@ impl RoguelikeMcpServer {
 
         // Autorun: loop internally and return final state with metadata.
         if let GameCommand::Autorun { dx, dy } = cmd {
-            let autorun_result = state.autorun(dx, dy);
-            self.spectator.write_frame(state);
-            let observation = state.observe();
-            let frontiers = state.frontier_tiles();
-            let json = format_response(&observation, &autorun_result, &frontiers, compact, state)
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            let autorun_result = session.state.autorun(dx, dy);
+            self.spectator.write_frame(&session.state);
+            let observation = session.state.observe();
+            let frontiers = session.state.frontier_tiles();
+            let json = format_response(
+                &observation,
+                &autorun_result,
+                &frontiers,
+                compact,
+                &session.state,
+                &mut session.last_graph_hash,
+            )
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
             return Ok(CallToolResult::success(vec![Content::text(json)]));
         }
 
-        let explored_before = state.explored.len() as i32;
-        let step_result = state.step(cmd);
-        self.spectator.write_frame(state);
-        let new_tiles_revealed = state.explored.len() as i32 - explored_before;
-        let observation = state.observe();
-        let frontiers = state.frontier_tiles();
+        let explored_before = session.state.explored.len() as i32;
+        let step_result = session.state.step(cmd);
+        self.spectator.write_frame(&session.state);
+        let new_tiles_revealed = session.state.explored.len() as i32 - explored_before;
+        let observation = session.state.observe();
+        let frontiers = session.state.frontier_tiles();
         let mut value = serde_json::to_value(&observation)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         if let serde_json::Value::Object(ref mut map) = value {
@@ -240,7 +268,12 @@ impl RoguelikeMcpServer {
         }
         replace_messages(&mut value, &step_result.new_messages);
         inject_frontier_exits(&mut value, &frontiers);
-        inject_exploration_graph(&mut value, state);
+        inject_exploration_graph_delta(
+            &mut value,
+            &session.state,
+            &mut session.last_graph_hash,
+            false,
+        );
         if compact {
             strip_map(&mut value);
         }
@@ -253,15 +286,14 @@ impl RoguelikeMcpServer {
         description = "Get the full explored map — all tiles the player has ever seen. Unlike observe (which shows only current FOV), this shows the complete explored dungeon. Entity glyphs only appear at current positions if in FOV. Frontier tiles (explored floor adjacent to unexplored) are marked with '~' to show where further exploration is possible. The response includes frontier_exits coordinates for easy navigation with pathfind_to."
     )]
     async fn get_explored_map(&self) -> Result<CallToolResult, McpError> {
-        let guard = self.session.lock().await;
-        let session = guard.as_ref().ok_or_else(|| {
+        let mut guard = self.session.lock().await;
+        let session = guard.as_mut().ok_or_else(|| {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
-        let state = &session.state;
 
-        let map_lines = state.explored_map();
-        let player = &state.entities[0];
-        let frontier_tiles = state.frontier_tiles();
+        let map_lines = session.state.explored_map();
+        let player = &session.state.entities[0];
+        let frontier_tiles = session.state.frontier_tiles();
         let frontier_exits: Vec<serde_json::Value> = frontier_tiles
             .iter()
             .map(|&(x, y)| serde_json::json!({"x": x, "y": y}))
@@ -272,7 +304,12 @@ impl RoguelikeMcpServer {
             "y": player.y,
             "frontier_exits": frontier_exits,
         });
-        inject_exploration_graph(&mut response, state);
+        inject_exploration_graph_delta(
+            &mut response,
+            &session.state,
+            &mut session.last_graph_hash,
+            true,
+        );
         let json = serde_json::to_string(&response)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
@@ -289,24 +326,31 @@ impl RoguelikeMcpServer {
         let session = guard.as_mut().ok_or_else(|| {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
-        let compact = session.compact;
-        let state = &mut session.state;
 
-        if state.game_over {
+        if session.state.game_over {
             return Err(McpError::invalid_request(
                 "Game is over. Call new_game to start a new game.",
                 None,
             ));
         }
 
-        let pathfind_result = state
+        let compact = session.compact;
+        let pathfind_result = session
+            .state
             .pathfind_to(params.x, params.y)
             .map_err(|e| McpError::invalid_request(e, None))?;
-        self.spectator.write_frame(state);
-        let observation = state.observe();
-        let frontiers = state.frontier_tiles();
-        let json = format_response(&observation, &pathfind_result, &frontiers, compact, state)
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        self.spectator.write_frame(&session.state);
+        let observation = session.state.observe();
+        let frontiers = session.state.frontier_tiles();
+        let json = format_response(
+            &observation,
+            &pathfind_result,
+            &frontiers,
+            compact,
+            &session.state,
+            &mut session.last_graph_hash,
+        )
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
@@ -318,28 +362,29 @@ impl RoguelikeMcpServer {
         let session = guard.as_mut().ok_or_else(|| {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
-        let compact = session.compact;
-        let state = &mut session.state;
 
-        if state.game_over {
+        if session.state.game_over {
             return Err(McpError::invalid_request(
                 "Game is over. Call new_game to start a new game.",
                 None,
             ));
         }
 
-        let explore_result = state
+        let compact = session.compact;
+        let explore_result = session
+            .state
             .auto_explore()
             .map_err(|e| McpError::invalid_request(e, None))?;
-        self.spectator.write_frame(state);
-        let observation = state.observe();
-        let frontier_count = state.frontier_tiles().len() as i32;
+        self.spectator.write_frame(&session.state);
+        let observation = session.state.observe();
+        let frontier_count = session.state.frontier_tiles().len() as i32;
         let json = format_auto_explore_response(
             &observation,
             &explore_result,
             frontier_count,
             compact,
-            state,
+            &session.state,
+            &mut session.last_graph_hash,
         )
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
@@ -399,7 +444,8 @@ impl RoguelikeMcpServer {
         if let serde_json::Value::Object(ref mut map) = value {
             map.insert("loaded".into(), serde_json::Value::Bool(true));
         }
-        inject_exploration_graph(&mut value, &loaded);
+        let mut last_graph_hash = None;
+        inject_exploration_graph_delta(&mut value, &loaded, &mut last_graph_hash, true);
         self.spectator.write_frame(&loaded);
         // Preserve compact setting from the current session.
         let mut guard = self.session.lock().await;
@@ -407,6 +453,7 @@ impl RoguelikeMcpServer {
         *guard = Some(GameSession {
             state: loaded,
             compact,
+            last_graph_hash,
         });
 
         if compact {
@@ -574,6 +621,7 @@ fn format_auto_fight_response(
     fight: &AutoFightResult,
     compact: bool,
     state: &GameState,
+    last_hash: &mut Option<u64>,
 ) -> Result<String, serde_json::Error> {
     let mut value = serde_json::to_value(observation)?;
     if let serde_json::Value::Object(ref mut map) = value {
@@ -597,7 +645,7 @@ fn format_auto_fight_response(
         );
     }
     replace_messages(&mut value, &fight.messages);
-    inject_exploration_graph(&mut value, state);
+    inject_exploration_graph_delta(&mut value, state, last_hash, false);
     if compact {
         strip_map(&mut value);
     }
@@ -611,6 +659,7 @@ fn format_response(
     frontier_tiles: &[Pos],
     compact: bool,
     state: &GameState,
+    last_hash: &mut Option<u64>,
 ) -> Result<String, serde_json::Error> {
     let mut value = serde_json::to_value(observation)?;
     if let serde_json::Value::Object(ref mut map) = value {
@@ -629,7 +678,7 @@ fn format_response(
     }
     replace_messages(&mut value, &autorun.messages);
     inject_frontier_exits(&mut value, frontier_tiles);
-    inject_exploration_graph(&mut value, state);
+    inject_exploration_graph_delta(&mut value, state, last_hash, false);
     if compact {
         strip_map(&mut value);
     }
@@ -648,6 +697,7 @@ fn format_auto_explore_response(
     frontier_count: i32,
     compact: bool,
     state: &GameState,
+    last_hash: &mut Option<u64>,
 ) -> Result<String, serde_json::Error> {
     let mut value = serde_json::to_value(observation)?;
     if let serde_json::Value::Object(ref mut map) = value {
@@ -683,7 +733,7 @@ fn format_auto_explore_response(
         }
     }
     replace_messages(&mut value, &explore.movement.messages);
-    inject_exploration_graph(&mut value, state);
+    inject_exploration_graph_delta(&mut value, state, last_hash, false);
     if compact {
         strip_map(&mut value);
     }
@@ -695,10 +745,11 @@ fn serialize_observation(
     observation: &roguelike_core::game::GameObservation,
     compact: bool,
     state: &GameState,
+    last_hash: &mut Option<u64>,
 ) -> Result<String, McpError> {
     let mut value = serde_json::to_value(observation)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-    inject_exploration_graph(&mut value, state);
+    inject_exploration_graph_delta(&mut value, state, last_hash, false);
     if compact {
         strip_map(&mut value);
     }
@@ -724,7 +775,99 @@ fn replace_messages(value: &mut serde_json::Value, messages: &[String]) {
     }
 }
 
+/// Cheap fingerprint of the inputs that determine exploration graph changes.
+///
+/// Hashes current room index, explored room count, per-room alive monster
+/// counts, and frontier tile count. This is ~100x cheaper than building the
+/// full graph (no A* calls). Uses `DefaultHasher` from stdlib — no new deps.
+fn exploration_graph_fingerprint(state: &GameState) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+
+    // Which room contains the player.
+    let px = state.entities[0].x;
+    let py = state.entities[0].y;
+    let current_room = state
+        .map
+        .rooms
+        .iter()
+        .position(|r| r.contains_interior(px, py));
+    current_room.hash(&mut hasher);
+
+    // Count of explored rooms (rooms whose center is in state.explored).
+    let explored_count = state
+        .map
+        .rooms
+        .iter()
+        .filter(|r| {
+            let (cx, cy) = r.center();
+            state.explored.contains(&(cx, cy))
+        })
+        .count();
+    explored_count.hash(&mut hasher);
+
+    // Per-room alive monster count (changes when monsters die).
+    for room in &state.map.rooms {
+        let alive = state
+            .entities
+            .iter()
+            .skip(1)
+            .filter(|e| e.alive && room.contains_interior(e.x, e.y))
+            .count();
+        alive.hash(&mut hasher);
+    }
+
+    // Frontier tile count (cheap proxy for corridor exploration changes).
+    state.frontier_tiles().len().hash(&mut hasher);
+
+    hasher.finish()
+}
+
+/// Inject the exploration graph with delta support.
+///
+/// When `force` is true, always builds and injects the full graph.
+/// When `force` is false, compares the fingerprint to the cached hash:
+/// - Same → injects `"exploration_unchanged": true` (skips expensive A*)
+/// - Different → builds full graph and updates the hash
+fn inject_exploration_graph_delta(
+    value: &mut serde_json::Value,
+    state: &GameState,
+    last_hash: &mut Option<u64>,
+    force: bool,
+) {
+    if state.map.rooms.len() < 2 {
+        return;
+    }
+
+    let current_fp = exploration_graph_fingerprint(state);
+
+    if !force {
+        if let Some(prev) = *last_hash {
+            if prev == current_fp {
+                if let serde_json::Value::Object(map) = value {
+                    map.insert(
+                        "exploration_unchanged".into(),
+                        serde_json::Value::Bool(true),
+                    );
+                }
+                return;
+            }
+        }
+    }
+
+    // Build and inject the full graph.
+    let graph = exploration_graph::build_exploration_graph(state);
+    if let Ok(graph_value) = serde_json::to_value(&graph)
+        && let serde_json::Value::Object(map) = value
+    {
+        map.insert("exploration".into(), graph_value);
+    }
+    *last_hash = Some(current_fp);
+}
+
 /// Inject the exploration graph into a JSON response if the map has 2+ rooms.
+/// (Legacy non-delta version — kept for reference but no longer called.)
+#[allow(dead_code)]
 fn inject_exploration_graph(value: &mut serde_json::Value, state: &GameState) {
     if state.map.rooms.len() >= 2 {
         let graph = exploration_graph::build_exploration_graph(state);
@@ -919,7 +1062,9 @@ mod tests {
 
         let fight = state.auto_fight().unwrap();
         let obs = state.observe();
-        let json_str = format_auto_fight_response(&obs, &fight, false, &state).unwrap();
+        let mut hash = None;
+        let json_str =
+            format_auto_fight_response(&obs, &fight, false, &state, &mut hash).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
         // map should be removed from auto_fight responses.
@@ -931,5 +1076,96 @@ mod tests {
         assert!(parsed.get("fight_hp_lost").is_some());
         // Player stats should still be present.
         assert!(parsed.get("hp").is_some());
+    }
+
+    // --- Exploration graph delta tests ---
+
+    fn make_test_state() -> GameState {
+        let mut gs = GameState::with_seed(80, 40, 42);
+        gs.update_fov();
+        gs
+    }
+
+    #[test]
+    fn exploration_fingerprint_stable_for_same_state() {
+        let gs = make_test_state();
+        let fp1 = exploration_graph_fingerprint(&gs);
+        let fp2 = exploration_graph_fingerprint(&gs);
+        assert_eq!(fp1, fp2);
+    }
+
+    #[test]
+    fn exploration_fingerprint_changes_on_room_discovery() {
+        let mut gs = make_test_state();
+        let fp_before = exploration_graph_fingerprint(&gs);
+        // Simulate discovering a new room by adding its center to explored.
+        if let Some(room) = gs.map.rooms.iter().find(|r| {
+            let (cx, cy) = r.center();
+            !gs.explored.contains(&(cx, cy))
+        }) {
+            let (cx, cy) = room.center();
+            gs.explored.insert((cx, cy));
+        }
+        let fp_after = exploration_graph_fingerprint(&gs);
+        assert_ne!(fp_before, fp_after);
+    }
+
+    #[test]
+    fn exploration_fingerprint_changes_on_monster_death() {
+        let mut gs = make_test_state();
+        let fp_before = exploration_graph_fingerprint(&gs);
+        // Kill an alive monster in a room.
+        if let Some(e) = gs.entities.iter_mut().skip(1).find(|e| e.alive) {
+            e.alive = false;
+        }
+        let fp_after = exploration_graph_fingerprint(&gs);
+        assert_ne!(fp_before, fp_after);
+    }
+
+    #[test]
+    fn delta_injects_full_graph_when_forced() {
+        let gs = make_test_state();
+        let mut hash = None;
+        let mut value = serde_json::json!({});
+        inject_exploration_graph_delta(&mut value, &gs, &mut hash, true);
+        assert!(value.get("exploration").is_some());
+        assert!(value.get("exploration_unchanged").is_none());
+        assert!(hash.is_some());
+    }
+
+    #[test]
+    fn delta_skips_graph_when_unchanged() {
+        let gs = make_test_state();
+        let mut hash = None;
+        // First call: force to set the hash.
+        let mut v1 = serde_json::json!({});
+        inject_exploration_graph_delta(&mut v1, &gs, &mut hash, true);
+        assert!(v1.get("exploration").is_some());
+
+        // Second call: same state, not forced → should skip.
+        let mut v2 = serde_json::json!({});
+        inject_exploration_graph_delta(&mut v2, &gs, &mut hash, false);
+        assert!(v2.get("exploration_unchanged").is_some());
+        assert!(v2.get("exploration").is_none());
+    }
+
+    #[test]
+    fn delta_rebuilds_graph_after_state_change() {
+        let mut gs = make_test_state();
+        let mut hash = None;
+        // First call: force to set the hash.
+        let mut v1 = serde_json::json!({});
+        inject_exploration_graph_delta(&mut v1, &gs, &mut hash, true);
+
+        // Mutate state: kill a monster.
+        if let Some(e) = gs.entities.iter_mut().skip(1).find(|e| e.alive) {
+            e.alive = false;
+        }
+
+        // Third call: state changed, not forced → should rebuild.
+        let mut v2 = serde_json::json!({});
+        inject_exploration_graph_delta(&mut v2, &gs, &mut hash, false);
+        assert!(v2.get("exploration").is_some());
+        assert!(v2.get("exploration_unchanged").is_none());
     }
 }

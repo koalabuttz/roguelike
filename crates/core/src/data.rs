@@ -117,8 +117,17 @@ mod data_files {
 
     /// Known color names — must match the arms of `parse_color()` above.
     const KNOWN_COLORS: &[&str] = &[
-        "Black", "White", "Grey", "DarkGrey", "Red", "DarkRed", "Green", "DarkGreen", "Yellow",
-        "DarkBlue", "Cyan",
+        "Black",
+        "White",
+        "Grey",
+        "DarkGrey",
+        "Red",
+        "DarkRed",
+        "Green",
+        "DarkGreen",
+        "Yellow",
+        "DarkBlue",
+        "Cyan",
     ];
 
     /// Known AI behavior names — must match the arms of `MonsterDef::ai_behavior()`.
@@ -253,7 +262,10 @@ mod data_files {
                 warnings.push(format!("Duplicate monster name: {}", m.name));
             }
             if m.hp <= 0 {
-                warnings.push(format!("Monster '{}' HP must be > 0 (got {})", m.name, m.hp));
+                warnings.push(format!(
+                    "Monster '{}' HP must be > 0 (got {})",
+                    m.name, m.hp
+                ));
             }
             if m.spawn_weight == 0 {
                 warnings.push(format!(
@@ -492,7 +504,11 @@ mod tests {
     fn validate_defaults_has_no_warnings() {
         let data = defaults();
         let warnings = validate_game_data(data);
-        assert!(warnings.is_empty(), "Expected no warnings, got: {:?}", warnings);
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings, got: {:?}",
+            warnings
+        );
     }
 
     #[test]
@@ -574,7 +590,11 @@ mod tests {
         let dup = data.monsters[0].clone();
         data.monsters.push(dup);
         let warnings = validate_game_data(&data);
-        assert!(warnings.iter().any(|w| w.contains("Duplicate monster name")));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("Duplicate monster name"))
+        );
     }
 
     #[test]

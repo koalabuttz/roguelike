@@ -656,8 +656,7 @@ mod tests {
         let mut gs = test_game();
         gs.entities
             .push(Entity::from_template(data::goblin(), 3, 3));
-        gs.entities
-            .push(Entity::from_template(data::orc(), 4, 4));
+        gs.entities.push(Entity::from_template(data::orc(), 4, 4));
         // Kill the goblin.
         gs.entities[1].alive = false;
         gs.entities[1].hp = 0;

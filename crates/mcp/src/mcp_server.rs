@@ -1049,8 +1049,7 @@ mod tests {
         let fight = state.auto_fight().unwrap();
         let obs = state.observe();
         let mut hash = None;
-        let json_str =
-            format_auto_fight_response(&obs, &fight, false, &state, &mut hash).unwrap();
+        let json_str = format_auto_fight_response(&obs, &fight, false, &state, &mut hash).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
         // map should be removed from auto_fight responses.

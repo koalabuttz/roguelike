@@ -316,7 +316,7 @@ fn render_status_bar<W: Write>(
     };
 
     let hint_segment = if settings.show_keybind_hints {
-        " | hjkl/arrows: move | .: wait | q: quit"
+        " | hjkl/arrows: move | .: wait | Ctrl+P: log | q: quit"
     } else {
         ""
     };

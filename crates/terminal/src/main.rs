@@ -7,13 +7,20 @@ mod render;
 #[cfg(all(debug_assertions, feature = "dev-tools"))]
 use roguelike_core::dev_tools::{self, DevCommand, DevSession, OverlayLayer};
 use roguelike_core::{
-    command::GameCommand, data, game, menu, menu::MenuAction, platform::Renderer,
-    saves::SlotMetadata, seed_code, settings, settings::Platform, types::Coord,
+    command::GameCommand,
+    data, game, menu,
+    menu::MenuAction,
+    message_history::{MessageHistoryViewer, ViewerAction},
+    platform::Renderer,
+    saves::SlotMetadata,
+    seed_code, settings,
+    settings::Platform,
+    types::Coord,
 };
 
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute, queue,
     style::{self, Color, SetBackgroundColor, SetForegroundColor},
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
@@ -155,6 +162,41 @@ fn run_menu(menu: &mut menu::Menu, renderer: &mut dyn Renderer) -> std::io::Resu
             && let Some(action) = menu.handle_input(cmd)
         {
             return Ok(action);
+        }
+    }
+}
+
+/// Run the full-screen message history viewer.
+///
+/// Blocks until the user presses Esc/q. Terminal-specific input loop that
+/// maps PageUp/PageDown and Ctrl+U/Ctrl+D to page scrolling.
+fn run_message_history(messages: &[String], renderer: &mut dyn Renderer) -> std::io::Result<()> {
+    let mut viewer = MessageHistoryViewer::new(messages);
+    loop {
+        viewer.draw(renderer);
+
+        let key = wait_for_keypress()?;
+        let (_, screen_h) = renderer.screen_size();
+        let page_size = (screen_h - 2).max(1) as usize;
+
+        match key.code {
+            KeyCode::PageUp => viewer.page_up(page_size),
+            KeyCode::PageDown => viewer.page_down(page_size),
+            KeyCode::Home => viewer.scroll_up(usize::MAX),
+            KeyCode::End => viewer.scroll_down(usize::MAX),
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                viewer.page_up(page_size / 2);
+            }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                viewer.page_down(page_size / 2);
+            }
+            _ => {
+                if let Some(cmd) = input::translate_menu_key(key)
+                    && viewer.handle_input(cmd) == ViewerAction::Close
+                {
+                    return Ok(());
+                }
+            }
         }
     }
 }
@@ -614,6 +656,13 @@ fn main() -> std::io::Result<()> {
                         }
                         continue;
                     }
+                }
+
+                // Message history viewer (Ctrl+P) — intercepted before
+                // translate_key so it doesn't consume a turn or appear in replays.
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('p') {
+                    run_message_history(state.log.all(), &mut renderer)?;
+                    continue;
                 }
 
                 if let Some(cmd) = input::translate_key(key, settings.vi_keys, settings.numpad) {

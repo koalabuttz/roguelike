@@ -36,6 +36,11 @@ impl MessageLog {
         self.messages.is_empty()
     }
 
+    /// Return all messages (oldest first).
+    pub fn all(&self) -> &[String] {
+        &self.messages
+    }
+
     /// Return all messages added since index `since` (exclusive).
     pub fn messages_since(&self, since: usize) -> Vec<String> {
         self.messages[since..].to_vec()
@@ -89,6 +94,16 @@ mod tests {
         log.add("hello");
         assert_eq!(log.len(), 1);
         assert!(!log.is_empty());
+    }
+
+    #[test]
+    fn all_returns_every_message() {
+        let mut log = MessageLog::new();
+        assert!(log.all().is_empty());
+        log.add("first");
+        log.add("second");
+        log.add("third");
+        assert_eq!(log.all(), &["first", "second", "third"]);
     }
 
     #[test]

@@ -103,14 +103,26 @@ or Unix domain socket.
 - Windows named pipes differ from Unix domain sockets — platform-specific code
 - Doesn't extend to remote viewing
 
-## Recommendation
+## Current Status
 
-**Start with Option 1** (file-based) to prove the concept — minimal code, works today.
+**Option 1 (file-based) is implemented** in `crates/mcp/src/spectate.rs`.
+
+- Opt-in via `ROGUELIKE_SPECTATE_PATH` environment variable (set to a file path)
+- Atomic writes (write to `.tmp`, then rename) to prevent partial reads by viewers
+- Integrated into all MCP actions: `new_game`, `act`, `pathfind_to`, `auto_explore`, `auto_fight`, `load_game`
+- Renders the full explored map (with entities in FOV, frontiers as `~`), a status line (HP, turn, kills, explored %, seed), and the last 4 log messages
+- Errors are silently ignored — spectating is best-effort and never breaks the MCP server
+
+Usage:
+
+```sh
+ROGUELIKE_SPECTATE_PATH=/tmp/roguelike-spectate.txt cargo run --bin mcp_server
+```
+
+A viewer process can watch the file and display it (e.g., `watch -n 0.1 cat /tmp/roguelike-spectate.txt`).
+
+## Next Step
 
 **Graduate to Option 3** (TCP) when polish is needed — it naturally extends into web
 spectating, replay streaming, and the networking roadmap. The flag becomes
 `--spectate-port 7878`.
-
-Both options rely on the existing `render.rs` module — the rendering code already
-exists, it just needs to be called from a new context (file/socket) instead of only
-from the terminal game loop.

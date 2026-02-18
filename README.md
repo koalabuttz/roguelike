@@ -72,6 +72,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 | Autorun | Shift+arrow, `HJKLYUBN` (vi uppercase), Shift+numpad |
 | Auto-explore | `o` |
 | Wait a turn | `.` or numpad `5` |
+| Message history | `Ctrl+P` |
 | Quit | `q`, `Esc`, or `Ctrl+C` |
 
 Vi keys and numpad are opt-in via Settings. Moving into a monster attacks it. Autorun keeps moving until hitting a wall, spotting a monster, or reaching a junction.
@@ -114,6 +115,20 @@ The server communicates over stdio and exposes these tools:
 | `save_game` | Save current state to an in-memory slot |
 | `load_game` | Restore a previously saved game state |
 | `get_rules` | Read game mechanics and strategy tips |
+
+### Spectator Mode
+
+Set `ROGUELIKE_SPECTATE_PATH` to watch the LLM play in a separate terminal:
+
+```sh
+# Terminal 1: start the MCP server with spectating enabled
+ROGUELIKE_SPECTATE_PATH=/tmp/roguelike-spectate.txt cargo run --bin mcp_server
+
+# Terminal 2: watch the game
+watch -n 0.1 cat /tmp/roguelike-spectate.txt
+```
+
+Frames are written atomically after every action. The spectator file shows the full explored map, HP/turn/kills status, and recent log messages.
 
 To use with Claude Desktop, add to your `claude_desktop_config.json`:
 
@@ -390,6 +405,7 @@ crates/
     src/
       main.rs               MCP server entry point
       mcp_server.rs         MCP tools for LLM-driven play
+      spectate.rs           File-based spectator (ROGUELIKE_SPECTATE_PATH env var)
 tools/
   visualize.py            Python/matplotlib analytics visualizer (batch, sweep, analysis modes)
   balance_diff.py         Balance diff tool — compares stats JSON, outputs markdown verdict (stdlib only)
@@ -499,6 +515,7 @@ Design principles (not checkboxes — follow these always):
 - [x] **LLM playtesting** — Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; dual backends (Claude Code CLI + Anthropic API), parallel execution, contextual strategy prompt with combat math, token usage tracking, compact mode for cost optimization
 - [x] **Debug overlay** — Visualize FOV boundaries, monster AI targets, A\* pathfinding routes, and exploration frontiers as colored overlays; toggle layers with F6–F9, cursor mode for interactive pathfinding
 - [x] **CI balance check** — GitHub Actions workflow runs headless presets on every gameplay change, diffs against cached baseline, posts verdict (STABLE/MINOR SHIFT/BALANCE SHIFT) to workflow summary and PR comments
+- [x] **MCP spectator mode** — File-based spectator for watching LLM play; set `ROGUELIKE_SPECTATE_PATH` env var to write ASCII frames atomically after every MCP action. [Design doc.](docs/spectator-mode-options.md)
 - [ ] **Map editor** — Visual tool for designing and testing dungeon layouts
 
 ### Polish

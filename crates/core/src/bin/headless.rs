@@ -247,13 +247,14 @@ fn run_batch(config: &RunConfig, game_data: &GameData) {
         let game_seed = config.seed.unwrap_or_else(rand::random::<u64>) + game_num as u64;
         stats.seeds_used.push(game_seed);
 
-        let result = run_single_game(
+        let (result, _gs) = run_single_game(
             config.width,
             config.height,
             game_seed,
             config.preset,
             config.max_turns,
             config.save_replays,
+            &ConfigOverrides::default(),
             game_data,
         );
 
@@ -458,12 +459,15 @@ fn run_single_game(
     preset: Option<MapPreset>,
     max_turns: Stat,
     save_replay: bool,
+    overrides: &ConfigOverrides,
     game_data: &GameData,
-) -> ReplayResult {
+) -> (ReplayResult, GameState) {
     let mut gs = match preset {
         Some(p) => GameState::with_preset_data(width, height, seed, p, game_data),
         None => GameState::with_data(width, height, seed, game_data),
     };
+
+    analytics::apply_overrides(&mut gs, overrides);
 
     let mut session = DevSession {
         recording: save_replay,
@@ -520,13 +524,14 @@ fn run_single_game(
     }
 
     let kills = gs.entities.iter().skip(1).filter(|e| !e.alive).count() as Stat;
-    ReplayResult {
+    let result = ReplayResult {
         turns_played: gs.turn_count,
         game_over: gs.game_over,
         final_hp: gs.entities[0].hp,
         final_turn: gs.turn_count,
         kills,
-    }
+    };
+    (result, gs)
 }
 
 /// Run a single game and save it as a golden replay.
@@ -694,6 +699,7 @@ fn run_sweep(
             let game_seed = (ci as u64 * 1000) + game_num as u64;
 
             if analytics_enabled {
+                // Full per-turn combat tracking (snapshot + diff each step).
                 let ga = run_single_game_tracked(
                     config.width,
                     config.height,
@@ -706,8 +712,9 @@ fn run_sweep(
                 );
                 point_analytics.push(ga);
             } else {
-                // Still need analytics for sweep results.
-                let ga = run_single_game_tracked(
+                // Lightweight: run game without per-turn tracking, then
+                // build minimal analytics from the final game state.
+                let (_result, gs) = run_single_game(
                     config.width,
                     config.height,
                     game_seed,
@@ -717,7 +724,7 @@ fn run_sweep(
                     overrides,
                     game_data,
                 );
-                point_analytics.push(ga);
+                point_analytics.push(analytics::from_game_state(&gs, game_seed));
             }
         }
 

@@ -63,6 +63,51 @@ pub fn new_analytics(seed: u64) -> GameAnalytics {
     }
 }
 
+/// Build a minimal `GameAnalytics` from a finished `GameState`.
+///
+/// Populates the fields needed for `aggregate()` (turns, kills, HP,
+/// explored_pct, win/loss) without per-turn combat tracking. The
+/// damage-by-type and combat_log fields remain empty.
+///
+/// Use this when you need aggregate sweep/batch stats but don't need
+/// per-fight detail — it avoids the per-turn snapshot/diff overhead
+/// of `run_single_game_tracked`.
+pub fn from_game_state(gs: &GameState, seed: u64) -> GameAnalytics {
+    let mut kills_by_type: HashMap<String, Stat> = HashMap::new();
+    for entity in gs.entities.iter().skip(1) {
+        if !entity.alive {
+            *kills_by_type.entry(entity.name.clone()).or_insert(0) += 1;
+        }
+    }
+
+    let floor_count = gs.map.tiles.iter().filter(|t| **t == Tile::Floor).count() as Stat;
+    let explored_floors = gs
+        .explored
+        .iter()
+        .filter(|&&(x, y)| gs.map.in_bounds(x, y) && gs.map.tiles[gs.map.idx(x, y)] == Tile::Floor)
+        .count() as Stat;
+    let explored_pct = if floor_count > 0 {
+        (explored_floors * 100) / floor_count
+    } else {
+        0
+    };
+
+    GameAnalytics {
+        kills_by_type,
+        damage_dealt_by_type: HashMap::new(),
+        damage_taken_by_type: HashMap::new(),
+        final_hp: gs.entities[0].hp,
+        explored_pct,
+        first_kill_turn: None,
+        last_kill_turn: None,
+        monsters_spawned: (gs.entities.len() - 1) as Stat,
+        combat_log: Vec::new(),
+        turns: gs.turn_count,
+        game_over: gs.game_over,
+        seed,
+    }
+}
+
 /// Snapshot of a single entity's state for diffing.
 ///
 /// Captures (name, hp, alive) for each entity at a point in time.
@@ -604,6 +649,52 @@ mod tests {
         assert_eq!(analytics.turns, 0);
         assert!(!analytics.game_over);
         assert!(analytics.explored_pct > 0);
+    }
+
+    #[test]
+    fn from_game_state_captures_kills_and_stats() {
+        let mut gs = test_game();
+        gs.entities
+            .push(Entity::from_template(data::goblin(), 3, 3));
+        gs.entities
+            .push(Entity::from_template(data::orc(), 4, 4));
+        // Kill the goblin.
+        gs.entities[1].alive = false;
+        gs.entities[1].hp = 0;
+        gs.turn_count = 42;
+
+        let ga = from_game_state(&gs, 99);
+        assert_eq!(ga.seed, 99);
+        assert_eq!(ga.turns, 42);
+        assert!(!ga.game_over);
+        assert_eq!(ga.final_hp, 30);
+        assert_eq!(ga.monsters_spawned, 2);
+        assert_eq!(*ga.kills_by_type.get("Goblin").unwrap_or(&0), 1);
+        assert_eq!(*ga.kills_by_type.get("Orc").unwrap_or(&0), 0);
+        // No per-turn tracking — combat log and damage maps are empty.
+        assert!(ga.combat_log.is_empty());
+        assert!(ga.damage_dealt_by_type.is_empty());
+        assert!(ga.damage_taken_by_type.is_empty());
+    }
+
+    #[test]
+    fn from_game_state_produces_valid_aggregate() {
+        // Verify aggregate() works correctly with minimal analytics
+        // (no combat log, no damage maps — just headline stats).
+        let mut gs = test_game();
+        gs.entities
+            .push(Entity::from_template(data::goblin(), 3, 3));
+        gs.entities[1].alive = false;
+        gs.entities[1].hp = 0;
+        gs.turn_count = 100;
+
+        let ga = from_game_state(&gs, 1);
+        let stats = aggregate(&[ga]);
+        assert_eq!(stats.games, 1);
+        assert_eq!(stats.win_rate, 1.0); // not game_over
+        assert_eq!(stats.avg_turns, 100.0);
+        assert_eq!(stats.avg_kills, 1.0);
+        assert_eq!(stats.avg_hp_remaining, 30.0);
     }
 
     #[test]

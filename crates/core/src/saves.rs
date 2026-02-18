@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::types::Stat;
+
 /// Lightweight metadata for a save slot, stored as a sidecar `.meta.json` file.
 ///
 /// This allows the menu to display slot info (turn, HP, exploration %) without
@@ -7,10 +9,10 @@ use serde::{Deserialize, Serialize};
 /// dependencies, no file I/O.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlotMetadata {
-    pub turn_count: i32,
-    pub player_hp: i32,
-    pub player_max_hp: i32,
-    pub explored_pct: i32,
+    pub turn_count: Stat,
+    pub player_hp: Stat,
+    pub player_max_hp: Stat,
+    pub explored_pct: Stat,
 }
 
 #[cfg(test)]

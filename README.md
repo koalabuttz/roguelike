@@ -359,7 +359,7 @@ The terminal, headless runner, and MCP server load `game.toml` on startup. In de
 
 **Compiled-in** — edit `crates/core/data/game.toml` (the embedded defaults) to add monsters permanently.
 
-If a monster needs new AI, add a variant to `AiBehavior` in `src/entity.rs` and implement it in `src/ai.rs`.
+If a monster needs new AI, add a variant to `AiBehavior` in `crates/core/src/entity.rs` and implement it in `crates/core/src/ai.rs`.
 
 ## Project Structure
 

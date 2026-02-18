@@ -461,8 +461,8 @@ pub struct ConfigOverrides {
     pub player_hp: Option<Stat>,
     pub player_attack: Option<Stat>,
     pub player_defense: Option<Stat>,
-    pub regen_interval: Option<i32>,
-    pub max_monsters_per_room: Option<i32>,
+    pub regen_interval: Option<Stat>,
+    pub max_monsters_per_room: Option<Stat>,
 }
 
 /// Apply config overrides to a game state after creation.

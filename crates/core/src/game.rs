@@ -51,13 +51,13 @@ pub enum AutorunStopReason {
 #[derive(Debug, Serialize)]
 pub struct AutorunResult {
     /// How many tiles the player moved.
-    pub steps_taken: i32,
+    pub steps_taken: Stat,
     /// Why the run stopped.
     pub stop_reason: AutorunStopReason,
     /// All messages generated during the run.
     pub messages: Vec<String>,
     /// How many new tiles were added to the explored set during this run.
-    pub new_tiles_revealed: i32,
+    pub new_tiles_revealed: Stat,
 }
 
 /// A snapshot of the visible game state, suitable for serialization.
@@ -79,10 +79,10 @@ pub struct GameObservation {
     pub recent_messages: Vec<String>,
     pub game_over: bool,
     // --- game stats ---
-    pub kills: i32,
-    pub rooms_found: i32,
+    pub kills: Stat,
+    pub rooms_found: Stat,
     #[serde(rename = "explored")]
-    pub explored_pct: i32,
+    pub explored_pct: Stat,
     pub seed: u64,
     pub seed_code: String,
 }
@@ -91,7 +91,7 @@ pub struct GameObservation {
 #[derive(Debug, Serialize)]
 pub struct AutoFightResult {
     /// How many rounds (full turns) the fight lasted.
-    pub rounds: i32,
+    pub rounds: Stat,
     /// Name of the monster fought.
     pub target_name: String,
     /// Whether the target was killed.
@@ -128,10 +128,10 @@ pub enum StepperMode {
 /// or all at once via `run_to_completion()`.
 pub struct AutorunStepper {
     mode: StepperMode,
-    steps_taken: i32,
-    max_steps: i32,
+    steps_taken: Stat,
+    max_steps: Stat,
     all_messages: Vec<String>,
-    explored_before: i32,
+    explored_before: Stat,
 }
 
 /// Result of a single stepper step.
@@ -247,7 +247,7 @@ impl AutorunStepper {
             steps_taken: self.steps_taken,
             stop_reason: reason,
             messages: std::mem::take(&mut self.all_messages),
-            new_tiles_revealed: state.explored.len() as i32 - self.explored_before,
+            new_tiles_revealed: state.explored.len() as Stat - self.explored_before,
         })
     }
 }
@@ -264,10 +264,10 @@ pub struct EntityInfo {
     pub alive: bool,
 }
 
-fn default_regen_interval() -> i32 {
+fn default_regen_interval() -> Stat {
     3
 }
-fn default_max_autorun_steps() -> i32 {
+fn default_max_autorun_steps() -> Stat {
     100
 }
 
@@ -281,7 +281,7 @@ pub struct GameState {
     pub explored: HashSet<Pos>,
     pub log: MessageLog,
     pub game_over: bool,
-    pub turn_count: i32,
+    pub turn_count: Stat,
     /// The seed used to generate this game. Enables reproducible dungeons,
     /// seed sharing, and deterministic replay.
     pub seed: u64,
@@ -291,9 +291,9 @@ pub struct GameState {
     #[serde(skip)]
     pub dirty: bool,
     #[serde(default = "default_regen_interval")]
-    pub regen_interval: i32,
+    pub regen_interval: Stat,
     #[serde(default = "default_max_autorun_steps")]
-    pub max_autorun_steps: i32,
+    pub max_autorun_steps: Stat,
 }
 
 impl GameState {
@@ -543,7 +543,7 @@ impl GameState {
             steps_taken: 0,
             max_steps: self.max_autorun_steps,
             all_messages: Vec::new(),
-            explored_before: self.explored.len() as i32,
+            explored_before: self.explored.len() as Stat,
         }
     }
 
@@ -560,7 +560,7 @@ impl GameState {
             steps_taken: 0,
             max_steps: self.max_autorun_steps,
             all_messages: Vec::new(),
-            explored_before: self.explored.len() as i32,
+            explored_before: self.explored.len() as Stat,
         })
     }
 
@@ -762,7 +762,7 @@ impl GameState {
             .rooms
             .iter()
             .filter(|r| self.explored.contains(&r.center()))
-            .count() as i32;
+            .count() as Stat;
         let explored_pct = self.explored_pct();
 
         GameObservation {
@@ -794,12 +794,12 @@ impl GameState {
     }
 
     /// Number of dead (non-player) entities.
-    pub fn kill_count(&self) -> i32 {
-        self.entities.iter().skip(1).filter(|e| !e.alive).count() as i32
+    pub fn kill_count(&self) -> Stat {
+        self.entities.iter().skip(1).filter(|e| !e.alive).count() as Stat
     }
 
     /// Percentage of floor tiles the player has explored (0–100).
-    pub fn explored_pct(&self) -> i32 {
+    pub fn explored_pct(&self) -> Stat {
         let floor_count = self.map.known_floor_count();
         if floor_count == 0 {
             return 0;
@@ -810,7 +810,7 @@ impl GameState {
             .filter(|&&(x, y)| {
                 self.map.in_bounds(x, y) && self.map.tiles[self.map.idx(x, y)] == map::Tile::Floor
             })
-            .count() as i32;
+            .count() as Stat;
         (explored_floors * 100) / floor_count
     }
 

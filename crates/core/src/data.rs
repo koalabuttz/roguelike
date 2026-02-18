@@ -38,13 +38,13 @@ pub struct MonsterDef {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct GameConfig {
     pub fov_radius: Coord,
-    pub max_rooms: i32,
+    pub max_rooms: Stat,
     pub room_size_min: Coord,
     pub room_size_max: Coord,
-    pub max_monsters_per_room: i32,
-    pub ui_bottom_rows: i32,
-    pub max_autorun_steps: i32,
-    pub regen_interval: i32,
+    pub max_monsters_per_room: Stat,
+    pub ui_bottom_rows: Stat,
+    pub max_autorun_steps: Stat,
+    pub regen_interval: Stat,
 }
 
 impl GameData {

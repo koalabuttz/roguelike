@@ -32,9 +32,9 @@ pub struct RoomNode {
     pub player_here: bool,
     pub cleared: bool,
     pub monsters: Vec<RoomMonster>,
-    pub corpses: i32,
+    pub corpses: Stat,
     pub exits: Vec<RoomExit>,
-    pub distance: Option<i32>,
+    pub distance: Option<Stat>,
 }
 
 #[derive(Serialize)]
@@ -77,7 +77,7 @@ pub fn build_exploration_graph(state: &GameState) -> ExplorationGraph {
 
         // Collect monsters and corpses in this room
         let mut monsters = Vec::new();
-        let mut corpses = 0i32;
+        let mut corpses: Stat = 0;
         for entity in state.entities.iter().skip(1) {
             if room.contains_interior(entity.x, entity.y) {
                 if entity.alive {
@@ -100,7 +100,7 @@ pub fn build_exploration_graph(state: &GameState) -> ExplorationGraph {
         // Pathfinding distance
         let distance = if explored {
             pathfinding::find_path(&state.map, px, py, cx, cy, &state.explored)
-                .map(|path| path.len() as i32)
+                .map(|path| path.len() as Stat)
         } else {
             None
         };
@@ -150,7 +150,7 @@ fn is_near_any_room(x: Coord, y: Coord, rooms: &[Rect]) -> bool {
 }
 
 /// Count walkable neighbors of a tile (8-directional).
-fn count_walkable_neighbors(map: &crate::map::Map, x: Coord, y: Coord) -> i32 {
+fn count_walkable_neighbors(map: &crate::map::Map, x: Coord, y: Coord) -> Stat {
     let mut count = 0;
     for dy in -1..=1 {
         for dx in -1..=1 {

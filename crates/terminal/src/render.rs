@@ -7,7 +7,7 @@ use crossterm::{
 };
 
 use roguelike_core::game::GameState;
-use roguelike_core::map::{self, Tile};
+use roguelike_core::map::Tile;
 use roguelike_core::platform::Renderer;
 use roguelike_core::settings::{ColorPalette, Settings};
 use roguelike_core::types::{Coord, GameColor};
@@ -310,21 +310,7 @@ fn render_status_bar<W: Write>(
     };
 
     let explored_segment = if settings.show_explored_pct {
-        let floor_count = state.map.known_floor_count();
-        let explored_floors = state
-            .explored
-            .iter()
-            .filter(|&&(x, y)| {
-                state.map.in_bounds(x, y)
-                    && state.map.tiles[state.map.idx(x, y)] == map::Tile::Floor
-            })
-            .count() as i32;
-        let pct = if floor_count > 0 {
-            (explored_floors * 100) / floor_count
-        } else {
-            0
-        };
-        format!(" | Explored: {}%", pct)
+        format!(" | Explored: {}%", state.explored_pct())
     } else {
         String::new()
     };

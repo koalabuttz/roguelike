@@ -1,7 +1,7 @@
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use crate::types::{Coord, Pos};
+use crate::types::{Coord, Pos, Stat};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Tile {
@@ -155,8 +155,8 @@ impl Map {
     }
 
     /// Count the total number of floor tiles on the map.
-    pub fn floor_count(&self) -> i32 {
-        self.tiles.iter().filter(|t| **t == Tile::Floor).count() as i32
+    pub fn floor_count(&self) -> Stat {
+        self.tiles.iter().filter(|t| **t == Tile::Floor).count() as Stat
     }
 
     /// Whether (x, y) is inside any room's interior.
@@ -166,7 +166,7 @@ impl Map {
 
     /// Count floor tiles excluding those inside hidden rooms.
     /// Use this for exploration stats so hidden rooms don't leak info.
-    pub fn known_floor_count(&self) -> i32 {
+    pub fn known_floor_count(&self) -> Stat {
         let mut count = 0;
         for y in 0..self.height {
             for x in 0..self.width {
@@ -184,8 +184,8 @@ impl Map {
     }
 
     /// Count non-hidden rooms.
-    pub fn known_room_count(&self) -> i32 {
-        self.rooms.iter().filter(|r| !r.hidden).count() as i32
+    pub fn known_room_count(&self) -> Stat {
+        self.rooms.iter().filter(|r| !r.hidden).count() as Stat
     }
 
     pub(crate) fn carve_room(&mut self, room: &Rect) {
@@ -221,7 +221,7 @@ impl Map {
     /// Returns the player's starting position (center of the first room).
     pub fn generate(
         &mut self,
-        max_rooms: i32,
+        max_rooms: Stat,
         min_size: Coord,
         max_size: Coord,
         rng: &mut impl Rng,

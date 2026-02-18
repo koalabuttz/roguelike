@@ -865,20 +865,6 @@ fn inject_exploration_graph_delta(
     *last_hash = Some(current_fp);
 }
 
-/// Inject the exploration graph into a JSON response if the map has 2+ rooms.
-/// (Legacy non-delta version — kept for reference but no longer called.)
-#[allow(dead_code)]
-fn inject_exploration_graph(value: &mut serde_json::Value, state: &GameState) {
-    if state.map.rooms.len() >= 2 {
-        let graph = exploration_graph::build_exploration_graph(state);
-        if let Ok(graph_value) = serde_json::to_value(&graph)
-            && let serde_json::Value::Object(map) = value
-        {
-            map.insert("exploration".into(), graph_value);
-        }
-    }
-}
-
 /// Inject `frontier_exits` array into an existing JSON object value.
 fn inject_frontier_exits(value: &mut serde_json::Value, frontier_tiles: &[Pos]) {
     if let serde_json::Value::Object(map) = value {

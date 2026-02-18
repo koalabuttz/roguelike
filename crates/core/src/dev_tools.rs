@@ -223,6 +223,9 @@ pub fn exec_dev(gs: &mut GameState, session: &mut DevSession, cmd: DevCommand) -
             let new_data = data::load_game_data();
 
             // Apply config changes to game state.
+            // Note: only global config values are patched here. Monster stat
+            // changes (HP, attack, etc.) apply to newly spawned entities only —
+            // existing live monsters keep their original stats.
             gs.regen_interval = new_data.config.regen_interval;
             gs.max_autorun_steps = new_data.config.max_autorun_steps;
             let fov_changed = gs.fov_radius != new_data.config.fov_radius;

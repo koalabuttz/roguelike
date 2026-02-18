@@ -3,13 +3,14 @@ use rand::Rng;
 use crate::data::MonsterDef;
 use crate::entity::Entity;
 use crate::map::Map;
+use crate::types::Stat;
 
 /// Spawn monsters in each room (except room 0, where the player starts).
 /// Uses the weighted spawn table to pick monster types.
 pub fn spawn_monsters(
     map: &Map,
     table: &[MonsterDef],
-    max_per_room: i32,
+    max_per_room: Stat,
     rng: &mut impl Rng,
 ) -> Vec<Entity> {
     let mut monsters = Vec::new();

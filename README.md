@@ -4,7 +4,18 @@ A terminal-based roguelike dungeon crawler written in Rust.
 
 Explore randomly generated dungeons, fight monsters, and try to survive. Renders directly in the terminal using ASCII characters and ANSI colors — no external game engine required.
 
-## Building and Running
+## Installation
+
+**Pre-built binaries** are available on the [Releases](https://github.com/koalabuttz/roguelike/releases) page for Linux (x86_64, ARM64), macOS (ARM64), and Windows (x86_64). Download, make executable, and run:
+
+```sh
+chmod +x roguelike-linux-x86_64   # Linux/macOS only
+./roguelike-linux-x86_64
+```
+
+Each release also includes the `mcp_server` and `headless` binaries.
+
+### Building from Source
 
 Requires [Rust](https://www.rust-lang.org/tools/install) **1.85.0 or later** (for edition 2024 support).
 
@@ -17,10 +28,12 @@ The game adapts to your terminal size automatically.
 ## Testing
 
 ```sh
-cargo test --workspace               # All tests: ~430 unit + 13 integration
+cargo test --workspace               # All ~496 tests across all crates
 cargo test -p roguelike-core --lib    # Unit tests across core modules
 cargo test -p roguelike-core --test golden_replays # 5 golden replay regression tests
 cargo test -p roguelike-core --test scenarios      # 8 balance integration tests
+cargo test -p roguelike-core --test invariants     # Property-based core game invariant tests
+cargo test -p roguelike-mcp                        # MCP integration + property tests
 cargo clippy --workspace -- -D warnings
 cargo fmt --all --check
 ```
@@ -32,6 +45,9 @@ cargo fmt --all --check
 | Unit tests | `cargo test -p roguelike-core --lib` | Module-level logic across core modules |
 | Golden replays | `cargo test -p roguelike-core --test golden_replays` | Deterministic replay regression — detects unintended gameplay changes |
 | Scenario tests | `cargo test -p roguelike-core --test scenarios` | Balance properties — e.g., "player survives 2 goblins", "troll kills weak player" |
+| Invariant tests | `cargo test -p roguelike-core --test invariants` | Property-based: random command sequences verify HP bounds, explored monotonicity, dead-stay-dead, save/load roundtrip |
+| MCP integration | `cargo test -p roguelike-mcp --test mcp_integration` | All 10 MCP tools: response schemas, error paths, session lifecycle |
+| MCP property tests | `cargo test -p roguelike-mcp --test mcp_proptest` | Random MCP tool sequences verify game invariants hold through the JSON interface |
 
 ### Golden Replays
 
@@ -401,6 +417,7 @@ crates/
     tests/
       golden_replays.rs     Golden replay regression tests
       scenarios.rs          Balance integration tests
+      invariants.rs         Property-based game invariant tests (proptest)
       golden_replays/       Stored golden replay JSON files
   terminal/                 roguelike-terminal: crossterm frontend
     src/
@@ -409,9 +426,13 @@ crates/
       render.rs             Terminal rendering (implements Renderer)
   mcp/                      roguelike-mcp: MCP server
     src/
+      lib.rs                Library root — re-exports mcp_server and spectate modules
       main.rs               MCP server entry point
       mcp_server.rs         MCP tools for LLM-driven play
       spectate.rs           File-based spectator (ROGUELIKE_SPECTATE_PATH env var)
+    tests/
+      mcp_integration.rs    Deterministic MCP tool integration tests
+      mcp_proptest.rs       Property-based MCP session tests (proptest)
 tools/
   visualize.py            Python/matplotlib analytics visualizer (batch, sweep, analysis modes)
   balance_diff.py         Balance diff tool — compares stats JSON, outputs markdown verdict (stdlib only)

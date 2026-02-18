@@ -84,7 +84,7 @@ Place functions based on **what they operate on**, not who calls them:
 
 ## Testing Systems
 
-The project has three levels of testing. Use the appropriate level for each type of change.
+The project has five levels of testing. Use the appropriate level for each type of change.
 
 ### Unit Tests (module-level)
 
@@ -145,6 +145,30 @@ fn golden_seed_99_arena() {
     load_and_verify(&format!("{}/seed_99_arena.json", GOLDEN_DIR));
 }
 ```
+
+### Invariant Property Tests (core game invariants)
+
+Property-based tests using `proptest` that generate random `GameCommand` sequences and verify fundamental invariants hold after every `step()`. Located in `crates/core/tests/invariants.rs`.
+
+Invariants checked:
+- `player.hp <= player.max_hp`
+- `game_over == true` iff `player.hp <= 0`
+- Explored set never shrinks
+- Dead entities stay dead
+- Player is always on a walkable tile (while alive)
+- `observe()` and `save_to_json()`/`load_from_json()` never panic
+
+Run with `cargo test -p roguelike-core --test invariants`. These are most useful when changing core game logic (combat, movement, entity lifecycle, save/load).
+
+### MCP Integration & Property Tests (MCP session layer)
+
+Two test files in `crates/mcp/tests/`:
+
+**`mcp_integration.rs`** — Deterministic tests calling MCP tool methods directly on `RoguelikeMcpServer`. Covers all 10 tools: response schemas, error paths (e.g., calling tools before `new_game`), session lifecycle (reset, save persistence across games), and edge cases (compact mode, invalid actions, auto\_fight metadata).
+
+**`mcp_proptest.rs`** — Property-based tests generating random sequences of MCP tool calls. Verifies that the MCP session layer (mutex logic, JSON serialization, error handling) preserves game invariants through the JSON interface. Includes tests for random tool sequences, save/load roundtrips, and panic-freedom (intentionally skipping `new_game` to test error resilience).
+
+Run with `cargo test -p roguelike-mcp`. Add or update these tests when changing MCP tool implementations, response formats, or session management.
 
 ### Headless Analytics (exploratory testing)
 

@@ -49,9 +49,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: balance-baseline.json
-          key: balance-baseline-${{ github.ref_name }}-latest
+          key: balance-baseline-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
-            balance-baseline-main-latest
+            balance-baseline-${{ github.ref_name }}-
             balance-baseline-main-
 
       - name: Build headless (release)
@@ -118,7 +118,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: balance-baseline.json
-          key: balance-baseline-${{ github.ref_name }}-latest
+          key: balance-baseline-${{ github.ref_name }}-${{ github.run_id }}
 
       - name: Upload artifacts
         if: always()

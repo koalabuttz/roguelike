@@ -24,6 +24,7 @@ attack = 3
 defense = 0
 ai = "Chase"
 spawn_weight = 60
+sight_radius = 6
 
 [[monsters]]
 name = "Orc"
@@ -34,6 +35,7 @@ attack = 4
 defense = 1
 ai = "Chase"
 spawn_weight = 30
+sight_radius = 7
 
 [[monsters]]
 name = "Troll"
@@ -44,3 +46,4 @@ attack = 6
 defense = 3
 ai = "Chase"
 spawn_weight = 10
+sight_radius = 5

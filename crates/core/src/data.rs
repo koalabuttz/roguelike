@@ -3,6 +3,10 @@ use serde::Deserialize;
 use crate::entity::AiBehavior;
 use crate::types::{Coord, GameColor, Stat};
 
+fn default_sight_radius() -> Coord {
+    8
+}
+
 /// Top-level game data — player stats, config knobs, and monster definitions.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct GameData {
@@ -32,6 +36,8 @@ pub struct MonsterDef {
     pub defense: Stat,
     pub ai: String,
     pub spawn_weight: u32,
+    #[serde(default = "default_sight_radius")]
+    pub sight_radius: Coord,
 }
 
 /// Game-wide tuning knobs — change these to rebalance without touching logic.
@@ -273,6 +279,12 @@ mod data_files {
                     m.name
                 ));
             }
+            if m.sight_radius <= 0 {
+                warnings.push(format!(
+                    "Monster '{}' sight_radius must be > 0 (got {})",
+                    m.name, m.sight_radius
+                ));
+            }
             validate_glyph(&m.name, &m.glyph, &mut warnings);
             validate_color(&m.name, &m.color, &mut warnings);
             validate_ai(&m.name, &m.ai, &mut warnings);
@@ -382,6 +394,12 @@ mod data_files {
                 }
                 if old_m.defense != new_m.defense {
                     changes.push(format!("DEF {} -> {}", old_m.defense, new_m.defense));
+                }
+                if old_m.sight_radius != new_m.sight_radius {
+                    changes.push(format!(
+                        "sight {} -> {}",
+                        old_m.sight_radius, new_m.sight_radius
+                    ));
                 }
                 if !changes.is_empty() {
                     diffs.push(format!("{} {}", new_m.name, changes.join(", ")));
@@ -608,5 +626,75 @@ mod tests {
             "chase should be valid AI, got warnings: {:?}",
             warnings
         );
+    }
+
+    // --- sight_radius tests ---
+
+    #[test]
+    fn parse_embedded_toml_sight_radius() {
+        let data = defaults();
+        for m in &data.monsters {
+            assert!(
+                m.sight_radius > 0,
+                "{} should have sight_radius > 0",
+                m.name
+            );
+        }
+        assert_eq!(goblin().sight_radius, 6);
+        assert_eq!(orc().sight_radius, 7);
+        assert_eq!(troll().sight_radius, 5);
+    }
+
+    #[test]
+    fn sight_radius_defaults_when_missing() {
+        let toml = r#"
+[player]
+hp = 30
+attack = 5
+defense = 2
+glyph = "@"
+color = "Yellow"
+
+[config]
+fov_radius = 8
+max_rooms = 30
+room_size_min = 4
+room_size_max = 10
+max_monsters_per_room = 2
+ui_bottom_rows = 5
+max_autorun_steps = 100
+regen_interval = 3
+
+[[monsters]]
+name = "Bat"
+glyph = "b"
+color = "Grey"
+hp = 2
+attack = 1
+defense = 0
+ai = "Chase"
+spawn_weight = 100
+"#;
+        let data = parse_game_data(toml).unwrap();
+        assert_eq!(data.monsters[0].sight_radius, 8); // default
+    }
+
+    #[test]
+    fn validate_catches_zero_sight_radius() {
+        let mut data = defaults().clone();
+        data.monsters[0].sight_radius = 0;
+        let warnings = validate_game_data(&data);
+        assert!(warnings.iter().any(|w| w.contains("sight_radius")));
+    }
+
+    #[test]
+    fn diff_detects_sight_radius_change() {
+        let old = defaults().clone();
+        let mut new = old.clone();
+        if let Some(goblin) = new.monsters.iter_mut().find(|m| m.name == "Goblin") {
+            goblin.sight_radius = 10;
+        }
+        let diffs = diff_game_data(&old, &new);
+        assert!(diffs.iter().any(|d| d.contains("sight 6 -> 10")));
     }
 }

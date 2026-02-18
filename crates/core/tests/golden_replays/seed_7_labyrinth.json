@@ -292,10 +292,10 @@
     "preset": "labyrinth"
   },
   "expected": {
-    "turns_played": 47,
-    "game_over": true,
-    "final_hp": 0,
-    "final_turn": 47,
-    "kills": 6
+    "turns_played": 38,
+    "game_over": false,
+    "final_hp": 20,
+    "final_turn": 38,
+    "kills": 4
   }
 }

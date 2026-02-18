@@ -17,7 +17,7 @@ The game adapts to your terminal size automatically.
 ## Testing
 
 ```sh
-cargo test --workspace               # All tests: 320 unit + 13 integration
+cargo test --workspace               # All tests: ~430 unit + 13 integration
 cargo test -p roguelike-core --lib    # Unit tests across core modules
 cargo test -p roguelike-core --test golden_replays # 5 golden replay regression tests
 cargo test -p roguelike-core --test scenarios      # 8 balance integration tests
@@ -91,8 +91,10 @@ Vi keys and numpad are opt-in via Settings. Moving into a monster attacks it. Au
 | `F8` | Toggle pathfinding overlay |
 | `F9` | Toggle frontiers overlay |
 | `F10` | Reload `game.toml` (hot reload) |
+| `F11` | Toggle reveal monsters overlay |
+| `F12` | Toggle monster FOV overlay |
 
-In pathfinding overlay mode (`F8`), arrow keys move a cursor to visualize the A\* path to any tile. Press `Esc` to return to frontier mode.
+In pathfinding overlay mode (`F8`) and monster FOV overlay mode (`F12`), arrow keys move a cursor to select individual paths/monsters. Press `Esc` to return to union mode. Monster FOV uses a three-state toggle: off → union (all monster sight boundaries) → cursor (single monster) → off.
 
 ## MCP Server (AI Play)
 
@@ -338,7 +340,7 @@ The MCP server supports a `compact` mode (`new_game` with `compact=true`) that o
 ## Gameplay
 
 - `@` is you. Monsters appear as colored letters (`g`oblin, `o`rc, `T`roll).
-- Monsters wake and chase you when they enter your field of view.
+- Monsters have their own sight range and chase you when *they* see you (not when you see them). Trolls are dim-sighted and easy to sneak past; goblins are alert scouts.
 - `%` marks a corpse. Dead monsters stay on the map.
 - The HP bar and message log are at the bottom of the screen.
 - **Title screen** lets you start a new game, enter a seed code, load a save, or adjust settings.
@@ -348,11 +350,11 @@ The MCP server supports a `compact` mode (`new_game` with `compact=true`) that o
 
 ## Monsters
 
-| Monster | Glyph | HP | ATK | DEF | Spawn Weight |
-|---------|-------|----|-----|-----|--------------|
-| Goblin  | `g`   | 6  | 3   | 0   | 60%          |
-| Orc     | `o`   | 12 | 4   | 1   | 30%          |
-| Troll   | `T`   | 20 | 6   | 3   | 10%          |
+| Monster | Glyph | HP | ATK | DEF | Sight | Spawn Weight |
+|---------|-------|----|-----|-----|-------|--------------|
+| Goblin  | `g`   | 6  | 3   | 0   | 6     | 60%          |
+| Orc     | `o`   | 12 | 4   | 1   | 7     | 30%          |
+| Troll   | `T`   | 20 | 6   | 3   | 5     | 10%          |
 
 ## Adding a New Monster
 
@@ -368,6 +370,7 @@ attack = 10
 defense = 5
 ai = "Chase"
 spawn_weight = 5
+sight_radius = 8
 ```
 
 The terminal, headless runner, and MCP server load `game.toml` on startup. In dev-tools builds, press `F10` to hot-reload without restarting.
@@ -513,7 +516,7 @@ Design principles (not checkboxes — follow these always):
 - [x] **Golden replay regression** — Stored deterministic replays with expected results; detects unintended gameplay changes
 - [x] **Parameter sweeps** — Sweep across player stats (HP, ATK, DEF) to find balance boundaries; JSON config, structured output
 - [x] **LLM playtesting** — Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; dual backends (Claude Code CLI + Anthropic API), parallel execution, contextual strategy prompt with combat math, token usage tracking, compact mode for cost optimization
-- [x] **Debug overlay** — Visualize FOV boundaries, monster AI targets, A\* pathfinding routes, and exploration frontiers as colored overlays; toggle layers with F6–F9, cursor mode for interactive pathfinding
+- [x] **Debug overlay** — Visualize FOV boundaries, monster AI targets, A\* pathfinding routes, exploration frontiers, hidden monsters, and per-monster FOV boundaries as colored overlays; toggle layers with F6–F9/F11–F12, cursor mode for interactive pathfinding and single-monster FOV inspection
 - [x] **CI balance check** — GitHub Actions workflow runs headless presets on every gameplay change, diffs against cached baseline, posts verdict (STABLE/MINOR SHIFT/BALANCE SHIFT) to workflow summary and PR comments
 - [x] **MCP spectator mode** — File-based spectator for watching LLM play; set `ROGUELIKE_SPECTATE_PATH` env var to write ASCII frames atomically after every MCP action. [Design doc.](docs/spectator-mode-options.md)
 - [ ] **Map editor** — Visual tool for designing and testing dungeon layouts

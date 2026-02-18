@@ -522,7 +522,7 @@ impl GameState {
         if action_taken {
             self.dirty = true;
             self.update_fov();
-            if ai::run_monster_turns(&mut self.entities, &self.map, &self.visible, &mut self.log) {
+            if ai::run_monster_turns(&mut self.entities, &self.map, &mut self.log) {
                 self.game_over = true;
             }
             self.turn_count += 1;

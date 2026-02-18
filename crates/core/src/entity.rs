@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 use crate::data::{MonsterDef, PlayerDef};
 use crate::types::{Coord, GameColor, Stat};
 
+fn default_entity_sight_radius() -> Coord {
+    8
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum EntityKind {
     Player,
@@ -30,6 +34,8 @@ pub struct Entity {
     pub attack: Stat,
     pub defense: Stat,
     pub alive: bool,
+    #[serde(default = "default_entity_sight_radius")]
+    pub sight_radius: Coord,
 }
 
 impl Entity {
@@ -48,6 +54,7 @@ impl Entity {
             attack: def.attack,
             defense: def.defense,
             alive: true,
+            sight_radius: 0, // Player FOV managed by GameState.fov_radius
         }
     }
 
@@ -72,6 +79,7 @@ impl Entity {
             attack: template.attack,
             defense: template.defense,
             alive: true,
+            sight_radius: template.sight_radius,
         }
     }
 }
@@ -116,5 +124,19 @@ mod tests {
     fn from_template_sets_hp_to_max_hp() {
         let e = Entity::from_template(data::troll(), 0, 0);
         assert_eq!(e.hp, e.max_hp);
+    }
+
+    #[test]
+    fn from_template_copies_sight_radius() {
+        let e = Entity::from_template(data::goblin(), 0, 0);
+        assert_eq!(e.sight_radius, data::goblin().sight_radius);
+        let e2 = Entity::from_template(data::troll(), 0, 0);
+        assert_eq!(e2.sight_radius, data::troll().sight_radius);
+    }
+
+    #[test]
+    fn player_sight_radius_is_zero() {
+        let p = Entity::player(5, 5);
+        assert_eq!(p.sight_radius, 0);
     }
 }

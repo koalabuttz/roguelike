@@ -601,7 +601,7 @@ fn main() -> std::io::Result<()> {
                     use crossterm::event::KeyCode;
 
                     // Handle overlay cursor mode input first (arrow keys move cursor,
-                    // Esc exits cursor mode back to frontier mode).
+                    // Esc exits cursor mode back to frontier/union mode).
                     if dev_session.overlay_cursor.is_some() {
                         let cursor_handled = match key.code {
                             KeyCode::Up => {
@@ -632,6 +632,37 @@ fn main() -> std::io::Result<()> {
                         }
                     }
 
+                    // Handle monster FOV cursor mode input.
+                    if dev_session.monster_fov_cursor.is_some() {
+                        let cursor_handled = match key.code {
+                            KeyCode::Up => {
+                                dev_session.monster_fov_cursor.as_mut().unwrap().1 -= 1;
+                                true
+                            }
+                            KeyCode::Down => {
+                                dev_session.monster_fov_cursor.as_mut().unwrap().1 += 1;
+                                true
+                            }
+                            KeyCode::Left => {
+                                dev_session.monster_fov_cursor.as_mut().unwrap().0 -= 1;
+                                true
+                            }
+                            KeyCode::Right => {
+                                dev_session.monster_fov_cursor.as_mut().unwrap().0 += 1;
+                                true
+                            }
+                            KeyCode::Esc => {
+                                dev_session.monster_fov_cursor = None;
+                                state.log.add("Monster FOV overlay: union mode.");
+                                true
+                            }
+                            _ => false,
+                        };
+                        if cursor_handled {
+                            continue;
+                        }
+                    }
+
                     let dev_cmd = match key.code {
                         KeyCode::F(1) => Some(DevCommand::DumpStats),
                         KeyCode::F(2) => Some(DevCommand::ToggleFov),
@@ -645,6 +676,12 @@ fn main() -> std::io::Result<()> {
                         KeyCode::F(8) => Some(DevCommand::ToggleOverlay(OverlayLayer::Pathfinding)),
                         KeyCode::F(9) => Some(DevCommand::ToggleOverlay(OverlayLayer::Frontiers)),
                         KeyCode::F(10) => Some(DevCommand::ReloadData),
+                        KeyCode::F(11) => {
+                            Some(DevCommand::ToggleOverlay(OverlayLayer::RevealMonsters))
+                        }
+                        KeyCode::F(12) => {
+                            Some(DevCommand::ToggleOverlay(OverlayLayer::MonsterFov))
+                        }
                         _ => None,
                     };
                     if let Some(cmd) = dev_cmd {

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::command::GameCommand;
 use crate::data;
 use crate::entity::Entity;
+use crate::fov;
 use crate::game::GameState;
 use crate::map::Tile;
 use crate::pathfinding;
@@ -21,6 +22,10 @@ pub enum OverlayLayer {
     Pathfinding,
     /// Exploration frontiers — tiles at the boundary of explored territory.
     Frontiers,
+    /// Reveal all monsters — shows monsters outside FOV in dim grey.
+    RevealMonsters,
+    /// Monster FOV — shows monster sight boundaries (union or cursor mode).
+    MonsterFov,
 }
 
 /// A single overlay cell to draw on top of the normal map.
@@ -77,11 +82,14 @@ pub struct DevSession {
     /// Whether recording is active.
     pub recording: bool,
     /// Bitfield of active overlay layers (bit 0=Fov, 1=MonsterTargets,
-    /// 2=Pathfinding, 3=Frontiers).
+    /// 2=Pathfinding, 3=Frontiers, 4=RevealMonsters, 5=MonsterFov).
     pub overlay_flags: u8,
     /// Cursor position for pathfinding overlay cursor mode.
     /// `None` = frontier mode, `Some(pos)` = cursor mode.
     pub overlay_cursor: Option<Pos>,
+    /// Cursor position for monster FOV overlay cursor mode.
+    /// `None` = union mode, `Some(pos)` = cursor mode (single monster).
+    pub monster_fov_cursor: Option<Pos>,
     /// Custom game data loaded from disk (used by Spawn and hot reload).
     pub game_data: Option<data::GameData>,
 }
@@ -181,6 +189,8 @@ pub fn exec_dev(gs: &mut GameState, session: &mut DevSession, cmd: DevCommand) -
                 OverlayLayer::MonsterTargets => 1,
                 OverlayLayer::Pathfinding => 2,
                 OverlayLayer::Frontiers => 3,
+                OverlayLayer::RevealMonsters => 4,
+                OverlayLayer::MonsterFov => 5,
             };
 
             if layer == OverlayLayer::Pathfinding {
@@ -200,6 +210,24 @@ pub fn exec_dev(gs: &mut GameState, session: &mut DevSession, cmd: DevCommand) -
                     session.overlay_cursor = None;
                     "Pathfinding overlay off.".to_string()
                 }
+            } else if layer == OverlayLayer::MonsterFov {
+                let is_on = session.overlay_flags & (1 << bit) != 0;
+                if !is_on {
+                    // OFF -> union mode.
+                    session.overlay_flags |= 1 << bit;
+                    session.monster_fov_cursor = None;
+                    "Monster FOV overlay: union mode.".to_string()
+                } else if session.monster_fov_cursor.is_none() {
+                    // Union mode -> cursor mode.
+                    session.monster_fov_cursor =
+                        Some((gs.entities[0].x, gs.entities[0].y));
+                    "Monster FOV overlay: cursor mode (arrows to move, Esc to exit).".to_string()
+                } else {
+                    // Cursor mode -> OFF.
+                    session.overlay_flags &= !(1 << bit);
+                    session.monster_fov_cursor = None;
+                    "Monster FOV overlay off.".to_string()
+                }
             } else {
                 session.overlay_flags ^= 1 << bit;
                 let name = match layer {
@@ -207,6 +235,8 @@ pub fn exec_dev(gs: &mut GameState, session: &mut DevSession, cmd: DevCommand) -
                     OverlayLayer::MonsterTargets => "Monster targets",
                     OverlayLayer::Pathfinding => unreachable!(),
                     OverlayLayer::Frontiers => "Frontiers",
+                    OverlayLayer::RevealMonsters => "Reveal monsters",
+                    OverlayLayer::MonsterFov => unreachable!(),
                 };
                 if session.overlay_flags & (1 << bit) != 0 {
                     format!("{} overlay on.", name)
@@ -434,6 +464,86 @@ pub fn compute_overlay(gs: &GameState, session: &DevSession) -> Vec<OverlayCell>
                 ch: '~',
                 color: GameColor::Yellow,
             });
+        }
+    }
+
+    // Layer 4: Reveal Monsters — show monsters outside player's FOV in dim grey.
+    let reveal_active = session.overlay_flags & (1 << 4) != 0;
+    if reveal_active {
+        for entity in gs.entities.iter().skip(1) {
+            if entity.alive && !gs.visible.contains(&(entity.x, entity.y)) {
+                cells.push(OverlayCell {
+                    x: entity.x,
+                    y: entity.y,
+                    ch: entity.glyph,
+                    color: GameColor::Rgb(100, 100, 100), // dim grey
+                });
+            }
+        }
+    }
+
+    // Layer 5: Monster FOV — show monster sight boundaries.
+    if session.overlay_flags & (1 << 5) != 0 {
+        if let Some((cx, cy)) = session.monster_fov_cursor {
+            // Cursor mode: show only the selected monster's FOV.
+            if let Some(monster) = gs
+                .entities
+                .iter()
+                .skip(1)
+                .find(|e| e.alive && e.x == cx && e.y == cy)
+            {
+                let monster_vis = fov::compute_fov(&gs.map, monster.x, monster.y, monster.sight_radius);
+                for &(vx, vy) in &monster_vis {
+                    let at_boundary = (-1..=1i32).any(|dy| {
+                        (-1..=1i32).any(|dx| {
+                            (dx != 0 || dy != 0) && !monster_vis.contains(&(vx + dx, vy + dy))
+                        })
+                    });
+                    if at_boundary {
+                        cells.push(OverlayCell {
+                            x: vx,
+                            y: vy,
+                            ch: ':',
+                            color: GameColor::Rgb(180, 80, 80), // dim red
+                        });
+                    }
+                }
+            }
+            // Draw cursor marker.
+            cells.push(OverlayCell {
+                x: cx,
+                y: cy,
+                ch: 'X',
+                color: GameColor::Rgb(255, 100, 100), // bright red cursor
+            });
+        } else {
+            // Union mode: show FOV boundaries for all relevant monsters.
+            for entity in gs.entities.iter().skip(1) {
+                if !entity.alive {
+                    continue;
+                }
+                // Show monsters that are visible, or all if RevealMonsters is active.
+                if !reveal_active && !gs.visible.contains(&(entity.x, entity.y)) {
+                    continue;
+                }
+                let monster_vis =
+                    fov::compute_fov(&gs.map, entity.x, entity.y, entity.sight_radius);
+                for &(vx, vy) in &monster_vis {
+                    let at_boundary = (-1..=1i32).any(|dy| {
+                        (-1..=1i32).any(|dx| {
+                            (dx != 0 || dy != 0) && !monster_vis.contains(&(vx + dx, vy + dy))
+                        })
+                    });
+                    if at_boundary {
+                        cells.push(OverlayCell {
+                            x: vx,
+                            y: vy,
+                            ch: ':',
+                            color: GameColor::Rgb(180, 80, 80), // dim red
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -1129,5 +1239,117 @@ mod tests {
         );
         assert!(msg.contains("Spawned Goblin"));
         assert_eq!(gs.entities.last().unwrap().hp, 99);
+    }
+
+    // --- RevealMonsters overlay tests ---
+
+    #[test]
+    fn reveal_monsters_shows_non_visible() {
+        let mut gs = test_game();
+        // Place a monster far outside FOV
+        let monster = Entity::from_template(data::goblin(), 18, 18);
+        gs.entities.push(monster);
+        gs.update_fov();
+        // Verify monster is NOT visible
+        assert!(!gs.visible.contains(&(18, 18)));
+        let mut session = DevSession::default();
+        session.overlay_flags = 1 << 4; // RevealMonsters layer
+        let cells = compute_overlay(&gs, &session);
+        // Should show the monster glyph
+        assert!(
+            cells.iter().any(|c| c.x == 18 && c.y == 18 && c.ch == 'g'),
+            "should reveal non-visible monster"
+        );
+    }
+
+    #[test]
+    fn reveal_monsters_skips_visible() {
+        let mut gs = test_game();
+        // Place a monster within FOV
+        let monster = Entity::from_template(data::goblin(), 6, 5);
+        gs.entities.push(monster);
+        gs.update_fov();
+        // Verify monster IS visible
+        assert!(gs.visible.contains(&(6, 5)));
+        let mut session = DevSession::default();
+        session.overlay_flags = 1 << 4; // RevealMonsters layer
+        let cells = compute_overlay(&gs, &session);
+        // Should NOT show overlay for visible monster (normal render handles it)
+        assert!(
+            !cells.iter().any(|c| c.x == 6 && c.y == 5),
+            "should not overlay visible monster"
+        );
+    }
+
+    // --- MonsterFov overlay tests ---
+
+    #[test]
+    fn monster_fov_boundary_cells_exist() {
+        let mut gs = test_game();
+        // Place a visible monster
+        let monster = Entity::from_template(data::goblin(), 6, 5);
+        gs.entities.push(monster);
+        gs.update_fov();
+        let mut session = DevSession::default();
+        session.overlay_flags = 1 << 5; // MonsterFov layer (union mode)
+        let cells = compute_overlay(&gs, &session);
+        // Should have boundary cells with ':'
+        assert!(
+            cells.iter().any(|c| c.ch == ':'),
+            "should have monster FOV boundary cells"
+        );
+    }
+
+    #[test]
+    fn monster_fov_cursor_mode_shows_single() {
+        let mut gs = test_game();
+        // Place two monsters
+        let monster1 = Entity::from_template(data::goblin(), 3, 3);
+        let monster2 = Entity::from_template(data::orc(), 8, 8);
+        gs.entities.push(monster1);
+        gs.entities.push(monster2);
+        gs.update_fov();
+        let mut session = DevSession::default();
+        session.overlay_flags = 1 << 5; // MonsterFov layer
+        session.monster_fov_cursor = Some((3, 3)); // Cursor on monster1
+        let cells = compute_overlay(&gs, &session);
+        // Should have cursor marker at (3, 3)
+        assert!(cells.iter().any(|c| c.ch == 'X' && c.x == 3 && c.y == 3));
+        // Should have boundary cells (from monster1's FOV)
+        assert!(cells.iter().any(|c| c.ch == ':'));
+    }
+
+    // --- MonsterFov toggle three-state test ---
+
+    #[test]
+    fn monster_fov_three_state_toggle() {
+        let mut gs = test_game();
+        let mut session = DevSession::default();
+        // OFF -> union mode
+        let msg = exec_dev(
+            &mut gs,
+            &mut session,
+            DevCommand::ToggleOverlay(OverlayLayer::MonsterFov),
+        );
+        assert!(msg.contains("union mode"));
+        assert_ne!(session.overlay_flags & (1 << 5), 0);
+        assert!(session.monster_fov_cursor.is_none());
+        // Union mode -> cursor mode
+        let msg = exec_dev(
+            &mut gs,
+            &mut session,
+            DevCommand::ToggleOverlay(OverlayLayer::MonsterFov),
+        );
+        assert!(msg.contains("cursor mode"));
+        assert!(session.monster_fov_cursor.is_some());
+        // Cursor mode -> OFF
+        let msg = exec_dev(
+            &mut gs,
+            &mut session,
+            DevCommand::ToggleOverlay(OverlayLayer::MonsterFov),
+        );
+        assert!(msg.contains("off"));
+        assert_eq!(session.overlay_flags & (1 << 5), 0);
+        assert!(session.monster_fov_cursor.is_none());
     }
 }

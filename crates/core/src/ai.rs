@@ -1,16 +1,27 @@
-use std::collections::HashSet;
-
 use crate::combat;
 use crate::entity::{AiBehavior, Entity};
+use crate::fov;
 use crate::map::Map;
 use crate::message_log::MessageLog;
-use crate::types::{Coord, Pos};
+use crate::types::Coord;
+
+/// Check whether a monster is aware of the player.
+///
+/// Each AI behavior has its own awareness model. Chase monsters use
+/// line-of-sight within their individual `sight_radius`.
+fn is_aware(entities: &[Entity], idx: usize, px: Coord, py: Coord, map: &Map) -> bool {
+    match entities[idx].ai {
+        AiBehavior::Chase => {
+            fov::can_see(map, entities[idx].x, entities[idx].y, px, py, entities[idx].sight_radius)
+        }
+        AiBehavior::None => false,
+    }
+}
 
 /// Run all monster turns. Returns true if the player was killed.
 pub fn run_monster_turns(
     entities: &mut [Entity],
     map: &Map,
-    visible: &HashSet<Pos>,
     log: &mut MessageLog,
 ) -> bool {
     let px = entities[0].x;
@@ -21,8 +32,8 @@ pub fn run_monster_turns(
             continue;
         }
 
-        // Only act if monster is visible (wake on sight)
-        if !visible.contains(&(entities[i].x, entities[i].y)) {
+        // Only act if monster is aware of the player (per-monster FOV)
+        if !is_aware(entities, i, px, py, map) {
             continue;
         }
 
@@ -98,17 +109,6 @@ mod tests {
         m
     }
 
-    /// Make all positions in the map visible.
-    fn full_visibility(w: i32, h: i32) -> HashSet<Pos> {
-        let mut vis = HashSet::new();
-        for y in 0..h {
-            for x in 0..w {
-                vis.insert((x, y));
-            }
-        }
-        vis
-    }
-
     fn make_player(x: i32, y: i32) -> Entity {
         Entity::player(x, y)
     }
@@ -120,7 +120,6 @@ mod tests {
     #[test]
     fn dead_monsters_are_skipped() {
         let map = open_map(10, 10);
-        let vis = full_visibility(10, 10);
         let mut log = MessageLog::new();
         let mut dead_monster = make_monster(3, 3);
         dead_monster.alive = false;
@@ -128,7 +127,7 @@ mod tests {
         let orig_y = dead_monster.y;
 
         let mut entities = vec![make_player(5, 5), dead_monster];
-        run_monster_turns(&mut entities, &map, &vis, &mut log);
+        run_monster_turns(&mut entities, &map, &mut log);
         // Dead monster should not have moved
         assert_eq!(entities[1].x, orig_x);
         assert_eq!(entities[1].y, orig_y);
@@ -136,15 +135,21 @@ mod tests {
 
     #[test]
     fn non_visible_monsters_are_skipped() {
-        let map = open_map(10, 10);
-        let vis = HashSet::new(); // nothing visible
+        let map = open_map(20, 20);
         let mut log = MessageLog::new();
-        let monster = make_monster(3, 3);
+        // Place monster behind a wall so it can't see the player
+        // Build a wall column at x=10
+        let mut walled_map = map;
+        for y in 0..20 {
+            let idx = walled_map.idx(10, y);
+            walled_map.tiles[idx] = Tile::Wall;
+        }
+        let monster = make_monster(15, 5);
         let orig_x = monster.x;
         let orig_y = monster.y;
 
         let mut entities = vec![make_player(5, 5), monster];
-        run_monster_turns(&mut entities, &map, &vis, &mut log);
+        run_monster_turns(&mut entities, &walled_map, &mut log);
         assert_eq!(entities[1].x, orig_x);
         assert_eq!(entities[1].y, orig_y);
     }
@@ -152,12 +157,11 @@ mod tests {
     #[test]
     fn adjacent_monster_attacks_player() {
         let map = open_map(10, 10);
-        let vis = full_visibility(10, 10);
         let mut log = MessageLog::new();
 
         let mut entities = vec![make_player(5, 5), make_monster(5, 4)]; // adjacent
         let player_hp_before = entities[0].hp;
-        run_monster_turns(&mut entities, &map, &vis, &mut log);
+        run_monster_turns(&mut entities, &map, &mut log);
         // Monster should have attacked, reducing player HP (goblin atk=3, player def=2, dmg=1)
         assert!(entities[0].hp < player_hp_before);
     }
@@ -165,11 +169,10 @@ mod tests {
     #[test]
     fn non_adjacent_monster_moves_toward_player() {
         let map = open_map(10, 10);
-        let vis = full_visibility(10, 10);
         let mut log = MessageLog::new();
 
         let mut entities = vec![make_player(5, 5), make_monster(2, 2)]; // far away
-        run_monster_turns(&mut entities, &map, &vis, &mut log);
+        run_monster_turns(&mut entities, &map, &mut log);
         // Monster should have moved closer to player
         let dx = (entities[1].x - 5).abs();
         let dy = (entities[1].y - 5).abs();
@@ -187,11 +190,11 @@ mod tests {
         let idx2 = map.idx(4, 4);
         map.tiles[idx2] = Tile::Wall;
 
-        let vis = full_visibility(10, 10);
         let mut log = MessageLog::new();
 
+        // Player at (5,3), monster at (3,3) — within sight radius on open tiles
         let mut entities = vec![make_player(5, 3), make_monster(3, 3)];
-        run_monster_turns(&mut entities, &map, &vis, &mut log);
+        run_monster_turns(&mut entities, &map, &mut log);
         // Monster should not be at (4, 3) — that's a wall
         assert!(!(entities[1].x == 4 && entities[1].y == 3));
     }
@@ -199,13 +202,12 @@ mod tests {
     #[test]
     fn monster_does_not_walk_through_other_monsters() {
         let map = open_map(10, 10);
-        let vis = full_visibility(10, 10);
         let mut log = MessageLog::new();
 
         // Monster at (3,5) wants to go toward player at (5,5).
         // Another monster at (4,5) blocks the direct path.
         let mut entities = vec![make_player(5, 5), make_monster(3, 5), make_monster(4, 5)];
-        run_monster_turns(&mut entities, &map, &vis, &mut log);
+        run_monster_turns(&mut entities, &map, &mut log);
         // First monster (index 1) should not end up at (4,5) — that's where monster 2 is
         assert!(!(entities[1].x == 4 && entities[1].y == 5));
     }
@@ -213,14 +215,13 @@ mod tests {
     #[test]
     fn returns_true_when_player_dies() {
         let map = open_map(10, 10);
-        let vis = full_visibility(10, 10);
         let mut log = MessageLog::new();
 
         let mut player = make_player(5, 5);
         player.hp = 1; // Nearly dead
         player.defense = 0;
         let mut entities = vec![player, make_monster(5, 4)]; // adjacent goblin, atk=3
-        let player_died = run_monster_turns(&mut entities, &map, &vis, &mut log);
+        let player_died = run_monster_turns(&mut entities, &map, &mut log);
         assert!(player_died);
         assert!(!entities[0].alive);
     }
@@ -228,11 +229,82 @@ mod tests {
     #[test]
     fn returns_false_when_player_alive() {
         let map = open_map(10, 10);
-        let vis = full_visibility(10, 10);
         let mut log = MessageLog::new();
 
         let mut entities = vec![make_player(5, 5), make_monster(5, 4)];
-        let player_died = run_monster_turns(&mut entities, &map, &vis, &mut log);
+        let player_died = run_monster_turns(&mut entities, &map, &mut log);
         assert!(!player_died);
+    }
+
+    // --- Per-monster FOV awareness tests ---
+
+    #[test]
+    fn monster_wakes_when_player_in_sight() {
+        let map = open_map(20, 20);
+        let mut log = MessageLog::new();
+        // Goblin has sight_radius=6. Player at (5,5), monster at (8,5) — distance 3.
+        let mut entities = vec![make_player(5, 5), make_monster(8, 5)];
+        let orig_x = entities[1].x;
+        run_monster_turns(&mut entities, &map, &mut log);
+        // Monster should have moved toward the player
+        assert!(entities[1].x < orig_x, "monster should chase toward player");
+    }
+
+    #[test]
+    fn monster_dormant_beyond_sight() {
+        let map = open_map(20, 20);
+        let mut log = MessageLog::new();
+        // Create a monster with sight_radius=4 at distance 6
+        let mut monster = make_monster(11, 5);
+        monster.sight_radius = 4;
+        let orig_x = monster.x;
+        let orig_y = monster.y;
+        let mut entities = vec![make_player(5, 5), monster];
+        run_monster_turns(&mut entities, &map, &mut log);
+        // Monster should NOT have moved — player is beyond its sight radius
+        assert_eq!(entities[1].x, orig_x);
+        assert_eq!(entities[1].y, orig_y);
+    }
+
+    #[test]
+    fn wall_blocks_monster_sight() {
+        let mut map = open_map(20, 20);
+        // Build a wall column at x=7
+        for y in 0..20 {
+            let idx = map.idx(7, y);
+            map.tiles[idx] = Tile::Wall;
+        }
+        let mut log = MessageLog::new();
+        // Player at (5,5), monster at (9,5) — wall blocks LOS
+        let monster = make_monster(9, 5);
+        let orig_x = monster.x;
+        let orig_y = monster.y;
+        let mut entities = vec![make_player(5, 5), monster];
+        run_monster_turns(&mut entities, &map, &mut log);
+        assert_eq!(entities[1].x, orig_x);
+        assert_eq!(entities[1].y, orig_y);
+    }
+
+    #[test]
+    fn different_sight_radii() {
+        let map = open_map(20, 20);
+        let mut log = MessageLog::new();
+        // Place two monsters at distance 5 from player
+        // Monster A: sight_radius=6 (can see player)
+        let mut monster_a = make_monster(10, 5);
+        monster_a.sight_radius = 6;
+        let orig_a_x = monster_a.x;
+        // Monster B: sight_radius=3 (cannot see player)
+        let mut monster_b = make_monster(10, 8);
+        monster_b.sight_radius = 3;
+        let orig_b_x = monster_b.x;
+        let orig_b_y = monster_b.y;
+        let mut entities = vec![make_player(5, 5), monster_a, monster_b];
+        run_monster_turns(&mut entities, &map, &mut log);
+        // Monster A should have moved (can see)
+        assert!(entities[1].x < orig_a_x, "monster A should chase");
+        // Monster B should NOT have moved (can't see)
+        assert_eq!(entities[2].x, orig_b_x);
+        assert_eq!(entities[2].y, orig_b_y);
     }
 }

@@ -233,7 +233,7 @@ All simulation hooks into one place: `GameState::step()` at `game.rs:454`. The e
 
 1. Player command (`handle_command`)
 2. FOV update (`update_fov`)
-3. Monster AI (`run_monster_turns`) — now mood-aware
+3. Monster AI (`run_monster_turns`) — per-monster FOV awareness via `can_see()`; future: mood-aware
 4. Event queue (`process_events`) — delayed effects fire
 5. Cellular automata (`tick_environment`) — environmental spread
 6. Turn counter increment

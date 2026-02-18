@@ -54,7 +54,7 @@ Builds on the core systems to add depth, platforms, and accessibility.
 | Magic/abilities | 0 | High | L | Big design space. Requires targeting UI. Expands combat significantly. |
 | Granular difficulty | 0 | Medium | S | Config toggles. Broadens who can enjoy the game. |
 | Context-sensitive help | 0 | Medium | S | `?` key on any screen. Accessibility and onboarding. |
-| Debug overlay | 0 | Medium | S | See AI decisions, FOV, pathfinding. Accelerates development. |
+| Debug overlay | 0 | Medium | S | See AI decisions, FOV, pathfinding, monster sight boundaries, hidden monsters. Accelerates development. |
 | ~~MCP spectator mode (file)~~ | ~~&zwj;~1 item~~ | ~~Medium~~ | ~~S~~ | ~~Write rendered frames to a file after each MCP action; viewer process displays them. Proves the concept, upgrades to TCP later. [Design doc.](spectator-mode-options.md)~~ Done (`ROGUELIKE_SPECTATE_PATH` env var, atomic file writes, integrated into all MCP actions). |
 | Meta-progression | 0 | High | L | Persistent unlocks between runs. Requires save/load. |
 | Web (WASM) | ~2 items | High | L | Browser-based play. Requires platform abstraction. |

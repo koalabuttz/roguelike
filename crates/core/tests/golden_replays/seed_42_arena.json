@@ -2020,10 +2020,10 @@
     "preset": "arena"
   },
   "expected": {
-    "turns_played": 500,
-    "game_over": false,
-    "final_hp": 30,
-    "final_turn": 500,
-    "kills": 2
+    "turns_played": 314,
+    "game_over": true,
+    "final_hp": 0,
+    "final_turn": 314,
+    "kills": 0
   }
 }

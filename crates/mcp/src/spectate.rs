@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn spectator_writer_writes_file() {
         let gs = test_game();
-        let path = PathBuf::from("/tmp/roguelike-spectate-test.txt");
+        let path = std::env::temp_dir().join("roguelike-spectate-test.txt");
         let writer = SpectatorWriter {
             path: Some(path.clone()),
         };

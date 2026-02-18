@@ -11,8 +11,9 @@ By submitting a pull request, you agree that your contributions may be included 
 ## Getting Started
 
 1. Fork the repository and clone your fork
-2. Create a feature branch: `git checkout -b my-feature`
-3. Make your changes
+2. Enable the pre-commit hook: `git config core.hooksPath .github/hooks`
+3. Create a feature branch: `git checkout -b my-feature`
+4. Make your changes
 
 ## Before Submitting
 
@@ -38,19 +39,15 @@ cargo run --bin headless -- --regenerate-goldens crates/core/tests/golden_replay
 
 Before pushing, run the validation commands above. You can run them individually during development or all at once before committing.
 
-### Pre-commit Hook (Recommended but Optional)
+### Pre-commit Hook (Recommended)
 
-To automatically run all checks before each commit:
+The pre-commit hook runs fmt, clippy, and tests before each commit. Enable it with:
 
 ```sh
-# One-time setup
-cp .github/hooks/pre-commit .git/hooks/pre-commit
-chmod +x .git/hooks/pre-commit
+git config core.hooksPath .github/hooks
 ```
 
-**Why it's optional**: The hook helps catch issues early and saves CI minutes, but it's not required — GitHub Actions will run the same checks on every PR. Some developers prefer to commit freely and rely on CI feedback.
-
-**Best practice**: If you're actively developing, enabling the hook prevents you from pushing broken code and provides faster feedback than waiting for CI.
+This points git at the repo's hooks directory so the hook stays in sync with the codebase. CI runs the same checks on every PR, so the hook is technically optional — but it gives much faster feedback than waiting for CI.
 
 ## Edition 2024 Notes
 

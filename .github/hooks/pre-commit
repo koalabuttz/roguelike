@@ -3,8 +3,7 @@
 # Runs formatting, linting, and tests before allowing commit
 #
 # To install:
-#   cp .github/hooks/pre-commit .git/hooks/pre-commit
-#   chmod +x .git/hooks/pre-commit
+#   git config core.hooksPath .github/hooks
 #
 # To bypass temporarily:
 #   git commit --no-verify

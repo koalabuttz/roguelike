@@ -18,6 +18,7 @@ toml = { workspace = true, optional = true }
 [dev-dependencies]
 serde_json = { workspace = true }
 criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1"
 
 [[bin]]
 name = "headless"

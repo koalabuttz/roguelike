@@ -11,6 +11,12 @@ pub struct SpectatorWriter {
     pub(crate) path: Option<PathBuf>,
 }
 
+impl Default for SpectatorWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SpectatorWriter {
     pub fn new() -> Self {
         let path = match std::env::var("ROGUELIKE_SPECTATE_PATH") {

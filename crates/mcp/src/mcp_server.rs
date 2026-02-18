@@ -109,7 +109,7 @@ impl RoguelikeMcpServer {
     #[tool(
         description = "Start a new roguelike game. Returns the initial game state observation. Call this before any other tool."
     )]
-    async fn new_game(
+    pub async fn new_game(
         &self,
         Parameters(params): Parameters<NewGameParams>,
     ) -> Result<CallToolResult, McpError> {
@@ -172,7 +172,7 @@ impl RoguelikeMcpServer {
     #[tool(
         description = "Observe the current visible game state. Returns player stats, an ASCII map of visible tiles, a list of visible monsters with their stats, and the recent message log. Note: act, pathfind_to, auto_explore, and auto_fight already return observations. Use observe only to check state without taking an action."
     )]
-    async fn observe(&self) -> Result<CallToolResult, McpError> {
+    pub async fn observe(&self) -> Result<CallToolResult, McpError> {
         let mut guard = self.session.lock().await;
         let session = guard.as_mut().ok_or_else(|| {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
@@ -191,7 +191,7 @@ impl RoguelikeMcpServer {
     #[tool(
         description = "Take an action in the game. Valid actions: 'move_north', 'move_south', 'move_east', 'move_west', 'move_northeast', 'move_northwest', 'move_southeast', 'move_southwest', 'wait'. Moving into a monster attacks it. Returns the resulting game state after the action and any monster turns. Also supports autorun: 'autorun_north', 'autorun_south', 'autorun_east', 'autorun_west', 'autorun_northeast', 'autorun_northwest', 'autorun_southeast', 'autorun_southwest'. Autorun keeps moving in that direction until hitting a wall, spotting a new monster, taking damage, or reaching a corridor junction/room entrance. Use autorun to traverse long corridors efficiently. Also supports 'auto_fight' to resolve combat with an adjacent monster in one call — fights the weakest adjacent monster to the death. Response includes game stats: kills, rooms_found, explored."
     )]
-    async fn act(
+    pub async fn act(
         &self,
         Parameters(params): Parameters<ActParams>,
     ) -> Result<CallToolResult, McpError> {
@@ -294,7 +294,7 @@ impl RoguelikeMcpServer {
     #[tool(
         description = "Get the full explored map — all tiles the player has ever seen. Unlike observe (which shows only current FOV), this shows the complete explored dungeon. Entity glyphs only appear at current positions if in FOV. Frontier tiles (explored floor adjacent to unexplored) are marked with '~' to show where further exploration is possible. The response includes frontier_exits coordinates for easy navigation with pathfind_to."
     )]
-    async fn get_explored_map(&self) -> Result<CallToolResult, McpError> {
+    pub async fn get_explored_map(&self) -> Result<CallToolResult, McpError> {
         let mut guard = self.session.lock().await;
         let session = guard.as_mut().ok_or_else(|| {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
@@ -327,7 +327,7 @@ impl RoguelikeMcpServer {
     #[tool(
         description = "Look at a specific tile to get detailed information. Returns terrain, entity info, visibility. Does not consume a turn."
     )]
-    async fn look_at(
+    pub async fn look_at(
         &self,
         Parameters(params): Parameters<LookAtParams>,
     ) -> Result<CallToolResult, McpError> {
@@ -351,7 +351,7 @@ impl RoguelikeMcpServer {
     #[tool(
         description = "Pathfind to a target tile using A*. The player automatically walks the shortest path through explored tiles, stopping for monsters, damage, or reaching the target. Use this instead of multiple move commands to navigate to a visible or previously-explored location."
     )]
-    async fn pathfind_to(
+    pub async fn pathfind_to(
         &self,
         Parameters(params): Parameters<PathfindParams>,
     ) -> Result<CallToolResult, McpError> {
@@ -390,7 +390,7 @@ impl RoguelikeMcpServer {
     #[tool(
         description = "Automatically explore the dungeon. Finds the nearest frontier tile (edge of explored area) and pathfinds to it. Equivalent to get_explored_map + pathfind_to in one call. Stops for monsters, damage, or when the frontier is reached. Returns observation with frontiers count, new_tiles revealed, and target_x/target_y explore coordinates."
     )]
-    async fn auto_explore(&self) -> Result<CallToolResult, McpError> {
+    pub async fn auto_explore(&self) -> Result<CallToolResult, McpError> {
         let mut guard = self.session.lock().await;
         let session = guard.as_mut().ok_or_else(|| {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
@@ -426,7 +426,7 @@ impl RoguelikeMcpServer {
     #[tool(
         description = "Save the current game state. Stores the game in an in-memory save slot (one slot, overwrites previous save). Returns turn count, HP, seed, and save size."
     )]
-    async fn save_game(&self) -> Result<CallToolResult, McpError> {
+    pub async fn save_game(&self) -> Result<CallToolResult, McpError> {
         // Lock session, serialize, drop lock before acquiring save_slot lock.
         let json = {
             let guard = self.session.lock().await;
@@ -460,7 +460,7 @@ impl RoguelikeMcpServer {
     #[tool(
         description = "Load a previously saved game state. Replaces the current game with the saved state. Returns the observation of the restored state."
     )]
-    async fn load_game(&self) -> Result<CallToolResult, McpError> {
+    pub async fn load_game(&self) -> Result<CallToolResult, McpError> {
         // Lock save_slot, clone JSON, drop save_slot lock before acquiring session lock.
         let save_json = {
             let guard = self.save_slot.lock().await;
@@ -500,7 +500,7 @@ impl RoguelikeMcpServer {
     #[tool(
         description = "Get the rules and mechanics of the roguelike game. Explains combat, movement, monsters, and field of view. Call this to understand the game before playing."
     )]
-    async fn get_rules(&self) -> Result<CallToolResult, McpError> {
+    pub async fn get_rules(&self) -> Result<CallToolResult, McpError> {
         let game_data = data::defaults();
         let cfg = &game_data.config;
         let player = &game_data.player;

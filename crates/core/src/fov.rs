@@ -140,7 +140,8 @@ where
             let map_y = oy + dx * yx + dy * yy;
 
             // Only mark visible if within the circular radius
-            if (dx * dx + dy * dy) < radius_sq && map.in_bounds(map_x, map_y)
+            if (dx * dx + dy * dy) < radius_sq
+                && map.in_bounds(map_x, map_y)
                 && !on_visible(map_x, map_y)
             {
                 return false; // early exit requested

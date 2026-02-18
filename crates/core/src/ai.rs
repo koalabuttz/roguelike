@@ -11,19 +11,20 @@ use crate::types::Coord;
 /// line-of-sight within their individual `sight_radius`.
 fn is_aware(entities: &[Entity], idx: usize, px: Coord, py: Coord, map: &Map) -> bool {
     match entities[idx].ai {
-        AiBehavior::Chase => {
-            fov::can_see(map, entities[idx].x, entities[idx].y, px, py, entities[idx].sight_radius)
-        }
+        AiBehavior::Chase => fov::can_see(
+            map,
+            entities[idx].x,
+            entities[idx].y,
+            px,
+            py,
+            entities[idx].sight_radius,
+        ),
         AiBehavior::None => false,
     }
 }
 
 /// Run all monster turns. Returns true if the player was killed.
-pub fn run_monster_turns(
-    entities: &mut [Entity],
-    map: &Map,
-    log: &mut MessageLog,
-) -> bool {
+pub fn run_monster_turns(entities: &mut [Entity], map: &Map, log: &mut MessageLog) -> bool {
     let px = entities[0].x;
     let py = entities[0].y;
 

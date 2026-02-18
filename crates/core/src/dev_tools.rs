@@ -219,8 +219,7 @@ pub fn exec_dev(gs: &mut GameState, session: &mut DevSession, cmd: DevCommand) -
                     "Monster FOV overlay: union mode.".to_string()
                 } else if session.monster_fov_cursor.is_none() {
                     // Union mode -> cursor mode.
-                    session.monster_fov_cursor =
-                        Some((gs.entities[0].x, gs.entities[0].y));
+                    session.monster_fov_cursor = Some((gs.entities[0].x, gs.entities[0].y));
                     "Monster FOV overlay: cursor mode (arrows to move, Esc to exit).".to_string()
                 } else {
                     // Cursor mode -> OFF.
@@ -492,7 +491,8 @@ pub fn compute_overlay(gs: &GameState, session: &DevSession) -> Vec<OverlayCell>
                 .skip(1)
                 .find(|e| e.alive && e.x == cx && e.y == cy)
             {
-                let monster_vis = fov::compute_fov(&gs.map, monster.x, monster.y, monster.sight_radius);
+                let monster_vis =
+                    fov::compute_fov(&gs.map, monster.x, monster.y, monster.sight_radius);
                 for &(vx, vy) in &monster_vis {
                     let at_boundary = (-1..=1i32).any(|dy| {
                         (-1..=1i32).any(|dx| {

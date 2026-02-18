@@ -679,9 +679,7 @@ fn main() -> std::io::Result<()> {
                         KeyCode::F(11) => {
                             Some(DevCommand::ToggleOverlay(OverlayLayer::RevealMonsters))
                         }
-                        KeyCode::F(12) => {
-                            Some(DevCommand::ToggleOverlay(OverlayLayer::MonsterFov))
-                        }
+                        KeyCode::F(12) => Some(DevCommand::ToggleOverlay(OverlayLayer::MonsterFov)),
                         _ => None,
                     };
                     if let Some(cmd) = dev_cmd {

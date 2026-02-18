@@ -1,4 +1,4 @@
-use crate::game::{GameState, TileInfo};
+use crate::game::{GameState, LookOptions, TileInfo};
 use crate::platform::Renderer;
 use crate::types::{Coord, GameColor};
 
@@ -56,6 +56,11 @@ impl LookCursor {
     /// Get tile info at the current cursor position.
     pub fn current_info(&self, state: &GameState) -> TileInfo {
         state.look_at(self.cursor_x, self.cursor_y)
+    }
+
+    /// Get tile info with configurable reveal options (for dev-tools overlays).
+    pub fn current_info_with(&self, state: &GameState, opts: &LookOptions) -> TileInfo {
+        state.look_at_with(self.cursor_x, self.cursor_y, opts)
     }
 
     /// Draw the look-mode overlay: cursor glyph and description in status area.

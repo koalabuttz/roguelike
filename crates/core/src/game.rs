@@ -276,6 +276,16 @@ pub struct EntityInfo {
     pub alive: bool,
 }
 
+/// Options that control what `look_at` reveals beyond normal FOV.
+///
+/// Default is conservative (reveal nothing). Platform layers build this
+/// from their own debug/dev state and pass it into `look_at_with`.
+#[derive(Debug, Clone, Default)]
+pub struct LookOptions {
+    /// Show alive monsters even outside the player's FOV.
+    pub reveal_monsters: bool,
+}
+
 fn default_regen_interval() -> Stat {
     3
 }
@@ -899,6 +909,18 @@ impl GameState {
     /// Returns terrain, entity info (only if visible), and display glyph.
     /// Out-of-bounds or unexplored tiles return appropriate defaults.
     pub fn look_at(&self, x: Coord, y: Coord) -> TileInfo {
+        self.look_at_inner(x, y, &LookOptions::default())
+    }
+
+    /// Like `look_at`, but with configurable reveal options.
+    ///
+    /// Use this when the caller has extra visibility (e.g. dev-tools
+    /// RevealMonsters overlay). Corpses still require normal visibility.
+    pub fn look_at_with(&self, x: Coord, y: Coord, opts: &LookOptions) -> TileInfo {
+        self.look_at_inner(x, y, opts)
+    }
+
+    fn look_at_inner(&self, x: Coord, y: Coord, opts: &LookOptions) -> TileInfo {
         if !self.map.in_bounds(x, y) {
             return TileInfo {
                 x,
@@ -931,8 +953,9 @@ impl GameState {
             map::Tile::Wall => "Wall".into(),
         };
 
-        // Entity info only if currently visible (don't reveal stale positions).
-        let entity = if visible {
+        // Show entity info if visible, or if reveal_monsters is active (alive only).
+        let show_entity = visible || opts.reveal_monsters;
+        let entity = if show_entity {
             // Check alive entities first (higher priority).
             if let Some(idx) = self
                 .entities
@@ -949,7 +972,8 @@ impl GameState {
                     max_hp: e.max_hp,
                     alive: true,
                 })
-            } else {
+            } else if visible {
+                // Corpses only shown when normally visible (not via reveal).
                 self.entities
                     .iter()
                     .find(|e| !e.alive && e.x == x && e.y == y)
@@ -962,16 +986,22 @@ impl GameState {
                         max_hp: e.max_hp,
                         alive: false,
                     })
+            } else {
+                None
             }
         } else {
             None
         };
 
+        // Show entity glyph if visible, or if we found a revealed monster.
         let glyph = if visible {
             self.glyph_at(x, y).unwrap_or(match tile {
                 map::Tile::Floor => '.',
                 map::Tile::Wall => '#',
             })
+        } else if entity.is_some() {
+            // Revealed monster — show its glyph.
+            entity.as_ref().unwrap().glyph
         } else {
             match tile {
                 map::Tile::Floor => '.',
@@ -2421,5 +2451,61 @@ mod tests {
         let mut gs = test_game();
         let acted = gs.handle_command(GameCommand::Look);
         assert!(!acted);
+    }
+
+    #[test]
+    fn look_at_with_reveal_shows_monster_outside_fov() {
+        let mut gs = test_game();
+        // Place monster outside FOV.
+        let monster = Entity::from_template(data::goblin(), 3, 3);
+        gs.entities.push(monster);
+        gs.explored.insert((3, 3));
+        gs.visible.remove(&(3, 3));
+        // Without reveal: no entity.
+        let info = gs.look_at(3, 3);
+        assert!(info.entity.is_none());
+        assert_eq!(info.glyph, '.');
+        // With reveal: entity shown.
+        let opts = LookOptions {
+            reveal_monsters: true,
+        };
+        let info = gs.look_at_with(3, 3, &opts);
+        assert!(info.entity.is_some());
+        let ent = info.entity.unwrap();
+        assert_eq!(ent.name, "Goblin");
+        assert!(ent.alive);
+        assert_eq!(info.glyph, 'g');
+    }
+
+    #[test]
+    fn look_at_with_reveal_does_not_show_corpse_outside_fov() {
+        let mut gs = test_game();
+        // Place dead monster outside FOV.
+        let mut corpse = Entity::from_template(data::goblin(), 3, 3);
+        corpse.alive = false;
+        corpse.hp = 0;
+        gs.entities.push(corpse);
+        gs.explored.insert((3, 3));
+        gs.visible.remove(&(3, 3));
+        // Even with reveal: corpses are not shown (only alive monsters).
+        let opts = LookOptions {
+            reveal_monsters: true,
+        };
+        let info = gs.look_at_with(3, 3, &opts);
+        assert!(info.entity.is_none());
+        assert_eq!(info.glyph, '.');
+    }
+
+    #[test]
+    fn look_at_with_default_opts_same_as_look_at() {
+        let mut gs = test_game();
+        let monster = Entity::from_template(data::goblin(), 3, 3);
+        gs.entities.push(monster);
+        gs.explored.insert((3, 3));
+        gs.visible.remove(&(3, 3));
+        let normal = gs.look_at(3, 3);
+        let with_defaults = gs.look_at_with(3, 3, &LookOptions::default());
+        assert_eq!(normal.entity.is_some(), with_defaults.entity.is_some());
+        assert_eq!(normal.glyph, with_defaults.glyph);
     }
 }

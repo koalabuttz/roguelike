@@ -9,6 +9,7 @@ use roguelike_core::dev_tools::{self, DevCommand, DevSession, OverlayLayer};
 use roguelike_core::{
     command::GameCommand,
     data, game,
+    game::LookOptions,
     look::{LookAction, LookCursor},
     menu,
     menu::MenuAction,
@@ -207,6 +208,7 @@ fn run_message_history(messages: &[String], renderer: &mut dyn Renderer) -> std:
 ///
 /// Blocks until the user closes look mode (Esc/x/q). Renders the game
 /// with a cursor overlay and tile description on each keypress.
+/// `look_opts` controls extra visibility (e.g. dev-tools RevealMonsters).
 fn run_look_mode(
     stdout: &mut impl std::io::Write,
     state: &game::GameState,
@@ -214,13 +216,14 @@ fn run_look_mode(
     cols: Coord,
     rows: Coord,
     settings: &settings::Settings,
+    look_opts: &LookOptions,
 ) -> std::io::Result<()> {
     let player = &state.entities[0];
     let mut cursor = LookCursor::new(player.x, player.y);
 
     loop {
         render::render(stdout, state, cols, rows, settings)?;
-        let info = cursor.current_info(state);
+        let info = cursor.current_info_with(state, look_opts);
         cursor.draw_overlay(renderer, &info, rows, settings.message_log_lines as Coord);
         renderer.flush();
 
@@ -739,6 +742,12 @@ fn main() -> std::io::Result<()> {
                         }
 
                         GameCommand::Look => {
+                            #[cfg(all(debug_assertions, feature = "dev-tools"))]
+                            let look_opts = LookOptions {
+                                reveal_monsters: dev_session.overlay_flags & (1 << 4) != 0,
+                            };
+                            #[cfg(not(all(debug_assertions, feature = "dev-tools")))]
+                            let look_opts = LookOptions::default();
                             run_look_mode(
                                 &mut stdout,
                                 state,
@@ -746,6 +755,7 @@ fn main() -> std::io::Result<()> {
                                 cols as i32,
                                 rows as i32,
                                 &settings,
+                                &look_opts,
                             )?;
                         }
 

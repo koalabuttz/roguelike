@@ -10,6 +10,7 @@ pub mod entity;
 pub mod exploration_graph;
 pub mod fov;
 pub mod game;
+pub mod look;
 pub mod map;
 pub mod menu;
 pub mod message_history;

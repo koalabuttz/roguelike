@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use roguelike_core::command::GameCommand;
+use roguelike_core::look::LookCommand;
 use roguelike_core::platform::MenuCommand;
 use roguelike_core::types::Coord;
 
@@ -77,6 +78,7 @@ pub fn translate_key(key: KeyEvent, vi_keys: bool, numpad: bool) -> Option<GameC
 
     match key.code {
         KeyCode::Char('o') => Some(GameCommand::AutoExplore),
+        KeyCode::Char('x') => Some(GameCommand::Look),
         KeyCode::Char('.') | KeyCode::Char('5') => Some(GameCommand::Wait),
         KeyCode::Char('q') | KeyCode::Esc => Some(GameCommand::Quit),
         _ => None,
@@ -92,6 +94,24 @@ pub fn translate_menu_key(key: KeyEvent) -> Option<MenuCommand> {
         KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('2') => Some(MenuCommand::Down),
         KeyCode::Enter | KeyCode::Char(' ') => Some(MenuCommand::Select),
         KeyCode::Esc | KeyCode::Char('q') => Some(MenuCommand::Back),
+        _ => None,
+    }
+}
+
+/// Translate a crossterm key event into a look-mode command.
+///
+/// Uses directional keys for cursor movement (ignoring autorun flag).
+/// Esc, x, and q close look mode.
+pub fn translate_look_key(key: KeyEvent, vi_keys: bool, numpad: bool) -> Option<LookCommand> {
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+
+    // Directional keys move the cursor (autorun flag is ignored).
+    if let Some((dx, dy, _)) = resolve_direction(key.code, shift, vi_keys, numpad) {
+        return Some(LookCommand::Move { dx, dy });
+    }
+
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('x') | KeyCode::Char('q') => Some(LookCommand::Close),
         _ => None,
     }
 }
@@ -322,8 +342,15 @@ mod tests {
     }
 
     #[test]
+    fn x_key_produces_look() {
+        assert_eq!(
+            translate_key(press(KeyCode::Char('x')), true, true),
+            Some(GameCommand::Look)
+        );
+    }
+
+    #[test]
     fn unbound_key_returns_none() {
-        assert_eq!(translate_key(press(KeyCode::Char('x')), true, true), None);
         assert_eq!(translate_key(press(KeyCode::Char('z')), true, true), None);
         assert_eq!(translate_key(press(KeyCode::F(1)), true, true), None);
     }
@@ -546,6 +573,65 @@ mod tests {
         assert_eq!(
             translate_key(press(KeyCode::Char('5')), true, false),
             Some(GameCommand::Wait)
+        );
+    }
+
+    // --- Look mode key tests ---
+
+    #[test]
+    fn look_directional_keys() {
+        assert_eq!(
+            translate_look_key(press(KeyCode::Up), true, true),
+            Some(LookCommand::Move { dx: 0, dy: -1 })
+        );
+        assert_eq!(
+            translate_look_key(press(KeyCode::Right), true, true),
+            Some(LookCommand::Move { dx: 1, dy: 0 })
+        );
+        assert_eq!(
+            translate_look_key(press(KeyCode::Char('h')), true, true),
+            Some(LookCommand::Move { dx: -1, dy: 0 })
+        );
+        assert_eq!(
+            translate_look_key(press(KeyCode::Char('7')), true, true),
+            Some(LookCommand::Move { dx: -1, dy: -1 })
+        );
+    }
+
+    #[test]
+    fn look_shift_direction_moves_one_tile() {
+        // Shift+direction in look mode should move one tile, not autorun.
+        assert_eq!(
+            translate_look_key(press_with(KeyCode::Up, KeyModifiers::SHIFT), true, true),
+            Some(LookCommand::Move { dx: 0, dy: -1 })
+        );
+        assert_eq!(
+            translate_look_key(press(KeyCode::Char('H')), true, true),
+            Some(LookCommand::Move { dx: -1, dy: 0 })
+        );
+    }
+
+    #[test]
+    fn look_close_keys() {
+        assert_eq!(
+            translate_look_key(press(KeyCode::Esc), true, true),
+            Some(LookCommand::Close)
+        );
+        assert_eq!(
+            translate_look_key(press(KeyCode::Char('x')), true, true),
+            Some(LookCommand::Close)
+        );
+        assert_eq!(
+            translate_look_key(press(KeyCode::Char('q')), true, true),
+            Some(LookCommand::Close)
+        );
+    }
+
+    #[test]
+    fn look_unbound_key_returns_none() {
+        assert_eq!(
+            translate_look_key(press(KeyCode::Char('z')), true, true),
+            None
         );
     }
 }

@@ -71,6 +71,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 | Move diagonal | `yubn` (vi), numpad `7913` |
 | Autorun | Shift+arrow, `HJKLYUBN` (vi uppercase), Shift+numpad |
 | Auto-explore | `o` |
+| Look mode | `x` (move cursor to examine tiles, Esc to close) |
 | Wait a turn | `.` or numpad `5` |
 | Message history | `Ctrl+P` |
 | Quit | `q`, `Esc`, or `Ctrl+C` |
@@ -111,6 +112,7 @@ The server communicates over stdio and exposes these tools:
 | `new_game` | Start a game (optional `width`/`height`/`seed`/`compact`/`seed_code` params) |
 | `observe` | Get visible state: map, entities, HP, messages |
 | `act` | Take an action: move, wait, autorun, or auto\_fight |
+| `look_at` | Examine a tile: terrain, entity info, visibility (no turn consumed) |
 | `pathfind_to` | A\* pathfind to a target tile; stops for monsters or damage |
 | `auto_explore` | Find nearest frontier and walk to it in one call |
 | `get_explored_map` | Full explored map with frontier markers (`~`) |
@@ -387,7 +389,8 @@ crates/
     src/
       lib.rs                Library root — re-exports all modules
       command.rs            GameCommand enum (platform-independent)
-      game.rs               GameState struct, step(), observe(), core game logic
+      game.rs               GameState struct, step(), observe(), look_at(), core game logic
+      look.rs               Look mode: cursor, commands, tile description formatting
       map.rs, combat.rs, ai.rs, fov.rs, pathfinding.rs, spawn.rs
       entity.rs, data.rs, types.rs, message_log.rs
       platform.rs           Renderer and InputSource traits
@@ -469,7 +472,7 @@ See [docs/roadmap-priority.md](docs/roadmap-priority.md) for a detailed breakdow
 - [ ] **Controller support** — Gamepad input on all desktop platforms; d-pad/stick for movement, context-sensitive menus for actions
 - [ ] **Steam Deck** — Verified controller layout, Steam Input API integration
 - [ ] **Menus** — Title screen and pause menu (done); inventory screen, character sheet, help screen still needed
-- [ ] **Look mode** — Cursor to examine tiles and entities
+- [x] **Look mode** — Cursor to examine tiles and entities
 - [ ] **Targeting** — Ranged attacks, spell targeting
 - [ ] **Options/settings** — Classic/casual mode, display preferences, and colorblind palettes (done); keybind customization and difficulty modes still needed
 

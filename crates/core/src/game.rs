@@ -252,8 +252,20 @@ impl AutorunStepper {
     }
 }
 
+/// Info about a tile at a given position, returned by `look_at()`.
+#[derive(Debug, Serialize)]
+pub struct TileInfo {
+    pub x: Coord,
+    pub y: Coord,
+    pub terrain: String,
+    pub entity: Option<EntityInfo>,
+    pub visible: bool,
+    pub explored: bool,
+    pub glyph: char,
+}
+
 /// Info about a visible entity (monster or corpse).
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct EntityInfo {
     pub name: String,
     pub glyph: char,
@@ -497,8 +509,11 @@ impl GameState {
         match cmd {
             GameCommand::Move { dx, dy } => self.player_move_or_attack(dx, dy),
             GameCommand::Wait => true,
-            // Autorun and AutoExplore are handled at a higher level (main loop / MCP act).
-            GameCommand::Autorun { .. } | GameCommand::AutoExplore | GameCommand::Quit => false,
+            // Autorun, AutoExplore, Look are handled at a higher level (main loop / MCP).
+            GameCommand::Autorun { .. }
+            | GameCommand::AutoExplore
+            | GameCommand::Look
+            | GameCommand::Quit => false,
         }
     }
 
@@ -877,6 +892,102 @@ impl GameState {
             }
         }
         lines
+    }
+
+    /// Query tile information at (x, y) for look mode.
+    ///
+    /// Returns terrain, entity info (only if visible), and display glyph.
+    /// Out-of-bounds or unexplored tiles return appropriate defaults.
+    pub fn look_at(&self, x: Coord, y: Coord) -> TileInfo {
+        if !self.map.in_bounds(x, y) {
+            return TileInfo {
+                x,
+                y,
+                terrain: "Out of bounds".into(),
+                entity: None,
+                visible: false,
+                explored: false,
+                glyph: ' ',
+            };
+        }
+
+        let explored = self.explored.contains(&(x, y));
+        if !explored {
+            return TileInfo {
+                x,
+                y,
+                terrain: "Unknown".into(),
+                entity: None,
+                visible: false,
+                explored: false,
+                glyph: ' ',
+            };
+        }
+
+        let visible = self.visible.contains(&(x, y));
+        let tile = self.map.tiles[self.map.idx(x, y)];
+        let terrain = match tile {
+            map::Tile::Floor => "Floor".into(),
+            map::Tile::Wall => "Wall".into(),
+        };
+
+        // Entity info only if currently visible (don't reveal stale positions).
+        let entity = if visible {
+            // Check alive entities first (higher priority).
+            if let Some(idx) = self
+                .entities
+                .iter()
+                .position(|e| e.alive && e.x == x && e.y == y)
+            {
+                let e = &self.entities[idx];
+                Some(EntityInfo {
+                    name: e.name.clone(),
+                    glyph: e.glyph,
+                    x: e.x,
+                    y: e.y,
+                    hp: e.hp,
+                    max_hp: e.max_hp,
+                    alive: true,
+                })
+            } else {
+                self.entities
+                    .iter()
+                    .find(|e| !e.alive && e.x == x && e.y == y)
+                    .map(|e| EntityInfo {
+                        name: e.name.clone(),
+                        glyph: '%',
+                        x: e.x,
+                        y: e.y,
+                        hp: e.hp,
+                        max_hp: e.max_hp,
+                        alive: false,
+                    })
+            }
+        } else {
+            None
+        };
+
+        let glyph = if visible {
+            self.glyph_at(x, y).unwrap_or(match tile {
+                map::Tile::Floor => '.',
+                map::Tile::Wall => '#',
+            })
+        } else {
+            match tile {
+                map::Tile::Floor => '.',
+                map::Tile::Wall => '#',
+            }
+        };
+
+        TileInfo {
+            x,
+            y,
+            terrain,
+            entity,
+            visible,
+            explored,
+            glyph,
+        }
     }
 
     /// Get the display glyph for the topmost entity at (x, y).
@@ -2193,5 +2304,122 @@ mod tests {
         let json = gs.save_to_json().unwrap();
         let loaded = GameState::load_from_json(&json).unwrap();
         assert!(!loaded.dirty);
+    }
+
+    // --- look_at() tests ---
+
+    #[test]
+    fn look_at_player_position() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let info = gs.look_at(5, 5);
+        assert_eq!(info.terrain, "Floor");
+        assert!(info.visible);
+        assert!(info.explored);
+        assert_eq!(info.glyph, '@');
+        let ent = info.entity.unwrap();
+        assert_eq!(ent.name, "Player");
+        assert!(ent.alive);
+    }
+
+    #[test]
+    fn look_at_visible_monster() {
+        let mut gs = test_game();
+        let monster = Entity::from_template(data::goblin(), 6, 5);
+        gs.entities.push(monster);
+        gs.update_fov();
+        let info = gs.look_at(6, 5);
+        assert_eq!(info.terrain, "Floor");
+        assert!(info.visible);
+        assert_eq!(info.glyph, 'g');
+        let ent = info.entity.unwrap();
+        assert_eq!(ent.name, "Goblin");
+        assert!(ent.alive);
+        assert_eq!(ent.hp, 6);
+    }
+
+    #[test]
+    fn look_at_empty_floor() {
+        let mut gs = test_game();
+        gs.update_fov();
+        let info = gs.look_at(3, 3);
+        assert_eq!(info.terrain, "Floor");
+        assert!(info.visible);
+        assert!(info.explored);
+        assert_eq!(info.glyph, '.');
+        assert!(info.entity.is_none());
+    }
+
+    #[test]
+    fn look_at_wall() {
+        let mut gs = test_game();
+        gs.update_fov();
+        // (0,0) is a wall and should be explored (visible from player at 5,5 with radius 8)
+        // but walls may not be visible; use a wall we know is in FOV
+        gs.explored.insert((0, 5));
+        let info = gs.look_at(0, 5);
+        assert_eq!(info.terrain, "Wall");
+        assert_eq!(info.glyph, '#');
+    }
+
+    #[test]
+    fn look_at_unexplored() {
+        let gs = test_game();
+        // (19, 19) is far from player, never explored
+        let info = gs.look_at(19, 19);
+        assert_eq!(info.terrain, "Unknown");
+        assert!(!info.visible);
+        assert!(!info.explored);
+        assert_eq!(info.glyph, ' ');
+        assert!(info.entity.is_none());
+    }
+
+    #[test]
+    fn look_at_out_of_bounds() {
+        let gs = test_game();
+        let info = gs.look_at(-1, -1);
+        assert_eq!(info.terrain, "Out of bounds");
+        assert!(!info.visible);
+        assert!(!info.explored);
+        assert_eq!(info.glyph, ' ');
+        assert!(info.entity.is_none());
+    }
+
+    #[test]
+    fn look_at_explored_not_visible_hides_entity() {
+        let mut gs = test_game();
+        // Place monster at a position, mark it explored but remove from visible
+        let monster = Entity::from_template(data::goblin(), 3, 3);
+        gs.entities.push(monster);
+        gs.explored.insert((3, 3));
+        gs.visible.remove(&(3, 3));
+        let info = gs.look_at(3, 3);
+        assert!(info.explored);
+        assert!(!info.visible);
+        // Entity should NOT be shown when not visible
+        assert!(info.entity.is_none());
+        // Glyph should show terrain, not entity
+        assert_eq!(info.glyph, '.');
+    }
+
+    #[test]
+    fn look_at_corpse() {
+        let mut gs = test_game();
+        let mut corpse = Entity::from_template(data::goblin(), 6, 5);
+        corpse.alive = false;
+        gs.entities.push(corpse);
+        gs.update_fov();
+        let info = gs.look_at(6, 5);
+        assert_eq!(info.glyph, '%');
+        let ent = info.entity.unwrap();
+        assert!(!ent.alive);
+        assert_eq!(ent.name, "Goblin");
+    }
+
+    #[test]
+    fn handle_command_look_does_not_consume_turn() {
+        let mut gs = test_game();
+        let acted = gs.handle_command(GameCommand::Look);
+        assert!(!acted);
     }
 }

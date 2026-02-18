@@ -8,7 +8,9 @@ mod render;
 use roguelike_core::dev_tools::{self, DevCommand, DevSession, OverlayLayer};
 use roguelike_core::{
     command::GameCommand,
-    data, game, menu,
+    data, game,
+    look::{LookAction, LookCursor},
+    menu,
     menu::MenuAction,
     message_history::{MessageHistoryViewer, ViewerAction},
     platform::Renderer,
@@ -197,6 +199,36 @@ fn run_message_history(messages: &[String], renderer: &mut dyn Renderer) -> std:
                     return Ok(());
                 }
             }
+        }
+    }
+}
+
+/// Run look mode: move a cursor around to examine tiles.
+///
+/// Blocks until the user closes look mode (Esc/x/q). Renders the game
+/// with a cursor overlay and tile description on each keypress.
+fn run_look_mode(
+    stdout: &mut impl std::io::Write,
+    state: &game::GameState,
+    renderer: &mut dyn Renderer,
+    cols: Coord,
+    rows: Coord,
+    settings: &settings::Settings,
+) -> std::io::Result<()> {
+    let player = &state.entities[0];
+    let mut cursor = LookCursor::new(player.x, player.y);
+
+    loop {
+        render::render(stdout, state, cols, rows, settings)?;
+        let info = cursor.current_info(state);
+        cursor.draw_overlay(renderer, &info, rows, settings.message_log_lines as Coord);
+        renderer.flush();
+
+        let key = wait_for_keypress()?;
+        if let Some(cmd) = input::translate_look_key(key, settings.vi_keys, settings.numpad)
+            && cursor.handle_input(cmd, state) == LookAction::Close
+        {
+            return Ok(());
         }
     }
 }
@@ -704,6 +736,17 @@ fn main() -> std::io::Result<()> {
                     match cmd {
                         GameCommand::Quit => {
                             app_state = AppState::Paused(menu::pause_menu(settings.casual_mode));
+                        }
+
+                        GameCommand::Look => {
+                            run_look_mode(
+                                &mut stdout,
+                                state,
+                                &mut renderer,
+                                cols as i32,
+                                rows as i32,
+                                &settings,
+                            )?;
                         }
 
                         GameCommand::Autorun { dx, dy } => {

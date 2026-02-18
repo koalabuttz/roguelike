@@ -14,6 +14,7 @@ use roguelike_core::exploration_graph;
 use roguelike_core::game::{
     AutoExploreResult, AutoFightResult, AutorunResult, AutorunStopReason, GameState,
 };
+use roguelike_core::look;
 use roguelike_core::seed_code;
 use roguelike_core::types::{Coord, Pos};
 
@@ -73,6 +74,14 @@ pub struct ActParams {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct PathfindParams {
+    /// Target X coordinate.
+    pub x: Coord,
+    /// Target Y coordinate.
+    pub y: Coord,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct LookAtParams {
     /// Target X coordinate.
     pub x: Coord,
     /// Target Y coordinate.
@@ -316,6 +325,30 @@ impl RoguelikeMcpServer {
     }
 
     #[tool(
+        description = "Look at a specific tile to get detailed information. Returns terrain, entity info, visibility. Does not consume a turn."
+    )]
+    async fn look_at(
+        &self,
+        Parameters(params): Parameters<LookAtParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let guard = self.session.lock().await;
+        let session = guard.as_ref().ok_or_else(|| {
+            McpError::invalid_request("No game in progress. Call new_game first.", None)
+        })?;
+
+        let tile_info = session.state.look_at(params.x, params.y);
+        let description = look::format_look_description(&tile_info);
+        let mut value = serde_json::to_value(&tile_info)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        if let serde_json::Value::Object(ref mut map) = value {
+            map.insert("description".into(), serde_json::Value::String(description));
+        }
+        let json = serde_json::to_string(&value)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(
         description = "Pathfind to a target tile using A*. The player automatically walks the shortest path through explored tiles, stopping for monsters, damage, or reaching the target. Use this instead of multiple move commands to navigate to a visible or previously-explored location."
     )]
     async fn pathfind_to(
@@ -525,6 +558,8 @@ impl RoguelikeMcpServer {
              Best way to explore the dungeon. Returns frontier_exits for next move.\n\
              - **pathfind_to(x, y)** — walk shortest path to any explored tile; \
              stops for monsters, damage, or on arrival\n\
+             - **look_at(x, y)** — examine a specific tile; returns terrain, entity \
+             info, and visibility without consuming a turn\n\
              - **get_explored_map** — full map of everywhere you've been; '~' tiles \
              are frontiers adjacent to unexplored areas; includes frontier_exits \
              coordinates you can pass to pathfind_to\n\

@@ -452,6 +452,7 @@ fn run_single_game_tracked(
     game_analytics
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_single_game(
     width: Coord,
     height: Coord,

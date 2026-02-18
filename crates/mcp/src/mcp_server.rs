@@ -841,18 +841,17 @@ fn inject_exploration_graph_delta(
 
     let current_fp = exploration_graph_fingerprint(state);
 
-    if !force {
-        if let Some(prev) = *last_hash {
-            if prev == current_fp {
-                if let serde_json::Value::Object(map) = value {
-                    map.insert(
-                        "exploration_unchanged".into(),
-                        serde_json::Value::Bool(true),
-                    );
-                }
-                return;
-            }
+    if !force
+        && let Some(prev) = *last_hash
+        && prev == current_fp
+    {
+        if let serde_json::Value::Object(map) = value {
+            map.insert(
+                "exploration_unchanged".into(),
+                serde_json::Value::Bool(true),
+            );
         }
+        return;
     }
 
     // Build and inject the full graph.

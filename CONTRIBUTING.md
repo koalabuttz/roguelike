@@ -27,6 +27,8 @@ cargo test --workspace
 
 CI runs these automatically on every pull request.
 
+> **Note:** The default build includes the `gamepad` feature (gilrs), which requires `pkg-config` and `libudev-dev` on Linux (`apt install pkg-config libudev-dev`). If you don't have these, build without gamepad: `cargo test --workspace --no-default-features --features dev-tools`.
+
 If golden replay tests fail after an intentional gameplay change, regenerate them:
 
 ```sh

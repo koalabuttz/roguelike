@@ -48,7 +48,7 @@ Builds on the core systems to add depth, platforms, and accessibility.
 |------|--------|--------|--------|-------|
 | ~~Platform abstraction~~ | ~~&zwj;~5 items~~ | ~~Low~~ | ~~M~~ | ~~Required before any platform port. Do alongside input abstraction.~~ Done. |
 | ~~Type aliases~~ | ~~&zwj;~2 items~~ | ~~None~~ | ~~S~~ | ~~30-minute refactor. Enables platform-specific type sizing.~~ Done. |
-| Controller support | ~1 item | High | M | Requires input abstraction. Enables couch play, Steam Deck. |
+| ~~Controller support~~ | ~~&zwj;~1 item~~ | ~~High~~ | ~~M~~ | ~~Requires input abstraction. Enables couch play, Steam Deck.~~ Done (gilrs, 8-dir d-pad/stick, LB autorun, context-sensitive button mapping). |
 | Replay system | ~2 items | Medium | M | Requires seeded RNG. Unlocks spectating and seed sharing. |
 | Auto-explore | 0 | High | M | Major QoL. Requires A*. Benefits all players, essential for motor accessibility. |
 | Magic/abilities | 0 | High | L | Big design space. Requires targeting UI. Expands combat significantly. |
@@ -121,7 +121,7 @@ Input abstraction
     → Replay system
       → Daily challenges / Seed sharing
 
-  → Controller support
+  → Controller support ✓
     → Steam Deck
 
   → Platform abstraction ✓

@@ -1,6 +1,7 @@
 use std::io::stdout;
 use std::time::Duration;
 
+mod gamepad;
 mod input;
 mod render;
 
@@ -23,7 +24,7 @@ use roguelike_core::{
 
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    event::{self, KeyCode, KeyModifiers},
     execute, queue,
     style::{self, Color, SetBackgroundColor, SetForegroundColor},
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
@@ -43,6 +44,7 @@ enum AppState {
 
 /// Run a multi-step sequence with animation: render each frame and
 /// check for keypress interrupts between steps.
+#[allow(clippy::too_many_arguments)]
 fn animate_stepper(
     stdout: &mut impl std::io::Write,
     state: &mut game::GameState,
@@ -51,6 +53,7 @@ fn animate_stepper(
     rows: Coord,
     settings: &settings::Settings,
     fov_disabled: bool,
+    gp: &mut gamepad::GamepadOption,
 ) -> std::io::Result<()> {
     loop {
         match stepper.next_step(state) {
@@ -67,23 +70,12 @@ fn animate_stepper(
                     let _ = event::read()?;
                     return Ok(());
                 }
+                // Also check gamepad for animation interrupt.
+                if gamepad::check_animation_interrupt(gp) {
+                    return Ok(());
+                }
             }
             game::StepOutcome::Done(_) => return Ok(()),
-        }
-    }
-}
-
-/// Wait for a key-press event, ignoring releases and non-key events.
-fn wait_for_keypress() -> std::io::Result<KeyEvent> {
-    loop {
-        if let Event::Key(
-            key @ KeyEvent {
-                kind: KeyEventKind::Press,
-                ..
-            },
-        ) = event::read()?
-        {
-            return Ok(key);
         }
     }
 }
@@ -93,6 +85,7 @@ fn text_input_dialog<W: std::io::Write>(
     w: &mut W,
     prompt: &str,
     hint: &str,
+    gp: &mut gamepad::GamepadOption,
 ) -> std::io::Result<Option<String>> {
     let mut input = String::new();
     loop {
@@ -140,28 +133,48 @@ fn text_input_dialog<W: std::io::Write>(
 
         w.flush()?;
 
-        let key = wait_for_keypress()?;
-        match key.code {
-            KeyCode::Esc => return Ok(None),
-            KeyCode::Enter => return Ok(Some(input)),
-            KeyCode::Backspace => {
-                input.pop();
+        match gamepad::poll_input(gp)? {
+            gamepad::InputEvent::Key(key) => match key.code {
+                KeyCode::Esc => return Ok(None),
+                KeyCode::Enter => return Ok(Some(input)),
+                KeyCode::Backspace => {
+                    input.pop();
+                }
+                KeyCode::Char(c) if c.is_ascii_alphanumeric() || c == '-' => {
+                    input.push(c);
+                }
+                _ => {}
+            },
+            // B button = cancel; other gamepad input is ignored in text input.
+            #[cfg(feature = "gamepad")]
+            gamepad::InputEvent::GamepadReady => {
+                if let Some(g) = gp
+                    && let Some(gamepad::HistoryCommand::Menu(
+                        roguelike_core::platform::MenuCommand::Back,
+                    )) = g.next_history_command()
+                {
+                    return Ok(None);
+                }
             }
-            KeyCode::Char(c) if c.is_ascii_alphanumeric() || c == '-' => {
-                input.push(c);
-            }
-            _ => {}
         }
     }
 }
 
 /// Run the title or pause menu loop. Returns the selected action.
-fn run_menu(menu: &mut menu::Menu, renderer: &mut dyn Renderer) -> std::io::Result<MenuAction> {
+fn run_menu(
+    menu: &mut menu::Menu,
+    renderer: &mut dyn Renderer,
+    gp: &mut gamepad::GamepadOption,
+) -> std::io::Result<MenuAction> {
     loop {
         menu.draw(renderer);
 
-        let key = wait_for_keypress()?;
-        if let Some(cmd) = input::translate_menu_key(key)
+        let cmd = match gamepad::poll_input(gp)? {
+            gamepad::InputEvent::Key(key) => input::translate_menu_key(key),
+            #[cfg(feature = "gamepad")]
+            gamepad::InputEvent::GamepadReady => gp.as_mut().and_then(|g| g.next_menu_command()),
+        };
+        if let Some(cmd) = cmd
             && let Some(action) = menu.handle_input(cmd)
         {
             return Ok(action);
@@ -173,31 +186,52 @@ fn run_menu(menu: &mut menu::Menu, renderer: &mut dyn Renderer) -> std::io::Resu
 ///
 /// Blocks until the user presses Esc/q. Terminal-specific input loop that
 /// maps PageUp/PageDown and Ctrl+U/Ctrl+D to page scrolling.
-fn run_message_history(messages: &[String], renderer: &mut dyn Renderer) -> std::io::Result<()> {
+fn run_message_history(
+    messages: &[String],
+    renderer: &mut dyn Renderer,
+    gp: &mut gamepad::GamepadOption,
+) -> std::io::Result<()> {
     let mut viewer = MessageHistoryViewer::new(messages);
     loop {
         viewer.draw(renderer);
 
-        let key = wait_for_keypress()?;
         let (_, screen_h) = renderer.screen_size();
         let page_size = (screen_h - 2).max(1) as usize;
 
-        match key.code {
-            KeyCode::PageUp => viewer.page_up(page_size),
-            KeyCode::PageDown => viewer.page_down(page_size),
-            KeyCode::Home => viewer.scroll_up(usize::MAX),
-            KeyCode::End => viewer.scroll_down(usize::MAX),
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                viewer.page_up(page_size / 2);
-            }
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                viewer.page_down(page_size / 2);
-            }
-            _ => {
-                if let Some(cmd) = input::translate_menu_key(key)
-                    && viewer.handle_input(cmd) == ViewerAction::Close
+        match gamepad::poll_input(gp)? {
+            gamepad::InputEvent::Key(key) => match key.code {
+                KeyCode::PageUp => viewer.page_up(page_size),
+                KeyCode::PageDown => viewer.page_down(page_size),
+                KeyCode::Home => viewer.scroll_up(usize::MAX),
+                KeyCode::End => viewer.scroll_down(usize::MAX),
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    viewer.page_up(page_size / 2);
+                }
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    viewer.page_down(page_size / 2);
+                }
+                _ => {
+                    if let Some(cmd) = input::translate_menu_key(key)
+                        && viewer.handle_input(cmd) == ViewerAction::Close
+                    {
+                        return Ok(());
+                    }
+                }
+            },
+            #[cfg(feature = "gamepad")]
+            gamepad::InputEvent::GamepadReady => {
+                if let Some(g) = gp
+                    && let Some(hcmd) = g.next_history_command()
                 {
-                    return Ok(());
+                    match hcmd {
+                        gamepad::HistoryCommand::PageUp => viewer.page_up(page_size),
+                        gamepad::HistoryCommand::PageDown => viewer.page_down(page_size),
+                        gamepad::HistoryCommand::Menu(cmd) => {
+                            if viewer.handle_input(cmd) == ViewerAction::Close {
+                                return Ok(());
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -209,6 +243,7 @@ fn run_message_history(messages: &[String], renderer: &mut dyn Renderer) -> std:
 /// Blocks until the user closes look mode (Esc/x/q). Renders the game
 /// with a cursor overlay and tile description on each keypress.
 /// `look_opts` controls extra visibility (e.g. dev-tools RevealMonsters).
+#[allow(clippy::too_many_arguments)]
 fn run_look_mode(
     stdout: &mut impl std::io::Write,
     state: &game::GameState,
@@ -217,6 +252,7 @@ fn run_look_mode(
     rows: Coord,
     settings: &settings::Settings,
     look_opts: &LookOptions,
+    gp: &mut gamepad::GamepadOption,
 ) -> std::io::Result<()> {
     let player = &state.entities[0];
     let mut cursor = LookCursor::new(player.x, player.y);
@@ -227,8 +263,14 @@ fn run_look_mode(
         cursor.draw_overlay(renderer, &info, rows, settings.message_log_lines as Coord);
         renderer.flush();
 
-        let key = wait_for_keypress()?;
-        if let Some(cmd) = input::translate_look_key(key, settings.vi_keys, settings.numpad)
+        let cmd = match gamepad::poll_input(gp)? {
+            gamepad::InputEvent::Key(key) => {
+                input::translate_look_key(key, settings.vi_keys, settings.numpad)
+            }
+            #[cfg(feature = "gamepad")]
+            gamepad::InputEvent::GamepadReady => gp.as_mut().and_then(|g| g.next_look_command()),
+        };
+        if let Some(cmd) = cmd
             && cursor.handle_input(cmd, state) == LookAction::Close
         {
             return Ok(());
@@ -351,12 +393,14 @@ fn main() -> std::io::Result<()> {
     let mut autosave_buf: Option<String> = None;
     #[cfg(all(debug_assertions, feature = "dev-tools"))]
     let mut dev_session = DevSession::default();
+    #[allow(clippy::let_unit_value)]
+    let mut gp = gamepad::new_gamepad_option();
     let has_save = has_save_for_title(settings.casual_mode);
     let mut app_state = AppState::Title(menu::title_menu(has_save, settings.casual_mode));
 
     'app: loop {
         match &mut app_state {
-            AppState::Title(title) => match run_menu(title, &mut renderer)? {
+            AppState::Title(title) => match run_menu(title, &mut renderer, &mut gp)? {
                 MenuAction::NewGame => {
                     let autosave_exists = std::path::Path::new(SAVE_FILE).exists();
                     if autosave_exists {
@@ -366,7 +410,7 @@ fn main() -> std::io::Result<()> {
                             "This will abandon your saved game."
                         };
                         let mut confirm = menu::confirm_menu(msg);
-                        match run_menu(&mut confirm, &mut renderer)? {
+                        match run_menu(&mut confirm, &mut renderer, &mut gp)? {
                             MenuAction::Confirm => {
                                 let _ = std::fs::remove_file(SAVE_FILE);
                                 let _ = std::fs::remove_file(AUTOSAVE_META_FILE);
@@ -394,6 +438,7 @@ fn main() -> std::io::Result<()> {
                         &mut stdout,
                         "Enter Seed Code",
                         "e.g. r7z3kq or r7z3kq-120x60a | Esc to cancel",
+                        &mut gp,
                     )? {
                         Some(code) if !code.is_empty() => match seed_code::decode(&code) {
                             Ok(params) => {
@@ -426,7 +471,7 @@ fn main() -> std::io::Result<()> {
                                     action: MenuAction::Back,
                                     enabled: true,
                                 }];
-                                let _ = run_menu(&mut err_menu, &mut renderer)?;
+                                let _ = run_menu(&mut err_menu, &mut renderer, &mut gp)?;
                                 let has_save = has_save_for_title(settings.casual_mode);
                                 app_state = AppState::Title(menu::title_menu(
                                     has_save,
@@ -453,7 +498,7 @@ fn main() -> std::io::Result<()> {
                             &slots,
                             settings.show_explored_pct,
                         );
-                        match run_menu(&mut load_menu, &mut renderer)? {
+                        match run_menu(&mut load_menu, &mut renderer, &mut gp)? {
                             MenuAction::LoadGame => {
                                 // Load autosave.
                                 menu::draw_loading(&mut renderer);
@@ -523,7 +568,7 @@ fn main() -> std::io::Result<()> {
                 MenuAction::Settings => {
                     loop {
                         let mut settings_m = menu::settings_menu(&settings, Platform::Terminal);
-                        match run_menu(&mut settings_m, &mut renderer)? {
+                        match run_menu(&mut settings_m, &mut renderer, &mut gp)? {
                             MenuAction::ToggleCasualMode => {
                                 settings.casual_mode = !settings.casual_mode;
                                 save_settings(&settings);
@@ -615,8 +660,8 @@ fn main() -> std::io::Result<()> {
                 }
 
                 if state.game_over {
-                    // Game-over: any key returns to title.
-                    wait_for_keypress()?;
+                    // Game-over: any input (keyboard or gamepad) returns to title.
+                    gamepad::poll_input(&mut gp)?;
                     // Dead game shouldn't be resumable — delete autosave + meta.
                     // Slot saves are preserved (casual mode can load from them).
                     let _ = std::fs::remove_file(SAVE_FILE);
@@ -628,114 +673,132 @@ fn main() -> std::io::Result<()> {
                     continue;
                 }
 
-                let key = wait_for_keypress()?;
+                let input = gamepad::poll_input(&mut gp)?;
 
-                // Debug keybindings (debug builds with dev-tools feature).
-                #[cfg(all(debug_assertions, feature = "dev-tools"))]
-                {
-                    use crossterm::event::KeyCode;
+                let cmd = match input {
+                    gamepad::InputEvent::Key(key) => {
+                        // Debug keybindings (debug builds with dev-tools feature).
+                        #[cfg(all(debug_assertions, feature = "dev-tools"))]
+                        {
+                            use crossterm::event::KeyCode;
 
-                    // Handle overlay cursor mode input first (arrow keys move cursor,
-                    // Esc exits cursor mode back to frontier/union mode).
-                    if dev_session.overlay_cursor.is_some() {
-                        let cursor_handled = match key.code {
-                            KeyCode::Up => {
-                                dev_session.overlay_cursor.as_mut().unwrap().1 -= 1;
-                                true
+                            // Handle overlay cursor mode input first (arrow keys move cursor,
+                            // Esc exits cursor mode back to frontier/union mode).
+                            if dev_session.overlay_cursor.is_some() {
+                                let cursor_handled = match key.code {
+                                    KeyCode::Up => {
+                                        dev_session.overlay_cursor.as_mut().unwrap().1 -= 1;
+                                        true
+                                    }
+                                    KeyCode::Down => {
+                                        dev_session.overlay_cursor.as_mut().unwrap().1 += 1;
+                                        true
+                                    }
+                                    KeyCode::Left => {
+                                        dev_session.overlay_cursor.as_mut().unwrap().0 -= 1;
+                                        true
+                                    }
+                                    KeyCode::Right => {
+                                        dev_session.overlay_cursor.as_mut().unwrap().0 += 1;
+                                        true
+                                    }
+                                    KeyCode::Esc => {
+                                        dev_session.overlay_cursor = None;
+                                        state.log.add("Pathfinding overlay: frontier mode.");
+                                        true
+                                    }
+                                    _ => false,
+                                };
+                                if cursor_handled {
+                                    continue;
+                                }
                             }
-                            KeyCode::Down => {
-                                dev_session.overlay_cursor.as_mut().unwrap().1 += 1;
-                                true
+
+                            // Handle monster FOV cursor mode input.
+                            if dev_session.monster_fov_cursor.is_some() {
+                                let cursor_handled = match key.code {
+                                    KeyCode::Up => {
+                                        dev_session.monster_fov_cursor.as_mut().unwrap().1 -= 1;
+                                        true
+                                    }
+                                    KeyCode::Down => {
+                                        dev_session.monster_fov_cursor.as_mut().unwrap().1 += 1;
+                                        true
+                                    }
+                                    KeyCode::Left => {
+                                        dev_session.monster_fov_cursor.as_mut().unwrap().0 -= 1;
+                                        true
+                                    }
+                                    KeyCode::Right => {
+                                        dev_session.monster_fov_cursor.as_mut().unwrap().0 += 1;
+                                        true
+                                    }
+                                    KeyCode::Esc => {
+                                        dev_session.monster_fov_cursor = None;
+                                        state.log.add("Monster FOV overlay: union mode.");
+                                        true
+                                    }
+                                    _ => false,
+                                };
+                                if cursor_handled {
+                                    continue;
+                                }
                             }
-                            KeyCode::Left => {
-                                dev_session.overlay_cursor.as_mut().unwrap().0 -= 1;
-                                true
+
+                            let dev_cmd = match key.code {
+                                KeyCode::F(1) => Some(DevCommand::DumpStats),
+                                KeyCode::F(2) => Some(DevCommand::ToggleFov),
+                                KeyCode::F(3) => Some(DevCommand::ToggleGodMode),
+                                KeyCode::F(4) => Some(DevCommand::RevealMap),
+                                KeyCode::F(5) => Some(DevCommand::KillAll),
+                                KeyCode::F(6) => Some(DevCommand::ToggleOverlay(OverlayLayer::Fov)),
+                                KeyCode::F(7) => {
+                                    Some(DevCommand::ToggleOverlay(OverlayLayer::MonsterTargets))
+                                }
+                                KeyCode::F(8) => {
+                                    Some(DevCommand::ToggleOverlay(OverlayLayer::Pathfinding))
+                                }
+                                KeyCode::F(9) => {
+                                    Some(DevCommand::ToggleOverlay(OverlayLayer::Frontiers))
+                                }
+                                KeyCode::F(10) => Some(DevCommand::ReloadData),
+                                KeyCode::F(11) => {
+                                    Some(DevCommand::ToggleOverlay(OverlayLayer::RevealMonsters))
+                                }
+                                KeyCode::F(12) => {
+                                    Some(DevCommand::ToggleOverlay(OverlayLayer::MonsterFov))
+                                }
+                                _ => None,
+                            };
+                            if let Some(cmd) = dev_cmd {
+                                let is_reload = matches!(cmd, DevCommand::ReloadData);
+                                let msg = dev_tools::exec_dev(state, &mut dev_session, cmd);
+                                state.log.add(&msg);
+                                if is_reload && let Some(ref d) = dev_session.game_data {
+                                    game_data = d.clone();
+                                }
+                                continue;
                             }
-                            KeyCode::Right => {
-                                dev_session.overlay_cursor.as_mut().unwrap().0 += 1;
-                                true
-                            }
-                            KeyCode::Esc => {
-                                dev_session.overlay_cursor = None;
-                                state.log.add("Pathfinding overlay: frontier mode.");
-                                true
-                            }
-                            _ => false,
-                        };
-                        if cursor_handled {
+                        }
+
+                        // Message history viewer (Ctrl+P) — intercepted before
+                        // translate_key so it doesn't consume a turn or appear in replays.
+                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                            && key.code == KeyCode::Char('p')
+                        {
+                            run_message_history(state.log.all(), &mut renderer, &mut gp)?;
                             continue;
                         }
+
+                        input::translate_key(key, settings.vi_keys, settings.numpad)
                     }
-
-                    // Handle monster FOV cursor mode input.
-                    if dev_session.monster_fov_cursor.is_some() {
-                        let cursor_handled = match key.code {
-                            KeyCode::Up => {
-                                dev_session.monster_fov_cursor.as_mut().unwrap().1 -= 1;
-                                true
-                            }
-                            KeyCode::Down => {
-                                dev_session.monster_fov_cursor.as_mut().unwrap().1 += 1;
-                                true
-                            }
-                            KeyCode::Left => {
-                                dev_session.monster_fov_cursor.as_mut().unwrap().0 -= 1;
-                                true
-                            }
-                            KeyCode::Right => {
-                                dev_session.monster_fov_cursor.as_mut().unwrap().0 += 1;
-                                true
-                            }
-                            KeyCode::Esc => {
-                                dev_session.monster_fov_cursor = None;
-                                state.log.add("Monster FOV overlay: union mode.");
-                                true
-                            }
-                            _ => false,
-                        };
-                        if cursor_handled {
-                            continue;
-                        }
+                    #[cfg(feature = "gamepad")]
+                    gamepad::InputEvent::GamepadReady => {
+                        gp.as_mut().and_then(|g| g.next_game_command())
                     }
+                };
 
-                    let dev_cmd = match key.code {
-                        KeyCode::F(1) => Some(DevCommand::DumpStats),
-                        KeyCode::F(2) => Some(DevCommand::ToggleFov),
-                        KeyCode::F(3) => Some(DevCommand::ToggleGodMode),
-                        KeyCode::F(4) => Some(DevCommand::RevealMap),
-                        KeyCode::F(5) => Some(DevCommand::KillAll),
-                        KeyCode::F(6) => Some(DevCommand::ToggleOverlay(OverlayLayer::Fov)),
-                        KeyCode::F(7) => {
-                            Some(DevCommand::ToggleOverlay(OverlayLayer::MonsterTargets))
-                        }
-                        KeyCode::F(8) => Some(DevCommand::ToggleOverlay(OverlayLayer::Pathfinding)),
-                        KeyCode::F(9) => Some(DevCommand::ToggleOverlay(OverlayLayer::Frontiers)),
-                        KeyCode::F(10) => Some(DevCommand::ReloadData),
-                        KeyCode::F(11) => {
-                            Some(DevCommand::ToggleOverlay(OverlayLayer::RevealMonsters))
-                        }
-                        KeyCode::F(12) => Some(DevCommand::ToggleOverlay(OverlayLayer::MonsterFov)),
-                        _ => None,
-                    };
-                    if let Some(cmd) = dev_cmd {
-                        let is_reload = matches!(cmd, DevCommand::ReloadData);
-                        let msg = dev_tools::exec_dev(state, &mut dev_session, cmd);
-                        state.log.add(&msg);
-                        if is_reload && let Some(ref d) = dev_session.game_data {
-                            game_data = d.clone();
-                        }
-                        continue;
-                    }
-                }
-
-                // Message history viewer (Ctrl+P) — intercepted before
-                // translate_key so it doesn't consume a turn or appear in replays.
-                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('p') {
-                    run_message_history(state.log.all(), &mut renderer)?;
-                    continue;
-                }
-
-                if let Some(cmd) = input::translate_key(key, settings.vi_keys, settings.numpad) {
+                if let Some(cmd) = cmd {
                     match cmd {
                         GameCommand::Quit => {
                             app_state = AppState::Paused(menu::pause_menu(settings.casual_mode));
@@ -756,6 +819,7 @@ fn main() -> std::io::Result<()> {
                                 rows as i32,
                                 &settings,
                                 &look_opts,
+                                &mut gp,
                             )?;
                         }
 
@@ -773,6 +837,7 @@ fn main() -> std::io::Result<()> {
                                 rows as i32,
                                 &settings,
                                 fov_off,
+                                &mut gp,
                             )?;
                             #[cfg(all(debug_assertions, feature = "dev-tools"))]
                             dev_tools::after_step(state, &mut dev_session, cmd);
@@ -799,6 +864,7 @@ fn main() -> std::io::Result<()> {
                                     rows as i32,
                                     &settings,
                                     fov_off,
+                                    &mut gp,
                                 )?;
                                 #[cfg(all(debug_assertions, feature = "dev-tools"))]
                                 dev_tools::after_step(state, &mut dev_session, cmd);
@@ -834,7 +900,7 @@ fn main() -> std::io::Result<()> {
             }
 
             AppState::Paused(pause) => {
-                let action = run_menu(pause, &mut renderer)?;
+                let action = run_menu(pause, &mut renderer, &mut gp)?;
                 match action {
                     MenuAction::ResumeGame | MenuAction::Back => {
                         app_state = AppState::Playing;
@@ -845,7 +911,7 @@ fn main() -> std::io::Result<()> {
                             let slots = load_all_slot_metadata();
                             let mut slot_menu =
                                 menu::save_slot_menu(&slots, settings.show_explored_pct);
-                            match run_menu(&mut slot_menu, &mut renderer)? {
+                            match run_menu(&mut slot_menu, &mut renderer, &mut gp)? {
                                 MenuAction::SelectSlot(slot) => {
                                     let msg = save_to_slot(state, slot);
                                     let mut new_pause = menu::pause_menu(settings.casual_mode);
@@ -875,7 +941,7 @@ fn main() -> std::io::Result<()> {
                             &slots,
                             settings.show_explored_pct,
                         );
-                        match run_menu(&mut load_m, &mut renderer)? {
+                        match run_menu(&mut load_m, &mut renderer, &mut gp)? {
                             MenuAction::LoadGame => {
                                 // Load autosave.
                                 menu::draw_loading(&mut renderer);

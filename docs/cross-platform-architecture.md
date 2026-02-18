@@ -23,11 +23,12 @@ roguelike/
 │   │       ├── dev_tools.rs, analytics.rs, scenario.rs
 │   │       └── message_log.rs
 │   ├── terminal/           roguelike-terminal: crossterm frontend
-│   │   ├── Cargo.toml      depends on core
+│   │   ├── Cargo.toml      depends on core + gilrs (optional)
 │   │   └── src/
 │   │       ├── main.rs
 │   │       ├── render.rs   (CrosstermRenderer)
-│   │       └── input.rs    (crossterm key translation)
+│   │       ├── input.rs    (crossterm key translation)
+│   │       └── gamepad.rs  (gilrs gamepad input, optional `gamepad` feature)
 │   ├── mcp/                roguelike-mcp: MCP server
 │   │   ├── Cargo.toml      depends on core + rmcp + tokio
 │   │   └── src/
@@ -99,7 +100,7 @@ Everything that doesn't touch a platform API:
 
 Anything that talks to hardware or external services:
 
-- **Terminal crate**: crossterm rendering, keyboard input, terminal lifecycle
+- **Terminal crate**: crossterm rendering, keyboard input, gamepad input (gilrs, optional), terminal lifecycle
 - **MCP crate**: rmcp server, tokio runtime, JSON serialization of game state
 - **GBA crate** (future): GBA tile/sprite rendering, button input, no-std setup
 - **Vita crate** (future): vita-sdk rendering, hardware buttons, memory card saves

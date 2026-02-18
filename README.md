@@ -94,6 +94,21 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 Vi keys and numpad are opt-in via Settings. Moving into a monster attacks it. Autorun keeps moving until hitting a wall, spotting a monster, or reaching a junction.
 
+### Gamepad
+
+Controller support is enabled by default (`gamepad` feature). Any XInput/DInput/HID gamepad recognized by [gilrs](https://crates.io/crates/gilrs) works — Xbox, PlayStation, Switch Pro, Steam Deck, etc. Keyboard and gamepad work simultaneously.
+
+| Context | D-pad / Stick | A (South) | B (East) | X (West) | Y (North) | LB | RB | Start |
+|---------|--------------|-----------|----------|----------|-----------|----|----|-------|
+| **Gameplay** | Move (8-dir) | Wait | Pause menu | Auto-explore | Look mode | Autorun modifier | — | Pause menu |
+| **Menu** | Up/Down | Select | Back | — | — | — | — | Select |
+| **Look mode** | Move cursor | — | Close | — | — | — | — | Close |
+| **Msg history** | Scroll up/down | Close | Close | — | — | Page up | Page down | Close |
+
+The analog stick is edge-triggered: one command per deflection, return to center before the next. Hold LB + D-pad/stick for autorun. D-pad diagonals (e.g., Up+Right) produce diagonal movement.
+
+To build without gamepad support: `cargo build --no-default-features --features dev-tools`
+
 ### Debug Keys (dev-tools build only)
 
 | Key | Action |
@@ -423,6 +438,7 @@ crates/
     src/
       main.rs               Terminal game entry point
       input.rs              Crossterm key-to-command translation
+      gamepad.rs            Gamepad input via gilrs (optional `gamepad` feature)
       render.rs             Terminal rendering (implements Renderer)
   mcp/                      roguelike-mcp: MCP server
     src/
@@ -463,6 +479,7 @@ Configurable fields under `[config]`:
 ## Dependencies
 
 - [crossterm](https://crates.io/crates/crossterm) 0.28 — cross-platform terminal manipulation
+- [gilrs](https://crates.io/crates/gilrs) 0.11 — cross-platform gamepad input (optional `gamepad` feature)
 - [rand](https://crates.io/crates/rand) 0.8 — random number generation
 - [serde](https://crates.io/crates/serde) 1 / [serde_json](https://crates.io/crates/serde_json) 1 — serialization for save/load and game observations
 - [rmcp](https://crates.io/crates/rmcp) 0.15 — MCP server (official Rust SDK)
@@ -490,7 +507,7 @@ See [docs/roadmap-priority.md](docs/roadmap-priority.md) for a detailed breakdow
 - [ ] **Meta-progression** — Persistent unlocks between runs (classes, upgrades, achievements)
 
 ### UI/UX
-- [ ] **Controller support** — Gamepad input on all desktop platforms; d-pad/stick for movement, context-sensitive menus for actions
+- [x] **Controller support** — Gamepad input via gilrs on all desktop platforms; d-pad/stick for 8-directional movement, LB autorun modifier, context-sensitive button mapping for menus/look/history
 - [ ] **Steam Deck** — Verified controller layout, Steam Input API integration
 - [ ] **Menus** — Title screen and pause menu (done); inventory screen, character sheet, help screen still needed
 - [x] **Look mode** — Cursor to examine tiles and entities

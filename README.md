@@ -216,8 +216,9 @@ ssh -p 2222 localhost
 ### Features
 
 - **Account system** — Register/login from the lobby; passwords hashed with argon2
+- **Server menu** — Post-login menu (Play / Watch a Game / Log Out) with lobby↔session loop
 - **Per-user saves** — Autosave, 5 manual save slots, and settings per account
-- **Full game experience** — Title screen, settings, save/load, look mode, message history
+- **Full game experience** — Title screen, settings, save/load, look mode, message history; "Lobby" replaces "Quit" in SSH menus to return to the server menu
 - **Terminal resize** — Adapts to client terminal size; enforces 60x20 minimum
 - **Connection limits** — Configurable max connections (default: 64)
 
@@ -480,25 +481,30 @@ crates/
       scenarios.rs          Balance integration tests
       invariants.rs         Property-based game invariant tests (proptest)
       golden_replays/       Stored golden replay JSON files
-  tui/                      roguelike-tui: shared ANSI rendering library
+  tui/                      roguelike-tui: shared terminal game loop + rendering
     src/
-      lib.rs                Re-exports render + input modules
+      lib.rs                Re-exports all modules
+      game_loop.rs          Unified game loop for terminal + SSH (title, playing, paused states)
       render.rs             CrosstermRenderer<W: Write>, render functions, color palettes
       input.rs              Key-to-command translation (game, menu, look mode)
+      input_provider.rs     InputProvider trait, InputResult, GameInput
+      saves.rs              SaveBackend trait (will move to crates/saves)
   terminal/                 roguelike-terminal: crossterm frontend
     src/
       main.rs               Terminal game entry point
-      input.rs              Re-exports roguelike-tui input
+      terminal_input.rs     InputProvider impl for local terminal (crossterm events)
+      local_saves.rs        SaveBackend impl for local filesystem
+      dev_hooks.rs          DevHooks impl for debug overlay keys (dev-tools feature)
       gamepad.rs            Gamepad input via gilrs (optional `gamepad` feature)
-      render.rs             Re-exports roguelike-tui render
   ssh/                      roguelike-ssh: SSH server frontend
     src/
       main.rs               SSH server entry point (CLI args, host key, bind)
-      server.rs             russh Handler impl (connection, PTY, data routing)
-      session.rs            Per-session game loop (lobby -> title -> game)
+      server.rs             russh Handler impl, lobby↔session loop
+      session.rs            Server menu (Play/Watch/Log Out) + game session
       lobby.rs              dgamelaunch-style lobby (login, register, quit)
       accounts.rs           Account storage with argon2 password hashing
-      saves.rs              Per-user save directory manager
+      saves.rs              SaveBackend impl for per-user server directories
+      ssh_input.rs          InputProvider impl for SSH channels
       ansi_input.rs         ANSI escape sequence -> KeyEvent parser
       channel_writer.rs     Write impl over SSH channel
   mcp/                      roguelike-mcp: MCP server

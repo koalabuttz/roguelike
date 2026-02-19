@@ -123,6 +123,12 @@ A viewer process can watch the file and display it (e.g., `watch -n 0.1 cat /tmp
 
 ## Next Step
 
-**Graduate to Option 3** (TCP) when polish is needed — it naturally extends into web
-spectating, replay streaming, and the networking roadmap. The flag becomes
-`--spectate-port 7878`.
+The original plan was to graduate to **Option 3** (TCP) for remote viewing capabilities. However, the [AT Protocol spectating design](atproto-spectating.md) now covers the remote spectating use case via federated PDS frame publishing and Jetstream delivery — with zero infrastructure to operate.
+
+**TCP remains useful** for low-latency local spectating (e.g., a second terminal on the same machine or LAN) where the AT Protocol round-trip would add unnecessary delay. But for the primary use case of "watch someone play from anywhere," atproto spectating supersedes TCP.
+
+**Recommended path:**
+
+1. Keep the file-based spectator as-is for local MCP spectating (done).
+2. Implement atproto spectating for federated remote viewing (see [atproto-spectating.md](atproto-spectating.md)).
+3. Only add TCP if there's a concrete need for low-latency local multi-viewer that the file-based approach can't satisfy.

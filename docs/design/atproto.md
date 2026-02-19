@@ -103,7 +103,7 @@ The DID (e.g., `did:plc:abc123`) is the stable, permanent identity. Handles can 
 
 **Both auth methods coexist.** Username/password login remains for users without atproto accounts. The lobby offers both options. Existing accounts can be linked to a DID.
 
-## Prerequisite: Extract `SaveBackend` from `roguelike-tui`
+## Prerequisite: Extract `SaveBackend` to `crates/saves`
 
 The `SaveBackend` trait currently lives in `crates/tui/src/saves.rs`, and `roguelike-tui` depends on `crossterm`. This creates a problem:
 
@@ -111,14 +111,27 @@ The `SaveBackend` trait currently lives in `crates/tui/src/saves.rs`, and `rogue
 - `crates/web` needs `SaveBackend` for its WASM save bridge.
 - `crossterm` does not compile to WASM.
 
-`SaveBackend` has no crossterm dependency itself — it's a pure trait over `GameState`, `SlotMetadata`, and `Settings`. It should be moved to `roguelike-core` (which has zero platform dependencies) before any atproto work begins.
+`SaveBackend` has no crossterm dependency itself — it's a pure trait over `GameState`, `SlotMetadata`, and `Settings`. However, it should **not** move to `roguelike-core`. Core should remain universal across all platforms, and constrained platforms (GBA with 32KB SRAM, C64 with tape/floppy) need completely different save mechanisms — they can't implement an interface that assumes multiple JSON save slots.
+
+Instead, `SaveBackend` moves to a new `crates/saves` crate that depends only on `roguelike-core`:
+
+```
+roguelike-core          ← universal (GameState, SlotMetadata, Settings)
+  ↑
+roguelike-saves         ← SaveBackend trait (connected platforms only)
+  ↑         ↑
+tui       atproto/web   ← implementations
+```
+
+Connected platforms (`terminal`, `ssh`, `atproto`, `web`) depend on `roguelike-saves`. Constrained platforms (`gba`, `c64`) don't — they have their own save mechanisms suited to their hardware.
 
 **Migration:**
 
-1. Move `SaveBackend` trait from `crates/tui/src/saves.rs` to `crates/core/src/saves.rs` (alongside the existing `SlotMetadata`).
-2. Update `crates/tui/src/game_loop.rs` to import from `roguelike_core::saves::SaveBackend` instead of `crate::saves::SaveBackend`.
-3. Update `crates/ssh/src/saves.rs` to implement `roguelike_core::saves::SaveBackend`.
-4. Remove `crates/tui/src/saves.rs` or re-export from core.
+1. Create `crates/saves/` with a `Cargo.toml` depending on `roguelike-core` and a `src/lib.rs` containing the `SaveBackend` trait definition.
+2. Update `crates/tui/Cargo.toml` to depend on `roguelike-saves`. Update `crates/tui/src/game_loop.rs` to import from `roguelike_saves::SaveBackend`.
+3. Update `crates/terminal/Cargo.toml` to depend on `roguelike-saves`. Update `crates/terminal/src/local_saves.rs` to implement `roguelike_saves::SaveBackend`.
+4. Update `crates/ssh/Cargo.toml` to depend on `roguelike-saves`. Update `crates/ssh/src/saves.rs` to implement `roguelike_saves::SaveBackend`.
+5. Remove `crates/tui/src/saves.rs`.
 
 This is a small, non-breaking refactor that unblocks the entire dependency chain. It should be done first, independently of the atproto work.
 
@@ -238,6 +251,8 @@ Stores user preferences. Single record per user.
 
 **Design note:** Settings are small structured data (~200 bytes). They live directly in the record with no blob. All fields are optional to allow forward/backward compatibility as settings are added.
 
+**Enum serialization stability:** Three fields — `colorPalette`, `pronouns`, and `leftHandLayout` — are Rust enums (`ColorPalette`, `Pronouns`, `LeftHandLayout`) serialized as strings. The serde string representation of these enums becomes the stable interchange format stored on the PDS. Renaming an enum variant is a breaking change that would silently fail to deserialize settings from the PDS. These enum variant names should be treated as part of the public API once the lexicon is published.
+
 ## OAuth Integration
 
 ### SSH Frontend
@@ -266,7 +281,7 @@ The SSH server already accepts all connections at the SSH protocol level (`auth_
 12. SSH lobby receives the DID, loads saves from PDS, enters game session.
 ```
 
-**Bridging async HTTP callback to sync lobby thread:** The lobby runs on a `spawn_blocking` thread (see `server.rs:98`). Communication uses a `tokio::sync::oneshot` channel. The lobby blocks via `rt_handle.block_on(receiver)`, matching the existing pattern at `server.rs:99`.
+**Bridging async HTTP callback to sync lobby thread:** The lobby runs on a `spawn_blocking` thread (see the `channel_open_session` handler in `server.rs`). Communication uses a `tokio::sync::oneshot` channel. The lobby blocks via `rt_handle.block_on(receiver)`, matching the existing `block_on` pattern used for session cleanup in the same function.
 
 **Timeout:** If the user doesn't complete browser auth within 5 minutes, the oneshot receiver times out and the lobby returns to the main menu.
 
@@ -340,7 +355,9 @@ pub enum LobbyResult {
 }
 ```
 
-The caller in `server.rs` (`channel_open_session`) matches on the variant to construct either a `SaveManager` (filesystem) or `PdsSaveBackend`, then passes it to `session::run_session` via the existing `&dyn SaveBackend` parameter.
+The caller in `server.rs` (`channel_open_session`) runs a lobby↔session loop. After the lobby returns, the loop matches on the `LobbyResult` variant to construct either a `SaveManager` (filesystem) or `PdsSaveBackend`, then passes it to `session::run_session`. The session returns `SessionResult::LogOut` (back to lobby) or `SessionResult::Quit` (disconnect). Inside the session, a server menu (Play / Watch / Log Out) gates access to the game loop. The game loop returns `GameLoopResult::Lobby` (back to server menu) or `GameLoopResult::Quit`.
+
+On SSH, the title and pause menus show "Lobby" instead of "Quit", wired to `MenuAction::Lobby` which propagates up as `GameLoopResult::Lobby`.
 
 **`run_lobby` signature changes:**
 
@@ -414,7 +431,7 @@ The axum HTTP server serves both OAuth and the WASM frontend:
 
 ## PDS Save Backend
 
-A new `PdsSaveBackend` implements the existing `SaveBackend` trait using XRPC calls to the user's PDS.
+A new `PdsSaveBackend` implements the `SaveBackend` trait (from `roguelike-saves`) using XRPC calls to the user's PDS.
 
 ### Trait mapping
 
@@ -455,7 +472,7 @@ Cache paths become `data_dir/cache/did_plc_abc123/`. Phase 1 local saves use `da
 
 `SaveBackend` methods are synchronous (`fn load_autosave(&self) -> Result<GameState, String>`), but PDS calls are async (HTTP via reqwest). The bridge depends on the frontend:
 
-**SSH:** The game loop already runs in `spawn_blocking` with access to a tokio runtime handle (see `server.rs:99`). `PdsSaveBackend` stores a `tokio::runtime::Handle` and calls `handle.block_on(async_pds_call())` inside each trait method. This is the same pattern the codebase already uses.
+**SSH:** The game loop already runs in `spawn_blocking` with access to a tokio runtime handle (see the `channel_open_session` handler in `server.rs`). `PdsSaveBackend` stores a `tokio::runtime::Handle` and calls `handle.block_on(async_pds_call())` inside each trait method. This is the same pattern the codebase already uses.
 
 **WASM:** `PdsSaveBackend` calls back to JS via `wasm_bindgen`. The JS side makes the async HTTP request and returns the result synchronously to the Web Worker (which can block). Alternatively, the WASM save backend operates only on the `localStorage` cache, and a JS background task syncs to the PDS independently.
 
@@ -602,6 +619,7 @@ WASM SaveBackend -> wasm_bindgen extern -> JS PDS client -> XRPC -> PDS
 ```toml
 [dependencies]
 roguelike-core = { path = "../core", default-features = false }
+roguelike-saves = { path = "../saves" }
 wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = ["CanvasRenderingContext2d", ...] }
 js-sys = "0.3"
@@ -631,6 +649,7 @@ crates/atproto/
 ```toml
 [dependencies]
 roguelike-core = { path = "../core" }
+roguelike-saves = { path = "../saves" }
 reqwest = { version = "0.12", features = ["json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

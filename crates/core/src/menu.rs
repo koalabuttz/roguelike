@@ -52,6 +52,8 @@ pub enum MenuAction {
     EditPlayerName,
     /// Cycle player pronouns.
     CyclePronouns,
+    /// Return to the server lobby (SSH only).
+    Lobby,
 }
 
 /// A single menu entry.
@@ -179,9 +181,23 @@ impl Menu {
 ///
 /// In **classic** mode the layout is: Continue (enabled if save) → New Game →
 /// Settings → Quit. In **casual** mode: New Game → Load Game (enabled if
-/// save) → Settings → Quit.
-pub fn title_menu(has_save: bool, casual_mode: bool) -> Menu {
-    let items = if casual_mode {
+/// save) → Settings → Quit. On SSH, "Quit" is replaced with "Log Out".
+pub fn title_menu(has_save: bool, casual_mode: bool, platform: Platform) -> Menu {
+    let exit_item = if platform == Platform::Ssh {
+        MenuItem {
+            label: "Lobby".to_string(),
+            action: MenuAction::Lobby,
+            enabled: true,
+        }
+    } else {
+        MenuItem {
+            label: "Quit".to_string(),
+            action: MenuAction::Quit,
+            enabled: true,
+        }
+    };
+
+    let mut items = if casual_mode {
         vec![
             MenuItem {
                 label: "New Game".to_string(),
@@ -201,11 +217,6 @@ pub fn title_menu(has_save: bool, casual_mode: bool) -> Menu {
             MenuItem {
                 label: "Settings".to_string(),
                 action: MenuAction::Settings,
-                enabled: true,
-            },
-            MenuItem {
-                label: "Quit".to_string(),
-                action: MenuAction::Quit,
                 enabled: true,
             },
         ]
@@ -231,13 +242,9 @@ pub fn title_menu(has_save: bool, casual_mode: bool) -> Menu {
                 action: MenuAction::Settings,
                 enabled: true,
             },
-            MenuItem {
-                label: "Quit".to_string(),
-                action: MenuAction::Quit,
-                enabled: true,
-            },
         ]
     };
+    items.push(exit_item);
     Menu::new("R O G U E L I K E", items)
 }
 
@@ -245,9 +252,23 @@ pub fn title_menu(has_save: bool, casual_mode: bool) -> Menu {
 ///
 /// In **classic** mode: Resume → Title Screen → Quit (no save/load — autosave
 /// handles it). In **casual** mode: Resume → Save Game → Load Game → Title
-/// Screen → Quit.
-pub fn pause_menu(casual_mode: bool) -> Menu {
-    let items = if casual_mode {
+/// Screen → Quit. On SSH, "Quit" is replaced with "Log Out".
+pub fn pause_menu(casual_mode: bool, platform: Platform) -> Menu {
+    let exit_item = if platform == Platform::Ssh {
+        MenuItem {
+            label: "Lobby".to_string(),
+            action: MenuAction::Lobby,
+            enabled: true,
+        }
+    } else {
+        MenuItem {
+            label: "Quit".to_string(),
+            action: MenuAction::Quit,
+            enabled: true,
+        }
+    };
+
+    let mut items = if casual_mode {
         vec![
             MenuItem {
                 label: "Resume".to_string(),
@@ -269,11 +290,6 @@ pub fn pause_menu(casual_mode: bool) -> Menu {
                 action: MenuAction::TitleScreen,
                 enabled: true,
             },
-            MenuItem {
-                label: "Quit".to_string(),
-                action: MenuAction::Quit,
-                enabled: true,
-            },
         ]
     } else {
         vec![
@@ -287,13 +303,9 @@ pub fn pause_menu(casual_mode: bool) -> Menu {
                 action: MenuAction::TitleScreen,
                 enabled: true,
             },
-            MenuItem {
-                label: "Quit".to_string(),
-                action: MenuAction::Quit,
-                enabled: true,
-            },
         ]
     };
+    items.push(exit_item);
     Menu::new("Paused", items)
 }
 
@@ -808,7 +820,7 @@ mod tests {
 
     #[test]
     fn title_menu_classic_has_expected_items() {
-        let menu = title_menu(false, false);
+        let menu = title_menu(false, false, Platform::Terminal);
         assert_eq!(menu.title, "R O G U E L I K E");
         assert_eq!(menu.items.len(), 5);
         assert_eq!(menu.items[0].action, MenuAction::LoadGame); // "Continue"
@@ -822,7 +834,7 @@ mod tests {
 
     #[test]
     fn title_menu_casual_has_expected_items() {
-        let menu = title_menu(false, true);
+        let menu = title_menu(false, true, Platform::Terminal);
         assert_eq!(menu.title, "R O G U E L I K E");
         assert_eq!(menu.items.len(), 5);
         assert_eq!(menu.items[0].action, MenuAction::NewGame);
@@ -835,14 +847,14 @@ mod tests {
 
     #[test]
     fn title_menu_classic_continue_enabled_when_save_exists() {
-        let menu = title_menu(true, false);
+        let menu = title_menu(true, false, Platform::Terminal);
         assert!(menu.items[0].enabled); // "Continue" enabled
         assert_eq!(menu.items[0].label, "Continue");
     }
 
     #[test]
     fn pause_menu_classic_has_expected_items() {
-        let menu = pause_menu(false);
+        let menu = pause_menu(false, Platform::Terminal);
         assert_eq!(menu.title, "Paused");
         assert_eq!(menu.items.len(), 3);
         assert_eq!(menu.items[0].action, MenuAction::ResumeGame);
@@ -852,7 +864,7 @@ mod tests {
 
     #[test]
     fn pause_menu_casual_has_expected_items() {
-        let menu = pause_menu(true);
+        let menu = pause_menu(true, Platform::Terminal);
         assert_eq!(menu.title, "Paused");
         assert_eq!(menu.items.len(), 5);
         assert_eq!(menu.items[0].action, MenuAction::ResumeGame);
@@ -956,7 +968,7 @@ mod tests {
 
     #[test]
     fn title_menu_casual_with_save_has_load_enabled() {
-        let menu = title_menu(true, true);
+        let menu = title_menu(true, true, Platform::Terminal);
         let load_item = menu
             .items
             .iter()
@@ -967,7 +979,7 @@ mod tests {
 
     #[test]
     fn title_menu_casual_without_save_has_load_disabled() {
-        let menu = title_menu(false, true);
+        let menu = title_menu(false, true, Platform::Terminal);
         let load_item = menu
             .items
             .iter()
@@ -978,7 +990,7 @@ mod tests {
 
     #[test]
     fn title_menu_classic_without_save_has_continue_disabled() {
-        let menu = title_menu(false, false);
+        let menu = title_menu(false, false, Platform::Terminal);
         let continue_item = menu.items.iter().find(|i| i.label == "Continue").unwrap();
         assert!(!continue_item.enabled);
     }

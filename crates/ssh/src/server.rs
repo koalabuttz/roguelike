@@ -10,6 +10,8 @@ use russh::server::{Auth, Msg, Session};
 use russh::{Channel, ChannelId};
 use tokio::sync::watch;
 
+use crossterm::{cursor, execute};
+
 use crate::accounts::AccountStore;
 use crate::ansi_input::AnsiParser;
 use crate::channel_writer::ChannelWriter;
@@ -98,53 +100,77 @@ impl russh::server::Handler for SshHandler {
         tokio::task::spawn_blocking(move || {
             let rt_handle = tokio::runtime::Handle::current();
             let mut writer = ChannelWriter::new(handle.clone(), channel_id, rt_handle.clone());
+            let _ = execute!(writer, cursor::Hide);
             let mut parser = AnsiParser::new();
             let mut size_rx = size_rx;
-            let active_sessions = server.active_sessions.load(Ordering::Relaxed);
+
+            // Wait briefly for the PTY request to arrive with real terminal
+            // dimensions. The watch channel is initialized with (80, 24) but
+            // the client's pty_request (which carries the actual size) arrives
+            // asynchronously after channel_open_session.
+            for _ in 0..20 {
+                if size_rx.has_changed().unwrap_or(false) {
+                    size_rx.borrow_and_update();
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
 
             let (width, height) = *size_rx.borrow();
 
-            // Run lobby
-            let username = match lobby::run_lobby(
-                &mut writer,
-                &input_rx,
-                &mut parser,
-                &server.accounts,
-                width as i32,
-                height as i32,
-                active_sessions,
-            ) {
-                Ok(LobbyResult::LoggedIn(user)) => user,
-                Ok(LobbyResult::Quit) => {
-                    tracing::info!("Client quit from lobby");
-                    server.active_sessions.fetch_sub(1, Ordering::Relaxed);
-                    let _ = rt_handle.block_on(async { handle.close(channel_id).await });
-                    return;
+            // Lobby ↔ session loop: LogOut returns to the lobby.
+            loop {
+                let active_sessions = server.active_sessions.load(Ordering::Relaxed);
+
+                // Run lobby
+                let username = match lobby::run_lobby(
+                    &mut writer,
+                    &input_rx,
+                    &mut parser,
+                    &server.accounts,
+                    width as i32,
+                    height as i32,
+                    active_sessions,
+                ) {
+                    Ok(LobbyResult::LoggedIn(user)) => user,
+                    Ok(LobbyResult::Quit) => {
+                        tracing::info!("Client quit from lobby");
+                        break;
+                    }
+                    Err(e) => {
+                        tracing::error!("Lobby error: {}", e);
+                        break;
+                    }
+                };
+
+                tracing::info!(username = %username, "User logged in");
+
+                let saves = SaveManager::new(&server.data_dir, &username);
+
+                match session::run_session(
+                    &mut writer,
+                    &input_rx,
+                    &mut size_rx,
+                    &mut parser,
+                    &saves,
+                    &username,
+                ) {
+                    Ok(session::SessionResult::LogOut) => {
+                        tracing::info!(username = %username, "User logged out");
+                        continue; // Back to pre-login lobby
+                    }
+                    Ok(session::SessionResult::Quit) => {
+                        tracing::info!(username = %username, "Session completed normally");
+                        break;
+                    }
+                    Err(e) => {
+                        tracing::warn!(username = %username, "Session error: {}", e);
+                        break;
+                    }
                 }
-                Err(e) => {
-                    tracing::error!("Lobby error: {}", e);
-                    server.active_sessions.fetch_sub(1, Ordering::Relaxed);
-                    let _ = rt_handle.block_on(async { handle.close(channel_id).await });
-                    return;
-                }
-            };
-
-            tracing::info!(username = %username, "User logged in");
-
-            let saves = SaveManager::new(&server.data_dir, &username);
-
-            match session::run_session(
-                &mut writer,
-                &input_rx,
-                &mut size_rx,
-                &mut parser,
-                &saves,
-                &username,
-            ) {
-                Ok(()) => tracing::info!(username = %username, "Session completed normally"),
-                Err(e) => tracing::warn!(username = %username, "Session error: {}", e),
             }
 
+            let _ = execute!(writer, cursor::Show);
             server.active_sessions.fetch_sub(1, Ordering::Relaxed);
             let _ = rt_handle.block_on(async { handle.close(channel_id).await });
         });

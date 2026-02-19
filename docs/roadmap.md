@@ -36,9 +36,10 @@ Builds on the core systems to add depth, platforms, and accessibility.
 | Magic/abilities | 0 | High | L | Big design space. Requires targeting UI. Expands combat significantly. |
 | Granular difficulty | 0 | Medium | S | Config toggles. Broadens who can enjoy the game. |
 | Meta-progression | 0 | High | L | Persistent unlocks between runs. Requires save/load. |
-| Extract SaveBackend to core | ~3 items | Low | S | `SaveBackend` trait is in `tui` (depends on crossterm). Move to `core` so `atproto` and `web` crates can use it without crossterm. Prerequisite for atproto and WASM. [Design doc.](design/atproto.md#prerequisite-extract-savebackend-from-roguelike-tui) |
+| Extract SaveBackend to `crates/saves` | ~3 items | Low | S | `SaveBackend` trait is in `tui` (depends on crossterm). Move to a new `crates/saves` crate (not core — constrained platforms like GBA/C64 need completely different save mechanisms). Connected platforms (`tui`, `ssh`, `atproto`, `web`) depend on it. Prerequisite for atproto and WASM. [Design doc.](design/atproto.md#prerequisite-extract-savebackend-to-cratessaves) |
+| Extract FrameSink/render_frame to core | ~2 items | Low | S | `render_frame()` is in `crates/mcp` but only depends on `GameState`. Move to core, define `FrameSink` trait + `NullFrameSink`. Prerequisite for atproto spectating. [Design doc.](design/atproto-spectating.md#phase-0-extract-render_frame-and-define-framesink) |
 | AT Protocol integration | ~2 items | High | L | Bluesky login via OAuth. Saves stored in user's PDS for cross-server portability. Requires HTTP server alongside SSH, custom lexicons. [Design doc.](design/atproto.md) |
-| Web (WASM) | ~2 items | High | L | Browser-based play. Requires platform abstraction + SaveBackend in core. CanvasRenderer, Web Worker for blocking game loop. [Design doc.](design/atproto.md#wasm-frontend) |
+| Web (WASM) | ~2 items | High | L | Browser-based play. Requires platform abstraction + `roguelike-saves`. CanvasRenderer, Web Worker for blocking game loop. [Design doc.](design/atproto.md#wasm-frontend) |
 | One-handed play (remaining) | 0 | Medium | S | Partially done (left-hand QWEASDZXC and WEASDZXCR layouts). Mouse-only and macros still TODO. |
 
 ## Tier 4: Networking & Polish
@@ -50,8 +51,8 @@ Features that build on a stable core and benefit from a wider feature set.
 | Shared leaderboard | 0 | Medium | M | Requires a server/API. |
 | Daily challenges | 0 | Medium | M | Requires seeded RNG + leaderboard. |
 | Steam Deck | 0 | Medium | M | Requires controller support. Steam Input API. |
-| MCP spectator mode (TCP) | ~1 item | Medium | M | Upgrade file-based spectator to TCP server on localhost. Multiple viewers, remote access, WebSocket upgrade path. Enables live spectating. [Design doc.](design/spectator-mode.md) |
-| Live spectating | 0 | High | L | Requires replay + networking. TCP spectator mode is a stepping stone. |
+| MCP spectator mode (TCP) | 0 | Low | M | Upgrade file-based spectator to TCP server on localhost for low-latency local multi-viewer. Largely superseded by atproto spectating for remote viewing. [Design doc.](design/spectator-mode.md) |
+| Atproto spectating | 0 | High | L | Federated live spectating via PDS frame publishing + Jetstream. Zero infrastructure — player's PDS handles storage and delivery. Depends on atproto OAuth. [Design doc.](design/atproto-spectating.md) |
 | Bones files | 0 | Medium | M | Requires save/load + networking. |
 | PDS save backend | 0 | High | M | Store saves in user's AT Protocol PDS repo using custom lexicons. Enables cross-server save portability. Part of [atproto integration](design/atproto.md#phase-2-pds-save-backend). |
 | Options/settings | 0 | Medium | M | Grows naturally as features accumulate. |
@@ -102,15 +103,15 @@ Input abstraction ✓
 
   → Platform abstraction ✓
     → SSH server ✓
-      → Extract SaveBackend to core
+      → Extract SaveBackend to crates/saves
         → AT Protocol OAuth (SSH login with Bluesky)
           → PDS save backend (portable saves)
             → WASM frontend (browser play + same saves)
-              → Spectating / Leaderboards
 
   → MCP spectator (file) ✓
-    → MCP spectator (TCP)
-      → Live spectating
+    → Extract FrameSink/render_frame to core
+      → Atproto spectating (federated live spectating via Jetstream)
+        → Web spectate viewer (lightweight JS, no full WASM needed)
 
 A* pathfinding ✓
   → MCP pathfind_to tool ✓
@@ -121,8 +122,10 @@ A* pathfinding ✓
 The foundation is complete — input abstraction, save/load, seeded RNG, A\*
 pathfinding, platform abstraction, and the SSH server are all done. The
 remaining critical path is the gameplay branch (Items → Stairs → XP) and the
-platform/identity branch (atproto OAuth → PDS saves → WASM). The atproto
-integration is designed in four phases; see the [design doc](design/atproto.md).
+platform/identity branch (atproto OAuth → PDS saves → WASM). The spectating
+branch now goes through atproto (FrameSink extraction → federated spectating)
+rather than TCP. See the [atproto design doc](design/atproto.md) (4 phases)
+and the [atproto spectating design doc](design/atproto-spectating.md) (5 phases).
 
 ## Completed
 
@@ -171,7 +174,7 @@ Items that have been implemented, organized by original tier.
 | Item | Notes |
 |------|-------|
 | Seed sharing | Base36 seed codes, title menu entry, death screen display, MCP seed_code param. |
-| SSH server | russh, lobby with login/register, per-user saves, argon2 password hashing. |
+| SSH server | russh, lobby with login/register, per-user saves, argon2 password hashing. Server menu (Play / Watch / Log Out) with lobby↔session loop. Platform-aware menus ("Lobby" instead of "Quit" on SSH). |
 | Hot reload | F10 in dev-tools build reloads `game.toml`. |
 | Balance telemetry | Per-game analytics, aggregate stats, CI balance workflow with baseline diffing. |
 | Character identity | Pronouns enum, player_name in Settings, shown in save slots and death screen. |

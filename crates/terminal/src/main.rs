@@ -41,5 +41,5 @@ fn main() -> std::io::Result<()> {
     execute!(stdout, terminal::LeaveAlternateScreen, cursor::Show)?;
     terminal::disable_raw_mode()?;
 
-    result
+    result.map(|_| ())
 }

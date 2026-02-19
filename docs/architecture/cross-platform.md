@@ -22,14 +22,17 @@ roguelike/
 │   │       ├── menu.rs, saves.rs, settings.rs
 │   │       ├── dev_tools.rs, analytics.rs, scenario.rs
 │   │       └── message_log.rs
+│   ├── saves/              roguelike-saves: SaveBackend trait (connected platforms)
+│   │   ├── Cargo.toml      depends on core only
+│   │   └── src/
+│   │       └── lib.rs       (SaveBackend trait definition)
 │   ├── tui/                roguelike-tui: shared terminal rendering + game loop
-│   │   ├── Cargo.toml      depends on core + crossterm
+│   │   ├── Cargo.toml      depends on core + saves + crossterm
 │   │   └── src/
 │   │       ├── game_loop.rs (unified game loop for terminal + SSH)
 │   │       ├── render.rs    (CrosstermRenderer, color palette mapping)
 │   │       ├── input.rs     (key-to-command translation)
-│   │       ├── input_provider.rs (InputProvider trait, InputResult, GameInput)
-│   │       └── saves.rs     (SaveBackend trait)
+│   │       └── input_provider.rs (InputProvider trait, InputResult, GameInput)
 │   ├── terminal/           roguelike-terminal: local terminal frontend
 │   │   ├── Cargo.toml      depends on core + tui + gilrs (optional)
 │   │   └── src/
@@ -43,12 +46,12 @@ roguelike/
 │   │   ├── Cargo.toml      depends on core + tui + russh + argon2
 │   │   └── src/
 │   │       ├── main.rs      (SSH + server startup)
-│   │       ├── server.rs    (russh Handler, per-connection state)
+│   │       ├── server.rs    (russh Handler, lobby↔session loop)
 │   │       ├── lobby.rs     (dgamelaunch-style login/register TUI)
 │   │       ├── accounts.rs  (argon2 password hashing, JSON account files)
-│   │       ├── session.rs   (game session for logged-in user)
+│   │       ├── session.rs   (server menu + game session, LogOut returns to lobby)
 │   │       ├── ssh_input.rs (InputProvider impl for SSH channels)
-│   │       ├── saves.rs     (SaveBackend impl for per-user directories)
+│   │       ├── saves.rs     (SaveBackend impl for per-user server directories)
 │   │       ├── ansi_input.rs (raw byte → KeyEvent parser)
 │   │       └── channel_writer.rs (async SSH channel → sync Write adapter)
 │   ├── mcp/                roguelike-mcp: MCP server for LLM play
@@ -64,7 +67,9 @@ roguelike/
 │   └── vita/               (future: PS Vita frontend)
 ```
 
-The `tui` crate sits between `core` and the terminal-based frontends (`terminal`, `ssh`). It provides the shared game loop, crossterm-based rendering, and the `InputProvider` / `SaveBackend` traits. Both `terminal` and `ssh` implement these traits for their respective I/O mechanisms.
+The `saves` crate defines the `SaveBackend` trait for platforms with enough storage for JSON-serialized game state and multiple save slots. It depends only on `core` (for `GameState`, `SlotMetadata`, `Settings`). Connected platforms (`terminal`, `ssh`, `atproto`, `web`) implement it; constrained platforms (`gba`, `c64`) have their own save mechanisms suited to their hardware and don't depend on this crate.
+
+The `tui` crate sits between `core`/`saves` and the terminal-based frontends (`terminal`, `ssh`). It provides the shared game loop, crossterm-based rendering, and the `InputProvider` trait. Both `terminal` and `ssh` implement these traits for their respective I/O mechanisms.
 
 Type aliases in `crates/core/src/types.rs` centralize platform-sensitive sizing:
 
@@ -74,7 +79,7 @@ pub type Pos = (Coord, Coord);  // (x, y) tile position
 pub type Stat = i32;   // character stat (HP, ATK, DEF, damage)
 ```
 
-Only `tui`, `terminal`, and `ssh` import `crossterm`. Only the `mcp` crate imports `rmcp`/`tokio`. The `core` crate has zero platform dependencies.
+Only `tui`, `terminal`, and `ssh` import `crossterm`. Only the `mcp` crate imports `rmcp`/`tokio`. The `core` and `saves` crates have zero platform dependencies.
 
 ### Completed prerequisites
 
@@ -87,7 +92,8 @@ Only `tui`, `terminal`, and `ssh` import `crossterm`. Only the `mcp` crate impor
 
 ### Pending prerequisites (for web/atproto)
 
-- [ ] **Extract `SaveBackend` to core** — Currently in `tui/src/saves.rs` which depends on crossterm. The trait itself has no crossterm dependency and should move to `core/src/saves.rs` so that `crates/atproto` and `crates/web` can implement it without pulling in crossterm. See [atproto design doc](../design/atproto.md#prerequisite-extract-savebackend-from-roguelike-tui).
+- [ ] **Extract `SaveBackend` to `crates/saves`** — Currently in `tui/src/saves.rs` which depends on crossterm. The trait itself has no crossterm dependency. Rather than moving to core (which should remain universal across all platforms, including GBA/C64 that need completely different save mechanisms), it moves to a new `crates/saves` crate that depends only on core. Connected platforms (`tui`, `ssh`, `atproto`, `web`) depend on it; constrained platforms don't. See [atproto design doc](../design/atproto.md#prerequisite-extract-savebackend-to-cratessaves).
+- [ ] **Extract `FrameSink` trait and `render_frame` to core** — `render_frame()` currently lives in `crates/mcp/src/spectate.rs` but only depends on `GameState`. The `FrameSink` trait (for spectate frame output) should be defined in core alongside a `NullFrameSink`. See [atproto spectating design doc](../design/atproto-spectating.md#phase-0-extract-render_frame-and-define-framesink).
 - [ ] **AT Protocol integration** — `atproto` crate for Bluesky OAuth login and PDS-based portable saves. See [design doc](../design/atproto.md).
 - [ ] **WASM frontend** — `web` crate with CanvasRenderer, Web Worker game loop, JS-bridged saves. See [design doc](../design/atproto.md#wasm-frontend).
 
@@ -136,14 +142,15 @@ Everything that doesn't touch a platform API:
 
 Anything that talks to hardware or external services:
 
-- **TUI crate**: crossterm rendering, shared game loop, `InputProvider` / `SaveBackend` traits, key-to-command translation
+- **Saves crate**: `SaveBackend` trait for platforms with JSON-serializable game state and multiple save slots. Depends only on core. Not used by constrained platforms (GBA, C64) that need hardware-specific save mechanisms.
+- **TUI crate**: crossterm rendering, shared game loop, `InputProvider` trait, key-to-command translation
 - **Terminal crate**: local crossterm event polling, local filesystem saves, gamepad input (gilrs, optional), terminal lifecycle
 - **SSH crate**: russh server, lobby/accounts system, ANSI input parsing, per-user saves, SSH channel I/O
 - **MCP crate**: rmcp server, tokio runtime, JSON serialization of game state
-- **Atproto crate** (future): AT Protocol OAuth, handle resolution, PDS save backend, XRPC client. See [design doc](../design/atproto.md).
+- **Atproto crate** (future): AT Protocol OAuth, handle resolution, PDS save backend, XRPC client, spectate frame publishing. See [design doc](../design/atproto.md).
 - **Web crate** (future): WASM entry point, canvas rendering, Web Worker input, JS interop for OAuth and PDS saves
-- **GBA crate** (future): GBA tile/sprite rendering, button input, no-std setup
-- **Vita crate** (future): vita-sdk rendering, hardware buttons, memory card saves
+- **GBA crate** (future): GBA tile/sprite rendering, button input, no-std setup, hardware-specific saves (SRAM/flash)
+- **Vita crate** (future): vita-sdk rendering, hardware buttons, memory card saves via vita-sdk save data API
 
 ## Color Abstraction
 

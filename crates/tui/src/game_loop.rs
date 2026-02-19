@@ -27,6 +27,14 @@ enum AppState {
     Paused(menu::Menu),
 }
 
+/// What caused the game loop to exit.
+pub enum GameLoopResult {
+    /// Normal quit or disconnect.
+    Quit,
+    /// User chose "Lobby" — return to the server lobby (SSH).
+    Lobby,
+}
+
 /// Optional dev-tools callbacks for debug builds.
 ///
 /// All methods have default no-op implementations so `NoDevHooks` (or any
@@ -96,9 +104,10 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
     saves: &dyn SaveBackend,
     dev: &mut D,
     config: GameLoopConfig,
-) -> io::Result<()> {
+) -> io::Result<GameLoopResult> {
     let mut cols = config.cols;
     let mut rows = config.rows;
+    let platform = config.platform;
 
     let mut settings = saves.load_settings();
     let mut game_data = data::load_game_data();
@@ -106,7 +115,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
     let mut game_state: Option<GameState> = None;
     let mut autosave_buf: Option<String> = None;
     let has_save = saves.has_save_for_title(settings.casual_mode);
-    let mut app_state = AppState::Title(menu::title_menu(has_save, settings.casual_mode));
+    let mut app_state = AppState::Title(menu::title_menu(has_save, settings.casual_mode, platform));
 
     'app: loop {
         // Check for terminal resize (SSH only; terminal returns None).
@@ -138,6 +147,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                     app_state = AppState::Title(menu::title_menu(
                                         has_save,
                                         settings.casual_mode,
+                                        platform,
                                     ));
                                     continue;
                                 }
@@ -190,6 +200,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                     app_state = AppState::Title(menu::title_menu(
                                         has_save,
                                         settings.casual_mode,
+                                        platform,
                                     ));
                                 }
                             },
@@ -198,6 +209,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                 app_state = AppState::Title(menu::title_menu(
                                     has_save,
                                     settings.casual_mode,
+                                    platform,
                                 ));
                             }
                         }
@@ -212,15 +224,26 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                             saves,
                             &settings,
                             None, // no pause menu index
+                            platform,
                         )?;
                     }
                     Some(MenuAction::Settings) => {
                         run_settings_loop(renderer, input, saves, &mut settings, config.platform)?;
                         let has_save = saves.has_save_for_title(settings.casual_mode);
-                        app_state =
-                            AppState::Title(menu::title_menu(has_save, settings.casual_mode));
+                        app_state = AppState::Title(menu::title_menu(
+                            has_save,
+                            settings.casual_mode,
+                            platform,
+                        ));
                     }
-                    Some(MenuAction::Quit | MenuAction::Back) => break 'app,
+                    Some(MenuAction::Quit) => break 'app,
+                    Some(MenuAction::Back) => {
+                        if platform == Platform::Ssh {
+                            return Ok(GameLoopResult::Lobby);
+                        }
+                        break 'app;
+                    }
+                    Some(MenuAction::Lobby) => return Ok(GameLoopResult::Lobby),
                     _ => {}
                 }
             }
@@ -248,7 +271,8 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                     game_state = None;
                     autosave_buf = None;
                     let has_save = saves.has_save_for_title(settings.casual_mode);
-                    app_state = AppState::Title(menu::title_menu(has_save, settings.casual_mode));
+                    app_state =
+                        AppState::Title(menu::title_menu(has_save, settings.casual_mode, platform));
                     continue;
                 }
 
@@ -278,7 +302,8 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                 if let Some(cmd) = cmd {
                     match cmd {
                         GameCommand::Quit => {
-                            app_state = AppState::Paused(menu::pause_menu(settings.casual_mode));
+                            app_state =
+                                AppState::Paused(menu::pause_menu(settings.casual_mode, platform));
                         }
                         GameCommand::Look => {
                             let look_opts = dev.look_options();
@@ -369,7 +394,8 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                 Some(MenuAction::SelectSlot(slot)) => {
                                     let msg =
                                         saves.save_to_slot(state, slot, &settings.player_name);
-                                    let mut new_pause = menu::pause_menu(settings.casual_mode);
+                                    let mut new_pause =
+                                        menu::pause_menu(settings.casual_mode, platform);
                                     new_pause.selected = 1;
                                     app_state = AppState::Paused(new_pause);
                                     if let Some(ref mut state) = game_state {
@@ -377,7 +403,8 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                     }
                                 }
                                 _ => {
-                                    let mut new_pause = menu::pause_menu(settings.casual_mode);
+                                    let mut new_pause =
+                                        menu::pause_menu(settings.casual_mode, platform);
                                     new_pause.selected = 1;
                                     app_state = AppState::Paused(new_pause);
                                 }
@@ -394,23 +421,28 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                             saves,
                             &settings,
                             Some(2), // pause menu "Load Game" index
+                            platform,
                         )?;
                     }
                     Some(MenuAction::TitleScreen) => {
                         game_state = None;
                         autosave_buf = None;
                         let has_save = saves.has_save_for_title(settings.casual_mode);
-                        app_state =
-                            AppState::Title(menu::title_menu(has_save, settings.casual_mode));
+                        app_state = AppState::Title(menu::title_menu(
+                            has_save,
+                            settings.casual_mode,
+                            platform,
+                        ));
                     }
                     Some(MenuAction::Quit) => break 'app,
+                    Some(MenuAction::Lobby) => return Ok(GameLoopResult::Lobby),
                     _ => {}
                 }
             }
         }
     }
 
-    Ok(())
+    Ok(GameLoopResult::Quit)
 }
 
 // ---------------------------------------------------------------------------
@@ -621,6 +653,7 @@ fn handle_load_game<W: Write>(
     saves: &dyn SaveBackend,
     settings: &Settings,
     pause_selected: Option<usize>,
+    platform: Platform,
 ) -> io::Result<()> {
     if settings.casual_mode {
         // Show load-slot picker.
@@ -641,7 +674,15 @@ fn handle_load_game<W: Write>(
                         *app_state = AppState::Playing;
                     }
                     Err(msg) => {
-                        load_failed(app_state, game_state, saves, settings, pause_selected, &msg);
+                        load_failed(
+                            app_state,
+                            game_state,
+                            saves,
+                            settings,
+                            pause_selected,
+                            &msg,
+                            platform,
+                        );
                     }
                 }
             }
@@ -655,13 +696,21 @@ fn handle_load_game<W: Write>(
                         *app_state = AppState::Playing;
                     }
                     Err(msg) => {
-                        load_failed(app_state, game_state, saves, settings, pause_selected, &msg);
+                        load_failed(
+                            app_state,
+                            game_state,
+                            saves,
+                            settings,
+                            pause_selected,
+                            &msg,
+                            platform,
+                        );
                     }
                 }
             }
             _ => {
                 // Back — return to previous menu.
-                load_back(app_state, saves, settings, pause_selected);
+                load_back(app_state, saves, settings, pause_selected, platform);
             }
         }
     } else {
@@ -675,7 +724,15 @@ fn handle_load_game<W: Write>(
                 *app_state = AppState::Playing;
             }
             Err(msg) => {
-                load_failed(app_state, game_state, saves, settings, pause_selected, &msg);
+                load_failed(
+                    app_state,
+                    game_state,
+                    saves,
+                    settings,
+                    pause_selected,
+                    &msg,
+                    platform,
+                );
             }
         }
     }
@@ -690,19 +747,20 @@ fn load_failed(
     settings: &Settings,
     pause_selected: Option<usize>,
     msg: &str,
+    platform: Platform,
 ) {
     if let Some(selected) = pause_selected {
         // From pause menu — log error and return.
         if let Some(state) = game_state {
             state.log.add(msg);
         }
-        let mut new_pause = menu::pause_menu(settings.casual_mode);
+        let mut new_pause = menu::pause_menu(settings.casual_mode, platform);
         new_pause.selected = selected;
         *app_state = AppState::Paused(new_pause);
     } else {
         // From title menu — return to title.
         let has_save = saves.has_save_for_title(settings.casual_mode);
-        *app_state = AppState::Title(menu::title_menu(has_save, settings.casual_mode));
+        *app_state = AppState::Title(menu::title_menu(has_save, settings.casual_mode, platform));
     }
 }
 
@@ -712,14 +770,15 @@ fn load_back(
     saves: &dyn SaveBackend,
     settings: &Settings,
     pause_selected: Option<usize>,
+    platform: Platform,
 ) {
     if let Some(selected) = pause_selected {
-        let mut new_pause = menu::pause_menu(settings.casual_mode);
+        let mut new_pause = menu::pause_menu(settings.casual_mode, platform);
         new_pause.selected = selected;
         *app_state = AppState::Paused(new_pause);
     } else {
         let has_save = saves.has_save_for_title(settings.casual_mode);
-        *app_state = AppState::Title(menu::title_menu(has_save, settings.casual_mode));
+        *app_state = AppState::Title(menu::title_menu(has_save, settings.casual_mode, platform));
     }
 }
 

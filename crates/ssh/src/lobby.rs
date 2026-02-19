@@ -133,7 +133,7 @@ fn draw_lobby<W: Write>(
         style::Print(version)
     )?;
 
-    // Menu items
+    // Menu items — left-justified as a block, block centered on screen.
     let items = [
         ("Login", true),
         ("Register", true),
@@ -141,12 +141,18 @@ fn draw_lobby<W: Write>(
         ("Quit", true),
     ];
 
+    let max_item_width = items
+        .iter()
+        .map(|(label, _)| label.len() as i32 + 2) // +2 for "> " or "  " prefix
+        .max()
+        .unwrap_or(0);
+    let items_x = (cx - max_item_width / 2).max(0);
+
     let items_y = top + 4;
     for (i, (label, enabled)) in items.iter().enumerate() {
         let y = items_y + i as i32;
         let prefix = if i == selected { "> " } else { "  " };
         let text = format!("{}{}", prefix, label);
-        let ix = (cx - text.len() as i32 / 2).max(0);
 
         let fg = if !enabled {
             Color::DarkGrey
@@ -158,7 +164,7 @@ fn draw_lobby<W: Write>(
 
         queue!(
             w,
-            cursor::MoveTo(ix as u16, y as u16),
+            cursor::MoveTo(items_x as u16, y as u16),
             SetForegroundColor(fg),
             SetBackgroundColor(Color::Black),
             style::Print(&text)

@@ -150,6 +150,45 @@ impl SaveManager {
     }
 }
 
+impl roguelike_tui::saves::SaveBackend for SaveManager {
+    fn has_autosave(&self) -> bool {
+        self.has_autosave()
+    }
+    fn load_autosave(&self) -> Result<GameState, String> {
+        self.load_autosave()
+    }
+    fn write_autosave(&self, json: &str, meta: &SlotMetadata) {
+        self.write_autosave(json, meta);
+    }
+    fn delete_autosave(&self) {
+        self.delete_autosave();
+    }
+    fn load_autosave_metadata(&self) -> Option<SlotMetadata> {
+        self.load_autosave_metadata()
+    }
+    fn save_to_slot(&self, state: &GameState, slot: u8, player_name: &str) -> String {
+        self.save_to_slot(state, slot, player_name)
+    }
+    fn load_from_slot(&self, slot: u8) -> Result<GameState, String> {
+        self.load_from_slot(slot)
+    }
+    fn load_all_slot_metadata(&self) -> [Option<SlotMetadata>; 5] {
+        self.load_all_slot_metadata()
+    }
+    fn has_any_save(&self) -> bool {
+        self.has_any_save()
+    }
+    fn has_save_for_title(&self, casual_mode: bool) -> bool {
+        self.has_save_for_title(casual_mode)
+    }
+    fn load_settings(&self) -> Settings {
+        self.load_settings()
+    }
+    fn save_settings(&self, settings: &Settings) {
+        self.save_settings(settings);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

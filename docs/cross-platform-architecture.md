@@ -1,10 +1,10 @@
 # Cross-Platform Architecture
 
-How the codebase is structured for multiple platform targets (terminal, GBA, Vita, web, etc.) without maintaining separate branches.
+How the codebase is structured for multiple platform targets (terminal, SSH, web, GBA, Vita, etc.) without maintaining separate branches.
 
 ## Current State
 
-The codebase is split into a Cargo workspace with three crates:
+The codebase is split into a Cargo workspace with five crates:
 
 ```
 roguelike/
@@ -22,23 +22,49 @@ roguelike/
 │   │       ├── menu.rs, saves.rs, settings.rs
 │   │       ├── dev_tools.rs, analytics.rs, scenario.rs
 │   │       └── message_log.rs
-│   ├── terminal/           roguelike-terminal: crossterm frontend
-│   │   ├── Cargo.toml      depends on core + gilrs (optional)
+│   ├── tui/                roguelike-tui: shared terminal rendering + game loop
+│   │   ├── Cargo.toml      depends on core + crossterm
+│   │   └── src/
+│   │       ├── game_loop.rs (unified game loop for terminal + SSH)
+│   │       ├── render.rs    (CrosstermRenderer, color palette mapping)
+│   │       ├── input.rs     (key-to-command translation)
+│   │       ├── input_provider.rs (InputProvider trait, InputResult, GameInput)
+│   │       └── saves.rs     (SaveBackend trait)
+│   ├── terminal/           roguelike-terminal: local terminal frontend
+│   │   ├── Cargo.toml      depends on core + tui + gilrs (optional)
 │   │   └── src/
 │   │       ├── main.rs
-│   │       ├── render.rs   (CrosstermRenderer)
-│   │       ├── input.rs    (crossterm key translation)
+│   │       ├── render.rs   (CrosstermRenderer setup)
+│   │       ├── input.rs    (crossterm event polling)
+│   │       ├── terminal_input.rs (InputProvider impl for local terminal)
+│   │       ├── local_saves.rs    (SaveBackend impl for local filesystem)
 │   │       └── gamepad.rs  (gilrs gamepad input, optional `gamepad` feature)
-│   ├── mcp/                roguelike-mcp: MCP server
+│   ├── ssh/                roguelike-ssh: SSH server frontend
+│   │   ├── Cargo.toml      depends on core + tui + russh + argon2
+│   │   └── src/
+│   │       ├── main.rs      (SSH + server startup)
+│   │       ├── server.rs    (russh Handler, per-connection state)
+│   │       ├── lobby.rs     (dgamelaunch-style login/register TUI)
+│   │       ├── accounts.rs  (argon2 password hashing, JSON account files)
+│   │       ├── session.rs   (game session for logged-in user)
+│   │       ├── ssh_input.rs (InputProvider impl for SSH channels)
+│   │       ├── saves.rs     (SaveBackend impl for per-user directories)
+│   │       ├── ansi_input.rs (raw byte → KeyEvent parser)
+│   │       └── channel_writer.rs (async SSH channel → sync Write adapter)
+│   ├── mcp/                roguelike-mcp: MCP server for LLM play
 │   │   ├── Cargo.toml      depends on core + rmcp + tokio
 │   │   └── src/
 │   │       ├── lib.rs       (re-exports mcp_server and spectate modules)
 │   │       ├── main.rs
 │   │       ├── mcp_server.rs
 │   │       └── spectate.rs  (file-based spectator, ROGUELIKE_SPECTATE_PATH)
+│   ├── atproto/            (future: AT Protocol identity + PDS save storage)
+│   ├── web/                (future: WASM browser frontend)
 │   └── gba/                (future: GBA frontend)
 │   └── vita/               (future: PS Vita frontend)
 ```
+
+The `tui` crate sits between `core` and the terminal-based frontends (`terminal`, `ssh`). It provides the shared game loop, crossterm-based rendering, and the `InputProvider` / `SaveBackend` traits. Both `terminal` and `ssh` implement these traits for their respective I/O mechanisms.
 
 Type aliases in `crates/core/src/types.rs` centralize platform-sensitive sizing:
 
@@ -48,14 +74,22 @@ pub type Pos = (Coord, Coord);  // (x, y) tile position
 pub type Stat = i32;   // character stat (HP, ATK, DEF, damage)
 ```
 
-Only the `terminal` crate imports `crossterm`. Only the `mcp` crate imports `rmcp`/`tokio`. The `core` crate has zero platform dependencies.
+Only `tui`, `terminal`, and `ssh` import `crossterm`. Only the `mcp` crate imports `rmcp`/`tokio`. The `core` crate has zero platform dependencies.
 
 ### Completed prerequisites
 
 - [x] **Platform abstraction** — `Renderer` and `InputSource` traits in `core/src/platform.rs`
 - [x] **Abstract Color** — `GameColor` enum in `core/src/types.rs`; crossterm removed from `entity.rs` and `data.rs`
 - [x] **Move `GameCommand`** — `command.rs` in core; terminal's `input.rs` only does key translation
-- [x] **Workspace split** — three crates: core, terminal, mcp
+- [x] **Workspace split** — five crates: core, tui, terminal, ssh, mcp
+- [x] **Shared game loop** — `tui/src/game_loop.rs` is the single game loop for both terminal and SSH frontends
+- [x] **SSH server** — `ssh` crate with russh, lobby system, per-user accounts and saves
+
+### Pending prerequisites (for web/atproto)
+
+- [ ] **Extract `SaveBackend` to core** — Currently in `tui/src/saves.rs` which depends on crossterm. The trait itself has no crossterm dependency and should move to `core/src/saves.rs` so that `crates/atproto` and `crates/web` can implement it without pulling in crossterm. See [atproto design doc](design/atproto.md#prerequisite-extract-savebackend-from-roguelike-tui).
+- [ ] **AT Protocol integration** — `atproto` crate for Bluesky OAuth login and PDS-based portable saves. See [design doc](design/atproto.md).
+- [ ] **WASM frontend** — `web` crate with CanvasRenderer, Web Worker game loop, JS-bridged saves. See [design doc](design/atproto.md#wasm-frontend).
 
 ## Why Not Branches
 
@@ -102,8 +136,12 @@ Everything that doesn't touch a platform API:
 
 Anything that talks to hardware or external services:
 
-- **Terminal crate**: crossterm rendering, keyboard input, gamepad input (gilrs, optional), terminal lifecycle
+- **TUI crate**: crossterm rendering, shared game loop, `InputProvider` / `SaveBackend` traits, key-to-command translation
+- **Terminal crate**: local crossterm event polling, local filesystem saves, gamepad input (gilrs, optional), terminal lifecycle
+- **SSH crate**: russh server, lobby/accounts system, ANSI input parsing, per-user saves, SSH channel I/O
 - **MCP crate**: rmcp server, tokio runtime, JSON serialization of game state
+- **Atproto crate** (future): AT Protocol OAuth, handle resolution, PDS save backend, XRPC client. See [design doc](design/atproto.md).
+- **Web crate** (future): WASM entry point, canvas rendering, Web Worker input, JS interop for OAuth and PDS saves
 - **GBA crate** (future): GBA tile/sprite rendering, button input, no-std setup
 - **Vita crate** (future): vita-sdk rendering, hardware buttons, memory card saves
 

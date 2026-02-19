@@ -58,7 +58,9 @@ Builds on the core systems to add depth, platforms, and accessibility.
 | ~~Debug overlay~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~See AI decisions, FOV, pathfinding, monster sight boundaries, hidden monsters. Accelerates development.~~ Done (F6–F12 toggles: FOV, targets, pathfinding, frontiers, reveal monsters, monster FOV). |
 | ~~MCP spectator mode (file)~~ | ~~&zwj;~1 item~~ | ~~Medium~~ | ~~S~~ | ~~Write rendered frames to a file after each MCP action; viewer process displays them. Proves the concept, upgrades to TCP later. [Design doc.](spectator-mode-options.md)~~ Done (`ROGUELIKE_SPECTATE_PATH` env var, atomic file writes, integrated into all MCP actions). |
 | Meta-progression | 0 | High | L | Persistent unlocks between runs. Requires save/load. |
-| Web (WASM) | ~2 items | High | L | Browser-based play. Requires platform abstraction. |
+| Extract SaveBackend to core | ~3 items | Low | S | `SaveBackend` trait is in `tui` (depends on crossterm). Move to `core` so `atproto` and `web` crates can use it without crossterm. Prerequisite for atproto and WASM. [Design doc.](design/atproto.md#prerequisite-extract-savebackend-from-roguelike-tui) |
+| AT Protocol integration | ~2 items | High | L | Bluesky login via OAuth. Saves stored in user's PDS for cross-server portability. Requires HTTP server alongside SSH, custom lexicons. [Design doc.](design/atproto.md) |
+| Web (WASM) | ~2 items | High | L | Browser-based play. Requires platform abstraction + SaveBackend in core. CanvasRenderer, Web Worker for blocking game loop. [Design doc.](design/atproto.md#wasm-frontend) |
 | ~~One-handed play~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~Keybind preset. Falls out of input abstraction + options.~~ Partially done (left-hand QWEASDZXC and WEASDZXCR layouts). Mouse-only and macros still TODO. |
 | ~~High-contrast mode~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~Alternative color set. Do together with colorblind modes.~~ Done (ColorPalette variant with brighter remappings). |
 
@@ -75,7 +77,8 @@ Features that build on a stable core and benefit from a wider feature set.
 | MCP spectator mode (TCP) | ~1 item | Medium | M | Upgrade file-based spectator to TCP server on localhost. Multiple viewers, remote access, WebSocket upgrade path. Enables live spectating. [Design doc.](spectator-mode-options.md) |
 | Live spectating | 0 | High | L | Requires replay + networking. TCP spectator mode is a stepping stone. |
 | Bones files | 0 | Medium | M | Requires save/load + networking. |
-| SSH server | 0 | Medium | L | Requires platform abstraction. |
+| ~~SSH server~~ | ~~0~~ | ~~Medium~~ | ~~L~~ | ~~Requires platform abstraction.~~ Done (russh, lobby with login/register, per-user saves, argon2 password hashing). |
+| PDS save backend | 0 | High | M | Store saves in user's AT Protocol PDS repo using custom lexicons. Enables cross-server save portability. Part of [atproto integration](design/atproto.md#phase-2-pds-save-backend). |
 | Options/settings | 0 | Medium | M | Grows naturally as features accumulate. |
 | Targeting | 0 | Medium | M | Needed for ranged magic. Distinct UI mode. |
 | ~~Hot reload~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~Requires data-driven content. Dev QoL.~~ Done (F10 in dev-tools build reloads `game.toml`). |
@@ -126,8 +129,12 @@ Input abstraction ✓
     → Steam Deck
 
   → Platform abstraction ✓
-    → WASM (web)
-      → Spectating / Leaderboards
+    → SSH server ✓
+      → Extract SaveBackend to core
+        → AT Protocol OAuth (SSH login with Bluesky)
+          → PDS save backend (portable saves)
+            → WASM frontend (browser play + same saves)
+              → Spectating / Leaderboards
 
   → MCP spectator (file) ✓
     → MCP spectator (TCP)
@@ -140,6 +147,7 @@ A* pathfinding ✓
 ```
 
 The foundation is complete — input abstraction, save/load, seeded RNG, A\*
-pathfinding, and platform abstraction are all done. The remaining critical
-path is the gameplay branch (Items → Stairs → XP) and the platform/networking
-branch (WASM, TCP spectator, leaderboards).
+pathfinding, platform abstraction, and the SSH server are all done. The
+remaining critical path is the gameplay branch (Items → Stairs → XP) and the
+platform/identity branch (atproto OAuth → PDS saves → WASM). The atproto
+integration is designed in four phases; see the [design doc](design/atproto.md).

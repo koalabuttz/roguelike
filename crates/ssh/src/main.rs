@@ -11,6 +11,7 @@ mod lobby;
 mod saves;
 mod server;
 mod session;
+mod ssh_input;
 
 use server::{ServerState, SshHandler};
 

@@ -1,5 +1,7 @@
 # Simulation Architecture
 
+> **Status:** Unimplemented future design. None of the systems below exist in the codebase yet. This document captures the design direction for adding emergent simulation.
+
 How to add Caves-of-Qud/NetHack-style emergent simulation to the roguelike while respecting GBA and C64 memory/CPU constraints.
 
 ## Design Philosophy
@@ -10,10 +12,10 @@ Simulation depth comes from **system interactions, not system complexity**. Five
 
 **Files:** `entity.rs`, `data.rs`, new `properties.rs`
 
-Add a `properties: u64` bitfield to `Entity` (line 19) and `MonsterTemplate` (line 5). Each bit represents a material or elemental tag that any system can query.
+Add a `properties: u64` bitfield to `Entity` and `MonsterTemplate`. Each bit represents a material or elemental tag that any system can query.
 
 ```rust
-// src/properties.rs
+// crates/core/src/properties.rs
 pub type Properties = u64; // u32 on GBA
 
 pub const FLAMMABLE:    Properties = 1 << 0;
@@ -43,7 +45,7 @@ Tiles also need properties (see section 3).
 
 **Files:** `data.rs`, `combat.rs`
 
-Add a `const` table mapping `(DamageType, Property) -> Reaction` to `data.rs`, alongside the existing templates. This enriches `melee_attack()` (`combat.rs:6`) without replacing it.
+Add a `const` table mapping `(DamageType, Property) -> Reaction` to `data.rs`, alongside the existing templates. This enriches `melee_attack()` without replacing it.
 
 ```rust
 pub enum DamageType { Physical, Fire, Cold, Poison, Lightning }
@@ -68,7 +70,7 @@ pub const REACTIONS: [[Reaction; 8]; 5] = [
 
 ### Phase A: Expand tile types
 
-The `Tile` enum (`map.rs:6`) and `move_cost()` (`map.rs:16`) already anticipate this:
+The `Tile` enum and `move_cost()` in `map.rs` already anticipate this:
 
 ```rust
 pub enum Tile { Wall, Floor, Water, Lava, Ice, Grass }
@@ -78,7 +80,7 @@ Pathfinding (`pathfinding.rs`) already respects `move_cost()` via Dijkstra, so n
 
 ### Phase B: Tile state layer
 
-Add a per-tile state byte to `Map` (`map.rs:63`):
+Add a per-tile state byte to `Map`:
 
 ```rust
 pub struct Map {
@@ -90,7 +92,7 @@ pub struct Map {
 
 ### Phase C: Cellular automata
 
-New `src/simulation.rs` — runs after AI in `step()` (`game.rs:461`):
+New `crates/core/src/simulation.rs` — runs after AI in `step()`:
 
 ```rust
 pub fn tick_environment(map: &mut Map, entities: &mut [Entity], turn: i32, budget: usize) {
@@ -111,10 +113,10 @@ The `budget` parameter comes from `SimBudget` (section 6). Players won't notice 
 
 **Files:** new `events.rs`, `game.rs`
 
-Replace ad-hoc turn-counting (like `apply_regen()` at `game.rs:439`) with a general-purpose priority queue:
+Replace ad-hoc turn-counting (like `apply_regen()`) with a general-purpose priority queue:
 
 ```rust
-// src/events.rs
+// crates/core/src/events.rs
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GameEvent {
     PoisonTick { entity_idx: usize },
@@ -131,7 +133,7 @@ pub struct TimedEvent {
 }
 ```
 
-Add `event_queue: BinaryHeap<Reverse<TimedEvent>>` to `GameState` (`game.rs:258`). Process events in `step()` after incrementing `turn_count` (line 464).
+Add `event_queue: BinaryHeap<Reverse<TimedEvent>>` to `GameState`. Process events in `step()` after incrementing `turn_count`.
 
 **Why event-driven:** Zero CPU cost for things that aren't happening. A sword doesn't cost cycles until the turn it rusts. This is how NetHack handles prayer timeouts, item erosion, and delayed instadeath. On GBA, cap drains per turn via `SimBudget::max_events_per_turn`.
 
@@ -139,14 +141,14 @@ Add `event_queue: BinaryHeap<Reverse<TimedEvent>>` to `GameState` (`game.rs:258`
 
 **Files:** `entity.rs`, `ai.rs`, `combat.rs`
 
-Add 2 bytes to `Entity` (`entity.rs:19`):
+Add 2 bytes to `Entity`:
 
 ```rust
 pub mood: i8,       // -128 (terrified) to 127 (enraged)
 pub memory: u8,     // Bitflags: SAW_ALLY_DIE, WAS_HIT, WAS_FED, etc.
 ```
 
-Expand `AiBehavior` (`entity.rs:12`):
+Expand `AiBehavior`:
 
 ```rust
 pub enum AiBehavior {
@@ -158,7 +160,7 @@ pub enum AiBehavior {
 }
 ```
 
-AI dispatch (`ai.rs:29`) becomes mood-aware:
+AI dispatch becomes mood-aware:
 
 - `mood < -50` overrides Chase to Flee
 - When an ally dies in FOV: `mood -= 30` for same-type monsters
@@ -229,7 +231,7 @@ Each phase builds on the previous. Phases 2-5 are largely independent once phase
 
 ## Integration Point
 
-All simulation hooks into one place: `GameState::step()` at `game.rs:454`. The enriched turn loop becomes:
+All simulation hooks into one place: `GameState::step()` in `game.rs`. The enriched turn loop becomes:
 
 1. Player command (`handle_command`)
 2. FOV update (`update_fov`)

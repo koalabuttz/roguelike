@@ -552,7 +552,7 @@ Configurable fields under `[config]`:
 
 ## Roadmap
 
-See [docs/roadmap-priority.md](docs/roadmap-priority.md) for a detailed breakdown with dependencies, effort estimates, and a critical path diagram.
+See [docs/roadmap.md](docs/roadmap.md) for a detailed breakdown with dependencies, effort estimates, and a critical path diagram.
 
 ### Foundation (enables networking, platforms & advanced features)
 - [x] **Input abstraction** — `GameCommand` enum, decouple game logic from terminal input
@@ -623,7 +623,7 @@ Design principles (not checkboxes — follow these always):
 - [x] **LLM playtesting** — Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; dual backends (Claude Code CLI + Anthropic API), parallel execution, contextual strategy prompt with combat math, token usage tracking, compact mode for cost optimization
 - [x] **Debug overlay** — Visualize FOV boundaries, monster AI targets, A\* pathfinding routes, exploration frontiers, hidden monsters, and per-monster FOV boundaries as colored overlays; toggle layers with F6–F9/F11–F12, cursor mode for interactive pathfinding and single-monster FOV inspection
 - [x] **CI balance check** — GitHub Actions workflow runs headless presets on every gameplay change, diffs against cached baseline, posts verdict (STABLE/MINOR SHIFT/BALANCE SHIFT) to workflow summary and PR comments
-- [x] **MCP spectator mode** — File-based spectator for watching LLM play; set `ROGUELIKE_SPECTATE_PATH` env var to write ASCII frames atomically after every MCP action. [Design doc.](docs/spectator-mode-options.md)
+- [x] **MCP spectator mode** — File-based spectator for watching LLM play; set `ROGUELIKE_SPECTATE_PATH` env var to write ASCII frames atomically after every MCP action. [Design doc.](docs/design/spectator-mode.md)
 - [ ] **Map editor** — Visual tool for designing and testing dungeon layouts
 
 ### Polish

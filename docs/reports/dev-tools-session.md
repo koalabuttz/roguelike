@@ -19,7 +19,7 @@ and cross-platform portability goals (GBA/C64 roadmap).
 
 ## Features Added
 
-### 1. Debug Console (`src/dev_tools.rs`)
+### 1. Debug Console (`crates/core/src/dev_tools.rs`)
 
 Ten dev commands accessible via F1–F5 in debug builds:
 
@@ -39,7 +39,7 @@ Ten dev commands accessible via F1–F5 in debug builds:
 Keybindings are behind `#[cfg(all(debug_assertions, feature = "dev-tools"))]`
 so they never compile into release builds.
 
-### 2. Map Generation Presets (`src/map.rs`)
+### 2. Map Generation Presets (`crates/core/src/map.rs`)
 
 Five deterministic map layouts for testing specific scenarios:
 
@@ -53,7 +53,7 @@ Five deterministic map layouts for testing specific scenarios:
 
 Constructor: `GameState::with_preset(width, height, seed, MapPreset::Arena)`
 
-### 3. Replay System (`src/dev_tools.rs`)
+### 3. Replay System (`crates/core/src/dev_tools.rs`)
 
 Deterministic recording and playback of game sessions:
 
@@ -63,7 +63,7 @@ Deterministic recording and playback of game sessions:
 - `ReplayResult` summarizes: turns played, final HP, kills, game over state
 - Derives `Serialize`/`Deserialize` — callers choose format at boundary
 
-### 4. Headless Runner (`src/bin/headless.rs`)
+### 4. Headless Runner (`crates/core/src/bin/headless.rs`)
 
 CLI binary for automated playtesting without rendering:
 

@@ -87,9 +87,9 @@ Only `tui`, `terminal`, and `ssh` import `crossterm`. Only the `mcp` crate impor
 
 ### Pending prerequisites (for web/atproto)
 
-- [ ] **Extract `SaveBackend` to core** — Currently in `tui/src/saves.rs` which depends on crossterm. The trait itself has no crossterm dependency and should move to `core/src/saves.rs` so that `crates/atproto` and `crates/web` can implement it without pulling in crossterm. See [atproto design doc](design/atproto.md#prerequisite-extract-savebackend-from-roguelike-tui).
-- [ ] **AT Protocol integration** — `atproto` crate for Bluesky OAuth login and PDS-based portable saves. See [design doc](design/atproto.md).
-- [ ] **WASM frontend** — `web` crate with CanvasRenderer, Web Worker game loop, JS-bridged saves. See [design doc](design/atproto.md#wasm-frontend).
+- [ ] **Extract `SaveBackend` to core** — Currently in `tui/src/saves.rs` which depends on crossterm. The trait itself has no crossterm dependency and should move to `core/src/saves.rs` so that `crates/atproto` and `crates/web` can implement it without pulling in crossterm. See [atproto design doc](../design/atproto.md#prerequisite-extract-savebackend-from-roguelike-tui).
+- [ ] **AT Protocol integration** — `atproto` crate for Bluesky OAuth login and PDS-based portable saves. See [design doc](../design/atproto.md).
+- [ ] **WASM frontend** — `web` crate with CanvasRenderer, Web Worker game loop, JS-bridged saves. See [design doc](../design/atproto.md#wasm-frontend).
 
 ## Why Not Branches
 
@@ -140,7 +140,7 @@ Anything that talks to hardware or external services:
 - **Terminal crate**: local crossterm event polling, local filesystem saves, gamepad input (gilrs, optional), terminal lifecycle
 - **SSH crate**: russh server, lobby/accounts system, ANSI input parsing, per-user saves, SSH channel I/O
 - **MCP crate**: rmcp server, tokio runtime, JSON serialization of game state
-- **Atproto crate** (future): AT Protocol OAuth, handle resolution, PDS save backend, XRPC client. See [design doc](design/atproto.md).
+- **Atproto crate** (future): AT Protocol OAuth, handle resolution, PDS save backend, XRPC client. See [design doc](../design/atproto.md).
 - **Web crate** (future): WASM entry point, canvas rendering, Web Worker input, JS interop for OAuth and PDS saves
 - **GBA crate** (future): GBA tile/sprite rendering, button input, no-std setup
 - **Vita crate** (future): vita-sdk rendering, hardware buttons, memory card saves

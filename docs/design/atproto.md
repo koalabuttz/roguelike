@@ -631,7 +631,6 @@ crates/atproto/
 ```toml
 [dependencies]
 roguelike-core = { path = "../core" }
-roguelike-tui = { path = "../tui", default-features = false }
 reqwest = { version = "0.12", features = ["json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

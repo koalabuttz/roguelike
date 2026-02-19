@@ -14,12 +14,8 @@ These items block the most downstream work or are essential for the game to func
 
 | Item | Blocks | Impact | Effort | Notes |
 |------|--------|--------|--------|-------|
-| ~~Input abstraction~~ | ~~&zwj;~15 items~~ | ~~Medium~~ | ~~S~~ | ~~Controller, replay, platforms, mouse-only, one-handed, auto-explore all depend on this. Single most blocking item.~~ Done. |
-| ~~Save/load~~ | ~~&zwj;~6 items~~ | ~~High~~ | ~~M~~ | ~~Unlocks meta-progression, bones, crash recovery. Expected baseline feature.~~ Done (serde serialization, classic/casual modes, 5 save slots in casual). |
 | Stairs | ~3 items | High | M | Transforms single-room arena into a multi-level dungeon. |
 | Items | ~4 items | High | M | Meaningful player decisions. Unlocks menus, inventory UI, hunger (food is an item). |
-| ~~Message history~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~Tiny effort, immediate QoL, essential for screen readers.~~ Done (Ctrl+P, scrollable, gamepad LB/RB page up/down). |
-| ~~Code of Conduct~~ | ~~0~~ | ~~Low~~ | ~~S~~ | ~~One file. Should exist before accepting external contributions.~~ Done. |
 
 ## Tier 2: Core Systems
 
@@ -27,18 +23,8 @@ Fills out the core game loop and addresses high-value, low-effort improvements.
 
 | Item | Blocks | Impact | Effort | Notes |
 |------|--------|--------|--------|-------|
-| ~~Menus~~ | ~~&zwj;~3 items~~ | ~~High~~ | ~~M~~ | ~~Needed the moment items exist. Design for keyboard + controller from the start.~~ Done (title screen, pause menu, settings, seed entry). |
-| ~~Seeded RNG~~ | ~~&zwj;~4 items~~ | ~~Medium~~ | ~~S~~ | ~~Unlocks replay, daily challenges, seed sharing. Small refactor, outsized downstream value.~~ Done (separate RNG streams per system). |
-| ~~A* pathfinding~~ | ~~&zwj;~2 items~~ | ~~High~~ | ~~M~~ | ~~Current greedy chase gets stuck on corners in complex layouts. Unlocks MCP pathfind_to and auto-explore.~~ Done. |
 | Hunger | 0 | Medium | S | Classic mechanic. Simple (decrement per turn, eat food). Depends on items. |
 | Experience/leveling | 0 | High | M | Progression within a run. |
-| ~~Data-driven content~~ | ~~&zwj;~2 items~~ | ~~Medium~~ | ~~M~~ | ~~Move templates to RON/TOML. Unlocks hot reload and community content.~~ Done (`game.toml` with hot reload via F10). |
-| ~~Look mode~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~"What is that T?" Needed as monster variety grows.~~ Done (cursor-based tile examination, `x` key / Y button). |
-| ~~Colorblind modes~~ | ~~0~~ | ~~High~~ | ~~S~~ | ~~Trivial if colors are in data files. 8% of men affected by current palette.~~ Done (protanopia, deuteranopia palettes in Settings). |
-| ~~MCP autorun tuning~~ | ~~0~~ | ~~High~~ | ~~S~~ | ~~Autorun stops every 1 step inside rooms due to open-neighbor count. Only stop at meaningful decision points (corridor forks, room exits).~~ Done (smarter stop conditions). |
-| ~~MCP pathfind_to tool~~ | ~~0~~ | ~~High~~ | ~~S~~ | ~~Walk to a visible/explored `(x, y)` via shortest path. Requires A\*. Eliminates navigation fumbles.~~ Done. |
-| ~~MCP explored map tool~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~Return all previously-seen tiles so LLM can plan exploration routes instead of wandering.~~ Done (`get_explored_map` with frontier markers). |
-| ~~MCP exploration graph~~ | ~~0~~ | ~~High~~ | ~~M~~ | ~~Structured room/corridor graph in observation responses for LLM strategic planning. Delta compression via fingerprint hashing.~~ Done (`exploration_graph.rs`, integrated into all MCP observations). |
 | Wandering monsters | 0 | Medium | S | Spawn new monsters over time to pressure the player forward. Primary anti-camping guard for HP regen — prevents infinite wait-to-heal. Uses existing spawn system. |
 
 ## Tier 3: Extended Features
@@ -47,22 +33,13 @@ Builds on the core systems to add depth, platforms, and accessibility.
 
 | Item | Blocks | Impact | Effort | Notes |
 |------|--------|--------|--------|-------|
-| ~~Platform abstraction~~ | ~~&zwj;~5 items~~ | ~~Low~~ | ~~M~~ | ~~Required before any platform port. Do alongside input abstraction.~~ Done. |
-| ~~Type aliases~~ | ~~&zwj;~2 items~~ | ~~None~~ | ~~S~~ | ~~30-minute refactor. Enables platform-specific type sizing.~~ Done. |
-| ~~Controller support~~ | ~~&zwj;~1 item~~ | ~~High~~ | ~~M~~ | ~~Requires input abstraction. Enables couch play, Steam Deck.~~ Done (gilrs, 8-dir d-pad/stick, LB autorun, context-sensitive button mapping). |
-| ~~Replay system~~ | ~~&zwj;~2 items~~ | ~~Medium~~ | ~~M~~ | ~~Requires seeded RNG. Unlocks spectating and seed sharing.~~ Done (deterministic recording/playback, golden replays). |
-| ~~Auto-explore~~ | ~~0~~ | ~~High~~ | ~~M~~ | ~~Major QoL. Requires A\*. Benefits all players, essential for motor accessibility.~~ Done (`o` key, gamepad X button, MCP `auto_explore` tool). |
 | Magic/abilities | 0 | High | L | Big design space. Requires targeting UI. Expands combat significantly. |
 | Granular difficulty | 0 | Medium | S | Config toggles. Broadens who can enjoy the game. |
-| ~~Context-sensitive help~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~`?` key on any screen. Accessibility and onboarding.~~ Done (dynamic help from Settings and GameData, `?` key). |
-| ~~Debug overlay~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~See AI decisions, FOV, pathfinding, monster sight boundaries, hidden monsters. Accelerates development.~~ Done (F6–F12 toggles: FOV, targets, pathfinding, frontiers, reveal monsters, monster FOV). |
-| ~~MCP spectator mode (file)~~ | ~~&zwj;~1 item~~ | ~~Medium~~ | ~~S~~ | ~~Write rendered frames to a file after each MCP action; viewer process displays them. Proves the concept, upgrades to TCP later. [Design doc.](spectator-mode-options.md)~~ Done (`ROGUELIKE_SPECTATE_PATH` env var, atomic file writes, integrated into all MCP actions). |
 | Meta-progression | 0 | High | L | Persistent unlocks between runs. Requires save/load. |
 | Extract SaveBackend to core | ~3 items | Low | S | `SaveBackend` trait is in `tui` (depends on crossterm). Move to `core` so `atproto` and `web` crates can use it without crossterm. Prerequisite for atproto and WASM. [Design doc.](design/atproto.md#prerequisite-extract-savebackend-from-roguelike-tui) |
 | AT Protocol integration | ~2 items | High | L | Bluesky login via OAuth. Saves stored in user's PDS for cross-server portability. Requires HTTP server alongside SSH, custom lexicons. [Design doc.](design/atproto.md) |
 | Web (WASM) | ~2 items | High | L | Browser-based play. Requires platform abstraction + SaveBackend in core. CanvasRenderer, Web Worker for blocking game loop. [Design doc.](design/atproto.md#wasm-frontend) |
-| ~~One-handed play~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~Keybind preset. Falls out of input abstraction + options.~~ Partially done (left-hand QWEASDZXC and WEASDZXCR layouts). Mouse-only and macros still TODO. |
-| ~~High-contrast mode~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~Alternative color set. Do together with colorblind modes.~~ Done (ColorPalette variant with brighter remappings). |
+| One-handed play (remaining) | 0 | Medium | S | Partially done (left-hand QWEASDZXC and WEASDZXCR layouts). Mouse-only and macros still TODO. |
 
 ## Tier 4: Networking & Polish
 
@@ -72,23 +49,18 @@ Features that build on a stable core and benefit from a wider feature set.
 |------|--------|--------|--------|-------|
 | Shared leaderboard | 0 | Medium | M | Requires a server/API. |
 | Daily challenges | 0 | Medium | M | Requires seeded RNG + leaderboard. |
-| ~~Seed sharing~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~Falls out of seeded RNG almost for free.~~ Done (base36 seed codes, title menu entry, death screen display, MCP seed_code param). |
 | Steam Deck | 0 | Medium | M | Requires controller support. Steam Input API. |
-| MCP spectator mode (TCP) | ~1 item | Medium | M | Upgrade file-based spectator to TCP server on localhost. Multiple viewers, remote access, WebSocket upgrade path. Enables live spectating. [Design doc.](spectator-mode-options.md) |
+| MCP spectator mode (TCP) | ~1 item | Medium | M | Upgrade file-based spectator to TCP server on localhost. Multiple viewers, remote access, WebSocket upgrade path. Enables live spectating. [Design doc.](design/spectator-mode.md) |
 | Live spectating | 0 | High | L | Requires replay + networking. TCP spectator mode is a stepping stone. |
 | Bones files | 0 | Medium | M | Requires save/load + networking. |
-| ~~SSH server~~ | ~~0~~ | ~~Medium~~ | ~~L~~ | ~~Requires platform abstraction.~~ Done (russh, lobby with login/register, per-user saves, argon2 password hashing). |
 | PDS save backend | 0 | High | M | Store saves in user's AT Protocol PDS repo using custom lexicons. Enables cross-server save portability. Part of [atproto integration](design/atproto.md#phase-2-pds-save-backend). |
 | Options/settings | 0 | Medium | M | Grows naturally as features accumulate. |
 | Targeting | 0 | Medium | M | Needed for ranged magic. Distinct UI mode. |
-| ~~Hot reload~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~Requires data-driven content. Dev QoL.~~ Done (F10 in dev-tools build reloads `game.toml`). |
-| ~~Balance telemetry~~ | ~~0~~ | ~~Medium~~ | ~~M~~ | ~~Useful once there's enough content to balance.~~ Done (per-game analytics, aggregate stats, CI balance workflow with baseline diffing). |
 | Mouse-only play | 0 | Medium | M | Click-to-move + menus. Benefits touchscreen too. |
 | Adjustable input timing | 0 | Low | S | Config option for players who need it. |
 | Sound effects | 0 | Medium | M | Rodio + SoundEvent. |
 | Tutorial/guided run | 0 | Medium | M | Useful once complexity warrants it. |
 | Localization | 0 | Medium | L | Externalize strings. Easier after game text stabilizes. |
-| ~~Character identity~~ | ~~0~~ | ~~Low~~ | ~~S~~ | ~~Name + pronouns. Small but meaningful.~~ Done (Pronouns enum, player_name in Settings, shown in save slots and death screen). |
 
 ## Tier 5: Long-Term
 
@@ -151,3 +123,55 @@ pathfinding, platform abstraction, and the SSH server are all done. The
 remaining critical path is the gameplay branch (Items → Stairs → XP) and the
 platform/identity branch (atproto OAuth → PDS saves → WASM). The atproto
 integration is designed in four phases; see the [design doc](design/atproto.md).
+
+## Completed
+
+Items that have been implemented, organized by original tier.
+
+### Tier 1
+
+| Item | Notes |
+|------|-------|
+| Input abstraction | Controller, replay, platforms, mouse-only, one-handed, auto-explore all depend on this. Single most blocking item. |
+| Save/load | Serde serialization, classic/casual modes, 5 save slots in casual. |
+| Message history | Ctrl+P, scrollable, gamepad LB/RB page up/down. |
+| Code of Conduct | One file. |
+
+### Tier 2
+
+| Item | Notes |
+|------|-------|
+| Menus | Title screen, pause menu, settings, seed entry. |
+| Seeded RNG | Separate RNG streams per system. |
+| A* pathfinding | Unlocks MCP pathfind_to and auto-explore. |
+| Data-driven content | `game.toml` with hot reload via F10. |
+| Look mode | Cursor-based tile examination, `x` key / Y button. |
+| Colorblind modes | Protanopia, deuteranopia palettes in Settings. |
+| MCP autorun tuning | Smarter stop conditions. |
+| MCP pathfind_to tool | Walk to a visible/explored `(x, y)` via shortest path. |
+| MCP explored map tool | `get_explored_map` with frontier markers. |
+| MCP exploration graph | `exploration_graph.rs`, integrated into all MCP observations. |
+
+### Tier 3
+
+| Item | Notes |
+|------|-------|
+| Platform abstraction | Required before any platform port. |
+| Type aliases | 30-minute refactor. Enables platform-specific type sizing. |
+| Controller support | gilrs, 8-dir d-pad/stick, LB autorun, context-sensitive button mapping. |
+| Replay system | Deterministic recording/playback, golden replays. |
+| Auto-explore | `o` key, gamepad X button, MCP `auto_explore` tool. |
+| Context-sensitive help | Dynamic help from Settings and GameData, `?` key. |
+| Debug overlay | F6–F12 toggles: FOV, targets, pathfinding, frontiers, reveal monsters, monster FOV. |
+| MCP spectator mode (file) | `ROGUELIKE_SPECTATE_PATH` env var, atomic file writes, integrated into all MCP actions. [Design doc.](design/spectator-mode.md) |
+| High-contrast mode | ColorPalette variant with brighter remappings. |
+
+### Tier 4
+
+| Item | Notes |
+|------|-------|
+| Seed sharing | Base36 seed codes, title menu entry, death screen display, MCP seed_code param. |
+| SSH server | russh, lobby with login/register, per-user saves, argon2 password hashing. |
+| Hot reload | F10 in dev-tools build reloads `game.toml`. |
+| Balance telemetry | Per-game analytics, aggregate stats, CI balance workflow with baseline diffing. |
+| Character identity | Pronouns enum, player_name in Settings, shown in save slots and death screen. |

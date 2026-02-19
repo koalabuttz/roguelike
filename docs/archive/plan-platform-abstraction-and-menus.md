@@ -1,5 +1,7 @@
 # Plan: Platform Abstraction + Menu System
 
+> **Archived** — this plan has been fully implemented. See [`docs/architecture/cross-platform.md`](../architecture/cross-platform.md) for current state.
+
 Next session plan. Platform abstraction first (enables menus and all future frontends), then a modular menu system with title screen and pause menu.
 
 ## Context
@@ -8,7 +10,7 @@ Next session plan. Platform abstraction first (enables menus and all future fron
 - Save/load is complete, so **menus** are next on the critical path.
 - But menus need a rendering/input abstraction to avoid building them directly on crossterm (which would be thrown away for every future platform).
 - The `GameColor` change (done in the save/load PR) already removed crossterm from `entity.rs` and `data.rs`. Only 3 files still import crossterm: `main.rs`, `input.rs`, `render.rs`.
-- The [cross-platform architecture doc](cross-platform-architecture.md) outlines the workspace split. We're doing **Phase 1** (traits in the current crate) — the workspace split is Phase 2 for when a second frontend actually exists.
+- The [cross-platform architecture doc](../architecture/cross-platform.md) outlines the workspace split. We're doing **Phase 1** (traits in the current crate) — the workspace split is Phase 2 for when a second frontend actually exists.
 
 ## Part 1: Platform Abstraction Traits
 

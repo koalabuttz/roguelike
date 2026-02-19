@@ -17,13 +17,15 @@ pub enum ColorPalette {
     Default,
     Protanopia,
     Deuteranopia,
+    HighContrast,
 }
 
 impl ColorPalette {
-    pub const ALL: [ColorPalette; 3] = [
+    pub const ALL: [ColorPalette; 4] = [
         ColorPalette::Default,
         ColorPalette::Protanopia,
         ColorPalette::Deuteranopia,
+        ColorPalette::HighContrast,
     ];
 
     pub fn display_name(self) -> &'static str {
@@ -31,6 +33,7 @@ impl ColorPalette {
             ColorPalette::Default => "Default",
             ColorPalette::Protanopia => "Protanopia",
             ColorPalette::Deuteranopia => "Deuteranopia",
+            ColorPalette::HighContrast => "High Contrast",
         }
     }
 
@@ -38,7 +41,85 @@ impl ColorPalette {
         match self {
             ColorPalette::Default => ColorPalette::Protanopia,
             ColorPalette::Protanopia => ColorPalette::Deuteranopia,
-            ColorPalette::Deuteranopia => ColorPalette::Default,
+            ColorPalette::Deuteranopia => ColorPalette::HighContrast,
+            ColorPalette::HighContrast => ColorPalette::Default,
+        }
+    }
+}
+
+/// Left-hand keyboard layout for one-handed play.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LeftHandLayout {
+    #[default]
+    Off,
+    Qweasdzxc,
+    Weasdzxcr,
+}
+
+impl LeftHandLayout {
+    pub fn display_name(self) -> &'static str {
+        match self {
+            LeftHandLayout::Off => "Off",
+            LeftHandLayout::Qweasdzxc => "QWEASDZXC",
+            LeftHandLayout::Weasdzxcr => "WEASDZXCR",
+        }
+    }
+
+    pub fn next(self) -> LeftHandLayout {
+        match self {
+            LeftHandLayout::Off => LeftHandLayout::Qweasdzxc,
+            LeftHandLayout::Qweasdzxc => LeftHandLayout::Weasdzxcr,
+            LeftHandLayout::Weasdzxcr => LeftHandLayout::Off,
+        }
+    }
+}
+
+/// Player pronoun options.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Pronouns {
+    #[default]
+    TheyThem,
+    HeHim,
+    SheHer,
+    ItIts,
+}
+
+impl Pronouns {
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Pronouns::TheyThem => "They/Them",
+            Pronouns::HeHim => "He/Him",
+            Pronouns::SheHer => "She/Her",
+            Pronouns::ItIts => "It/Its",
+        }
+    }
+
+    pub fn next(self) -> Pronouns {
+        match self {
+            Pronouns::TheyThem => Pronouns::HeHim,
+            Pronouns::HeHim => Pronouns::SheHer,
+            Pronouns::SheHer => Pronouns::ItIts,
+            Pronouns::ItIts => Pronouns::TheyThem,
+        }
+    }
+
+    pub fn subject(self) -> &'static str {
+        match self {
+            Pronouns::TheyThem => "they",
+            Pronouns::HeHim => "he",
+            Pronouns::SheHer => "she",
+            Pronouns::ItIts => "it",
+        }
+    }
+
+    pub fn was_were(self) -> &'static str {
+        match self {
+            Pronouns::TheyThem => "were",
+            Pronouns::HeHim => "was",
+            Pronouns::SheHer => "was",
+            Pronouns::ItIts => "was",
         }
     }
 }
@@ -56,6 +137,9 @@ pub enum Setting {
     ViKeys,
     Numpad,
     ColorPalette,
+    LeftHandLayout,
+    PlayerName,
+    Pronouns,
 }
 
 impl Setting {
@@ -69,14 +153,27 @@ impl Setting {
                     | Setting::Numpad
                     | Setting::ShowKeybindHints
                     | Setting::ColorPalette
+                    | Setting::LeftHandLayout
+                    | Setting::PlayerName
+                    | Setting::Pronouns
             ),
             Platform::Gba => !matches!(
                 self,
-                Setting::AutosaveFrequency | Setting::ViKeys | Setting::Numpad
+                Setting::AutosaveFrequency
+                    | Setting::ViKeys
+                    | Setting::Numpad
+                    | Setting::LeftHandLayout
+                    | Setting::PlayerName
+                    | Setting::Pronouns
             ),
             Platform::Vita => !matches!(
                 self,
-                Setting::AutosaveFrequency | Setting::ViKeys | Setting::Numpad
+                Setting::AutosaveFrequency
+                    | Setting::ViKeys
+                    | Setting::Numpad
+                    | Setting::LeftHandLayout
+                    | Setting::PlayerName
+                    | Setting::Pronouns
             ),
             Platform::C64 => !matches!(
                 self,
@@ -84,6 +181,9 @@ impl Setting {
                     | Setting::ViKeys
                     | Setting::Numpad
                     | Setting::AnimationSpeed
+                    | Setting::LeftHandLayout
+                    | Setting::PlayerName
+                    | Setting::Pronouns
             ),
         }
     }
@@ -107,6 +207,14 @@ fn default_message_log_lines() -> u8 {
 
 fn default_palette() -> ColorPalette {
     ColorPalette::Default
+}
+
+fn default_left_hand_layout() -> LeftHandLayout {
+    LeftHandLayout::Off
+}
+
+fn default_pronouns() -> Pronouns {
+    Pronouns::TheyThem
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,6 +241,12 @@ pub struct Settings {
     pub message_log_lines: u8,
     #[serde(default = "default_palette")]
     pub color_palette: ColorPalette,
+    #[serde(default = "default_left_hand_layout")]
+    pub left_hand_layout: LeftHandLayout,
+    #[serde(default)]
+    pub player_name: String,
+    #[serde(default = "default_pronouns")]
+    pub pronouns: Pronouns,
 }
 
 impl Default for Settings {
@@ -156,6 +270,9 @@ impl Settings {
                 animation_speed_ms: 50,
                 message_log_lines: 4,
                 color_palette: ColorPalette::Default,
+                left_hand_layout: LeftHandLayout::Off,
+                player_name: String::new(),
+                pronouns: Pronouns::TheyThem,
             },
             Platform::Mcp => Settings {
                 casual_mode: false,
@@ -169,6 +286,9 @@ impl Settings {
                 animation_speed_ms: 0,
                 message_log_lines: 4,
                 color_palette: ColorPalette::Default,
+                left_hand_layout: LeftHandLayout::Off,
+                player_name: String::new(),
+                pronouns: Pronouns::TheyThem,
             },
             Platform::Gba => Settings {
                 casual_mode: false,
@@ -182,6 +302,9 @@ impl Settings {
                 animation_speed_ms: 50,
                 message_log_lines: 4,
                 color_palette: ColorPalette::Default,
+                left_hand_layout: LeftHandLayout::Off,
+                player_name: String::new(),
+                pronouns: Pronouns::TheyThem,
             },
             Platform::Vita => Settings {
                 casual_mode: false,
@@ -195,6 +318,9 @@ impl Settings {
                 animation_speed_ms: 50,
                 message_log_lines: 4,
                 color_palette: ColorPalette::Default,
+                left_hand_layout: LeftHandLayout::Off,
+                player_name: String::new(),
+                pronouns: Pronouns::TheyThem,
             },
             Platform::C64 => Settings {
                 casual_mode: false,
@@ -208,6 +334,9 @@ impl Settings {
                 animation_speed_ms: 0,
                 message_log_lines: 4,
                 color_palette: ColorPalette::Default,
+                left_hand_layout: LeftHandLayout::Off,
+                player_name: String::new(),
+                pronouns: Pronouns::TheyThem,
             },
         }
     }
@@ -290,6 +419,9 @@ mod tests {
             Setting::ViKeys,
             Setting::Numpad,
             Setting::ColorPalette,
+            Setting::LeftHandLayout,
+            Setting::PlayerName,
+            Setting::Pronouns,
         ];
         for s in all {
             assert!(
@@ -360,7 +492,11 @@ mod tests {
     fn color_palette_cycle_order() {
         assert_eq!(ColorPalette::Default.next(), ColorPalette::Protanopia);
         assert_eq!(ColorPalette::Protanopia.next(), ColorPalette::Deuteranopia);
-        assert_eq!(ColorPalette::Deuteranopia.next(), ColorPalette::Default);
+        assert_eq!(
+            ColorPalette::Deuteranopia.next(),
+            ColorPalette::HighContrast
+        );
+        assert_eq!(ColorPalette::HighContrast.next(), ColorPalette::Default);
     }
 
     #[test]
@@ -368,6 +504,12 @@ mod tests {
         assert_eq!(ColorPalette::Default.display_name(), "Default");
         assert_eq!(ColorPalette::Protanopia.display_name(), "Protanopia");
         assert_eq!(ColorPalette::Deuteranopia.display_name(), "Deuteranopia");
+        assert_eq!(ColorPalette::HighContrast.display_name(), "High Contrast");
+    }
+
+    #[test]
+    fn color_palette_all_has_correct_length() {
+        assert_eq!(ColorPalette::ALL.len(), 4);
     }
 
     #[test]
@@ -379,6 +521,81 @@ mod tests {
         let json = serde_json::to_string(&original).unwrap();
         let loaded: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.color_palette, ColorPalette::Protanopia);
+    }
+
+    #[test]
+    fn pronouns_cycle() {
+        assert_eq!(Pronouns::TheyThem.next(), Pronouns::HeHim);
+        assert_eq!(Pronouns::HeHim.next(), Pronouns::SheHer);
+        assert_eq!(Pronouns::SheHer.next(), Pronouns::ItIts);
+        assert_eq!(Pronouns::ItIts.next(), Pronouns::TheyThem);
+    }
+
+    #[test]
+    fn pronouns_display_names() {
+        assert_eq!(Pronouns::TheyThem.display_name(), "They/Them");
+        assert_eq!(Pronouns::HeHim.display_name(), "He/Him");
+        assert_eq!(Pronouns::SheHer.display_name(), "She/Her");
+        assert_eq!(Pronouns::ItIts.display_name(), "It/Its");
+    }
+
+    #[test]
+    fn pronouns_subject() {
+        assert_eq!(Pronouns::TheyThem.subject(), "they");
+        assert_eq!(Pronouns::HeHim.subject(), "he");
+        assert_eq!(Pronouns::SheHer.subject(), "she");
+        assert_eq!(Pronouns::ItIts.subject(), "it");
+    }
+
+    #[test]
+    fn pronouns_was_were() {
+        assert_eq!(Pronouns::TheyThem.was_were(), "were");
+        assert_eq!(Pronouns::HeHim.was_were(), "was");
+        assert_eq!(Pronouns::SheHer.was_were(), "was");
+        assert_eq!(Pronouns::ItIts.was_were(), "was");
+    }
+
+    #[test]
+    fn pronouns_not_available_on_mcp() {
+        assert!(!Setting::Pronouns.is_available(Platform::Mcp));
+        assert!(!Setting::PlayerName.is_available(Platform::Mcp));
+    }
+
+    #[test]
+    fn pronouns_available_on_terminal() {
+        assert!(Setting::Pronouns.is_available(Platform::Terminal));
+        assert!(Setting::PlayerName.is_available(Platform::Terminal));
+    }
+
+    #[test]
+    fn left_hand_layout_cycle() {
+        assert_eq!(LeftHandLayout::Off.next(), LeftHandLayout::Qweasdzxc);
+        assert_eq!(LeftHandLayout::Qweasdzxc.next(), LeftHandLayout::Weasdzxcr);
+        assert_eq!(LeftHandLayout::Weasdzxcr.next(), LeftHandLayout::Off);
+    }
+
+    #[test]
+    fn left_hand_layout_display_names() {
+        assert_eq!(LeftHandLayout::Off.display_name(), "Off");
+        assert_eq!(LeftHandLayout::Qweasdzxc.display_name(), "QWEASDZXC");
+        assert_eq!(LeftHandLayout::Weasdzxcr.display_name(), "WEASDZXCR");
+    }
+
+    #[test]
+    fn left_hand_layout_not_available_on_mcp() {
+        assert!(!Setting::LeftHandLayout.is_available(Platform::Mcp));
+    }
+
+    #[test]
+    fn left_hand_layout_not_available_on_gba_vita_c64() {
+        assert!(!Setting::LeftHandLayout.is_available(Platform::Gba));
+        assert!(!Setting::LeftHandLayout.is_available(Platform::Vita));
+        assert!(!Setting::LeftHandLayout.is_available(Platform::C64));
+    }
+
+    #[test]
+    fn left_hand_layout_available_on_terminal() {
+        assert!(Setting::LeftHandLayout.is_available(Platform::Terminal));
     }
 
     #[test]

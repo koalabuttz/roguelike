@@ -75,12 +75,32 @@ fn deuteranopia_color(c: GameColor) -> Color {
     }
 }
 
+/// Remap a `GameColor` for high-contrast mode (maximum distinctness).
+fn high_contrast_color(c: GameColor) -> Color {
+    match c {
+        GameColor::DarkGrey => Color::Rgb {
+            r: 120,
+            g: 120,
+            b: 120,
+        },
+        GameColor::Green => Color::Cyan,
+        GameColor::DarkGreen => Color::Rgb {
+            r: 255,
+            g: 60,
+            b: 60,
+        },
+        GameColor::DarkRed => Color::Magenta,
+        _ => to_crossterm_color(c),
+    }
+}
+
 /// Map a `GameColor` through the selected palette to a crossterm `Color`.
 fn palette_color(c: GameColor, palette: ColorPalette) -> Color {
     match palette {
         ColorPalette::Default => to_crossterm_color(c),
         ColorPalette::Protanopia => protanopia_color(c),
         ColorPalette::Deuteranopia => deuteranopia_color(c),
+        ColorPalette::HighContrast => high_contrast_color(c),
     }
 }
 
@@ -147,14 +167,7 @@ pub fn render<W: Write>(
     render_map(w, state, pal)?;
     render_entities(w, state, settings.show_corpses, pal)?;
     render_status_bar(w, state, screen_width, screen_height, settings)?;
-    render_message_log(
-        w,
-        state,
-        screen_width,
-        screen_height,
-        settings.message_log_lines,
-        pal,
-    )?;
+    render_message_log(w, state, screen_width, screen_height, settings)?;
 
     w.flush()?;
     Ok(())
@@ -210,7 +223,10 @@ fn render_map<W: Write>(w: &mut W, state: &GameState, pal: ColorPalette) -> std:
                     Tile::Floor => '.',
                     Tile::Wall => '#',
                 };
-                let dim = palette_color(GameColor::Rgb(40, 40, 50), pal);
+                let dim = match pal {
+                    ColorPalette::HighContrast => palette_color(GameColor::Grey, pal),
+                    _ => palette_color(GameColor::Rgb(40, 40, 50), pal),
+                };
                 queue!(
                     w,
                     cursor::MoveTo(x as u16, y as u16),
@@ -353,9 +369,10 @@ fn render_message_log<W: Write>(
     state: &GameState,
     screen_width: Coord,
     screen_height: Coord,
-    message_log_lines: u8,
-    pal: ColorPalette,
+    settings: &Settings,
 ) -> std::io::Result<()> {
+    let pal = settings.color_palette;
+    let message_log_lines = settings.message_log_lines;
     let n = message_log_lines as usize;
     let log_start_row = (screen_height - message_log_lines as i32) as u16;
     let messages = state.log.recent(n);
@@ -387,7 +404,15 @@ fn render_message_log<W: Write>(
     }
 
     if state.game_over {
-        let msg = "You have been slain... Press any key to exit.";
+        let msg = if settings.player_name.is_empty() {
+            "You have been slain... Press any key to exit.".to_string()
+        } else {
+            format!(
+                "{} {} slain... Press any key to exit.",
+                settings.player_name,
+                settings.pronouns.was_were()
+            )
+        };
         let x = (screen_width as usize).saturating_sub(msg.len()) / 2;
         let y = screen_height / 2;
         queue!(
@@ -395,7 +420,7 @@ fn render_message_log<W: Write>(
             cursor::MoveTo(x as u16, y as u16),
             SetForegroundColor(palette_color(GameColor::Red, pal)),
             SetBackgroundColor(palette_color(GameColor::Black, pal)),
-            style::Print(msg)
+            style::Print(&msg)
         )?;
 
         let seed_msg = format!("Seed: {}", state.seed_code());

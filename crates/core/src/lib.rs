@@ -10,6 +10,8 @@ pub mod entity;
 pub mod exploration_graph;
 pub mod fov;
 pub mod game;
+#[cfg(feature = "data-files")]
+pub mod help;
 pub mod look;
 pub mod map;
 pub mod menu;

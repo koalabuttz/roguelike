@@ -22,4 +22,5 @@ pub enum GameCommand {
     Look,
     Wait,
     Quit,
+    Help,
 }

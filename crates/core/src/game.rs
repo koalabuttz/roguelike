@@ -519,10 +519,11 @@ impl GameState {
         match cmd {
             GameCommand::Move { dx, dy } => self.player_move_or_attack(dx, dy),
             GameCommand::Wait => true,
-            // Autorun, AutoExplore, Look are handled at a higher level (main loop / MCP).
+            // Autorun, AutoExplore, Look, Help are handled at a higher level (main loop / MCP).
             GameCommand::Autorun { .. }
             | GameCommand::AutoExplore
             | GameCommand::Look
+            | GameCommand::Help
             | GameCommand::Quit => false,
         }
     }
@@ -815,6 +816,7 @@ impl GameState {
             player_hp: player.hp,
             player_max_hp: player.max_hp,
             explored_pct: self.explored_pct(),
+            player_name: None,
         }
     }
 

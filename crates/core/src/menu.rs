@@ -46,6 +46,12 @@ pub enum MenuAction {
     EnterSeed,
     /// Cycle the color palette (for colorblind accessibility).
     CycleColorPalette,
+    /// Cycle left-hand keyboard layout.
+    CycleLeftHandLayout,
+    /// Edit the player's name (text input dialog).
+    EditPlayerName,
+    /// Cycle player pronouns.
+    CyclePronouns,
 }
 
 /// A single menu entry.
@@ -396,6 +402,38 @@ pub fn settings_menu(settings: &Settings, platform: Platform) -> Menu {
         });
     }
 
+    if Setting::LeftHandLayout.is_available(platform) {
+        items.push(MenuItem {
+            label: format!(
+                "Left-Hand Keys: {}",
+                settings.left_hand_layout.display_name()
+            ),
+            action: MenuAction::CycleLeftHandLayout,
+            enabled: true,
+        });
+    }
+
+    if Setting::PlayerName.is_available(platform) {
+        let name_display = if settings.player_name.is_empty() {
+            "Name: (none)".to_string()
+        } else {
+            format!("Name: {}", settings.player_name)
+        };
+        items.push(MenuItem {
+            label: name_display,
+            action: MenuAction::EditPlayerName,
+            enabled: true,
+        });
+    }
+
+    if Setting::Pronouns.is_available(platform) {
+        items.push(MenuItem {
+            label: format!("Pronouns: {}", settings.pronouns.display_name()),
+            action: MenuAction::CyclePronouns,
+            enabled: true,
+        });
+    }
+
     if Setting::AnimationSpeed.is_available(platform) {
         items.push(MenuItem {
             label: format!("Animation Speed: {}ms", settings.animation_speed_ms),
@@ -469,9 +507,13 @@ fn slot_label(index: u8, meta: &Option<SlotMetadata>, show_pct: bool) -> String 
     let num = index + 1;
     match meta {
         Some(m) => {
+            let name_part = match &m.player_name {
+                Some(name) if !name.is_empty() => format!(" ({})", name),
+                _ => String::new(),
+            };
             let base = format!(
-                "Slot {} \u{2014} Turn {}, {}/{} HP",
-                num, m.turn_count, m.player_hp, m.player_max_hp
+                "Slot {}{} \u{2014} Turn {}, {}/{} HP",
+                num, name_part, m.turn_count, m.player_hp, m.player_max_hp
             );
             if show_pct {
                 format!("{}, {}%", base, m.explored_pct)
@@ -986,6 +1028,9 @@ mod tests {
         assert!(!actions.contains(&MenuAction::ToggleNumpad));
         assert!(!actions.contains(&MenuAction::ToggleShowKeybindHints));
         assert!(!actions.contains(&MenuAction::CycleColorPalette));
+        assert!(!actions.contains(&MenuAction::CycleLeftHandLayout));
+        assert!(!actions.contains(&MenuAction::EditPlayerName));
+        assert!(!actions.contains(&MenuAction::CyclePronouns));
     }
 
     #[test]
@@ -1001,6 +1046,9 @@ mod tests {
         assert!(actions.contains(&MenuAction::CycleColorPalette));
         assert!(actions.contains(&MenuAction::ToggleViKeys));
         assert!(actions.contains(&MenuAction::ToggleNumpad));
+        assert!(actions.contains(&MenuAction::CycleLeftHandLayout));
+        assert!(actions.contains(&MenuAction::EditPlayerName));
+        assert!(actions.contains(&MenuAction::CyclePronouns));
         assert!(actions.contains(&MenuAction::CycleAnimationSpeed));
         assert!(actions.contains(&MenuAction::CycleAutosaveFrequency));
         assert!(actions.contains(&MenuAction::CycleMessageLogLines));
@@ -1057,6 +1105,7 @@ mod tests {
             player_hp: 20,
             player_max_hp: 30,
             explored_pct: 35,
+            player_name: None,
         }
     }
 

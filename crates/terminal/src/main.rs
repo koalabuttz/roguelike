@@ -11,6 +11,7 @@ use roguelike_core::{
     command::GameCommand,
     data, game,
     game::LookOptions,
+    help,
     look::{LookAction, LookCursor},
     menu,
     menu::MenuAction,
@@ -140,7 +141,9 @@ fn text_input_dialog<W: std::io::Write>(
                 KeyCode::Backspace => {
                     input.pop();
                 }
-                KeyCode::Char(c) if c.is_ascii_alphanumeric() || c == '-' => {
+                KeyCode::Char(c)
+                    if c.is_ascii_alphanumeric() || c == '-' || c == ' ' || c == '_' =>
+                {
                     input.push(c);
                 }
                 _ => {}
@@ -264,9 +267,7 @@ fn run_look_mode(
         renderer.flush();
 
         let cmd = match gamepad::poll_input(gp)? {
-            gamepad::InputEvent::Key(key) => {
-                input::translate_look_key(key, settings.vi_keys, settings.numpad)
-            }
+            gamepad::InputEvent::Key(key) => input::translate_look_key(key, settings),
             #[cfg(feature = "gamepad")]
             gamepad::InputEvent::GamepadReady => gp.as_mut().and_then(|g| g.next_look_command()),
         };
@@ -317,11 +318,15 @@ fn write_metadata(path: &str, meta: &SlotMetadata) {
     }
 }
 
-fn save_to_slot(state: &game::GameState, slot: u8) -> String {
+fn save_to_slot(state: &game::GameState, slot: u8, player_name: &str) -> String {
     match state.save_to_json() {
         Ok(json) => match std::fs::write(slot_save_path(slot), json) {
             Ok(()) => {
-                write_metadata(&slot_meta_path(slot), &state.extract_metadata());
+                let mut meta = state.extract_metadata();
+                if !player_name.is_empty() {
+                    meta.player_name = Some(player_name.to_string());
+                }
+                write_metadata(&slot_meta_path(slot), &meta);
                 "Game saved.".to_string()
             }
             Err(e) => format!("Save failed: {e}"),
@@ -629,6 +634,25 @@ fn main() -> std::io::Result<()> {
                                 settings.color_palette = settings.color_palette.next();
                                 save_settings(&settings);
                             }
+                            MenuAction::CycleLeftHandLayout => {
+                                settings.left_hand_layout = settings.left_hand_layout.next();
+                                save_settings(&settings);
+                            }
+                            MenuAction::EditPlayerName => {
+                                if let Some(name) = text_input_dialog(
+                                    &mut stdout,
+                                    "Enter Your Name",
+                                    "Letters, digits, hyphens, spaces, underscores | Esc to cancel",
+                                    &mut gp,
+                                )? {
+                                    settings.player_name = name;
+                                    save_settings(&settings);
+                                }
+                            }
+                            MenuAction::CyclePronouns => {
+                                settings.pronouns = settings.pronouns.next();
+                                save_settings(&settings);
+                            }
                             _ => break,
                         }
                     }
@@ -647,7 +671,11 @@ fn main() -> std::io::Result<()> {
                     let _ = std::fs::write(SAVE_FILE, buf);
                     // Write sidecar metadata (both modes — so switching to casual
                     // has metadata immediately available).
-                    write_metadata(AUTOSAVE_META_FILE, &state.extract_metadata());
+                    let mut meta = state.extract_metadata();
+                    if !settings.player_name.is_empty() {
+                        meta.player_name = Some(settings.player_name.clone());
+                    }
+                    write_metadata(AUTOSAVE_META_FILE, &meta);
                     autosave_buf = None;
                 }
 
@@ -790,7 +818,7 @@ fn main() -> std::io::Result<()> {
                             continue;
                         }
 
-                        input::translate_key(key, settings.vi_keys, settings.numpad)
+                        input::translate_key(key, &settings)
                     }
                     #[cfg(feature = "gamepad")]
                     gamepad::InputEvent::GamepadReady => {
@@ -821,6 +849,11 @@ fn main() -> std::io::Result<()> {
                                 &look_opts,
                                 &mut gp,
                             )?;
+                        }
+
+                        GameCommand::Help => {
+                            let lines = help::help_lines(&settings, &game_data);
+                            run_message_history(&lines, &mut renderer, &mut gp)?;
                         }
 
                         GameCommand::Autorun { dx, dy } => {
@@ -913,7 +946,7 @@ fn main() -> std::io::Result<()> {
                                 menu::save_slot_menu(&slots, settings.show_explored_pct);
                             match run_menu(&mut slot_menu, &mut renderer, &mut gp)? {
                                 MenuAction::SelectSlot(slot) => {
-                                    let msg = save_to_slot(state, slot);
+                                    let msg = save_to_slot(state, slot, &settings.player_name);
                                     let mut new_pause = menu::pause_menu(settings.casual_mode);
                                     new_pause.selected = 1;
                                     app_state = AppState::Paused(new_pause);

@@ -1,0 +1,13 @@
+[package]
+name = "roguelike-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["dev-tools"]
+dev-tools = ["roguelike-core/dev-tools"]
+
+[dependencies]
+roguelike-core = { path = "../core" }
+crossterm = "0.28"

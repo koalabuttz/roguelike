@@ -387,8 +387,8 @@ fn main() -> std::io::Result<()> {
     terminal::enable_raw_mode()?;
     execute!(stdout, EnterAlternateScreen, cursor::Hide)?;
 
-    let mut renderer = render::CrosstermRenderer::new(std::io::stdout());
     let (cols, rows) = terminal::size()?;
+    let mut renderer = render::CrosstermRenderer::new(std::io::stdout(), cols as i32, rows as i32);
 
     let mut settings = load_settings();
     let mut game_data = data::load_game_data();

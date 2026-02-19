@@ -6,12 +6,13 @@ license.workspace = true
 
 [features]
 default = ["dev-tools", "gamepad"]
-dev-tools = ["roguelike-core/dev-tools"]
+dev-tools = ["roguelike-core/dev-tools", "roguelike-tui/dev-tools"]
 gamepad = ["gilrs"]
 raw-usb = ["gamepad", "rusb"]
 
 [dependencies]
 roguelike-core = { path = "../core" }
+roguelike-tui = { path = "../tui" }
 crossterm = "0.28"
 serde_json = { workspace = true }
 gilrs = { version = "0.11", optional = true }

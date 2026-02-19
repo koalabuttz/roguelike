@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
     Terminal,
+    Ssh,
     Mcp,
     Gba,
     Vita,
@@ -145,7 +146,7 @@ pub enum Setting {
 impl Setting {
     pub fn is_available(self, platform: Platform) -> bool {
         match platform {
-            Platform::Terminal => true,
+            Platform::Terminal | Platform::Ssh => true,
             Platform::Mcp => !matches!(
                 self,
                 Setting::AnimationSpeed
@@ -258,7 +259,7 @@ impl Default for Settings {
 impl Settings {
     pub fn defaults_for(platform: Platform) -> Self {
         match platform {
-            Platform::Terminal => Settings {
+            Platform::Terminal | Platform::Ssh => Settings {
                 casual_mode: false,
                 show_explored_pct: false,
                 show_coordinates: false,
@@ -596,6 +597,43 @@ mod tests {
     #[test]
     fn left_hand_layout_available_on_terminal() {
         assert!(Setting::LeftHandLayout.is_available(Platform::Terminal));
+    }
+
+    #[test]
+    fn ssh_defaults_match_terminal() {
+        let ssh = Settings::defaults_for(Platform::Ssh);
+        let terminal = Settings::defaults_for(Platform::Terminal);
+        assert_eq!(ssh.casual_mode, terminal.casual_mode);
+        assert_eq!(ssh.vi_keys, terminal.vi_keys);
+        assert_eq!(ssh.numpad, terminal.numpad);
+        assert_eq!(ssh.animation_speed_ms, terminal.animation_speed_ms);
+        assert_eq!(ssh.message_log_lines, terminal.message_log_lines);
+    }
+
+    #[test]
+    fn ssh_all_settings_available() {
+        let all = [
+            Setting::CasualMode,
+            Setting::AutosaveFrequency,
+            Setting::ShowExploredPct,
+            Setting::ShowCoordinates,
+            Setting::ShowKeybindHints,
+            Setting::ShowCorpses,
+            Setting::MessageLogLines,
+            Setting::AnimationSpeed,
+            Setting::ViKeys,
+            Setting::Numpad,
+            Setting::ColorPalette,
+            Setting::LeftHandLayout,
+            Setting::PlayerName,
+            Setting::Pronouns,
+        ];
+        for s in all {
+            assert!(
+                s.is_available(Platform::Ssh),
+                "{s:?} should be available on Ssh"
+            );
+        }
     }
 
     #[test]

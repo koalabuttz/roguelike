@@ -13,7 +13,7 @@ chmod +x roguelike-linux-x86_64   # Linux/macOS only
 ./roguelike-linux-x86_64
 ```
 
-Each release also includes the `mcp_server` and `headless` binaries.
+Each release also includes the `mcp_server`, `headless`, and `roguelike-ssh` binaries.
 
 ### Building from Source
 
@@ -28,7 +28,7 @@ The game adapts to your terminal size automatically.
 ## Testing
 
 ```sh
-cargo test --workspace               # All ~548 tests across all crates
+cargo test --workspace               # All ~600 tests across all crates
 cargo test -p roguelike-core --lib    # Unit tests across core modules
 cargo test -p roguelike-core --test golden_replays # 5 golden replay regression tests
 cargo test -p roguelike-core --test scenarios      # 8 balance integration tests
@@ -200,6 +200,37 @@ npx @modelcontextprotocol/inspector cargo run --bin mcp_server
 ```
 
 This opens a web UI where you can manually invoke tools and verify responses. Useful for debugging tool implementations or testing changes before integrating with Claude Desktop.
+
+## SSH Server (Multiplayer)
+
+Play over SSH — no installation needed on the client side. A dgamelaunch-style lobby handles user registration and login with argon2 password hashing. Each user gets persistent saves and settings.
+
+```sh
+# Start the SSH server:
+cargo run --bin roguelike-ssh -- --port 2222
+
+# Connect from any machine:
+ssh -p 2222 localhost
+```
+
+### Features
+
+- **Account system** — Register/login from the lobby; passwords hashed with argon2
+- **Per-user saves** — Autosave, 5 manual save slots, and settings per account
+- **Full game experience** — Title screen, settings, save/load, look mode, message history
+- **Terminal resize** — Adapts to client terminal size; enforces 60x20 minimum
+- **Connection limits** — Configurable max connections (default: 64)
+
+### CLI Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port` | 2222 | Listen port |
+| `--data-dir` | `~/.local/share/roguelike-ssh/` | Data directory for accounts, saves, and host key |
+| `--max-connections` | 64 | Maximum simultaneous connections |
+| `--idle-timeout` | 30 | Idle timeout in minutes |
+
+Environment variables `ROGUELIKE_SSH_PORT` and `ROGUELIKE_SSH_DATA_DIR` also work.
 
 ## Headless Runner (Automated Playtesting)
 
@@ -449,12 +480,27 @@ crates/
       scenarios.rs          Balance integration tests
       invariants.rs         Property-based game invariant tests (proptest)
       golden_replays/       Stored golden replay JSON files
+  tui/                      roguelike-tui: shared ANSI rendering library
+    src/
+      lib.rs                Re-exports render + input modules
+      render.rs             CrosstermRenderer<W: Write>, render functions, color palettes
+      input.rs              Key-to-command translation (game, menu, look mode)
   terminal/                 roguelike-terminal: crossterm frontend
     src/
       main.rs               Terminal game entry point
-      input.rs              Crossterm key-to-command translation
+      input.rs              Re-exports roguelike-tui input
       gamepad.rs            Gamepad input via gilrs (optional `gamepad` feature)
-      render.rs             Terminal rendering (implements Renderer)
+      render.rs             Re-exports roguelike-tui render
+  ssh/                      roguelike-ssh: SSH server frontend
+    src/
+      main.rs               SSH server entry point (CLI args, host key, bind)
+      server.rs             russh Handler impl (connection, PTY, data routing)
+      session.rs            Per-session game loop (lobby -> title -> game)
+      lobby.rs              dgamelaunch-style lobby (login, register, quit)
+      accounts.rs           Account storage with argon2 password hashing
+      saves.rs              Per-user save directory manager
+      ansi_input.rs         ANSI escape sequence -> KeyEvent parser
+      channel_writer.rs     Write impl over SSH channel
   mcp/                      roguelike-mcp: MCP server
     src/
       lib.rs                Library root — re-exports mcp_server and spectate modules
@@ -499,8 +545,10 @@ Configurable fields under `[config]`:
 - [rand](https://crates.io/crates/rand) 0.8 — random number generation
 - [serde](https://crates.io/crates/serde) 1 / [serde_json](https://crates.io/crates/serde_json) 1 — serialization for save/load and game observations
 - [rmcp](https://crates.io/crates/rmcp) 0.15 — MCP server (official Rust SDK)
-- [tokio](https://crates.io/crates/tokio) 1 — async runtime for MCP server
-- [tracing](https://crates.io/crates/tracing) 0.1 / [tracing-subscriber](https://crates.io/crates/tracing-subscriber) 0.3 — structured logging for MCP server
+- [russh](https://crates.io/crates/russh) 0.49 / [russh-keys](https://crates.io/crates/russh-keys) 0.49 — SSH server for multiplayer
+- [argon2](https://crates.io/crates/argon2) 0.5 — Password hashing for SSH account system
+- [tokio](https://crates.io/crates/tokio) 1 — async runtime for MCP and SSH servers
+- [tracing](https://crates.io/crates/tracing) 0.1 / [tracing-subscriber](https://crates.io/crates/tracing-subscriber) 0.3 — structured logging for MCP and SSH servers
 
 ## Roadmap
 
@@ -557,7 +605,7 @@ Design principles (not checkboxes — follow these always):
 - [ ] **Web (WASM)** — Browser-based play via wasm-pack + xterm.js; enables browser spectating and leaderboards
 - [ ] **Game Boy Advance** — Native ARM via `thumbv4t-none-eabi` target + `gba` crate; no_std, fixed-size containers
 - [ ] **PS Vita** — Native ARM via vita-sdk + vitasdk-sys; hardware buttons, OLED display, memory card saves
-- [ ] **SSH server** — Server-side play via russh, NetHack-server style (players connect via SSH)
+- [x] **SSH server** — Server-side play via russh, NetHack-server style (players connect via SSH); dgamelaunch-style lobby with account registration/login, per-user persistent saves
 - [ ] **Commodore 64** — Native 6502 via rust-mos; no_std, fixed-size containers, 8-bit types, C64 screen/keyboard I/O
 
 ### Modding

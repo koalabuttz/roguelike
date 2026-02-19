@@ -56,6 +56,7 @@ jobs:
           cp "${src}/mcp_server${{ matrix.suffix }}" "dist/mcp_server-${{ matrix.os_label }}-${{ matrix.arch_label }}${{ matrix.suffix }}"
           cp "${src}/roguelike${{ matrix.suffix }}" "dist/roguelike-${{ matrix.os_label }}-${{ matrix.arch_label }}${{ matrix.suffix }}"
           cp "${src}/headless${{ matrix.suffix }}" "dist/headless-${{ matrix.os_label }}-${{ matrix.arch_label }}${{ matrix.suffix }}"
+          cp "${src}/roguelike-ssh${{ matrix.suffix }}" "dist/roguelike-ssh-${{ matrix.os_label }}-${{ matrix.arch_label }}${{ matrix.suffix }}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -91,6 +92,7 @@ jobs:
             | Binary | Description |
             |--------|-------------|
             | `roguelike-*` | Terminal game |
+            | `roguelike-ssh-*` | SSH server for multiplayer |
             | `mcp_server-*` | MCP server for LLM play |
             | `headless-*` | Automated playtesting runner |
 

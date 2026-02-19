@@ -8,12 +8,14 @@ license.workspace = true
 default = ["dev-tools", "gamepad"]
 dev-tools = ["roguelike-core/dev-tools"]
 gamepad = ["gilrs"]
+raw-usb = ["gamepad", "rusb"]
 
 [dependencies]
 roguelike-core = { path = "../core" }
 crossterm = "0.28"
 serde_json = { workspace = true }
 gilrs = { version = "0.11", optional = true }
+rusb = { version = "0.9", optional = true }
 
 [[bin]]
 name = "roguelike"

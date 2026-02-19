@@ -109,6 +109,16 @@ The analog stick is edge-triggered: one command per deflection, return to center
 
 To build without gamepad support: `cargo build --no-default-features --features dev-tools`
 
+#### Raw USB Fallback (ChromeOS / Crostini)
+
+In environments where the kernel lacks the `xpad` driver (e.g. Crostini on ChromeOS), gilrs won't detect the controller because `/dev/input/` doesn't exist. If the Xbox Series controller (`045e:0b12`) is visible at `/dev/bus/usb/`, the `raw-usb` feature talks to it directly via the GIP protocol:
+
+```sh
+cargo build --features raw-usb
+```
+
+Requires `libusb-1.0-0-dev` on Linux (`apt install libusb-1.0-0-dev`). The `raw-usb` feature implies `gamepad` and acts as an automatic fallback — gilrs is tried first, and raw USB is only used when gilrs finds zero gamepads.
+
 ### Debug Keys (dev-tools build only)
 
 | Key | Action |
@@ -480,6 +490,7 @@ Configurable fields under `[config]`:
 
 - [crossterm](https://crates.io/crates/crossterm) 0.28 — cross-platform terminal manipulation
 - [gilrs](https://crates.io/crates/gilrs) 0.11 — cross-platform gamepad input (optional `gamepad` feature)
+- [rusb](https://crates.io/crates/rusb) 0.9 — raw USB access for Xbox GIP protocol (optional `raw-usb` feature)
 - [rand](https://crates.io/crates/rand) 0.8 — random number generation
 - [serde](https://crates.io/crates/serde) 1 / [serde_json](https://crates.io/crates/serde_json) 1 — serialization for save/load and game observations
 - [rmcp](https://crates.io/crates/rmcp) 0.15 — MCP server (official Rust SDK)

@@ -1,10 +1,10 @@
 # AT Protocol (Bluesky) Integration
 
-Design for adding AT Protocol identity and portable save storage to the roguelike, enabling cross-platform play across SSH and web (WASM) frontends with saves that follow the player.
+Design for adding AT Protocol identity and portable save storage to the roguelike, enabling cross-platform play across terminal, SSH, and web (WASM) frontends with saves that follow the player.
 
 ## Goals
 
-1. **Bluesky login** on both SSH and web frontends via AT Protocol OAuth.
+1. **Bluesky login** on terminal, SSH, and web frontends via AT Protocol OAuth.
 2. **Portable saves** stored in the user's AT Protocol PDS repository, accessible from any server or client.
 3. **Account migration** for existing username/password players to link their atproto identity.
 4. **Federation-friendly**: a player's saves work on any server running this game, not just the original.
@@ -42,31 +42,38 @@ The DID (e.g., `did:plc:abc123`) is the stable, permanent identity. Handles can 
 ## Architecture
 
 ```
-                         +-------------------------+
-                         |   Bluesky Auth Server   |
-                         |   (bsky.social or       |
-                         |    user's AS)           |
-                         +-----+-------------+-----+
-                         PAR + |             | browser
-                         token |             | redirect
-                               |             |
-                 +-------------+    +--------+----------+
-                 |                  |                    |
-                 v                  v                    v
-+----------------+---+   +---------+---------+   +------+-------+
-|  SSH Server        |   |  HTTP Server      |   |  Browser     |
-|  (russh :2222)     |   |  (axum :443)      |   |  (WASM game) |
-|                    |   |                   |   |              |
-|  lobby: atproto    |   |  /oauth/callback  |   |  JS handles  |
-|  OAuth via HTTP <--+-->|  /oauth/client-   |   |  OAuth via   |
-|  callback bridge   |   |    metadata.json  |   |  @atproto/   |
-|                    |   |  /static/ (WASM)  |   |  oauth-      |
-+--------+-----------+   +--+----------------+   |  client-     |
-         |                   |                    |  browser     |
-         |                   |                    +------+-------+
-         |                   |                           |
-         |    +--------------+--+                        |
-         +--->|  PdsSaveBackend |<-----------------------+
+                           +-------------------------+
+                           |   Bluesky Auth Server   |
+                           |   (bsky.social or       |
+                           |    user's AS)           |
+                           +--+------+----------+----+
+                         PAR+ |      | browser   | browser
+                        token |      | redirect  | redirect
+                              |      |           | (loopback)
+                +-------------+    +-+--------+  |
+                |                  |           |  |
+                v                  v           |  v
++---------------+----+   +--------+--------+  | +------------------+
+|  SSH Server        |   |  HTTP Server    |  | |  Terminal Binary  |
+|  (russh :2222)     |   |  (axum :443)    |  | |  (local)         |
+|                    |   |                 |  | |                  |
+|  lobby: atproto    |   | /oauth/callback |  | |  loopback OAuth  |
+|  OAuth via HTTP <--+-->| /oauth/client-  |  | |  127.0.0.1:{port}|
+|  callback bridge   |   |   metadata.json |  | |  opens browser   |
+|                    |   | /static/ (WASM) |  | |  persists tokens |
++--------+-----------+   +-+---------------+  | +--------+---------+
+         |                  |                  |          |
+         |                  |  +------+--------+          |
+         |                  |  |  Browser      |          |
+         |                  |  |  (WASM game)  |          |
+         |                  |  |  JS handles   |          |
+         |                  |  |  OAuth via    |          |
+         |                  |  |  @atproto/    |          |
+         |                  |  |  oauth-client |          |
+         |                  |  +------+--------+          |
+         |                  |         |                   |
+         |    +-------------+--+      |                   |
+         +--->|  PdsSaveBackend |<----+-------------------+
               |                 |
               |  XRPC calls to  |
               |  user's PDS:    |
@@ -366,6 +373,63 @@ pub fn run_lobby<W: Write>(
 ) -> std::io::Result<LobbyResult>
 ```
 
+### Terminal Frontend
+
+The terminal binary is a local, single-user application. It uses a loopback redirect (RFC 8252 for native apps) — simpler than the SSH case because there's no shared state between concurrent sessions.
+
+**Flow:**
+
+```
+1. User selects "Login with Bluesky" from the title screen.
+2. Terminal prompts for their handle (e.g., "alice.bsky.social").
+3. Terminal resolves handle -> DID -> PDS -> Authorization Server.
+4. Terminal generates PKCE verifier, DPoP keypair, state token.
+5. Terminal binds a temporary HTTP server to 127.0.0.1:0 (OS-assigned port).
+6. Terminal submits PAR request with redirect_uri=http://127.0.0.1:{port}/callback.
+7. Terminal opens the authorization URL in the user's default browser (via `open`/`xdg-open`).
+8. User authenticates with Bluesky in their browser.
+9. Bluesky redirects to http://127.0.0.1:{port}/callback?code=...&state=...
+10. Localhost server receives the callback, exchanges code for tokens, shuts down.
+11. Terminal shows "Logged in as alice.bsky.social" and returns to the title screen.
+12. Saves now use PdsSaveBackend (with local filesystem cache for performance).
+```
+
+**Why loopback:** AT Protocol OAuth follows RFC 8252 which supports `http://127.0.0.1` redirects for native applications. No domain, no HTTPS, no TLS certificate needed. The authorization server accepts any port on the loopback address, so the terminal picks a random available port.
+
+**Browser opening:** The terminal uses `open` (macOS), `xdg-open` (Linux), or `start` (Windows) to launch the user's default browser. If the browser can't be opened (e.g., headless server, no display), the terminal prints the URL and asks the user to open it manually — matching the SSH flow.
+
+**Token persistence:** Unlike the SSH server (which holds tokens in memory per-session), the terminal persists tokens to the local filesystem (`~/.local/share/roguelike/atproto_tokens.json`). On next launch, the terminal checks for valid tokens before showing the title screen. If a refresh token is still valid, the user is logged in automatically. If expired, they re-authenticate.
+
+```rust
+/// Stored at ~/.local/share/roguelike/atproto_tokens.json
+pub struct PersistedTokens {
+    pub did: String,
+    pub handle: String,
+    pub pds_url: String,
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub dpop_key_pem: String,          // PEM-encoded ES256 private key
+    pub access_token_expires_at: String, // ISO 8601
+}
+```
+
+**Sync/async bridge:** The terminal binary is currently synchronous. Adding atproto requires a tokio runtime for HTTP calls (handle resolution, PAR, token exchange, PDS XRPC). The terminal creates a `tokio::runtime::Runtime` at startup (gated behind the `atproto` feature flag) and uses `runtime.block_on()` for individual operations. The game loop itself remains synchronous.
+
+**Feature flag:** Atproto support is opt-in via a Cargo feature to avoid adding tokio/reqwest to the default terminal build:
+
+```toml
+# crates/terminal/Cargo.toml
+[features]
+default = ["dev-tools", "gamepad"]
+atproto = ["roguelike-atproto", "tokio/rt"]
+```
+
+Without the `atproto` feature, the terminal behaves exactly as it does today — local saves, no login, no network calls. The "Login with Bluesky" title screen option is hidden when compiled without `atproto`.
+
+**Title screen integration:** The title menu gains a "Login with Bluesky" / "Log Out ({handle})" entry. When logged in, the title screen shows "Logged in as alice.bsky.social" and the save/load system uses `PdsSaveBackend` with a local filesystem cache. When not logged in (or compiled without `atproto`), saves use the existing `LocalSaveBackend`.
+
+**Local saves remain available:** Logging in with Bluesky does not delete or migrate local saves automatically. The user can choose to migrate via a "Migrate Local Saves to Bluesky" option in settings. Local saves and PDS saves coexist — the active backend depends on login state.
+
 ### WASM Frontend
 
 In the browser, OAuth is the native flow. The JavaScript layer handles the entire OAuth exchange using `@atproto/oauth-client-browser`. The Rust/WASM code never touches OAuth directly.
@@ -385,7 +449,7 @@ In the browser, OAuth is the native flow. The JavaScript layer handles the entir
 
 ### Client Metadata Document
 
-Both frontends share a single client metadata document served at `https://<domain>/oauth/client-metadata.json`:
+All three frontends share a single client metadata document served at `https://<domain>/oauth/client-metadata.json`:
 
 ```json
 {
@@ -395,17 +459,22 @@ Both frontends share a single client metadata document served at `https://<domai
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "scope": "atproto",
-  "redirect_uris": ["https://<domain>/oauth/callback"],
+  "redirect_uris": [
+    "https://<domain>/oauth/callback",
+    "http://127.0.0.1/callback"
+  ],
   "dpop_bound_access_tokens": true,
   "token_endpoint_auth_method": "none"
 }
 ```
 
+The first redirect URI is for the SSH and WASM frontends (server-side callback). The second is for the terminal binary (loopback redirect per RFC 8252). AT Protocol authorization servers accept any port on `http://127.0.0.1` when this loopback URI pattern is registered, so the terminal can use a random OS-assigned port.
+
 This is a public client (no client secret). Token lifetimes are shorter for public clients (access token < 30 min, refresh token session limited to 2 weeks).
 
 ### HTTP Server Endpoints
 
-The axum HTTP server serves both OAuth and the WASM frontend:
+The axum HTTP server (running alongside the SSH server) serves OAuth callbacks and the WASM frontend. The terminal binary does not use this server — it runs its own temporary loopback server for OAuth callbacks.
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
@@ -539,6 +608,8 @@ Both fields are `Option` with `#[serde(default)]` for backward compatibility wit
 
 ### Login flow decision tree
 
+**SSH lobby:**
+
 ```
 Lobby
  |
@@ -556,6 +627,28 @@ Lobby
        -> if DID matches existing account: use that account
        -> if DID is new: create account with auto-generated username from handle
        -> use PdsSaveBackend
+```
+
+**Terminal title screen:**
+
+```
+Title Screen
+ |
+ +-- (not logged in, atproto feature enabled)
+ |     "Login with Bluesky" visible
+ |     -> loopback OAuth flow -> DID + tokens
+ |     -> persist tokens to filesystem
+ |     -> switch SaveBackend to PdsSaveBackend (with local cache)
+ |     -> return to title screen, now showing "Logged in as {handle}"
+ |
+ +-- (logged in)
+ |     "Log Out ({handle})" visible
+ |     -> clear persisted tokens
+ |     -> switch SaveBackend back to LocalSaveBackend
+ |     -> return to title screen
+ |
+ +-- (atproto feature not compiled)
+       no login options shown, LocalSaveBackend always used
 ```
 
 ## WASM Frontend
@@ -616,7 +709,7 @@ The `getrandom` JS feature is required for `rand` to work in WASM.
 
 ## New Crate: `crates/atproto`
 
-Shared AT Protocol logic used by both SSH and web frontends.
+Shared AT Protocol logic used by the terminal, SSH, and web frontends.
 
 ```
 crates/atproto/
@@ -655,51 +748,69 @@ Recommended: start with `atrium-oauth` to reduce initial effort. Evaluate whethe
 
 ## Implementation Phases
 
-### Phase 1: HTTP Server + OAuth (SSH)
+### Phase 1: OAuth (SSH + Terminal)
 
-**Goal:** Users can "Login with Bluesky" on the SSH server.
+**Goal:** Users can "Login with Bluesky" on the SSH server and the terminal binary.
 
+**Core atproto crate:**
+- Add handle resolution, PAR, DPoP, token exchange in `crates/atproto`.
+- Shared logic: `resolve_handle()`, `exchange_code()`, `refresh_tokens()` work for all frontends.
+
+**SSH server:**
 - Add axum HTTP server alongside SSH in `main.rs`, sharing `Arc<ServerState>`.
 - Serve `/oauth/client-metadata.json` (static JSON).
 - Implement `/oauth/callback` handler with `OAuthPendingStore` (state -> oneshot sender).
-- Add handle resolution, PAR, DPoP, token exchange in `crates/atproto`.
 - Add "Login with Bluesky" to the SSH lobby menu.
 - Bridge: lobby blocks on oneshot receiver; callback handler sends DID through it.
 - Add `atproto_did` / `atproto_handle` fields to `Account`.
-- **Saves remain on local filesystem** keyed by DID (not yet on PDS).
 - Requires: domain with HTTPS.
+
+**Terminal binary:**
+- Add `atproto` feature flag to `crates/terminal/Cargo.toml` (off by default).
+- Bind temporary loopback HTTP server for OAuth callback.
+- Open browser via `open`/`xdg-open`/`start`.
+- Persist tokens to `~/.local/share/roguelike/atproto_tokens.json`.
+- Add "Login with Bluesky" / "Log Out" to the title screen menu.
+- Auto-login on startup if persisted refresh token is still valid.
+
+**All frontends:** Saves remain on local filesystem keyed by DID (not yet on PDS).
 
 ### Phase 2: PDS Save Backend
 
-**Goal:** Saves are stored on the user's PDS, accessible from any server.
+**Goal:** Saves are stored on the user's PDS, accessible from any frontend.
 
 - Define and publish lexicons (`com.<domain>.roguelike.save.gameState`, `.settings`).
 - Implement `PdsSaveBackend` in `crates/atproto/src/save_backend.rs`.
-- Implement local cache layer (filesystem for SSH, with dirty tracking and async PDS sync).
-- Migrate SSH saves from local-only to PDS-backed for atproto users.
-- Username/password-only users continue using local `SaveManager`.
-- Add "Link Bluesky Account" flow for existing accounts.
+- Implement local cache layer (filesystem for both SSH and terminal, with dirty tracking and async PDS sync).
+- Migrate saves from local-only to PDS-backed for atproto users on all frontends.
+- SSH username/password-only users continue using local `SaveManager`. Terminal users without atproto continue using `LocalSaveBackend`.
+- Add "Link Bluesky Account" flow for existing SSH accounts.
+- Add "Migrate Local Saves to Bluesky" option in terminal settings.
 - Save migration tool: reads local saves, uploads to PDS.
 
 ### Phase 3: WASM Frontend
 
-**Goal:** Browser-playable game with the same saves as SSH.
+**Goal:** Browser-playable game with the same saves as SSH and terminal.
 
 - Create `crates/web` with `CanvasRenderer`, `WebInput`, WASM save bridge.
 - Web Worker architecture for blocking game loop.
 - JS entry point with `@atproto/oauth-client-browser` for auth.
 - Serve static WASM files from the axum HTTP server.
 - `localStorage` as the local save cache, PDS as source of truth.
-- **Result:** Play on SSH or browser, same atproto identity, same saves.
+- **Result:** Play on terminal, SSH, or browser — same atproto identity, same saves.
 
 ### Phase 4: Polish
 
 - Handle edge cases: PDS unavailable (fall back to cache), token expiry during long sessions, simultaneous play on multiple clients.
-- Settings sync (merge strategy for concurrent changes).
+- Terminal: graceful fallback when browser can't be opened (print URL, manual paste).
+- Terminal: auto-refresh tokens on startup; clear invalid persisted tokens gracefully.
+- Settings sync (merge strategy for concurrent changes across terminal/SSH/web).
 - Display atproto handle in-game (status bar, death screen, leaderboards).
 - Rate limiting for PDS writes (respect PDS operator limits).
 
 ## Configuration
+
+### SSH Server
 
 The SSH server's `main.rs` uses a hand-rolled arg parser. The following are added for Phase 1:
 
@@ -714,6 +825,18 @@ The SSH server's `main.rs` uses a hand-rolled arg parser. The following are adde
 If `--domain` is not set, the "Login with Bluesky" option is hidden from the lobby menu. This lets operators run the SSH server without HTTPS/atproto support (backward compatible).
 
 If `--tls-cert` / `--tls-key` are not set, the HTTP server listens on plain HTTP. Operators are expected to terminate TLS via a reverse proxy (nginx, Caddy). The `--domain` value is still used to construct OAuth URLs.
+
+### Terminal Binary
+
+The terminal binary requires no server-side configuration. When built with the `atproto` feature, it uses the hosted client metadata URL for the `client_id`:
+
+| Env var | Default | Purpose |
+|---------|---------|---------|
+| `ROGUELIKE_CLIENT_ID` | `https://<domain>/oauth/client-metadata.json` | Override the client metadata URL (useful for development with `http://localhost`) |
+
+Token persistence path follows the XDG base directory spec: `$XDG_DATA_HOME/roguelike/atproto_tokens.json` (defaults to `~/.local/share/roguelike/atproto_tokens.json` on Linux, `~/Library/Application Support/roguelike/atproto_tokens.json` on macOS).
+
+The "Login with Bluesky" option appears in the title screen only when compiled with the `atproto` feature. No CLI flags needed — the feature flag controls availability, and the user decides whether to log in via the menu.
 
 **`ServerState` changes:**
 
@@ -844,7 +967,9 @@ For local development without a domain/HTTPS:
 5. **Save size growth.** Current saves are 20-80KB. With multi-floor dungeons and inventory, they could grow. The blob approach handles up to 1MB. If saves exceed that, compression (gzip blob with `application/gzip` MIME type added to the lexicon `accept` list) extends the limit further.
 6. **Offline play.** WASM frontend could support offline play using only the `localStorage` cache, syncing to PDS when connectivity returns. This adds complexity (conflict resolution, dirty tracking) but improves UX on unreliable connections.
 7. **Token storage for SSH.** The SSH server needs to persist OAuth tokens (access + refresh) to avoid re-authentication on every SSH connection. Options: (a) in-memory only — user re-auths every connection (simplest, acceptable if sessions are long); (b) store encrypted tokens in the Account file — persistent across restarts; (c) separate token store file per DID. Recommendation: start with (a) for Phase 1, upgrade to (b) if the re-auth friction is too high.
-8. **Settings sync timing.** When a user changes settings on one frontend and switches to another, when are settings re-read from the PDS? Options: (a) only on session start (simple, small staleness window); (b) periodic poll during play (complex, marginal benefit). Recommendation: (a), since settings rarely change mid-session and the next session always gets the latest.
+8. **Settings sync timing.** When a user changes settings on one frontend and switches to another, when are settings re-read from the PDS? Options: (a) only on session start (simple, small staleness window); (b) periodic poll during play (complex, marginal benefit). Recommendation: (a), since settings rarely change mid-session and the next session always get the latest.
+9. **Terminal token security.** Tokens are stored as plaintext JSON on the local filesystem. On a shared machine, another user with filesystem access could read them. Options: (a) plaintext (simplest, acceptable for single-user machines — the typical terminal game scenario); (b) OS keychain via `keyring` crate (more secure, adds platform-specific dependencies); (c) file permissions (0600) to limit access. Recommendation: (a) with (c) — plaintext JSON with restrictive file permissions, matching how `git` stores credentials. The `keyring` crate can be explored later if users request it.
+10. **Terminal binary size.** Adding tokio + reqwest to the terminal binary increases size significantly. The `atproto` feature flag keeps this opt-in, but pre-built release binaries need a decision: ship with or without atproto? Options: (a) ship two binaries (with and without); (b) always include atproto; (c) ship without, users build from source to enable. Recommendation: (b) — always include, since the download size increase is acceptable for the convenience of having the feature available.
 
 ## References
 

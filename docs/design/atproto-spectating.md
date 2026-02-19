@@ -558,8 +558,8 @@ Dependency graph (spectating + saves):
     PdsSaveBackend          ← implements SaveBackend
     JetstreamSubscriber     ← tokio-tungstenite
 
-  roguelike-terminal        ← depends on core + saves + tui
-    uses NullFrameSink or AtprotoFrameSink (opt-in)
+  roguelike-terminal        ← depends on core + saves + tui (+ atproto when feature enabled)
+    uses NullFrameSink or AtprotoFrameSink (opt-in via atproto feature)
 
   roguelike-ssh             ← depends on core + saves + tui
     uses AtprotoFrameSink (when user has atproto identity)

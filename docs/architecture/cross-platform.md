@@ -147,7 +147,7 @@ Anything that talks to hardware or external services:
 
 - **Saves crate**: `SaveBackend` trait for platforms with JSON-serializable game state and multiple save slots. Depends only on core. Not used by constrained platforms (GBA, C64) that need hardware-specific save mechanisms.
 - **TUI crate**: crossterm rendering, shared game loop, `InputProvider` trait, key-to-command translation
-- **Terminal crate**: local crossterm event polling, local filesystem saves, gamepad input (gilrs, optional), terminal lifecycle
+- **Terminal crate**: local crossterm event polling, local filesystem saves, gamepad input (gilrs, optional), terminal lifecycle, optional atproto login via loopback OAuth (`atproto` feature flag)
 - **SSH crate**: russh server, lobby/accounts system, ANSI input parsing, per-user saves, SSH channel I/O
 - **MCP crate**: rmcp server, tokio runtime, JSON serialization of game state
 - **Atproto crate** (future): AT Protocol OAuth, handle resolution, PDS save backend, XRPC client, spectate frame publishing. See [design doc](../design/atproto.md).

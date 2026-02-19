@@ -37,7 +37,7 @@ Builds on the core systems to add depth, platforms, and accessibility.
 | Granular difficulty | 0 | Medium | S | Config toggles. Broadens who can enjoy the game. |
 | Meta-progression | 0 | High | L | Persistent unlocks between runs. Requires save/load. |
 | Thread FrameSink through game loop | ~2 items | Low | S | `FrameSink` trait and `render_frame()` are in core. Remaining: pass `&dyn FrameSink` into `run_game_loop`, rename `SpectatorWriter` to `FileFrameSink`. Prerequisite for atproto spectating. [Design doc.](design/atproto-spectating.md#phase-0-extract-render_frame-and-define-framesink) |
-| AT Protocol integration | ~2 items | High | L | Bluesky login via OAuth. Saves stored in user's PDS for cross-server portability. Requires HTTP server alongside SSH, custom lexicons. [Design doc.](design/atproto.md) |
+| AT Protocol integration | ~2 items | High | L | Bluesky login via OAuth on SSH (HTTP callback bridge) and terminal (loopback redirect). Saves stored in user's PDS for cross-platform portability. [Design doc.](design/atproto.md) |
 | Web (WASM) | ~2 items | High | L | Browser-based play. Requires platform abstraction + `roguelike-saves`. CanvasRenderer, Web Worker for blocking game loop. [Design doc.](design/atproto.md#wasm-frontend) |
 | One-handed play (remaining) | 0 | Medium | S | Partially done (left-hand QWEASDZXC and WEASDZXCR layouts). Mouse-only and macros still TODO. |
 
@@ -104,8 +104,8 @@ Input abstraction ✓
   → Platform abstraction ✓
     → SSH server ✓
       → Extract SaveBackend to crates/saves ✓
-        → AT Protocol OAuth (SSH login with Bluesky)
-          → PDS save backend (portable saves)
+        → AT Protocol OAuth (SSH + terminal login with Bluesky)
+          → PDS save backend (portable saves across all frontends)
             → WASM frontend (browser play + same saves)
 
   → MCP spectator (file) ✓

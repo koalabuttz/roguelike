@@ -28,7 +28,7 @@ The game adapts to your terminal size automatically.
 ## Testing
 
 ```sh
-cargo test --workspace               # All ~496 tests across all crates
+cargo test --workspace               # All ~548 tests across all crates
 cargo test -p roguelike-core --lib    # Unit tests across core modules
 cargo test -p roguelike-core --test golden_replays # 5 golden replay regression tests
 cargo test -p roguelike-core --test scenarios      # 8 balance integration tests
@@ -90,6 +90,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 | Look mode | `x` (move cursor to examine tiles, Esc to close) |
 | Wait a turn | `.` or numpad `5` |
 | Message history | `Ctrl+P` |
+| Help | `?` |
 | Quit | `q`, `Esc`, or `Ctrl+C` |
 
 Vi keys and numpad are opt-in via Settings. Moving into a monster attacks it. Autorun keeps moving until hitting a wall, spotting a monster, or reaching a junction.
@@ -111,11 +112,13 @@ To build without gamepad support: `cargo build --no-default-features --features 
 
 #### Raw USB Fallback (ChromeOS / Crostini)
 
-In environments where the kernel lacks the `xpad` driver (e.g. Crostini on ChromeOS), gilrs won't detect the controller because `/dev/input/` doesn't exist. If the Xbox Series controller (`045e:0b12`) is visible at `/dev/bus/usb/`, the `raw-usb` feature talks to it directly via the GIP protocol:
+In environments where the kernel lacks gamepad drivers (e.g. Crostini on ChromeOS), gilrs won't detect the controller because `/dev/input/` doesn't exist. If a USB HID gamepad is visible at `/dev/bus/usb/`, the `raw-usb` feature talks to it directly via USB HID reports:
 
 ```sh
 cargo build --features raw-usb
 ```
+
+Currently targets the 8BitDo SN30 Pro in DirectInput mode (`2dc8:6001`). Use the `usb_hid_test` example (`cargo run --example usb_hid_test --features raw-usb`) to verify HID report layouts on other controllers.
 
 Requires `libusb-1.0-0-dev` on Linux (`apt install libusb-1.0-0-dev`). The `raw-usb` feature implies `gamepad` and acts as an automatic fallback — gilrs is tried first, and raw USB is only used when gilrs finds zero gamepads.
 
@@ -432,8 +435,10 @@ crates/
       command.rs            GameCommand enum (platform-independent)
       game.rs               GameState struct, step(), observe(), look_at(), core game logic
       look.rs               Look mode: cursor, commands, tile description formatting
+      help.rs               Context-sensitive help screen (? key), dynamic from Settings/GameData
+      exploration_graph.rs  Room/corridor graph for MCP strategic planning
       map.rs, combat.rs, ai.rs, fov.rs, pathfinding.rs, spawn.rs
-      entity.rs, data.rs, types.rs, message_log.rs
+      entity.rs, data.rs, types.rs, message_log.rs, message_history.rs
       platform.rs           Renderer and InputSource traits
       seed_code.rs          Shareable seed code encode/decode (base36)
       menu.rs, saves.rs, settings.rs
@@ -490,7 +495,7 @@ Configurable fields under `[config]`:
 
 - [crossterm](https://crates.io/crates/crossterm) 0.28 — cross-platform terminal manipulation
 - [gilrs](https://crates.io/crates/gilrs) 0.11 — cross-platform gamepad input (optional `gamepad` feature)
-- [rusb](https://crates.io/crates/rusb) 0.9 — raw USB access for Xbox GIP protocol (optional `raw-usb` feature)
+- [rusb](https://crates.io/crates/rusb) 0.9 — raw USB HID gamepad access (optional `raw-usb` feature)
 - [rand](https://crates.io/crates/rand) 0.8 — random number generation
 - [serde](https://crates.io/crates/serde) 1 / [serde_json](https://crates.io/crates/serde_json) 1 — serialization for save/load and game observations
 - [rmcp](https://crates.io/crates/rmcp) 0.15 — MCP server (official Rust SDK)
@@ -527,11 +532,11 @@ See [docs/roadmap-priority.md](docs/roadmap-priority.md) for a detailed breakdow
 
 ### Accessibility
 
-- [ ] **Visual** — ~~Colorblind palettes~~ (done: protanopia, deuteranopia), high-contrast mode, configurable glyphs, reduced clutter option
+- [ ] **Visual** — ~~Colorblind palettes~~ (done: protanopia, deuteranopia), ~~high-contrast mode~~ (done), configurable glyphs, reduced clutter option
 - [ ] **Screen reader support** — Structured output for NVDA/JAWS/VoiceOver; braille display compatible
-- [ ] **Motor** — One-handed layouts, mouse-only play, adjustable input timing, auto-explore (done), macros
-- [ ] **Cognitive** — Granular difficulty toggles, scrollable message history, context-sensitive help (`?`)
-- [ ] **Character identity** — Player-chosen name and pronouns used in game text
+- [ ] **Motor** — ~~One-handed layouts~~ (done: left-hand QWEASDZXC/WEASDZXCR), mouse-only play, adjustable input timing, ~~auto-explore~~ (done), macros
+- [ ] **Cognitive** — Granular difficulty toggles, ~~scrollable message history~~ (done), ~~context-sensitive help~~ (done: `?` key)
+- [x] **Character identity** — Player-chosen name and pronouns in Settings, shown in save slots and death screen
 - [x] **Code of Conduct** — See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 Design principles (not checkboxes — follow these always):

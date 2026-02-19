@@ -29,7 +29,7 @@ CI runs these automatically on every pull request.
 
 > **Note:** The default build includes the `gamepad` feature (gilrs), which requires `pkg-config` and `libudev-dev` on Linux (`apt install pkg-config libudev-dev`). If you don't have these, build without gamepad: `cargo test --workspace --no-default-features --features dev-tools`.
 >
-> **Raw USB feature:** The `raw-usb` feature (Xbox controller fallback via GIP protocol) additionally requires `libusb-1.0-0-dev` on Linux (`apt install libusb-1.0-0-dev`). Build/test with: `cargo test --workspace --features raw-usb`.
+> **Raw USB feature:** The `raw-usb` feature (USB HID gamepad fallback for environments without `/dev/input/`) additionally requires `libusb-1.0-0-dev` on Linux (`apt install libusb-1.0-0-dev`). Build/test with: `cargo test --workspace --features raw-usb`.
 
 If golden replay tests fail after an intentional gameplay change, regenerate them:
 

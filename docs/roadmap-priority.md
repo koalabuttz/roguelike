@@ -54,13 +54,13 @@ Builds on the core systems to add depth, platforms, and accessibility.
 | ~~Auto-explore~~ | ~~0~~ | ~~High~~ | ~~M~~ | ~~Major QoL. Requires A\*. Benefits all players, essential for motor accessibility.~~ Done (`o` key, gamepad X button, MCP `auto_explore` tool). |
 | Magic/abilities | 0 | High | L | Big design space. Requires targeting UI. Expands combat significantly. |
 | Granular difficulty | 0 | Medium | S | Config toggles. Broadens who can enjoy the game. |
-| Context-sensitive help | 0 | Medium | S | `?` key on any screen. Accessibility and onboarding. |
+| ~~Context-sensitive help~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~`?` key on any screen. Accessibility and onboarding.~~ Done (dynamic help from Settings and GameData, `?` key). |
 | ~~Debug overlay~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~See AI decisions, FOV, pathfinding, monster sight boundaries, hidden monsters. Accelerates development.~~ Done (F6–F12 toggles: FOV, targets, pathfinding, frontiers, reveal monsters, monster FOV). |
 | ~~MCP spectator mode (file)~~ | ~~&zwj;~1 item~~ | ~~Medium~~ | ~~S~~ | ~~Write rendered frames to a file after each MCP action; viewer process displays them. Proves the concept, upgrades to TCP later. [Design doc.](spectator-mode-options.md)~~ Done (`ROGUELIKE_SPECTATE_PATH` env var, atomic file writes, integrated into all MCP actions). |
 | Meta-progression | 0 | High | L | Persistent unlocks between runs. Requires save/load. |
 | Web (WASM) | ~2 items | High | L | Browser-based play. Requires platform abstraction. |
-| One-handed play | 0 | Medium | S | Keybind preset. Falls out of input abstraction + options. |
-| High-contrast mode | 0 | Medium | S | Alternative color set. Do together with colorblind modes. |
+| ~~One-handed play~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~Keybind preset. Falls out of input abstraction + options.~~ Partially done (left-hand QWEASDZXC and WEASDZXCR layouts). Mouse-only and macros still TODO. |
+| ~~High-contrast mode~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~Alternative color set. Do together with colorblind modes.~~ Done (ColorPalette variant with brighter remappings). |
 
 ## Tier 4: Networking & Polish
 
@@ -85,7 +85,7 @@ Features that build on a stable core and benefit from a wider feature set.
 | Sound effects | 0 | Medium | M | Rodio + SoundEvent. |
 | Tutorial/guided run | 0 | Medium | M | Useful once complexity warrants it. |
 | Localization | 0 | Medium | L | Externalize strings. Easier after game text stabilizes. |
-| Character identity | 0 | Low | S | Name + pronouns. Small but meaningful. |
+| ~~Character identity~~ | ~~0~~ | ~~Low~~ | ~~S~~ | ~~Name + pronouns. Small but meaningful.~~ Done (Pronouns enum, player_name in Settings, shown in save slots and death screen). |
 
 ## Tier 5: Long-Term
 

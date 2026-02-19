@@ -32,8 +32,10 @@ roguelike/
 │   ├── mcp/                roguelike-mcp: MCP server
 │   │   ├── Cargo.toml      depends on core + rmcp + tokio
 │   │   └── src/
+│   │       ├── lib.rs       (re-exports mcp_server and spectate modules)
 │   │       ├── main.rs
-│   │       └── mcp_server.rs
+│   │       ├── mcp_server.rs
+│   │       └── spectate.rs  (file-based spectator, ROGUELIKE_SPECTATE_PATH)
 │   └── gba/                (future: GBA frontend)
 │   └── vita/               (future: PS Vita frontend)
 ```

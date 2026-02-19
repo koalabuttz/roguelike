@@ -2,7 +2,7 @@ use roguelike_core::game::GameState;
 use roguelike_core::saves::SlotMetadata;
 use roguelike_core::settings::Settings;
 
-use roguelike_tui::saves::SaveBackend;
+use roguelike_saves::SaveBackend;
 
 const SAVE_FILE: &str = "savegame.json";
 const AUTOSAVE_META_FILE: &str = "savegame.meta.json";

@@ -10,4 +10,5 @@ dev-tools = ["roguelike-core/dev-tools"]
 
 [dependencies]
 roguelike-core = { path = "../core" }
+roguelike-saves = { path = "../saves" }
 crossterm = "0.28"

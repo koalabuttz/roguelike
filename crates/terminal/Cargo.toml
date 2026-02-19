@@ -12,6 +12,7 @@ raw-usb = ["gamepad", "rusb"]
 
 [dependencies]
 roguelike-core = { path = "../core" }
+roguelike-saves = { path = "../saves" }
 roguelike-tui = { path = "../tui" }
 crossterm = "0.28"
 serde_json = { workspace = true }

@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 roguelike-core = { path = "../core" }
+roguelike-saves = { path = "../saves" }
 roguelike-tui = { path = "../tui", default-features = false, features = [] }
 russh = "0.49"
 russh-keys = "0.49"

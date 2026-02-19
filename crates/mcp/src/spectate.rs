@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use roguelike_core::game::GameState;
+use roguelike_core::spectate::render_frame;
 
 /// Writes plain-text ASCII frames to a file for external viewers.
 ///
@@ -42,42 +43,6 @@ impl SpectatorWriter {
     }
 }
 
-/// Render a plain-text ASCII frame from the game state.
-///
-/// Shows the full explored map (with entities in FOV, frontiers as `~`),
-/// a status line, and the last 4 log messages.
-pub fn render_frame(state: &GameState) -> String {
-    let map_lines = state.explored_map();
-    let player = &state.entities[0];
-    let kills = state.kill_count();
-    let explored_pct = state.explored_pct();
-
-    let mut frame = String::new();
-
-    // Map
-    for line in &map_lines {
-        frame.push_str(line);
-        frame.push('\n');
-    }
-
-    // Status line
-    frame.push_str(&format!(
-        "HP {}/{} | Turn {} | Kills {} | Explored {}% | Seed {}\n",
-        player.hp, player.max_hp, state.turn_count, kills, explored_pct, state.seed,
-    ));
-
-    // Last 4 messages
-    let messages = state.log.recent(4);
-    if !messages.is_empty() {
-        for msg in messages {
-            frame.push_str(msg);
-            frame.push('\n');
-        }
-    }
-
-    frame
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,32 +79,6 @@ mod tests {
             regen_interval: roguelike_core::data::config().regen_interval,
             max_autorun_steps: roguelike_core::data::config().max_autorun_steps,
         }
-    }
-
-    #[test]
-    fn render_frame_contains_player() {
-        let gs = test_game();
-        let frame = render_frame(&gs);
-        assert!(frame.contains('@'), "Frame should contain player glyph");
-    }
-
-    #[test]
-    fn render_frame_contains_hp_line() {
-        let gs = test_game();
-        let frame = render_frame(&gs);
-        assert!(frame.contains("HP 30/30"), "Frame should contain HP status");
-        assert!(frame.contains("Seed 42"), "Frame should contain seed");
-    }
-
-    #[test]
-    fn render_frame_contains_messages() {
-        let mut gs = test_game();
-        gs.log.add("Test combat message");
-        let frame = render_frame(&gs);
-        assert!(
-            frame.contains("Test combat message"),
-            "Frame should contain log messages"
-        );
     }
 
     #[test]

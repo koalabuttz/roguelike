@@ -25,4 +25,5 @@ pub mod scenario;
 pub mod seed_code;
 pub mod settings;
 pub mod spawn;
+pub mod spectate;
 pub mod types;

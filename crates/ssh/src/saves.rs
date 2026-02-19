@@ -150,7 +150,7 @@ impl SaveManager {
     }
 }
 
-impl roguelike_tui::saves::SaveBackend for SaveManager {
+impl roguelike_saves::SaveBackend for SaveManager {
     fn has_autosave(&self) -> bool {
         self.has_autosave()
     }

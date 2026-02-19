@@ -582,7 +582,7 @@ See [docs/roadmap.md](docs/roadmap.md) for a detailed breakdown with dependencie
 
 ### UI/UX
 - [x] **Controller support** — Gamepad input via gilrs on all desktop platforms; d-pad/stick for 8-directional movement, LB autorun modifier, context-sensitive button mapping for menus/look/history
-- [ ] **Steam Deck** — Verified controller layout, Steam Input API integration
+- [ ] **Steam Deck + Steam Cloud** — Verified controller layout, Steam Input API, Steam Auto-Cloud save sync (coexists with AT Protocol PDS saves)
 - [ ] **Menus** — Title screen and pause menu (done); inventory screen, character sheet, help screen still needed
 - [x] **Look mode** — Cursor to examine tiles and entities
 - [ ] **Targeting** — Ranged attacks, spell targeting

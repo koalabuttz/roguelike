@@ -552,6 +552,59 @@ For SSH, the local cache is the filesystem under `data_dir/cache/{did}/`. For WA
 
 **Conflict resolution:** If the same user plays simultaneously on two frontends (unlikely but possible), the last write wins. The `savedAt` timestamp in the record enables a "this save is older than expected, overwrite?" prompt if needed.
 
+### Steam Cloud coexistence
+
+The local filesystem cache is the natural integration point for Steam Cloud saves. Steam Cloud operates at the filesystem level — it syncs files between machines transparently. Since the `PdsSaveBackend` already writes to a local cache directory before syncing to the PDS, Steam Cloud can sync that same directory with zero game code changes.
+
+**Save hierarchy:**
+
+```
+AT Protocol PDS        ← Cross-ecosystem portability (SSH, web, C64 bridge, any server)
+  ↕ async sync
+Local filesystem       ← Fast, always available, write cache for PDS
+  ↕ Steam Auto-Cloud
+Steam Cloud            ← Cross-machine portability within Steam ecosystem
+```
+
+The PDS is the source of truth for cross-platform identity and federation. Steam Cloud is a transparent backup of the local cache, providing multi-PC sync for Steam/Steam Deck users who may not have an atproto identity.
+
+**Steam Auto-Cloud (zero-code, recommended):** Configure Steam Auto-Cloud in the Steamworks partner dashboard to sync the save and cache directories:
+
+```
+# Non-atproto users (local saves only):
+~/.local/share/roguelike/saves/          → *.json
+
+# Atproto users (PDS cache):
+~/.local/share/roguelike/cache/          → **/*.json
+
+# Atproto tokens (so login persists across machines):
+~/.local/share/roguelike/                → atproto_tokens.json
+```
+
+On Windows, replace `~/.local/share` with `%APPDATA%`. The paths follow the XDG / platform conventions already used by the terminal binary.
+
+**Three-way conflict resolution:** When a user has both a Bluesky identity and Steam Cloud, saves can exist in three locations (PDS, local cache, Steam Cloud). The `savedAt` timestamp in every save record resolves conflicts:
+
+1. On session start, load from PDS (source of truth).
+2. If PDS is unreachable, fall back to local cache (which Steam Cloud keeps current across machines).
+3. If the local cache has a newer `savedAt` than the PDS (e.g., played offline, Steam Cloud synced, now PDS is reachable), prompt: "Local save is newer than Bluesky save. Upload to Bluesky?"
+
+This means Steam Cloud acts as a resilience layer — if the PDS is down or the user hasn't linked Bluesky, saves still roam between Steam machines.
+
+**Feature flag:** Steam integration is opt-in via a Cargo feature, following the same pattern as atproto:
+
+```toml
+# crates/terminal/Cargo.toml
+[features]
+default = ["dev-tools", "gamepad"]
+atproto = ["roguelike-atproto", "tokio/rt"]
+steam = ["steamworks"]
+```
+
+Steam Auto-Cloud requires no feature flag (it's external to the binary). The `steam` feature is only needed if using the Steamworks `ISteamRemoteStorage` API for richer conflict handling or Steam Deck-specific integration (e.g., suspend/resume save triggers).
+
+**Users without atproto:** For players who never log in with Bluesky, the save path is simply: local filesystem ↔ Steam Cloud. This is the standard Steam game experience. Atproto adds a layer on top, not a replacement.
+
 ### Authentication for PDS calls
 
 XRPC calls to the PDS require a DPoP-bound access token. For SSH, the server holds the token obtained during OAuth. For WASM, the JS layer provides fresh tokens to the WASM module.
@@ -970,6 +1023,8 @@ For local development without a domain/HTTPS:
 8. **Settings sync timing.** When a user changes settings on one frontend and switches to another, when are settings re-read from the PDS? Options: (a) only on session start (simple, small staleness window); (b) periodic poll during play (complex, marginal benefit). Recommendation: (a), since settings rarely change mid-session and the next session always get the latest.
 9. **Terminal token security.** Tokens are stored as plaintext JSON on the local filesystem. On a shared machine, another user with filesystem access could read them. Options: (a) plaintext (simplest, acceptable for single-user machines — the typical terminal game scenario); (b) OS keychain via `keyring` crate (more secure, adds platform-specific dependencies); (c) file permissions (0600) to limit access. Recommendation: (a) with (c) — plaintext JSON with restrictive file permissions, matching how `git` stores credentials. The `keyring` crate can be explored later if users request it.
 10. **Terminal binary size.** Adding tokio + reqwest to the terminal binary increases size significantly. The `atproto` feature flag keeps this opt-in, but pre-built release binaries need a decision: ship with or without atproto? Options: (a) ship two binaries (with and without); (b) always include atproto; (c) ship without, users build from source to enable. Recommendation: (b) — always include, since the download size increase is acceptable for the convenience of having the feature available.
+11. **Steam Cloud save directory layout.** Steam Auto-Cloud syncs files by path pattern. The local cache directory structure (`cache/{did}/`) uses sanitized DIDs as directory names. If a user links a different Bluesky account, they get a different cache directory, and Steam Cloud syncs both. This is correct (different identities, different saves) but may surprise users who expect a single save set per Steam account. Document this behavior in the Steam store page / FAQ.
+12. **Steam Deck suspend/resume.** Steam Deck can suspend the game mid-session. On resume, the PDS connection may have timed out and access tokens expired. The existing token refresh logic (refresh on 401, re-auth if refresh token expired) handles this, but the UX should be tested — a 5-second token refresh pause on resume could feel like a hang. Consider pre-emptively refreshing tokens on resume if the `steam` feature detects a Deck environment.
 
 ## References
 

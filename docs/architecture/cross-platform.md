@@ -151,6 +151,7 @@ Anything that talks to hardware or external services:
 - **Web crate** (future): WASM entry point, canvas rendering, Web Worker input, JS interop for OAuth and PDS saves
 - **GBA crate** (future): GBA tile/sprite rendering, button input, no-std setup, hardware-specific saves (SRAM/flash)
 - **Vita crate** (future): vita-sdk rendering, hardware buttons, memory card saves via vita-sdk save data API
+- **C64 bridge** (future): External companion service (not a workspace crate) that proxies C64 binary TCP packets to AT Protocol XRPC calls, enabling PDS saves and spectating for the C64 port via Ultimate64 Ethernet. See [design doc](../design/c64-atproto-bridge.md).
 
 ## Color Abstraction
 

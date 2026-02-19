@@ -12,6 +12,7 @@ Project documentation for the roguelike dungeon crawler.
 | [architecture/simulation.md](architecture/simulation.md) | Future design for emergent simulation (properties, events, CA) | Future design |
 | [design/atproto.md](design/atproto.md) | AT Protocol integration: OAuth, PDS saves, WASM frontend | Future design |
 | [design/atproto-spectating.md](design/atproto-spectating.md) | Federated spectating via AT Protocol: Jetstream frame delivery, discovery | Future design |
+| [design/c64-atproto-bridge.md](design/c64-atproto-bridge.md) | Self-hostable bridge server connecting C64 (via Ultimate64 Ethernet) to AT Protocol for PDS saves and spectating | Future design |
 | [design/spectator-mode.md](design/spectator-mode.md) | Spectator mode options (file, stderr, TCP, Unix socket) | Current |
 | [reports/llm-playtest-summary.md](reports/llm-playtest-summary.md) | Consolidated findings from all 4 LLM playtest sessions | Historical |
 | [reports/llm-playtest-session-1.md](reports/llm-playtest-session-1.md) | Session 1: baseline, no healing, identified core MCP pain points | Historical |

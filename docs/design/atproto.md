@@ -123,7 +123,7 @@ roguelike-saves         ← SaveBackend trait (connected platforms only)
 tui       atproto/web   ← implementations
 ```
 
-Connected platforms (`terminal`, `ssh`, `atproto`, `web`) depend on `roguelike-saves`. Constrained platforms (`gba`, `c64`) don't — they have their own save mechanisms suited to their hardware.
+Connected platforms (`terminal`, `ssh`, `atproto`, `web`) depend on `roguelike-saves`. Constrained platforms (`gba`, `c64`) don't — they have their own save mechanisms suited to their hardware. The C64 can optionally reach the PDS via an external [bridge server](c64-atproto-bridge.md) that translates binary TCP packets to XRPC calls.
 
 **Migration:**
 

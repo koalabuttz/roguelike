@@ -83,6 +83,7 @@ Significant investment. May depend on earlier tiers being complete.
 | Game Boy Advance | 0 | Low | XL | Requires no_std rewrite of data structures. |
 | PS Vita | 0 | Low | L | Native ARM via vita-sdk; hardware buttons, OLED display, memory card saves. |
 | Commodore 64 | 0 | Low | XL | Requires no_std, 8-bit types, custom toolchain. |
+| C64 AT Protocol bridge | 0 | Low | L | Self-hostable Docker bridge connecting C64 (via Ultimate64 Ethernet) to PDS saves and spectating. External companion service, not a workspace crate. [Design doc.](design/c64-atproto-bridge.md) |
 
 ## Critical Path
 

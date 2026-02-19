@@ -361,6 +361,137 @@ mod inner {
         *lb_held = report.has(BTN_LB);
     }
 
+    // -- Raw-USB dispatch helpers (pure functions for testability) -----------
+
+    /// Consume a pending or new raw-usb report, updating held state.
+    /// Returns `(current, previous)` for edge detection.
+    #[cfg(feature = "raw-usb")]
+    fn consume_raw_report(
+        usb: &super::raw_usb::RawUsbState,
+        prev_report: &mut super::raw_usb::GipInputReport,
+        pending_report: &mut Option<super::raw_usb::GipInputReport>,
+        dpad_held: &mut [bool; 4],
+        lb_held: &mut bool,
+    ) -> Option<(
+        super::raw_usb::GipInputReport,
+        super::raw_usb::GipInputReport,
+    )> {
+        let report = pending_report.take().or_else(|| usb.read_input())?;
+        let prev = *prev_report;
+        *prev_report = report;
+        update_held_from_report(&report, dpad_held, lb_held);
+        Some((report, prev))
+    }
+
+    /// Normalize raw-usb stick axes and apply edge-trigger deadzone.
+    #[cfg(feature = "raw-usb")]
+    fn check_raw_stick(
+        report: &super::raw_usb::GipInputReport,
+        stick_engaged: &mut bool,
+    ) -> Option<(Coord, Coord)> {
+        let sx = report.left_stick_x as f32 / 32768.0;
+        let sy = report.left_stick_y as f32 / 32768.0;
+        check_stick_common(sx, sy, stick_engaged)
+    }
+
+    /// True if any d-pad button was newly pressed (edge detection).
+    #[cfg(feature = "raw-usb")]
+    pub fn gip_dpad_newly_pressed(
+        report: &super::raw_usb::GipInputReport,
+        prev: &super::raw_usb::GipInputReport,
+    ) -> bool {
+        use super::raw_usb::*;
+        newly_pressed(report, prev, BTN_DPAD_UP)
+            || newly_pressed(report, prev, BTN_DPAD_DOWN)
+            || newly_pressed(report, prev, BTN_DPAD_LEFT)
+            || newly_pressed(report, prev, BTN_DPAD_RIGHT)
+    }
+
+    /// Map GIP face-button edges to game commands (A/B/X/Y/Menu only).
+    #[cfg(feature = "raw-usb")]
+    pub fn gip_face_to_game_cmd(
+        report: &super::raw_usb::GipInputReport,
+        prev: &super::raw_usb::GipInputReport,
+    ) -> Option<GameCommand> {
+        use super::raw_usb::*;
+        if newly_pressed(report, prev, BTN_A) {
+            return Some(GameCommand::Wait);
+        }
+        if newly_pressed(report, prev, BTN_B) || newly_pressed(report, prev, BTN_MENU) {
+            return Some(GameCommand::Quit);
+        }
+        if newly_pressed(report, prev, BTN_X) {
+            return Some(GameCommand::AutoExplore);
+        }
+        if newly_pressed(report, prev, BTN_Y) {
+            return Some(GameCommand::Look);
+        }
+        None
+    }
+
+    /// Map GIP button edges to menu commands (d-pad + face buttons).
+    #[cfg(feature = "raw-usb")]
+    pub fn gip_to_menu_cmd(
+        report: &super::raw_usb::GipInputReport,
+        prev: &super::raw_usb::GipInputReport,
+    ) -> Option<MenuCommand> {
+        use super::raw_usb::*;
+        if newly_pressed(report, prev, BTN_DPAD_UP) {
+            return Some(MenuCommand::Up);
+        }
+        if newly_pressed(report, prev, BTN_DPAD_DOWN) {
+            return Some(MenuCommand::Down);
+        }
+        if newly_pressed(report, prev, BTN_A) || newly_pressed(report, prev, BTN_MENU) {
+            return Some(MenuCommand::Select);
+        }
+        if newly_pressed(report, prev, BTN_B) {
+            return Some(MenuCommand::Back);
+        }
+        None
+    }
+
+    /// Map GIP button edges to look-mode commands (close only).
+    #[cfg(feature = "raw-usb")]
+    pub fn gip_to_look_cmd(
+        report: &super::raw_usb::GipInputReport,
+        prev: &super::raw_usb::GipInputReport,
+    ) -> Option<LookCommand> {
+        use super::raw_usb::*;
+        if newly_pressed(report, prev, BTN_B) || newly_pressed(report, prev, BTN_MENU) {
+            return Some(LookCommand::Close);
+        }
+        None
+    }
+
+    /// Map GIP button edges to history-viewer commands.
+    #[cfg(feature = "raw-usb")]
+    pub fn gip_to_history_cmd(
+        report: &super::raw_usb::GipInputReport,
+        prev: &super::raw_usb::GipInputReport,
+    ) -> Option<HistoryCommand> {
+        use super::raw_usb::*;
+        if newly_pressed(report, prev, BTN_DPAD_UP) {
+            return Some(HistoryCommand::Menu(MenuCommand::Up));
+        }
+        if newly_pressed(report, prev, BTN_DPAD_DOWN) {
+            return Some(HistoryCommand::Menu(MenuCommand::Down));
+        }
+        if newly_pressed(report, prev, BTN_LB) {
+            return Some(HistoryCommand::PageUp);
+        }
+        if newly_pressed(report, prev, BTN_RB) {
+            return Some(HistoryCommand::PageDown);
+        }
+        if newly_pressed(report, prev, BTN_A)
+            || newly_pressed(report, prev, BTN_B)
+            || newly_pressed(report, prev, BTN_MENU)
+        {
+            return Some(HistoryCommand::Menu(MenuCommand::Back));
+        }
+        None
+    }
+
     impl GamepadState {
         /// Try to create a `GamepadOption`. Tries gilrs first; if gilrs finds
         /// zero gamepads and `raw-usb` is enabled, falls back to raw USB.
@@ -523,34 +654,19 @@ mod inner {
                     prev_report,
                     pending_report,
                 } => {
-                    use super::raw_usb::*;
-                    let report = pending_report.take().or_else(|| usb.read_input())?;
-                    let prev = *prev_report;
-                    *prev_report = report;
+                    let (report, prev) = consume_raw_report(
+                        usb,
+                        prev_report,
+                        pending_report,
+                        &mut self.dpad_held,
+                        &mut self.lb_held,
+                    )?;
 
-                    update_held_from_report(&report, &mut self.dpad_held, &mut self.lb_held);
-
-                    // Edge-detect face buttons.
-                    if newly_pressed(&report, &prev, BTN_A) {
-                        return Some(GameCommand::Wait);
-                    }
-                    if newly_pressed(&report, &prev, BTN_B)
-                        || newly_pressed(&report, &prev, BTN_MENU)
-                    {
-                        return Some(GameCommand::Quit);
-                    }
-                    if newly_pressed(&report, &prev, BTN_X) {
-                        return Some(GameCommand::AutoExplore);
-                    }
-                    if newly_pressed(&report, &prev, BTN_Y) {
-                        return Some(GameCommand::Look);
+                    if let Some(cmd) = gip_face_to_game_cmd(&report, &prev) {
+                        return Some(cmd);
                     }
 
-                    // D-pad: fire on any newly pressed d-pad button.
-                    if (newly_pressed(&report, &prev, BTN_DPAD_UP)
-                        || newly_pressed(&report, &prev, BTN_DPAD_DOWN)
-                        || newly_pressed(&report, &prev, BTN_DPAD_LEFT)
-                        || newly_pressed(&report, &prev, BTN_DPAD_RIGHT))
+                    if gip_dpad_newly_pressed(&report, &prev)
                         && let Some((dx, dy)) = dpad_direction(&self.dpad_held)
                     {
                         return Some(if self.lb_held {
@@ -560,10 +676,7 @@ mod inner {
                         });
                     }
 
-                    // Stick: normalize and edge-trigger.
-                    let sx = report.left_stick_x as f32 / 32768.0;
-                    let sy = report.left_stick_y as f32 / 32768.0;
-                    if let Some((dx, dy)) = check_stick_common(sx, sy, &mut self.stick_engaged) {
+                    if let Some((dx, dy)) = check_raw_stick(&report, &mut self.stick_engaged) {
                         return Some(if self.lb_held {
                             GameCommand::Autorun { dx, dy }
                         } else {
@@ -614,32 +727,19 @@ mod inner {
                     prev_report,
                     pending_report,
                 } => {
-                    use super::raw_usb::*;
-                    let report = pending_report.take().or_else(|| usb.read_input())?;
-                    let prev = *prev_report;
-                    *prev_report = report;
+                    let (report, prev) = consume_raw_report(
+                        usb,
+                        prev_report,
+                        pending_report,
+                        &mut self.dpad_held,
+                        &mut self.lb_held,
+                    )?;
 
-                    update_held_from_report(&report, &mut self.dpad_held, &mut self.lb_held);
-
-                    if newly_pressed(&report, &prev, BTN_DPAD_UP) {
-                        return Some(MenuCommand::Up);
-                    }
-                    if newly_pressed(&report, &prev, BTN_DPAD_DOWN) {
-                        return Some(MenuCommand::Down);
-                    }
-                    if newly_pressed(&report, &prev, BTN_A)
-                        || newly_pressed(&report, &prev, BTN_MENU)
-                    {
-                        return Some(MenuCommand::Select);
-                    }
-                    if newly_pressed(&report, &prev, BTN_B) {
-                        return Some(MenuCommand::Back);
+                    if let Some(cmd) = gip_to_menu_cmd(&report, &prev) {
+                        return Some(cmd);
                     }
 
-                    // Stick: up/down only.
-                    let sx = report.left_stick_x as f32 / 32768.0;
-                    let sy = report.left_stick_y as f32 / 32768.0;
-                    if let Some((_, dy)) = check_stick_common(sx, sy, &mut self.stick_engaged) {
+                    if let Some((_, dy)) = check_raw_stick(&report, &mut self.stick_engaged) {
                         if dy < 0 {
                             return Some(MenuCommand::Up);
                         }
@@ -693,33 +793,25 @@ mod inner {
                     prev_report,
                     pending_report,
                 } => {
-                    use super::raw_usb::*;
-                    let report = pending_report.take().or_else(|| usb.read_input())?;
-                    let prev = *prev_report;
-                    *prev_report = report;
+                    let (report, prev) = consume_raw_report(
+                        usb,
+                        prev_report,
+                        pending_report,
+                        &mut self.dpad_held,
+                        &mut self.lb_held,
+                    )?;
 
-                    update_held_from_report(&report, &mut self.dpad_held, &mut self.lb_held);
-
-                    if newly_pressed(&report, &prev, BTN_B)
-                        || newly_pressed(&report, &prev, BTN_MENU)
-                    {
-                        return Some(LookCommand::Close);
+                    if let Some(cmd) = gip_to_look_cmd(&report, &prev) {
+                        return Some(cmd);
                     }
 
-                    // D-pad movement.
-                    if (newly_pressed(&report, &prev, BTN_DPAD_UP)
-                        || newly_pressed(&report, &prev, BTN_DPAD_DOWN)
-                        || newly_pressed(&report, &prev, BTN_DPAD_LEFT)
-                        || newly_pressed(&report, &prev, BTN_DPAD_RIGHT))
+                    if gip_dpad_newly_pressed(&report, &prev)
                         && let Some((dx, dy)) = dpad_direction(&self.dpad_held)
                     {
                         return Some(LookCommand::Move { dx, dy });
                     }
 
-                    // Stick.
-                    let sx = report.left_stick_x as f32 / 32768.0;
-                    let sy = report.left_stick_y as f32 / 32768.0;
-                    if let Some((dx, dy)) = check_stick_common(sx, sy, &mut self.stick_engaged) {
+                    if let Some((dx, dy)) = check_raw_stick(&report, &mut self.stick_engaged) {
                         return Some(LookCommand::Move { dx, dy });
                     }
 
@@ -771,36 +863,19 @@ mod inner {
                     prev_report,
                     pending_report,
                 } => {
-                    use super::raw_usb::*;
-                    let report = pending_report.take().or_else(|| usb.read_input())?;
-                    let prev = *prev_report;
-                    *prev_report = report;
+                    let (report, prev) = consume_raw_report(
+                        usb,
+                        prev_report,
+                        pending_report,
+                        &mut self.dpad_held,
+                        &mut self.lb_held,
+                    )?;
 
-                    update_held_from_report(&report, &mut self.dpad_held, &mut self.lb_held);
-
-                    if newly_pressed(&report, &prev, BTN_DPAD_UP) {
-                        return Some(HistoryCommand::Menu(MenuCommand::Up));
-                    }
-                    if newly_pressed(&report, &prev, BTN_DPAD_DOWN) {
-                        return Some(HistoryCommand::Menu(MenuCommand::Down));
-                    }
-                    if newly_pressed(&report, &prev, BTN_LB) {
-                        return Some(HistoryCommand::PageUp);
-                    }
-                    if newly_pressed(&report, &prev, BTN_RB) {
-                        return Some(HistoryCommand::PageDown);
-                    }
-                    if newly_pressed(&report, &prev, BTN_A)
-                        || newly_pressed(&report, &prev, BTN_B)
-                        || newly_pressed(&report, &prev, BTN_MENU)
-                    {
-                        return Some(HistoryCommand::Menu(MenuCommand::Back));
+                    if let Some(cmd) = gip_to_history_cmd(&report, &prev) {
+                        return Some(cmd);
                     }
 
-                    // Stick: up/down only.
-                    let sx = report.left_stick_x as f32 / 32768.0;
-                    let sy = report.left_stick_y as f32 / 32768.0;
-                    if let Some((_, dy)) = check_stick_common(sx, sy, &mut self.stick_engaged) {
+                    if let Some((_, dy)) = check_raw_stick(&report, &mut self.stick_engaged) {
                         if dy < 0 {
                             return Some(HistoryCommand::Menu(MenuCommand::Up));
                         }
@@ -1368,63 +1443,102 @@ mod tests {
 
     #[cfg(feature = "raw-usb")]
     mod gip_command_mapping_tests {
+        use super::super::inner::{
+            gip_face_to_game_cmd, gip_to_history_cmd, gip_to_look_cmd, gip_to_menu_cmd,
+        };
         use super::super::raw_usb::*;
         use roguelike_core::command::GameCommand;
         use roguelike_core::look::LookCommand;
         use roguelike_core::platform::MenuCommand;
 
-        /// Pure function: map a GIP face button to a game command via edge detection.
-        fn gip_face_to_game_cmd(btn: u16) -> Option<GameCommand> {
-            match btn {
-                b if b == BTN_A => Some(GameCommand::Wait),
-                b if b == BTN_B || b == BTN_MENU => Some(GameCommand::Quit),
-                b if b == BTN_X => Some(GameCommand::AutoExplore),
-                b if b == BTN_Y => Some(GameCommand::Look),
-                _ => None,
-            }
-        }
+        use super::super::HistoryCommand;
 
-        fn gip_to_menu_cmd(btn: u16) -> Option<MenuCommand> {
-            match btn {
-                b if b == BTN_DPAD_UP => Some(MenuCommand::Up),
-                b if b == BTN_DPAD_DOWN => Some(MenuCommand::Down),
-                b if b == BTN_A || b == BTN_MENU => Some(MenuCommand::Select),
-                b if b == BTN_B => Some(MenuCommand::Back),
-                _ => None,
-            }
-        }
-
-        fn gip_to_look_cmd(btn: u16) -> Option<LookCommand> {
-            match btn {
-                b if b == BTN_B || b == BTN_MENU => Some(LookCommand::Close),
-                _ => None,
-            }
+        /// Build a (current, previous) report pair representing a fresh button press.
+        fn press(btn: u16) -> (GipInputReport, GipInputReport) {
+            let curr = GipInputReport {
+                buttons: btn,
+                ..Default::default()
+            };
+            let prev = GipInputReport::default();
+            (curr, prev)
         }
 
         #[test]
         fn game_face_buttons() {
-            assert_eq!(gip_face_to_game_cmd(BTN_A), Some(GameCommand::Wait));
-            assert_eq!(gip_face_to_game_cmd(BTN_B), Some(GameCommand::Quit));
-            assert_eq!(gip_face_to_game_cmd(BTN_X), Some(GameCommand::AutoExplore));
-            assert_eq!(gip_face_to_game_cmd(BTN_Y), Some(GameCommand::Look));
-            assert_eq!(gip_face_to_game_cmd(BTN_MENU), Some(GameCommand::Quit));
+            let (r, p) = press(BTN_A);
+            assert_eq!(gip_face_to_game_cmd(&r, &p), Some(GameCommand::Wait));
+            let (r, p) = press(BTN_B);
+            assert_eq!(gip_face_to_game_cmd(&r, &p), Some(GameCommand::Quit));
+            let (r, p) = press(BTN_X);
+            assert_eq!(gip_face_to_game_cmd(&r, &p), Some(GameCommand::AutoExplore));
+            let (r, p) = press(BTN_Y);
+            assert_eq!(gip_face_to_game_cmd(&r, &p), Some(GameCommand::Look));
+            let (r, p) = press(BTN_MENU);
+            assert_eq!(gip_face_to_game_cmd(&r, &p), Some(GameCommand::Quit));
+        }
+
+        #[test]
+        fn game_held_button_does_not_fire() {
+            // Same report as prev = button held, not newly pressed.
+            let held = GipInputReport {
+                buttons: BTN_A,
+                ..Default::default()
+            };
+            assert_eq!(gip_face_to_game_cmd(&held, &held), None);
         }
 
         #[test]
         fn menu_buttons() {
-            assert_eq!(gip_to_menu_cmd(BTN_DPAD_UP), Some(MenuCommand::Up));
-            assert_eq!(gip_to_menu_cmd(BTN_DPAD_DOWN), Some(MenuCommand::Down));
-            assert_eq!(gip_to_menu_cmd(BTN_A), Some(MenuCommand::Select));
-            assert_eq!(gip_to_menu_cmd(BTN_MENU), Some(MenuCommand::Select));
-            assert_eq!(gip_to_menu_cmd(BTN_B), Some(MenuCommand::Back));
-            assert_eq!(gip_to_menu_cmd(BTN_X), None);
+            let (r, p) = press(BTN_DPAD_UP);
+            assert_eq!(gip_to_menu_cmd(&r, &p), Some(MenuCommand::Up));
+            let (r, p) = press(BTN_DPAD_DOWN);
+            assert_eq!(gip_to_menu_cmd(&r, &p), Some(MenuCommand::Down));
+            let (r, p) = press(BTN_A);
+            assert_eq!(gip_to_menu_cmd(&r, &p), Some(MenuCommand::Select));
+            let (r, p) = press(BTN_MENU);
+            assert_eq!(gip_to_menu_cmd(&r, &p), Some(MenuCommand::Select));
+            let (r, p) = press(BTN_B);
+            assert_eq!(gip_to_menu_cmd(&r, &p), Some(MenuCommand::Back));
+            let (r, p) = press(BTN_X);
+            assert_eq!(gip_to_menu_cmd(&r, &p), None);
         }
 
         #[test]
         fn look_buttons() {
-            assert_eq!(gip_to_look_cmd(BTN_B), Some(LookCommand::Close));
-            assert_eq!(gip_to_look_cmd(BTN_MENU), Some(LookCommand::Close));
-            assert_eq!(gip_to_look_cmd(BTN_A), None);
+            let (r, p) = press(BTN_B);
+            assert_eq!(gip_to_look_cmd(&r, &p), Some(LookCommand::Close));
+            let (r, p) = press(BTN_MENU);
+            assert_eq!(gip_to_look_cmd(&r, &p), Some(LookCommand::Close));
+            let (r, p) = press(BTN_A);
+            assert_eq!(gip_to_look_cmd(&r, &p), None);
+        }
+
+        #[test]
+        fn history_buttons() {
+            let (r, p) = press(BTN_DPAD_UP);
+            assert_eq!(
+                gip_to_history_cmd(&r, &p),
+                Some(HistoryCommand::Menu(MenuCommand::Up))
+            );
+            let (r, p) = press(BTN_DPAD_DOWN);
+            assert_eq!(
+                gip_to_history_cmd(&r, &p),
+                Some(HistoryCommand::Menu(MenuCommand::Down))
+            );
+            let (r, p) = press(BTN_LB);
+            assert_eq!(gip_to_history_cmd(&r, &p), Some(HistoryCommand::PageUp));
+            let (r, p) = press(BTN_RB);
+            assert_eq!(gip_to_history_cmd(&r, &p), Some(HistoryCommand::PageDown));
+            let (r, p) = press(BTN_A);
+            assert_eq!(
+                gip_to_history_cmd(&r, &p),
+                Some(HistoryCommand::Menu(MenuCommand::Back))
+            );
+            let (r, p) = press(BTN_B);
+            assert_eq!(
+                gip_to_history_cmd(&r, &p),
+                Some(HistoryCommand::Menu(MenuCommand::Back))
+            );
         }
     }
 }

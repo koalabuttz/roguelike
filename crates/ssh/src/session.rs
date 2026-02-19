@@ -7,6 +7,7 @@ use crossterm::style::Color;
 use crossterm::{cursor, queue, style, terminal};
 
 use roguelike_core::settings::Platform;
+use roguelike_core::spectate::NullFrameSink;
 
 use roguelike_tui::game_loop::{self, GameLoopConfig, GameLoopResult, NoDevHooks};
 use roguelike_tui::render;
@@ -253,7 +254,14 @@ fn run_game<W: Write>(
         rows,
     };
 
-    let result = game_loop::run_game_loop(&mut renderer, &mut input, saves, &mut dev, config);
+    let result = game_loop::run_game_loop(
+        &mut renderer,
+        &mut input,
+        saves,
+        &mut dev,
+        config,
+        &NullFrameSink,
+    );
 
     tracing::info!(username, "Game ended");
     result

@@ -1,38 +1,40 @@
 use std::path::PathBuf;
 
 use roguelike_core::game::GameState;
-use roguelike_core::spectate::render_frame;
+use roguelike_core::spectate::{FrameSink, render_frame};
 
 /// Writes plain-text ASCII frames to a file for external viewers.
 ///
 /// Opt-in: set `ROGUELIKE_SPECTATE_PATH` to a file path to enable.
 /// Disabled by default (no env var or empty string).
 /// Uses atomic write (write tmp + rename) to prevent partial reads.
-pub struct SpectatorWriter {
+pub struct FileFrameSink {
     pub(crate) path: Option<PathBuf>,
 }
 
-impl Default for SpectatorWriter {
+impl Default for FileFrameSink {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SpectatorWriter {
+impl FileFrameSink {
     pub fn new() -> Self {
         let path = match std::env::var("ROGUELIKE_SPECTATE_PATH") {
             Ok(val) if val.is_empty() => None,
             Ok(val) => Some(PathBuf::from(val)),
             Err(_) => None,
         };
-        SpectatorWriter { path }
+        FileFrameSink { path }
     }
+}
 
+impl FrameSink for FileFrameSink {
     /// Write a rendered frame to the spectator file.
     ///
     /// Does nothing if spectating is disabled. Errors are silently ignored
     /// (spectating is best-effort and must never break the MCP server).
-    pub fn write_frame(&self, state: &GameState) {
+    fn write_frame(&self, state: &GameState) {
         if let Some(ref path) = self.path {
             let frame = render_frame(state);
             let tmp_path = path.with_extension("tmp");
@@ -83,7 +85,7 @@ mod tests {
 
     #[test]
     fn spectator_writer_disabled() {
-        let writer = SpectatorWriter { path: None };
+        let writer = FileFrameSink { path: None };
         // write_frame should be a no-op when disabled
         let gs = test_game();
         writer.write_frame(&gs); // should not panic
@@ -93,7 +95,7 @@ mod tests {
     fn spectator_writer_writes_file() {
         let gs = test_game();
         let path = std::env::temp_dir().join("roguelike-spectate-test.txt");
-        let writer = SpectatorWriter {
+        let writer = FileFrameSink {
             path: Some(path.clone()),
         };
         writer.write_frame(&gs);

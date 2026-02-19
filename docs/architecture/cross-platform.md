@@ -92,11 +92,11 @@ Only `tui`, `terminal`, and `ssh` import `crossterm`. Only the `mcp` crate impor
 - [x] **Shared game loop** — `tui/src/game_loop.rs` is the single game loop for both terminal and SSH frontends
 - [x] **SSH server** — `ssh` crate with russh, lobby system, per-user accounts and saves
 - [x] **Extract `SaveBackend` to `crates/saves`** — The `SaveBackend` trait now lives in `crates/saves/src/lib.rs`, depending only on `roguelike-core`. The `tui` crate re-exports it (`pub use roguelike_saves::SaveBackend`). Connected platforms (`terminal`, `ssh`, and future `atproto`, `web`) depend on `roguelike-saves`; constrained platforms (`gba`, `c64`) don't. See [atproto design doc](../design/atproto.md#prerequisite-extract-savebackend-to-cratessaves).
-- [x] **Extract `FrameSink` trait and `render_frame` to core** — The `FrameSink` trait, `NullFrameSink`, and `render_frame()` now live in `crates/core/src/spectate.rs`. The MCP crate's `SpectatorWriter` imports `render_frame` from core. Remaining work: thread `&dyn FrameSink` through `run_game_loop` in `crates/tui/src/game_loop.rs`, and rename `SpectatorWriter` to `FileFrameSink`. See [atproto spectating design doc](../design/atproto-spectating.md#phase-0-extract-render_frame-and-define-framesink).
+- [x] **Extract `FrameSink` trait and `render_frame` to core** — The `FrameSink` trait, `NullFrameSink`, and `render_frame()` now live in `crates/core/src/spectate.rs`. The MCP crate's `FileFrameSink` imports `render_frame` from core and implements the `FrameSink` trait.
+- [x] **Thread `FrameSink` through the game loop** — `run_game_loop` accepts `&dyn FrameSink` as a parameter. Three `write_frame` call sites (after autorun, auto-explore, and normal commands). Terminal and SSH pass `&NullFrameSink`. `SpectatorWriter` renamed to `FileFrameSink`. See [atproto spectating design doc](../design/atproto-spectating.md#phase-0-extract-render_frame-and-define-framesink).
 
 ### Pending prerequisites (for web/atproto)
 
-- [ ] **Thread `FrameSink` through the game loop** — Pass `&dyn FrameSink` into `run_game_loop` so terminal and SSH frontends can optionally produce spectate frames. Rename `SpectatorWriter` to `FileFrameSink` and implement the `FrameSink` trait.
 - [ ] **AT Protocol integration** — `atproto` crate for Bluesky OAuth login and PDS-based portable saves. See [design doc](../design/atproto.md).
 - [ ] **WASM frontend** — `web` crate with CanvasRenderer, Web Worker game loop, JS-bridged saves. See [design doc](../design/atproto.md#wasm-frontend).
 
@@ -151,6 +151,7 @@ Anything that talks to hardware or external services:
 - **SSH crate**: russh server, lobby/accounts system, ANSI input parsing, per-user saves, SSH channel I/O
 - **MCP crate**: rmcp server, tokio runtime, JSON serialization of game state
 - **Atproto crate** (future): AT Protocol OAuth, handle resolution, PDS save backend, XRPC client, spectate frame publishing. See [design doc](../design/atproto.md).
+- **Steam integration** (future, `steam` feature on terminal crate): Optional Steamworks API for `ISteamRemoteStorage` conflict handling and Steam Deck suspend/resume hooks. Steam Auto-Cloud (zero-code, configured in Steamworks dashboard) syncs the local save/cache directory — the same directory used as the PDS write cache — providing cross-machine portability within the Steam ecosystem alongside atproto's cross-platform portability. See [atproto design doc](../design/atproto.md#steam-cloud-coexistence).
 - **Web crate** (future): WASM entry point, canvas rendering, Web Worker input, JS interop for OAuth and PDS saves
 - **GBA crate** (future): GBA tile/sprite rendering, button input, no-std setup, hardware-specific saves (SRAM/flash)
 - **Vita crate** (future): vita-sdk rendering, hardware buttons, memory card saves via vita-sdk save data API

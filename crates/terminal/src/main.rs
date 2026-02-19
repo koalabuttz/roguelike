@@ -8,6 +8,7 @@ mod terminal_input;
 use crossterm::{cursor, execute, terminal};
 
 use roguelike_core::settings::Platform;
+use roguelike_core::spectate::NullFrameSink;
 use roguelike_tui::game_loop::{self, GameLoopConfig};
 
 fn main() -> std::io::Result<()> {
@@ -36,7 +37,14 @@ fn main() -> std::io::Result<()> {
         rows: rows as i32,
     };
 
-    let result = game_loop::run_game_loop(&mut renderer, &mut input, &saves, &mut dev, config);
+    let result = game_loop::run_game_loop(
+        &mut renderer,
+        &mut input,
+        &saves,
+        &mut dev,
+        config,
+        &NullFrameSink,
+    );
 
     execute!(stdout, terminal::LeaveAlternateScreen, cursor::Show)?;
     terminal::disable_raw_mode()?;

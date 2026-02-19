@@ -14,6 +14,7 @@ use roguelike_core::message_history::{MessageHistoryViewer, ViewerAction};
 use roguelike_core::platform::Renderer;
 use roguelike_core::seed_code;
 use roguelike_core::settings::{self, Platform, Settings};
+use roguelike_core::spectate::FrameSink;
 use roguelike_core::types::Coord;
 
 use crate::input_provider::{GameInput, HistoryInput, InputProvider, InputResult};
@@ -104,6 +105,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
     saves: &dyn SaveBackend,
     dev: &mut D,
     config: GameLoopConfig,
+    frame_sink: &dyn FrameSink,
 ) -> io::Result<GameLoopResult> {
     let mut cols = config.cols;
     let mut rows = config.rows;
@@ -328,6 +330,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                 input,
                             )?;
                             dev.after_step(state, cmd);
+                            frame_sink.write_frame(state);
                             if state.dirty
                                 && let Ok(json) = state.save_to_json()
                             {
@@ -348,6 +351,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                     input,
                                 )?;
                                 dev.after_step(state, cmd);
+                                frame_sink.write_frame(state);
                                 if state.dirty
                                     && let Ok(json) = state.save_to_json()
                                 {
@@ -362,6 +366,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                         _ => {
                             state.step(cmd);
                             dev.after_step(state, cmd);
+                            frame_sink.write_frame(state);
                             if state.dirty
                                 && (state.turn_count as u32)
                                     .is_multiple_of(settings.autosave_frequency)

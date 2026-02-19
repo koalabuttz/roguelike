@@ -36,7 +36,7 @@ Builds on the core systems to add depth, platforms, and accessibility.
 | Magic/abilities | 0 | High | L | Big design space. Requires targeting UI. Expands combat significantly. |
 | Granular difficulty | 0 | Medium | S | Config toggles. Broadens who can enjoy the game. |
 | Meta-progression | 0 | High | L | Persistent unlocks between runs. Requires save/load. |
-| Thread FrameSink through game loop | ~2 items | Low | S | `FrameSink` trait and `render_frame()` are in core. Remaining: pass `&dyn FrameSink` into `run_game_loop`, rename `SpectatorWriter` to `FileFrameSink`. Prerequisite for atproto spectating. [Design doc.](design/atproto-spectating.md#phase-0-extract-render_frame-and-define-framesink) |
+| Thread FrameSink through game loop | ~2 items | Low | S | Done. `run_game_loop` accepts `&dyn FrameSink`, `SpectatorWriter` renamed to `FileFrameSink` (implements `FrameSink`). Terminal and SSH pass `&NullFrameSink`. [Design doc.](design/atproto-spectating.md#phase-0-extract-render_frame-and-define-framesink) |
 | AT Protocol integration | ~2 items | High | L | Bluesky login via OAuth on SSH (HTTP callback bridge) and terminal (loopback redirect). Saves stored in user's PDS for cross-platform portability. [Design doc.](design/atproto.md) |
 | Web (WASM) | ~2 items | High | L | Browser-based play. Requires platform abstraction + `roguelike-saves`. CanvasRenderer, Web Worker for blocking game loop. [Design doc.](design/atproto.md#wasm-frontend) |
 | One-handed play (remaining) | 0 | Medium | S | Partially done (left-hand QWEASDZXC and WEASDZXCR layouts). Mouse-only and macros still TODO. |
@@ -49,7 +49,7 @@ Features that build on a stable core and benefit from a wider feature set.
 |------|--------|--------|--------|-------|
 | Shared leaderboard | 0 | Medium | M | Requires a server/API. |
 | Daily challenges | 0 | Medium | M | Requires seeded RNG + leaderboard. |
-| Steam Deck | 0 | Medium | M | Requires controller support. Steam Input API. |
+| Steam Deck + Steam Cloud | 0 | Medium | M | Controller support done (gilrs). Remaining: Steam Input API, Steam Auto-Cloud config for save directory sync. Steam Cloud syncs the local save/cache directory, coexisting with PDS saves — see [atproto design doc](design/atproto.md#steam-cloud-coexistence). |
 | MCP spectator mode (TCP) | 0 | Low | M | Upgrade file-based spectator to TCP server on localhost for low-latency local multi-viewer. Largely superseded by atproto spectating for remote viewing. [Design doc.](design/spectator-mode.md) |
 | Atproto spectating | 0 | High | L | Federated live spectating via PDS frame publishing + Jetstream. Zero infrastructure — player's PDS handles storage and delivery. Depends on atproto OAuth. [Design doc.](design/atproto-spectating.md) |
 | Bones files | 0 | Medium | M | Requires save/load + networking. |
@@ -99,7 +99,7 @@ Input abstraction ✓
       → Daily challenges / Seed sharing ✓ (seed sharing done)
 
   → Controller support ✓
-    → Steam Deck
+    → Steam Deck + Steam Cloud (Auto-Cloud syncs local save/cache dir)
 
   → Platform abstraction ✓
     → SSH server ✓
@@ -110,7 +110,7 @@ Input abstraction ✓
 
   → MCP spectator (file) ✓
     → Extract FrameSink/render_frame to core ✓
-      → Thread FrameSink through game loop
+      → Thread FrameSink through game loop ✓
         → Atproto spectating (federated live spectating via Jetstream)
           → Web spectate viewer (lightweight JS, no full WASM needed)
 
@@ -121,13 +121,13 @@ A* pathfinding ✓
 ```
 
 The foundation is complete — input abstraction, save/load, seeded RNG, A\*
-pathfinding, platform abstraction, the SSH server, SaveBackend extraction, and
-the FrameSink/render\_frame extraction are all done. The remaining critical path
-is the gameplay branch (Items → Stairs → XP) and the platform/identity branch
-(atproto OAuth → PDS saves → WASM). The spectating branch now goes through
-atproto (FrameSink game loop threading → federated spectating) rather than TCP.
-See the [atproto design doc](design/atproto.md) (4 phases) and the
-[atproto spectating design doc](design/atproto-spectating.md) (5 phases).
+pathfinding, platform abstraction, the SSH server, SaveBackend extraction,
+FrameSink/render\_frame extraction, and FrameSink game loop threading are all
+done. The remaining critical path is the gameplay branch (Items → Stairs → XP)
+and the platform/identity branch (atproto OAuth → PDS saves → WASM). The
+spectating branch now goes through atproto (federated spectating via Jetstream)
+rather than TCP. See the [atproto design doc](design/atproto.md) (4 phases) and
+the [atproto spectating design doc](design/atproto-spectating.md) (5 phases).
 
 ## Completed
 
@@ -164,7 +164,8 @@ Items that have been implemented, organized by original tier.
 | Platform abstraction | Required before any platform port. |
 | Type aliases | 30-minute refactor. Enables platform-specific type sizing. |
 | Extract SaveBackend to `crates/saves` | `SaveBackend` trait moved from `tui` to `crates/saves` (depends only on core). `tui/saves.rs` re-exports. Connected platforms depend on `roguelike-saves`; constrained platforms don't. |
-| Extract FrameSink/render_frame to core | `FrameSink` trait, `NullFrameSink`, and `render_frame()` now in `crates/core/src/spectate.rs`. MCP crate imports `render_frame` from core. Remaining: thread `&dyn FrameSink` through `run_game_loop`, rename `SpectatorWriter` to `FileFrameSink`. |
+| Extract FrameSink/render_frame to core | `FrameSink` trait, `NullFrameSink`, and `render_frame()` now in `crates/core/src/spectate.rs`. MCP crate imports `render_frame` from core. |
+| Thread FrameSink through game loop | `run_game_loop` accepts `&dyn FrameSink` parameter. `SpectatorWriter` renamed to `FileFrameSink` (implements `FrameSink`). Terminal and SSH pass `&NullFrameSink`. Three `write_frame` call sites in the game loop (autorun, auto-explore, normal commands). |
 | Controller support | gilrs, 8-dir d-pad/stick, LB autorun, context-sensitive button mapping. |
 | Replay system | Deterministic recording/playback, golden replays. |
 | Auto-explore | `o` key, gamepad X button, MCP `auto_explore` tool. |

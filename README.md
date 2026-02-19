@@ -516,7 +516,7 @@ crates/
       lib.rs                Library root — re-exports mcp_server and spectate modules
       main.rs               MCP server entry point
       mcp_server.rs         MCP tools for LLM-driven play
-      spectate.rs           File-based spectator (ROGUELIKE_SPECTATE_PATH env var)
+      spectate.rs           FileFrameSink (implements FrameSink, ROGUELIKE_SPECTATE_PATH env var)
     tests/
       mcp_integration.rs    Deterministic MCP tool integration tests
       mcp_proptest.rs       Property-based MCP session tests (proptest)

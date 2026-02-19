@@ -18,7 +18,9 @@ use roguelike_core::look;
 use roguelike_core::seed_code;
 use roguelike_core::types::{Coord, Pos};
 
-use crate::spectate::SpectatorWriter;
+use roguelike_core::spectate::FrameSink;
+
+use crate::spectate::FileFrameSink;
 
 /// Per-session state: game state plus configuration set at `new_game` time.
 struct GameSession {
@@ -40,7 +42,7 @@ struct GameSession {
 pub struct RoguelikeMcpServer {
     session: Arc<Mutex<Option<GameSession>>>,
     save_slot: Arc<Mutex<Option<String>>>,
-    spectator: Arc<SpectatorWriter>,
+    spectator: Arc<FileFrameSink>,
     game_data: Arc<data::GameData>,
     tool_router: ToolRouter<Self>,
 }
@@ -100,7 +102,7 @@ impl RoguelikeMcpServer {
         Self {
             session: Arc::new(Mutex::new(None)),
             save_slot: Arc::new(Mutex::new(None)),
-            spectator: Arc::new(SpectatorWriter::new()),
+            spectator: Arc::new(FileFrameSink::new()),
             game_data: Arc::new(data::load_game_data()),
             tool_router: Self::tool_router(),
         }

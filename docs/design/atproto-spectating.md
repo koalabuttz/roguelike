@@ -275,19 +275,14 @@ pub trait FrameSink {
 
 **Why in core:** The trait references only `GameState`, which is already in core. No platform dependencies. Any crate can implement it. This follows the same pattern as `Renderer` and `InputSource` — core defines the trait, frontends implement it. (Note: `SaveBackend` follows a different pattern — it lives in `crates/saves`, not core, because constrained platforms like GBA/C64 need completely different save mechanisms. `FrameSink` belongs in core because *all* platforms can pass a `NullFrameSink` at zero cost, unlike `SaveBackend` which imposes interface assumptions about JSON slots.)
 
-**Why infallible:** Spectating must never break gameplay. Network errors, PDS outages, rate limits — all are silently absorbed. This matches the existing `SpectatorWriter` design ("errors are silently ignored").
+**Why infallible:** Spectating must never break gameplay. Network errors, PDS outages, rate limits — all are silently absorbed. This matches the `FileFrameSink` design ("errors are silently ignored").
 
-### Existing `SpectatorWriter` → `FileFrameSink`
+### `FileFrameSink` (Done)
 
-The `render_frame()` function and the `FrameSink` trait + `NullFrameSink` have already been extracted to `crates/core/src/spectate.rs`. The MCP crate's `SpectatorWriter` imports `render_frame` from core. The remaining step is to rename `SpectatorWriter` to `FileFrameSink` and have it implement the `FrameSink` trait.
+The `render_frame()` function and the `FrameSink` trait + `NullFrameSink` live in `crates/core/src/spectate.rs`. The MCP crate's `FileFrameSink` (in `crates/mcp/src/spectate.rs`) implements the `FrameSink` trait, using `render_frame` from core and atomic file writes.
 
 ```
-Current state:
-  crates/core/src/spectate.rs →  FrameSink trait + NullFrameSink + render_frame()  (done)
-  crates/mcp/src/spectate.rs  →  SpectatorWriter (imports render_frame from core, not yet implementing FrameSink)
-
-Target state:
-  crates/core/src/spectate.rs →  FrameSink trait + NullFrameSink + render_frame()  (done)
+  crates/core/src/spectate.rs →  FrameSink trait + NullFrameSink + render_frame()
   crates/mcp/src/spectate.rs  →  FileFrameSink (implements FrameSink)
 ```
 
@@ -476,7 +471,7 @@ For a "browse all active games" experience without knowing specific handles:
 
 ### Where `write_frame` Is Called
 
-Currently, the MCP server calls `SpectatorWriter::write_frame()` after each `act()`, `pathfind_to()`, `auto_explore()`, and `auto_fight()` tool call. For the shared game loop in `crates/tui/src/game_loop.rs`, the call goes after each step that changes game state:
+The MCP server calls `FileFrameSink::write_frame()` (via the `FrameSink` trait) after each `act()`, `pathfind_to()`, `auto_explore()`, and `auto_fight()` tool call. The shared game loop in `crates/tui/src/game_loop.rs` calls `frame_sink.write_frame(state)` after each step that changes game state:
 
 ```rust
 // In game_loop.rs, after a successful step:
@@ -509,7 +504,7 @@ impl FrameSink for NullFrameSink {
 
 ### MCP Server Integration
 
-The MCP server continues using `FileFrameSink` (renamed from `SpectatorWriter`). If an atproto session is available (future MCP-with-identity mode), it can additionally use `AtprotoFrameSink` via `CompositeFrameSink`.
+The MCP server uses `FileFrameSink` (which implements `FrameSink`). If an atproto session is available (future MCP-with-identity mode), it can additionally use `AtprotoFrameSink` via `CompositeFrameSink`.
 
 ## Constrained Platform Strategy
 
@@ -627,22 +622,18 @@ Only the producer (the player) needs atproto OAuth tokens to write frame records
 
 > **Phase numbering note:** These phases (0–4) are specific to atproto spectating and are independent of the phases in [atproto.md](atproto.md#implementation-phases) (1–4), which cover OAuth, PDS saves, and WASM. Where there are cross-dependencies, they are noted explicitly (e.g., spectating Phase 1 depends on atproto.md Phase 1 for OAuth).
 
-### Phase 0: Extract `render_frame` and Define `FrameSink` (Partially Done)
+### Phase 0: Extract `render_frame` and Define `FrameSink` (Done)
 
-**Effort:** S (hours) — remaining work is minimal.
+**Effort:** S (hours).
 
-**Done:**
 - `crates/core/src/spectate.rs` — `FrameSink` trait, `NullFrameSink`, `render_frame()` all live here.
 - `crates/core/src/lib.rs` — `pub mod spectate` is present.
-- `crates/mcp/src/spectate.rs` — `SpectatorWriter` imports `render_frame` from core.
+- `crates/mcp/src/spectate.rs` — `FileFrameSink` implements `FrameSink`, uses `render_frame` from core.
+- `crates/tui/src/game_loop.rs` — `run_game_loop` accepts `frame_sink: &dyn FrameSink`, calls `write_frame` after autorun, auto-explore, and normal commands.
+- `crates/terminal/src/main.rs` — Passes `&NullFrameSink`.
+- `crates/ssh/src/session.rs` — Passes `&NullFrameSink` (atproto sink comes in Phase 2).
 
-**Remaining:**
-- `crates/mcp/src/spectate.rs` — Rename `SpectatorWriter` to `FileFrameSink`, implement the `FrameSink` trait.
-- `crates/tui/src/game_loop.rs` — Add `frame_sink: &dyn FrameSink` parameter to `run_game_loop`.
-- `crates/terminal/src/main.rs` — Pass `&NullFrameSink` (or opt-in `FileFrameSink`).
-- `crates/ssh/src/session.rs` — Pass `&NullFrameSink` (atproto sink comes in Phase 2).
-
-This is a pure refactor — no new functionality, no new dependencies. All existing tests continue to pass. The MCP spectator works exactly as before.
+This was a pure refactor — no new functionality, no new dependencies. All existing tests pass. The MCP spectator works exactly as before.
 
 ### Phase 1: Lexicon Design and Frame Publishing
 

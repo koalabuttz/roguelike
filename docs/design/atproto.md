@@ -103,17 +103,13 @@ The DID (e.g., `did:plc:abc123`) is the stable, permanent identity. Handles can 
 
 **Both auth methods coexist.** Username/password login remains for users without atproto accounts. The lobby offers both options. Existing accounts can be linked to a DID.
 
-## Prerequisite: Extract `SaveBackend` to `crates/saves`
+## Prerequisite: Extract `SaveBackend` to `crates/saves` (Done)
 
-The `SaveBackend` trait currently lives in `crates/tui/src/saves.rs`, and `roguelike-tui` depends on `crossterm`. This creates a problem:
+> **Status: Complete.** The `SaveBackend` trait now lives in `crates/saves/src/lib.rs`, depending only on `roguelike-core`. The `tui` crate re-exports it (`pub use roguelike_saves::SaveBackend`). Both `terminal` (`local_saves.rs`) and `ssh` (`saves.rs`) implement the trait from `roguelike-saves`. This unblocks the atproto and WASM dependency chains.
 
-- `crates/atproto` needs `SaveBackend` to implement `PdsSaveBackend`.
-- `crates/web` needs `SaveBackend` for its WASM save bridge.
-- `crossterm` does not compile to WASM.
+The `SaveBackend` trait was originally in `crates/tui/src/saves.rs`, but `roguelike-tui` depends on `crossterm` which doesn't compile to WASM. The trait itself is a pure interface over `GameState`, `SlotMetadata`, and `Settings` — no platform dependencies.
 
-`SaveBackend` has no crossterm dependency itself — it's a pure trait over `GameState`, `SlotMetadata`, and `Settings`. However, it should **not** move to `roguelike-core`. Core should remain universal across all platforms, and constrained platforms (GBA with 32KB SRAM, C64 with tape/floppy) need completely different save mechanisms — they can't implement an interface that assumes multiple JSON save slots.
-
-Instead, `SaveBackend` moves to a new `crates/saves` crate that depends only on `roguelike-core`:
+It lives in `crates/saves` rather than `roguelike-core` because constrained platforms (GBA with 32KB SRAM, C64 with tape/floppy) need completely different save mechanisms — they can't implement an interface that assumes multiple JSON save slots.
 
 ```
 roguelike-core          ← universal (GameState, SlotMetadata, Settings)
@@ -124,16 +120,6 @@ tui       atproto/web   ← implementations
 ```
 
 Connected platforms (`terminal`, `ssh`, `atproto`, `web`) depend on `roguelike-saves`. Constrained platforms (`gba`, `c64`) don't — they have their own save mechanisms suited to their hardware. The C64 can optionally reach the PDS via an external [bridge server](c64-atproto-bridge.md) that translates binary TCP packets to XRPC calls.
-
-**Migration:**
-
-1. Create `crates/saves/` with a `Cargo.toml` depending on `roguelike-core` and a `src/lib.rs` containing the `SaveBackend` trait definition.
-2. Update `crates/tui/Cargo.toml` to depend on `roguelike-saves`. Update `crates/tui/src/game_loop.rs` to import from `roguelike_saves::SaveBackend`.
-3. Update `crates/terminal/Cargo.toml` to depend on `roguelike-saves`. Update `crates/terminal/src/local_saves.rs` to implement `roguelike_saves::SaveBackend`.
-4. Update `crates/ssh/Cargo.toml` to depend on `roguelike-saves`. Update `crates/ssh/src/saves.rs` to implement `roguelike_saves::SaveBackend`.
-5. Remove `crates/tui/src/saves.rs`.
-
-This is a small, non-breaking refactor that unblocks the entire dependency chain. It should be done first, independently of the atproto work.
 
 ## Lexicon Design
 

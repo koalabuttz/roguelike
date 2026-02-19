@@ -36,8 +36,7 @@ Builds on the core systems to add depth, platforms, and accessibility.
 | Magic/abilities | 0 | High | L | Big design space. Requires targeting UI. Expands combat significantly. |
 | Granular difficulty | 0 | Medium | S | Config toggles. Broadens who can enjoy the game. |
 | Meta-progression | 0 | High | L | Persistent unlocks between runs. Requires save/load. |
-| Extract SaveBackend to `crates/saves` | ~3 items | Low | S | `SaveBackend` trait is in `tui` (depends on crossterm). Move to a new `crates/saves` crate (not core — constrained platforms like GBA/C64 need completely different save mechanisms). Connected platforms (`tui`, `ssh`, `atproto`, `web`) depend on it. Prerequisite for atproto and WASM. [Design doc.](design/atproto.md#prerequisite-extract-savebackend-to-cratessaves) |
-| Extract FrameSink/render_frame to core | ~2 items | Low | S | `render_frame()` is in `crates/mcp` but only depends on `GameState`. Move to core, define `FrameSink` trait + `NullFrameSink`. Prerequisite for atproto spectating. [Design doc.](design/atproto-spectating.md#phase-0-extract-render_frame-and-define-framesink) |
+| Thread FrameSink through game loop | ~2 items | Low | S | `FrameSink` trait and `render_frame()` are in core. Remaining: pass `&dyn FrameSink` into `run_game_loop`, rename `SpectatorWriter` to `FileFrameSink`. Prerequisite for atproto spectating. [Design doc.](design/atproto-spectating.md#phase-0-extract-render_frame-and-define-framesink) |
 | AT Protocol integration | ~2 items | High | L | Bluesky login via OAuth. Saves stored in user's PDS for cross-server portability. Requires HTTP server alongside SSH, custom lexicons. [Design doc.](design/atproto.md) |
 | Web (WASM) | ~2 items | High | L | Browser-based play. Requires platform abstraction + `roguelike-saves`. CanvasRenderer, Web Worker for blocking game loop. [Design doc.](design/atproto.md#wasm-frontend) |
 | One-handed play (remaining) | 0 | Medium | S | Partially done (left-hand QWEASDZXC and WEASDZXCR layouts). Mouse-only and macros still TODO. |
@@ -104,15 +103,16 @@ Input abstraction ✓
 
   → Platform abstraction ✓
     → SSH server ✓
-      → Extract SaveBackend to crates/saves
+      → Extract SaveBackend to crates/saves ✓
         → AT Protocol OAuth (SSH login with Bluesky)
           → PDS save backend (portable saves)
             → WASM frontend (browser play + same saves)
 
   → MCP spectator (file) ✓
-    → Extract FrameSink/render_frame to core
-      → Atproto spectating (federated live spectating via Jetstream)
-        → Web spectate viewer (lightweight JS, no full WASM needed)
+    → Extract FrameSink/render_frame to core ✓
+      → Thread FrameSink through game loop
+        → Atproto spectating (federated live spectating via Jetstream)
+          → Web spectate viewer (lightweight JS, no full WASM needed)
 
 A* pathfinding ✓
   → MCP pathfind_to tool ✓
@@ -121,12 +121,13 @@ A* pathfinding ✓
 ```
 
 The foundation is complete — input abstraction, save/load, seeded RNG, A\*
-pathfinding, platform abstraction, and the SSH server are all done. The
-remaining critical path is the gameplay branch (Items → Stairs → XP) and the
-platform/identity branch (atproto OAuth → PDS saves → WASM). The spectating
-branch now goes through atproto (FrameSink extraction → federated spectating)
-rather than TCP. See the [atproto design doc](design/atproto.md) (4 phases)
-and the [atproto spectating design doc](design/atproto-spectating.md) (5 phases).
+pathfinding, platform abstraction, the SSH server, SaveBackend extraction, and
+the FrameSink/render\_frame extraction are all done. The remaining critical path
+is the gameplay branch (Items → Stairs → XP) and the platform/identity branch
+(atproto OAuth → PDS saves → WASM). The spectating branch now goes through
+atproto (FrameSink game loop threading → federated spectating) rather than TCP.
+See the [atproto design doc](design/atproto.md) (4 phases) and the
+[atproto spectating design doc](design/atproto-spectating.md) (5 phases).
 
 ## Completed
 
@@ -162,6 +163,8 @@ Items that have been implemented, organized by original tier.
 |------|-------|
 | Platform abstraction | Required before any platform port. |
 | Type aliases | 30-minute refactor. Enables platform-specific type sizing. |
+| Extract SaveBackend to `crates/saves` | `SaveBackend` trait moved from `tui` to `crates/saves` (depends only on core). `tui/saves.rs` re-exports. Connected platforms depend on `roguelike-saves`; constrained platforms don't. |
+| Extract FrameSink/render_frame to core | `FrameSink` trait, `NullFrameSink`, and `render_frame()` now in `crates/core/src/spectate.rs`. MCP crate imports `render_frame` from core. Remaining: thread `&dyn FrameSink` through `run_game_loop`, rename `SpectatorWriter` to `FileFrameSink`. |
 | Controller support | gilrs, 8-dir d-pad/stick, LB autorun, context-sensitive button mapping. |
 | Replay system | Deterministic recording/playback, golden replays. |
 | Auto-explore | `o` key, gamepad X button, MCP `auto_explore` tool. |

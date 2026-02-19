@@ -4,7 +4,7 @@ How the codebase is structured for multiple platform targets (terminal, SSH, web
 
 ## Current State
 
-The codebase is split into a Cargo workspace with five crates:
+The codebase is split into a Cargo workspace with six crates:
 
 ```
 roguelike/
@@ -19,20 +19,22 @@ roguelike/
 │   │       ├── game.rs, map.rs, combat.rs, ai.rs, fov.rs
 │   │       ├── pathfinding.rs, spawn.rs, entity.rs, data.rs
 │   │       ├── platform.rs ← Renderer, InputSource traits
+│   │       ├── spectate.rs ← FrameSink trait, NullFrameSink, render_frame()
 │   │       ├── menu.rs, saves.rs, settings.rs
 │   │       ├── dev_tools.rs, analytics.rs, scenario.rs
 │   │       └── message_log.rs
 │   ├── saves/              roguelike-saves: SaveBackend trait (connected platforms)
 │   │   ├── Cargo.toml      depends on core only
 │   │   └── src/
-│   │       └── lib.rs       (SaveBackend trait definition)
+│   │       └── lib.rs       SaveBackend trait definition
 │   ├── tui/                roguelike-tui: shared terminal rendering + game loop
 │   │   ├── Cargo.toml      depends on core + saves + crossterm
 │   │   └── src/
 │   │       ├── game_loop.rs (unified game loop for terminal + SSH)
 │   │       ├── render.rs    (CrosstermRenderer, color palette mapping)
 │   │       ├── input.rs     (key-to-command translation)
-│   │       └── input_provider.rs (InputProvider trait, InputResult, GameInput)
+│   │       ├── input_provider.rs (InputProvider trait, InputResult, GameInput)
+│   │       └── saves.rs     (re-exports SaveBackend from roguelike-saves)
 │   ├── terminal/           roguelike-terminal: local terminal frontend
 │   │   ├── Cargo.toml      depends on core + tui + gilrs (optional)
 │   │   └── src/
@@ -86,14 +88,15 @@ Only `tui`, `terminal`, and `ssh` import `crossterm`. Only the `mcp` crate impor
 - [x] **Platform abstraction** — `Renderer` and `InputSource` traits in `core/src/platform.rs`
 - [x] **Abstract Color** — `GameColor` enum in `core/src/types.rs`; crossterm removed from `entity.rs` and `data.rs`
 - [x] **Move `GameCommand`** — `command.rs` in core; terminal's `input.rs` only does key translation
-- [x] **Workspace split** — five crates: core, tui, terminal, ssh, mcp
+- [x] **Workspace split** — six crates: core, saves, tui, terminal, ssh, mcp
 - [x] **Shared game loop** — `tui/src/game_loop.rs` is the single game loop for both terminal and SSH frontends
 - [x] **SSH server** — `ssh` crate with russh, lobby system, per-user accounts and saves
+- [x] **Extract `SaveBackend` to `crates/saves`** — The `SaveBackend` trait now lives in `crates/saves/src/lib.rs`, depending only on `roguelike-core`. The `tui` crate re-exports it (`pub use roguelike_saves::SaveBackend`). Connected platforms (`terminal`, `ssh`, and future `atproto`, `web`) depend on `roguelike-saves`; constrained platforms (`gba`, `c64`) don't. See [atproto design doc](../design/atproto.md#prerequisite-extract-savebackend-to-cratessaves).
+- [x] **Extract `FrameSink` trait and `render_frame` to core** — The `FrameSink` trait, `NullFrameSink`, and `render_frame()` now live in `crates/core/src/spectate.rs`. The MCP crate's `SpectatorWriter` imports `render_frame` from core. Remaining work: thread `&dyn FrameSink` through `run_game_loop` in `crates/tui/src/game_loop.rs`, and rename `SpectatorWriter` to `FileFrameSink`. See [atproto spectating design doc](../design/atproto-spectating.md#phase-0-extract-render_frame-and-define-framesink).
 
 ### Pending prerequisites (for web/atproto)
 
-- [ ] **Extract `SaveBackend` to `crates/saves`** — Currently in `tui/src/saves.rs` which depends on crossterm. The trait itself has no crossterm dependency. Rather than moving to core (which should remain universal across all platforms, including GBA/C64 that need completely different save mechanisms), it moves to a new `crates/saves` crate that depends only on core. Connected platforms (`tui`, `ssh`, `atproto`, `web`) depend on it; constrained platforms don't. See [atproto design doc](../design/atproto.md#prerequisite-extract-savebackend-to-cratessaves).
-- [ ] **Extract `FrameSink` trait and `render_frame` to core** — `render_frame()` currently lives in `crates/mcp/src/spectate.rs` but only depends on `GameState`. The `FrameSink` trait (for spectate frame output) should be defined in core alongside a `NullFrameSink`. See [atproto spectating design doc](../design/atproto-spectating.md#phase-0-extract-render_frame-and-define-framesink).
+- [ ] **Thread `FrameSink` through the game loop** — Pass `&dyn FrameSink` into `run_game_loop` so terminal and SSH frontends can optionally produce spectate frames. Rename `SpectatorWriter` to `FileFrameSink` and implement the `FrameSink` trait.
 - [ ] **AT Protocol integration** — `atproto` crate for Bluesky OAuth login and PDS-based portable saves. See [design doc](../design/atproto.md).
 - [ ] **WASM frontend** — `web` crate with CanvasRenderer, Web Worker game loop, JS-bridged saves. See [design doc](../design/atproto.md#wasm-frontend).
 

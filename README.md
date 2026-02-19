@@ -472,6 +472,7 @@ crates/
       map.rs, combat.rs, ai.rs, fov.rs, pathfinding.rs, spawn.rs
       entity.rs, data.rs, types.rs, message_log.rs, message_history.rs
       platform.rs           Renderer and InputSource traits
+      spectate.rs           FrameSink trait, NullFrameSink, render_frame()
       seed_code.rs          Shareable seed code encode/decode (base36)
       menu.rs, saves.rs, settings.rs
       dev_tools.rs, analytics.rs, scenario.rs  (dev-tools feature)
@@ -481,6 +482,9 @@ crates/
       scenarios.rs          Balance integration tests
       invariants.rs         Property-based game invariant tests (proptest)
       golden_replays/       Stored golden replay JSON files
+  saves/                    roguelike-saves: SaveBackend trait (connected platforms)
+    src/
+      lib.rs                SaveBackend trait definition (depends only on core)
   tui/                      roguelike-tui: shared terminal game loop + rendering
     src/
       lib.rs                Re-exports all modules
@@ -488,7 +492,7 @@ crates/
       render.rs             CrosstermRenderer<W: Write>, render functions, color palettes
       input.rs              Key-to-command translation (game, menu, look mode)
       input_provider.rs     InputProvider trait, InputResult, GameInput
-      saves.rs              SaveBackend trait (will move to crates/saves)
+      saves.rs              Re-exports SaveBackend from roguelike-saves
   terminal/                 roguelike-terminal: crossterm frontend
     src/
       main.rs               Terminal game entry point

@@ -41,109 +41,130 @@ pub enum HistoryCommand {
 }
 
 // ---------------------------------------------------------------------------
-// Raw USB submodule — GIP protocol for Xbox controllers
+// Raw HID submodule — generic USB HID gamepad support
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "raw-usb")]
-mod raw_usb {
+mod raw_hid {
     use rusb::{Context, DeviceHandle, UsbContext};
     use std::time::Duration;
 
-    // Xbox Series controller USB IDs.
-    const VENDOR_ID: u16 = 0x045e;
-    const PRODUCT_ID: u16 = 0x0b12;
+    // USB HID interface class code.
+    const HID_IFACE_CLASS: u8 = 0x03;
 
-    // GIP interface descriptor values.
-    const GIP_IFACE_CLASS: u8 = 0xFF;
-    const GIP_IFACE_SUBCLASS: u8 = 0x47;
-    const GIP_IFACE_PROTOCOL: u8 = 0xD0;
+    // buttons1 bits — 8BitDo SN30 Pro DirectInput (D mode).
+    // Button numbering follows USB HID report order.
+    // Names use Xbox/positional convention (A=South, B=East, X=West, Y=North).
+    // Verify experimentally with `usb_hid_test` if using a different controller.
+    pub const HID_BTN_A: u8 = 0x02; // South face button
+    pub const HID_BTN_B: u8 = 0x01; // East face button
+    pub const HID_BTN_X: u8 = 0x08; // West face button
+    pub const HID_BTN_Y: u8 = 0x04; // North face button
+    pub const HID_BTN_LB: u8 = 0x10; // Left shoulder
+    pub const HID_BTN_RB: u8 = 0x20; // Right shoulder
 
-    // GIP command byte for input reports.
-    const GIP_CMD_INPUT: u8 = 0x20;
+    // buttons2 bits
+    #[cfg(test)] // only used in test iteration over buttons2
+    pub const HID_BTN_SELECT: u8 = 0x01;
+    pub const HID_BTN_START: u8 = 0x02;
 
-    // GIP init packets.
-    const GIP_INIT_IDENTIFY: &[u8] = &[0x04, 0x20, 0x01, 0x00];
-    const GIP_INIT_ACTIVE: &[u8] = &[0x05, 0x20, 0x03, 0x01, 0x00];
-
-    // Button bit positions in the u16 bitmask (bytes 4-5 of the report).
-    pub const BTN_MENU: u16 = 1 << 2;
-    #[cfg(test)] // only used in test iteration over all buttons
-    pub const BTN_VIEW: u16 = 1 << 3;
-    pub const BTN_A: u16 = 1 << 4;
-    pub const BTN_B: u16 = 1 << 5;
-    pub const BTN_X: u16 = 1 << 6;
-    pub const BTN_Y: u16 = 1 << 7;
-    pub const BTN_DPAD_UP: u16 = 1 << 8;
-    pub const BTN_DPAD_DOWN: u16 = 1 << 9;
-    pub const BTN_DPAD_LEFT: u16 = 1 << 10;
-    pub const BTN_DPAD_RIGHT: u16 = 1 << 11;
-    pub const BTN_LB: u16 = 1 << 12;
-    pub const BTN_RB: u16 = 1 << 13;
-
-    /// Parsed GIP input report (18 bytes from the controller).
+    /// Parsed HID input report from a DirectInput gamepad.
     ///
-    /// Layout: `[header(4)] [buttons(2)] [LT(2)] [RT(2)] [LX(2)] [LY(2)] [RX(2)] [RY(2)]`
-    #[derive(Debug, Clone, Copy, Default, PartialEq)]
-    pub struct GipInputReport {
-        pub buttons: u16,
-        pub left_trigger: u16,
-        pub right_trigger: u16,
-        pub left_stick_x: i16,
-        pub left_stick_y: i16,
-        pub right_stick_x: i16,
-        pub right_stick_y: i16,
+    /// Layout: `[buttons1] [buttons2] [hat] [LX] [LY] [RX] [RY] [extra...]`
+    /// Sticks are unsigned 0x00-0xFF with 0x80 as center.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct HidInputReport {
+        pub buttons1: u8,
+        pub buttons2: u8,
+        pub hat: u8,
+        pub left_stick_x: u8,
+        pub left_stick_y: u8,
+        pub right_stick_x: u8,
+        pub right_stick_y: u8,
     }
 
-    impl GipInputReport {
-        /// Parse from an 18+ byte buffer. Caller must verify `buf[0] == 0x20`
-        /// and `len >= 18`.
+    impl Default for HidInputReport {
+        fn default() -> Self {
+            Self {
+                buttons1: 0,
+                buttons2: 0,
+                hat: 0x08, // centered
+                left_stick_x: 0x80,
+                left_stick_y: 0x80,
+                right_stick_x: 0x80,
+                right_stick_y: 0x80,
+            }
+        }
+    }
+
+    impl HidInputReport {
+        /// Parse from a 7+ byte buffer.
         pub fn parse(buf: &[u8]) -> Self {
             Self {
-                buttons: u16::from_le_bytes([buf[4], buf[5]]),
-                left_trigger: u16::from_le_bytes([buf[6], buf[7]]),
-                right_trigger: u16::from_le_bytes([buf[8], buf[9]]),
-                left_stick_x: i16::from_le_bytes([buf[10], buf[11]]),
-                left_stick_y: i16::from_le_bytes([buf[12], buf[13]]),
-                right_stick_x: i16::from_le_bytes([buf[14], buf[15]]),
-                right_stick_y: i16::from_le_bytes([buf[16], buf[17]]),
+                buttons1: buf[0],
+                buttons2: buf[1],
+                hat: buf[2],
+                left_stick_x: buf[3],
+                left_stick_y: buf[4],
+                right_stick_x: buf[5],
+                right_stick_y: buf[6],
             }
         }
 
-        /// Test whether a button bit is set.
-        pub fn has(&self, bit: u16) -> bool {
-            self.buttons & bit != 0
+        /// Test whether a button bit is set in buttons1.
+        pub fn has1(&self, bit: u8) -> bool {
+            self.buttons1 & bit != 0
+        }
+
+        /// Test whether a button bit is set in buttons2.
+        #[cfg(test)]
+        pub fn has2(&self, bit: u8) -> bool {
+            self.buttons2 & bit != 0
         }
     }
 
-    /// Edge detection: button pressed in `curr` but not in `prev`.
-    pub fn newly_pressed(curr: &GipInputReport, prev: &GipInputReport, bit: u16) -> bool {
-        curr.has(bit) && !prev.has(bit)
+    /// Hat switch value to D-pad booleans: `[Up, Down, Left, Right]`.
+    ///
+    /// Standard USB HID hat encoding: 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW,
+    /// 6=W, 7=NW, >=8=centered.
+    pub fn hat_to_dpad(hat: u8) -> [bool; 4] {
+        match hat {
+            0 => [true, false, false, false], // N
+            1 => [true, false, false, true],  // NE
+            2 => [false, false, false, true], // E
+            3 => [false, true, false, true],  // SE
+            4 => [false, true, false, false], // S
+            5 => [false, true, true, false],  // SW
+            6 => [false, false, true, false], // W
+            7 => [true, false, true, false],  // NW
+            _ => [false; 4],                  // centered
+        }
     }
 
-    /// USB device handle for a GIP (Xbox) controller.
-    pub struct RawUsbState {
+    /// Edge detection for buttons1: pressed in `curr` but not in `prev`.
+    pub fn hid_newly_pressed1(curr: &HidInputReport, prev: &HidInputReport, bit: u8) -> bool {
+        (curr.buttons1 & bit != 0) && (prev.buttons1 & bit == 0)
+    }
+
+    /// Edge detection for buttons2: pressed in `curr` but not in `prev`.
+    pub fn hid_newly_pressed2(curr: &HidInputReport, prev: &HidInputReport, bit: u8) -> bool {
+        (curr.buttons2 & bit != 0) && (prev.buttons2 & bit == 0)
+    }
+
+    /// USB device handle for a generic HID gamepad.
+    pub struct RawHidState {
         handle: DeviceHandle<Context>,
         ep_in: u8,
-        #[allow(dead_code)] // stored for potential future output (rumble)
-        ep_out: u8,
     }
 
-    impl RawUsbState {
-        /// Find and initialize an Xbox Series controller via raw USB.
+    impl RawHidState {
+        /// Find and initialize any USB HID gamepad (class 0x03).
         /// Returns `None` if not found or init fails.
         pub fn try_init() -> Option<Self> {
             let ctx = Context::new().ok()?;
             let devices = ctx.devices().ok()?;
 
             for device in devices.iter() {
-                let desc = match device.device_descriptor() {
-                    Ok(d) => d,
-                    Err(_) => continue,
-                };
-                if desc.vendor_id() != VENDOR_ID || desc.product_id() != PRODUCT_ID {
-                    continue;
-                }
-
                 let config = match device.active_config_descriptor() {
                     Ok(c) => c,
                     Err(_) => continue,
@@ -151,27 +172,24 @@ mod raw_usb {
 
                 for iface in config.interfaces() {
                     for iface_desc in iface.descriptors() {
-                        if iface_desc.class_code() != GIP_IFACE_CLASS
-                            || iface_desc.sub_class_code() != GIP_IFACE_SUBCLASS
-                            || iface_desc.protocol_code() != GIP_IFACE_PROTOCOL
-                        {
+                        if iface_desc.class_code() != HID_IFACE_CLASS {
                             continue;
                         }
 
                         let iface_num = iface_desc.interface_number();
                         let mut ep_in = None;
-                        let mut ep_out = None;
 
                         for ep in iface_desc.endpoint_descriptors() {
-                            match ep.direction() {
-                                rusb::Direction::In => ep_in = Some(ep.address()),
-                                rusb::Direction::Out => ep_out = Some(ep.address()),
+                            if ep.direction() == rusb::Direction::In
+                                && ep.transfer_type() == rusb::TransferType::Interrupt
+                            {
+                                ep_in = Some(ep.address());
                             }
                         }
 
-                        let (ep_in, ep_out) = match (ep_in, ep_out) {
-                            (Some(i), Some(o)) => (i, o),
-                            _ => continue,
+                        let ep_in = match ep_in {
+                            Some(e) => e,
+                            None => continue,
                         };
 
                         let handle = match device.open() {
@@ -185,40 +203,34 @@ mod raw_usb {
                             continue;
                         }
 
-                        // Send GIP init packets.
-                        let timeout = Duration::from_millis(100);
-                        if handle
-                            .write_interrupt(ep_out, GIP_INIT_IDENTIFY, timeout)
-                            .is_err()
-                        {
-                            continue;
-                        }
-                        if handle
-                            .write_interrupt(ep_out, GIP_INIT_ACTIVE, timeout)
-                            .is_err()
-                        {
-                            continue;
-                        }
+                        // Workaround: some USB stacks (e.g. Crostini/xHCI
+                        // passthrough) require a control transfer before
+                        // interrupt endpoint transfers will succeed.
+                        let _ = handle.read_control(
+                            0x80, // GET_STATUS: device-to-host, standard, device
+                            0x00, // GET_STATUS request
+                            0,
+                            0,
+                            &mut [0u8; 2],
+                            Duration::from_millis(100),
+                        );
 
-                        return Some(RawUsbState {
-                            handle,
-                            ep_in,
-                            ep_out,
-                        });
+                        // No init packets needed — HID devices are ready
+                        // immediately after the kernel driver initializes them.
+
+                        return Some(RawHidState { handle, ep_in });
                     }
                 }
             }
             None
         }
 
-        /// Non-blocking read of a GIP input report (4ms timeout).
-        pub fn read_input(&self) -> Option<GipInputReport> {
+        /// Non-blocking read of an HID input report (4ms timeout).
+        pub fn read_input(&self) -> Option<HidInputReport> {
             let mut buf = [0u8; 64];
             let timeout = Duration::from_millis(4);
             match self.handle.read_interrupt(self.ep_in, &mut buf, timeout) {
-                Ok(len) if len >= 18 && buf[0] == GIP_CMD_INPUT => {
-                    Some(GipInputReport::parse(&buf))
-                }
+                Ok(len) if len >= 7 => Some(HidInputReport::parse(&buf)),
                 _ => None,
             }
         }
@@ -251,13 +263,13 @@ mod inner {
             gilrs: Gilrs,
             buffered_event: Option<gilrs::Event>,
         },
-        /// Xbox controller via raw USB (GIP protocol), for environments
-        /// where the kernel lacks the xpad driver (e.g. Crostini).
+        /// Generic USB HID gamepad (e.g. 8BitDo SN30 Pro in DirectInput mode),
+        /// for environments where gilrs/evdev don't see the device.
         #[cfg(feature = "raw-usb")]
-        RawUsb {
-            usb: super::raw_usb::RawUsbState,
-            prev_report: super::raw_usb::GipInputReport,
-            pending_report: Option<super::raw_usb::GipInputReport>,
+        RawHid {
+            hid: super::raw_hid::RawHidState,
+            prev_report: super::raw_hid::HidInputReport,
+            pending_report: Option<super::raw_hid::HidInputReport>,
         },
     }
 
@@ -332,7 +344,7 @@ mod inner {
         check_stick_common(sx, sy, stick_engaged)
     }
 
-    /// Shared stick edge-trigger logic (works for both gilrs and raw-usb).
+    /// Shared stick edge-trigger logic (works for both gilrs and raw HID).
     fn check_stick_common(sx: f32, sy: f32, stick_engaged: &mut bool) -> Option<(Coord, Coord)> {
         let magnitude = (sx * sx + sy * sy).sqrt();
         if magnitude < 0.3 {
@@ -346,146 +358,156 @@ mod inner {
         Some(analog_to_direction(sx, sy))
     }
 
-    /// Update shared state from a raw-usb GIP input report.
+    // -- Raw-HID dispatch helpers (pure functions for testability) ------------
+
+    /// Update shared state from an HID hat switch and shoulder buttons.
     #[cfg(feature = "raw-usb")]
-    fn update_held_from_report(
-        report: &super::raw_usb::GipInputReport,
+    fn update_held_from_hid_report(
+        report: &super::raw_hid::HidInputReport,
         dpad_held: &mut [bool; 4],
         lb_held: &mut bool,
     ) {
-        use super::raw_usb::*;
-        dpad_held[DPAD_UP] = report.has(BTN_DPAD_UP);
-        dpad_held[DPAD_DOWN] = report.has(BTN_DPAD_DOWN);
-        dpad_held[DPAD_LEFT] = report.has(BTN_DPAD_LEFT);
-        dpad_held[DPAD_RIGHT] = report.has(BTN_DPAD_RIGHT);
-        *lb_held = report.has(BTN_LB);
+        *dpad_held = super::raw_hid::hat_to_dpad(report.hat);
+        *lb_held = report.has1(super::raw_hid::HID_BTN_LB);
     }
 
-    // -- Raw-USB dispatch helpers (pure functions for testability) -----------
-
-    /// Consume a pending or new raw-usb report, updating held state.
+    /// Consume a pending or new HID report, updating held state.
     /// Returns `(current, previous)` for edge detection.
     #[cfg(feature = "raw-usb")]
-    fn consume_raw_report(
-        usb: &super::raw_usb::RawUsbState,
-        prev_report: &mut super::raw_usb::GipInputReport,
-        pending_report: &mut Option<super::raw_usb::GipInputReport>,
+    fn consume_hid_report(
+        hid: &super::raw_hid::RawHidState,
+        prev_report: &mut super::raw_hid::HidInputReport,
+        pending_report: &mut Option<super::raw_hid::HidInputReport>,
         dpad_held: &mut [bool; 4],
         lb_held: &mut bool,
     ) -> Option<(
-        super::raw_usb::GipInputReport,
-        super::raw_usb::GipInputReport,
+        super::raw_hid::HidInputReport,
+        super::raw_hid::HidInputReport,
     )> {
-        let report = pending_report.take().or_else(|| usb.read_input())?;
+        let report = pending_report.take().or_else(|| hid.read_input())?;
         let prev = *prev_report;
         *prev_report = report;
-        update_held_from_report(&report, dpad_held, lb_held);
+        update_held_from_hid_report(&report, dpad_held, lb_held);
         Some((report, prev))
     }
 
-    /// Normalize raw-usb stick axes and apply edge-trigger deadzone.
+    /// Normalize HID stick axes (u8 0-255, center 128) and apply edge-trigger.
+    /// HID Y axis: 0x00=up, 0xFF=down — inverted vs gilrs convention, so we
+    /// negate Y before passing to `check_stick_common`.
     #[cfg(feature = "raw-usb")]
-    fn check_raw_stick(
-        report: &super::raw_usb::GipInputReport,
+    fn check_hid_stick(
+        report: &super::raw_hid::HidInputReport,
         stick_engaged: &mut bool,
     ) -> Option<(Coord, Coord)> {
-        let sx = report.left_stick_x as f32 / 32768.0;
-        let sy = report.left_stick_y as f32 / 32768.0;
+        let sx = (report.left_stick_x as f32 - 128.0) / 128.0;
+        // Negate Y: HID 0x00=up → -1.0, but gilrs/check_stick_common expects
+        // positive Y = up, so invert.
+        let sy = -((report.left_stick_y as f32 - 128.0) / 128.0);
         check_stick_common(sx, sy, stick_engaged)
     }
 
-    /// True if any d-pad button was newly pressed (edge detection).
+    /// Detect hat switch change representing a new d-pad press.
     #[cfg(feature = "raw-usb")]
-    pub fn gip_dpad_newly_pressed(
-        report: &super::raw_usb::GipInputReport,
-        prev: &super::raw_usb::GipInputReport,
+    pub fn hid_dpad_newly_pressed(
+        report: &super::raw_hid::HidInputReport,
+        prev: &super::raw_hid::HidInputReport,
     ) -> bool {
-        use super::raw_usb::*;
-        newly_pressed(report, prev, BTN_DPAD_UP)
-            || newly_pressed(report, prev, BTN_DPAD_DOWN)
-            || newly_pressed(report, prev, BTN_DPAD_LEFT)
-            || newly_pressed(report, prev, BTN_DPAD_RIGHT)
+        // Centered → direction, or direction → different direction.
+        report.hat < 8 && (prev.hat >= 8 || prev.hat != report.hat)
     }
 
-    /// Map GIP face-button edges to game commands (A/B/X/Y/Menu only).
+    /// Map HID face-button edges to game commands (A/B/X/Y/Start only).
     #[cfg(feature = "raw-usb")]
-    pub fn gip_face_to_game_cmd(
-        report: &super::raw_usb::GipInputReport,
-        prev: &super::raw_usb::GipInputReport,
+    pub fn hid_face_to_game_cmd(
+        report: &super::raw_hid::HidInputReport,
+        prev: &super::raw_hid::HidInputReport,
     ) -> Option<GameCommand> {
-        use super::raw_usb::*;
-        if newly_pressed(report, prev, BTN_A) {
+        use super::raw_hid::*;
+        if hid_newly_pressed1(report, prev, HID_BTN_A) {
             return Some(GameCommand::Wait);
         }
-        if newly_pressed(report, prev, BTN_B) || newly_pressed(report, prev, BTN_MENU) {
+        if hid_newly_pressed1(report, prev, HID_BTN_B)
+            || hid_newly_pressed2(report, prev, HID_BTN_START)
+        {
             return Some(GameCommand::Quit);
         }
-        if newly_pressed(report, prev, BTN_X) {
+        if hid_newly_pressed1(report, prev, HID_BTN_X) {
             return Some(GameCommand::AutoExplore);
         }
-        if newly_pressed(report, prev, BTN_Y) {
+        if hid_newly_pressed1(report, prev, HID_BTN_Y) {
             return Some(GameCommand::Look);
         }
         None
     }
 
-    /// Map GIP button edges to menu commands (d-pad + face buttons).
+    /// Map HID button edges to menu commands (hat + face buttons).
     #[cfg(feature = "raw-usb")]
-    pub fn gip_to_menu_cmd(
-        report: &super::raw_usb::GipInputReport,
-        prev: &super::raw_usb::GipInputReport,
+    pub fn hid_to_menu_cmd(
+        report: &super::raw_hid::HidInputReport,
+        prev: &super::raw_hid::HidInputReport,
     ) -> Option<MenuCommand> {
-        use super::raw_usb::*;
-        if newly_pressed(report, prev, BTN_DPAD_UP) {
-            return Some(MenuCommand::Up);
+        use super::raw_hid::*;
+        // Hat switch edge detection for menu navigation.
+        if hid_dpad_newly_pressed(report, prev) {
+            let dpad = hat_to_dpad(report.hat);
+            if dpad[DPAD_UP] {
+                return Some(MenuCommand::Up);
+            }
+            if dpad[DPAD_DOWN] {
+                return Some(MenuCommand::Down);
+            }
         }
-        if newly_pressed(report, prev, BTN_DPAD_DOWN) {
-            return Some(MenuCommand::Down);
-        }
-        if newly_pressed(report, prev, BTN_A) || newly_pressed(report, prev, BTN_MENU) {
+        if hid_newly_pressed1(report, prev, HID_BTN_A)
+            || hid_newly_pressed2(report, prev, HID_BTN_START)
+        {
             return Some(MenuCommand::Select);
         }
-        if newly_pressed(report, prev, BTN_B) {
+        if hid_newly_pressed1(report, prev, HID_BTN_B) {
             return Some(MenuCommand::Back);
         }
         None
     }
 
-    /// Map GIP button edges to look-mode commands (close only).
+    /// Map HID button edges to look-mode commands (close only).
     #[cfg(feature = "raw-usb")]
-    pub fn gip_to_look_cmd(
-        report: &super::raw_usb::GipInputReport,
-        prev: &super::raw_usb::GipInputReport,
+    pub fn hid_to_look_cmd(
+        report: &super::raw_hid::HidInputReport,
+        prev: &super::raw_hid::HidInputReport,
     ) -> Option<LookCommand> {
-        use super::raw_usb::*;
-        if newly_pressed(report, prev, BTN_B) || newly_pressed(report, prev, BTN_MENU) {
+        use super::raw_hid::*;
+        if hid_newly_pressed1(report, prev, HID_BTN_B)
+            || hid_newly_pressed2(report, prev, HID_BTN_START)
+        {
             return Some(LookCommand::Close);
         }
         None
     }
 
-    /// Map GIP button edges to history-viewer commands.
+    /// Map HID button edges to history-viewer commands.
     #[cfg(feature = "raw-usb")]
-    pub fn gip_to_history_cmd(
-        report: &super::raw_usb::GipInputReport,
-        prev: &super::raw_usb::GipInputReport,
+    pub fn hid_to_history_cmd(
+        report: &super::raw_hid::HidInputReport,
+        prev: &super::raw_hid::HidInputReport,
     ) -> Option<HistoryCommand> {
-        use super::raw_usb::*;
-        if newly_pressed(report, prev, BTN_DPAD_UP) {
-            return Some(HistoryCommand::Menu(MenuCommand::Up));
+        use super::raw_hid::*;
+        if hid_dpad_newly_pressed(report, prev) {
+            let dpad = hat_to_dpad(report.hat);
+            if dpad[DPAD_UP] {
+                return Some(HistoryCommand::Menu(MenuCommand::Up));
+            }
+            if dpad[DPAD_DOWN] {
+                return Some(HistoryCommand::Menu(MenuCommand::Down));
+            }
         }
-        if newly_pressed(report, prev, BTN_DPAD_DOWN) {
-            return Some(HistoryCommand::Menu(MenuCommand::Down));
-        }
-        if newly_pressed(report, prev, BTN_LB) {
+        if hid_newly_pressed1(report, prev, HID_BTN_LB) {
             return Some(HistoryCommand::PageUp);
         }
-        if newly_pressed(report, prev, BTN_RB) {
+        if hid_newly_pressed1(report, prev, HID_BTN_RB) {
             return Some(HistoryCommand::PageDown);
         }
-        if newly_pressed(report, prev, BTN_A)
-            || newly_pressed(report, prev, BTN_B)
-            || newly_pressed(report, prev, BTN_MENU)
+        if hid_newly_pressed1(report, prev, HID_BTN_A)
+            || hid_newly_pressed1(report, prev, HID_BTN_B)
+            || hid_newly_pressed2(report, prev, HID_BTN_START)
         {
             return Some(HistoryCommand::Menu(MenuCommand::Back));
         }
@@ -494,18 +516,18 @@ mod inner {
 
     impl GamepadState {
         /// Try to create a `GamepadOption`. Tries gilrs first; if gilrs finds
-        /// zero gamepads and `raw-usb` is enabled, falls back to raw USB.
+        /// zero gamepads and `raw-usb` is enabled, falls back to raw HID.
         pub fn new_option() -> super::GamepadOption {
             match Gilrs::new() {
                 Ok(gilrs) => {
                     #[cfg(feature = "raw-usb")]
                     if gilrs.gamepads().count() == 0
-                        && let Some(usb) = super::raw_usb::RawUsbState::try_init()
+                        && let Some(hid) = super::raw_hid::RawHidState::try_init()
                     {
                         return Some(GamepadState {
-                            backend: Backend::RawUsb {
-                                usb,
-                                prev_report: super::raw_usb::GipInputReport::default(),
+                            backend: Backend::RawHid {
+                                hid,
+                                prev_report: super::raw_hid::HidInputReport::default(),
                                 pending_report: None,
                             },
                             stick_engaged: false,
@@ -525,11 +547,11 @@ mod inner {
                 }
                 Err(_) => {
                     #[cfg(feature = "raw-usb")]
-                    if let Some(usb) = super::raw_usb::RawUsbState::try_init() {
+                    if let Some(hid) = super::raw_hid::RawHidState::try_init() {
                         return Some(GamepadState {
-                            backend: Backend::RawUsb {
-                                usb,
-                                prev_report: super::raw_usb::GipInputReport::default(),
+                            backend: Backend::RawHid {
+                                hid,
+                                prev_report: super::raw_hid::HidInputReport::default(),
                                 pending_report: None,
                             },
                             stick_engaged: false,
@@ -554,13 +576,13 @@ mod inner {
                     *buffered_event = None;
                 }
                 #[cfg(feature = "raw-usb")]
-                Backend::RawUsb {
-                    usb,
+                Backend::RawHid {
+                    hid,
                     prev_report,
                     pending_report,
                 } => {
-                    while usb.read_input().is_some() {}
-                    *prev_report = super::raw_usb::GipInputReport::default();
+                    while hid.read_input().is_some() {}
+                    *prev_report = super::raw_hid::HidInputReport::default();
                     *pending_report = None;
                 }
             }
@@ -586,15 +608,15 @@ mod inner {
                     false
                 }
                 #[cfg(feature = "raw-usb")]
-                Backend::RawUsb {
-                    usb,
+                Backend::RawHid {
+                    hid,
                     pending_report,
                     ..
                 } => {
                     if pending_report.is_some() {
                         return true;
                     }
-                    if let Some(report) = usb.read_input() {
+                    if let Some(report) = hid.read_input() {
                         *pending_report = Some(report);
                         return true;
                     }
@@ -649,24 +671,24 @@ mod inner {
                     }
                 },
                 #[cfg(feature = "raw-usb")]
-                Backend::RawUsb {
-                    usb,
+                Backend::RawHid {
+                    hid,
                     prev_report,
                     pending_report,
                 } => {
-                    let (report, prev) = consume_raw_report(
-                        usb,
+                    let (report, prev) = consume_hid_report(
+                        hid,
                         prev_report,
                         pending_report,
                         &mut self.dpad_held,
                         &mut self.lb_held,
                     )?;
 
-                    if let Some(cmd) = gip_face_to_game_cmd(&report, &prev) {
+                    if let Some(cmd) = hid_face_to_game_cmd(&report, &prev) {
                         return Some(cmd);
                     }
 
-                    if gip_dpad_newly_pressed(&report, &prev)
+                    if hid_dpad_newly_pressed(&report, &prev)
                         && let Some((dx, dy)) = dpad_direction(&self.dpad_held)
                     {
                         return Some(if self.lb_held {
@@ -676,7 +698,7 @@ mod inner {
                         });
                     }
 
-                    if let Some((dx, dy)) = check_raw_stick(&report, &mut self.stick_engaged) {
+                    if let Some((dx, dy)) = check_hid_stick(&report, &mut self.stick_engaged) {
                         return Some(if self.lb_held {
                             GameCommand::Autorun { dx, dy }
                         } else {
@@ -722,24 +744,24 @@ mod inner {
                     }
                 },
                 #[cfg(feature = "raw-usb")]
-                Backend::RawUsb {
-                    usb,
+                Backend::RawHid {
+                    hid,
                     prev_report,
                     pending_report,
                 } => {
-                    let (report, prev) = consume_raw_report(
-                        usb,
+                    let (report, prev) = consume_hid_report(
+                        hid,
                         prev_report,
                         pending_report,
                         &mut self.dpad_held,
                         &mut self.lb_held,
                     )?;
 
-                    if let Some(cmd) = gip_to_menu_cmd(&report, &prev) {
+                    if let Some(cmd) = hid_to_menu_cmd(&report, &prev) {
                         return Some(cmd);
                     }
 
-                    if let Some((_, dy)) = check_raw_stick(&report, &mut self.stick_engaged) {
+                    if let Some((_, dy)) = check_hid_stick(&report, &mut self.stick_engaged) {
                         if dy < 0 {
                             return Some(MenuCommand::Up);
                         }
@@ -788,30 +810,30 @@ mod inner {
                     }
                 },
                 #[cfg(feature = "raw-usb")]
-                Backend::RawUsb {
-                    usb,
+                Backend::RawHid {
+                    hid,
                     prev_report,
                     pending_report,
                 } => {
-                    let (report, prev) = consume_raw_report(
-                        usb,
+                    let (report, prev) = consume_hid_report(
+                        hid,
                         prev_report,
                         pending_report,
                         &mut self.dpad_held,
                         &mut self.lb_held,
                     )?;
 
-                    if let Some(cmd) = gip_to_look_cmd(&report, &prev) {
+                    if let Some(cmd) = hid_to_look_cmd(&report, &prev) {
                         return Some(cmd);
                     }
 
-                    if gip_dpad_newly_pressed(&report, &prev)
+                    if hid_dpad_newly_pressed(&report, &prev)
                         && let Some((dx, dy)) = dpad_direction(&self.dpad_held)
                     {
                         return Some(LookCommand::Move { dx, dy });
                     }
 
-                    if let Some((dx, dy)) = check_raw_stick(&report, &mut self.stick_engaged) {
+                    if let Some((dx, dy)) = check_hid_stick(&report, &mut self.stick_engaged) {
                         return Some(LookCommand::Move { dx, dy });
                     }
 
@@ -858,24 +880,24 @@ mod inner {
                     }
                 },
                 #[cfg(feature = "raw-usb")]
-                Backend::RawUsb {
-                    usb,
+                Backend::RawHid {
+                    hid,
                     prev_report,
                     pending_report,
                 } => {
-                    let (report, prev) = consume_raw_report(
-                        usb,
+                    let (report, prev) = consume_hid_report(
+                        hid,
                         prev_report,
                         pending_report,
                         &mut self.dpad_held,
                         &mut self.lb_held,
                     )?;
 
-                    if let Some(cmd) = gip_to_history_cmd(&report, &prev) {
+                    if let Some(cmd) = hid_to_history_cmd(&report, &prev) {
                         return Some(cmd);
                     }
 
-                    if let Some((_, dy)) = check_raw_stick(&report, &mut self.stick_engaged) {
+                    if let Some((_, dy)) = check_hid_stick(&report, &mut self.stick_engaged) {
                         if dy < 0 {
                             return Some(HistoryCommand::Menu(MenuCommand::Up));
                         }
@@ -1280,265 +1302,272 @@ mod tests {
         }
     }
 
-    // -- Raw USB / GIP protocol tests (no hardware required) --
+    // -- Raw HID report parsing tests (no hardware required) --
 
     #[cfg(feature = "raw-usb")]
-    mod gip_tests {
-        use super::super::raw_usb::*;
+    mod hid_tests {
+        use super::super::raw_hid::*;
 
-        /// Build an 18-byte GIP input report buffer from field values.
-        fn make_report(
-            buttons: u16,
-            lt: u16,
-            rt: u16,
-            lx: i16,
-            ly: i16,
-            rx: i16,
-            ry: i16,
-        ) -> [u8; 18] {
-            let mut buf = [0u8; 18];
-            buf[0] = 0x20; // command byte
-            buf[1] = 0x00; // flags
-            buf[2] = 0x01; // sequence
-            buf[3] = 0x0E; // length
-            buf[4..6].copy_from_slice(&buttons.to_le_bytes());
-            buf[6..8].copy_from_slice(&lt.to_le_bytes());
-            buf[8..10].copy_from_slice(&rt.to_le_bytes());
-            buf[10..12].copy_from_slice(&lx.to_le_bytes());
-            buf[12..14].copy_from_slice(&ly.to_le_bytes());
-            buf[14..16].copy_from_slice(&rx.to_le_bytes());
-            buf[16..18].copy_from_slice(&ry.to_le_bytes());
-            buf
+        /// Build a 9-byte HID input report buffer from field values.
+        fn make_hid_report(
+            buttons1: u8,
+            buttons2: u8,
+            hat: u8,
+            lx: u8,
+            ly: u8,
+            rx: u8,
+            ry: u8,
+        ) -> [u8; 9] {
+            [buttons1, buttons2, hat, lx, ly, rx, ry, 0, 0]
         }
 
         #[test]
         fn parse_idle_report() {
-            let buf = make_report(0, 0, 0, 0, 0, 0, 0);
-            let report = GipInputReport::parse(&buf);
-            assert_eq!(report, GipInputReport::default());
+            let buf = make_hid_report(0, 0, 0x08, 0x80, 0x80, 0x80, 0x80);
+            let report = HidInputReport::parse(&buf);
+            assert_eq!(report, HidInputReport::default());
         }
 
         #[test]
-        fn parse_button_a() {
-            let buf = make_report(BTN_A, 0, 0, 0, 0, 0, 0);
-            let report = GipInputReport::parse(&buf);
-            assert!(report.has(BTN_A));
-            assert!(!report.has(BTN_B));
-            assert!(!report.has(BTN_X));
-        }
-
-        #[test]
-        fn parse_each_button() {
+        fn parse_each_button1() {
             let buttons = [
-                BTN_A,
-                BTN_B,
-                BTN_X,
-                BTN_Y,
-                BTN_MENU,
-                BTN_VIEW,
-                BTN_LB,
-                BTN_RB,
-                BTN_DPAD_UP,
-                BTN_DPAD_DOWN,
-                BTN_DPAD_LEFT,
-                BTN_DPAD_RIGHT,
+                HID_BTN_A, HID_BTN_B, HID_BTN_X, HID_BTN_Y, HID_BTN_LB, HID_BTN_RB,
             ];
             for &btn in &buttons {
-                let buf = make_report(btn, 0, 0, 0, 0, 0, 0);
-                let report = GipInputReport::parse(&buf);
-                assert!(report.has(btn), "button 0x{btn:04x} not set");
-                // Every other button should be off.
+                let buf = make_hid_report(btn, 0, 0x08, 0x80, 0x80, 0x80, 0x80);
+                let report = HidInputReport::parse(&buf);
+                assert!(report.has1(btn), "button 0x{btn:02x} not set");
                 for &other in &buttons {
                     if other != btn {
-                        assert!(!report.has(other), "button 0x{other:04x} should be off");
+                        assert!(!report.has1(other), "button 0x{other:02x} should be off");
                     }
                 }
             }
         }
 
         #[test]
-        fn parse_multi_button() {
-            let bits = BTN_A | BTN_LB | BTN_DPAD_UP;
-            let buf = make_report(bits, 0, 0, 0, 0, 0, 0);
-            let report = GipInputReport::parse(&buf);
-            assert!(report.has(BTN_A));
-            assert!(report.has(BTN_LB));
-            assert!(report.has(BTN_DPAD_UP));
-            assert!(!report.has(BTN_B));
+        fn parse_each_button2() {
+            let buttons = [HID_BTN_SELECT, HID_BTN_START];
+            for &btn in &buttons {
+                let buf = make_hid_report(0, btn, 0x08, 0x80, 0x80, 0x80, 0x80);
+                let report = HidInputReport::parse(&buf);
+                assert!(report.has2(btn), "button2 0x{btn:02x} not set");
+                for &other in &buttons {
+                    if other != btn {
+                        assert!(!report.has2(other), "button2 0x{other:02x} should be off");
+                    }
+                }
+            }
         }
 
         #[test]
-        fn parse_dpad_combos() {
-            let diagonal = BTN_DPAD_UP | BTN_DPAD_RIGHT;
-            let buf = make_report(diagonal, 0, 0, 0, 0, 0, 0);
-            let report = GipInputReport::parse(&buf);
-            assert!(report.has(BTN_DPAD_UP));
-            assert!(report.has(BTN_DPAD_RIGHT));
-            assert!(!report.has(BTN_DPAD_DOWN));
-            assert!(!report.has(BTN_DPAD_LEFT));
+        fn hat_to_dpad_all_values() {
+            // [Up, Down, Left, Right]
+            assert_eq!(hat_to_dpad(0), [true, false, false, false]); // N
+            assert_eq!(hat_to_dpad(1), [true, false, false, true]); // NE
+            assert_eq!(hat_to_dpad(2), [false, false, false, true]); // E
+            assert_eq!(hat_to_dpad(3), [false, true, false, true]); // SE
+            assert_eq!(hat_to_dpad(4), [false, true, false, false]); // S
+            assert_eq!(hat_to_dpad(5), [false, true, true, false]); // SW
+            assert_eq!(hat_to_dpad(6), [false, false, true, false]); // W
+            assert_eq!(hat_to_dpad(7), [true, false, true, false]); // NW
         }
 
         #[test]
-        fn parse_triggers() {
-            let buf = make_report(0, 512, 1023, 0, 0, 0, 0);
-            let report = GipInputReport::parse(&buf);
-            assert_eq!(report.left_trigger, 512);
-            assert_eq!(report.right_trigger, 1023);
+        fn hat_to_dpad_centered_variants() {
+            // Any value >= 8 should produce centered (all false).
+            for v in 8..=15 {
+                assert_eq!(hat_to_dpad(v), [false; 4], "hat={v} should be centered");
+            }
+            assert_eq!(hat_to_dpad(0xFF), [false; 4]);
         }
 
         #[test]
-        fn parse_stick_extremes() {
-            // Full left-down on left stick, full right-up on right stick.
-            let buf = make_report(0, 0, 0, -32768, -32768, 32767, 32767);
-            let report = GipInputReport::parse(&buf);
-            assert_eq!(report.left_stick_x, -32768);
-            assert_eq!(report.left_stick_y, -32768);
-            assert_eq!(report.right_stick_x, 32767);
-            assert_eq!(report.right_stick_y, 32767);
-        }
-
-        #[test]
-        fn newly_pressed_fires_once() {
-            let idle = GipInputReport::default();
-            let pressed = GipInputReport {
-                buttons: BTN_A,
+        fn hid_newly_pressed_fires_once() {
+            let idle = HidInputReport::default();
+            let pressed = HidInputReport {
+                buttons1: HID_BTN_A,
                 ..Default::default()
             };
             // Press edge: fires.
-            assert!(newly_pressed(&pressed, &idle, BTN_A));
+            assert!(hid_newly_pressed1(&pressed, &idle, HID_BTN_A));
             // Hold: does not fire.
-            assert!(!newly_pressed(&pressed, &pressed, BTN_A));
+            assert!(!hid_newly_pressed1(&pressed, &pressed, HID_BTN_A));
             // Release: does not fire.
-            assert!(!newly_pressed(&idle, &pressed, BTN_A));
+            assert!(!hid_newly_pressed1(&idle, &pressed, HID_BTN_A));
         }
 
         #[test]
-        fn newly_pressed_independent_buttons() {
-            let prev = GipInputReport {
-                buttons: BTN_A,
+        fn hid_newly_pressed2_fires_once() {
+            let idle = HidInputReport::default();
+            let pressed = HidInputReport {
+                buttons2: HID_BTN_START,
                 ..Default::default()
             };
-            let curr = GipInputReport {
-                buttons: BTN_A | BTN_B,
-                ..Default::default()
-            };
-            // B is newly pressed, A is held.
-            assert!(newly_pressed(&curr, &prev, BTN_B));
-            assert!(!newly_pressed(&curr, &prev, BTN_A));
+            assert!(hid_newly_pressed2(&pressed, &idle, HID_BTN_START));
+            assert!(!hid_newly_pressed2(&pressed, &pressed, HID_BTN_START));
+            assert!(!hid_newly_pressed2(&idle, &pressed, HID_BTN_START));
         }
 
         #[test]
-        fn stick_normalization_positive_y_is_up() {
-            // GIP: positive Y = up. Same convention as gilrs.
-            // analog_to_direction expects positive Y = up and negates it for screen.
+        fn stick_normalization() {
             use super::super::inner::analog_to_direction;
-            // Full up: i16 max = 32767 → 32767/32768 ≈ 1.0 → screen up = (0, -1)
-            let sy = 32767i16 as f32 / 32768.0;
-            assert_eq!(analog_to_direction(0.0, sy), (0, -1));
-            // Full down: i16 min = -32768 → -32768/32768 = -1.0 → screen down = (0, 1)
-            let sy = -32768i16 as f32 / 32768.0;
-            assert_eq!(analog_to_direction(0.0, sy), (0, 1));
+            // HID: 0x00 = full left/up, 0x80 = center, 0xFF = full right/down.
+            // After normalization: X maps directly, Y is negated.
+            // left_stick_x=0xFF → sx = (255-128)/128 = ~1.0 → right
+            // left_stick_y=0x00 → sy_raw = (0-128)/128 = -1.0,
+            //   negated → sy = 1.0 → up → screen (0,-1)
+            let sx = (0xFFu8 as f32 - 128.0) / 128.0;
+            let sy = -((0x00u8 as f32 - 128.0) / 128.0);
+            assert_eq!(analog_to_direction(sx, sy), (1, -1)); // right + up = NE
+
+            // Full down: y=0xFF → sy_raw = (255-128)/128 ≈ 1.0,
+            //   negated → sy = -1.0 → down → screen (0, 1)
+            let sx = (0x80u8 as f32 - 128.0) / 128.0; // ~0
+            let sy = -((0xFFu8 as f32 - 128.0) / 128.0);
+            assert_eq!(analog_to_direction(sx, sy), (0, 1)); // down
         }
     }
 
     #[cfg(feature = "raw-usb")]
-    mod gip_command_mapping_tests {
+    mod hid_command_mapping_tests {
         use super::super::inner::{
-            gip_face_to_game_cmd, gip_to_history_cmd, gip_to_look_cmd, gip_to_menu_cmd,
+            hid_dpad_newly_pressed, hid_face_to_game_cmd, hid_to_history_cmd, hid_to_look_cmd,
+            hid_to_menu_cmd,
         };
-        use super::super::raw_usb::*;
+        use super::super::raw_hid::*;
         use roguelike_core::command::GameCommand;
         use roguelike_core::look::LookCommand;
         use roguelike_core::platform::MenuCommand;
 
         use super::super::HistoryCommand;
 
-        /// Build a (current, previous) report pair representing a fresh button press.
-        fn press(btn: u16) -> (GipInputReport, GipInputReport) {
-            let curr = GipInputReport {
-                buttons: btn,
+        /// Build a (current, previous) report pair for a fresh buttons1 press.
+        fn press1(btn: u8) -> (HidInputReport, HidInputReport) {
+            let curr = HidInputReport {
+                buttons1: btn,
                 ..Default::default()
             };
-            let prev = GipInputReport::default();
+            let prev = HidInputReport::default();
+            (curr, prev)
+        }
+
+        /// Build a (current, previous) report pair for a fresh buttons2 press.
+        fn press2(btn: u8) -> (HidInputReport, HidInputReport) {
+            let curr = HidInputReport {
+                buttons2: btn,
+                ..Default::default()
+            };
+            let prev = HidInputReport::default();
+            (curr, prev)
+        }
+
+        /// Build a (current, previous) report pair for a fresh hat press.
+        fn press_hat(hat: u8) -> (HidInputReport, HidInputReport) {
+            let curr = HidInputReport {
+                hat,
+                ..Default::default()
+            };
+            let prev = HidInputReport::default(); // hat=0x08 (centered)
             (curr, prev)
         }
 
         #[test]
         fn game_face_buttons() {
-            let (r, p) = press(BTN_A);
-            assert_eq!(gip_face_to_game_cmd(&r, &p), Some(GameCommand::Wait));
-            let (r, p) = press(BTN_B);
-            assert_eq!(gip_face_to_game_cmd(&r, &p), Some(GameCommand::Quit));
-            let (r, p) = press(BTN_X);
-            assert_eq!(gip_face_to_game_cmd(&r, &p), Some(GameCommand::AutoExplore));
-            let (r, p) = press(BTN_Y);
-            assert_eq!(gip_face_to_game_cmd(&r, &p), Some(GameCommand::Look));
-            let (r, p) = press(BTN_MENU);
-            assert_eq!(gip_face_to_game_cmd(&r, &p), Some(GameCommand::Quit));
+            let (r, p) = press1(HID_BTN_A);
+            assert_eq!(hid_face_to_game_cmd(&r, &p), Some(GameCommand::Wait));
+            let (r, p) = press1(HID_BTN_B);
+            assert_eq!(hid_face_to_game_cmd(&r, &p), Some(GameCommand::Quit));
+            let (r, p) = press1(HID_BTN_X);
+            assert_eq!(hid_face_to_game_cmd(&r, &p), Some(GameCommand::AutoExplore));
+            let (r, p) = press1(HID_BTN_Y);
+            assert_eq!(hid_face_to_game_cmd(&r, &p), Some(GameCommand::Look));
+            let (r, p) = press2(HID_BTN_START);
+            assert_eq!(hid_face_to_game_cmd(&r, &p), Some(GameCommand::Quit));
         }
 
         #[test]
         fn game_held_button_does_not_fire() {
-            // Same report as prev = button held, not newly pressed.
-            let held = GipInputReport {
-                buttons: BTN_A,
+            let held = HidInputReport {
+                buttons1: HID_BTN_A,
                 ..Default::default()
             };
-            assert_eq!(gip_face_to_game_cmd(&held, &held), None);
+            assert_eq!(hid_face_to_game_cmd(&held, &held), None);
         }
 
         #[test]
         fn menu_buttons() {
-            let (r, p) = press(BTN_DPAD_UP);
-            assert_eq!(gip_to_menu_cmd(&r, &p), Some(MenuCommand::Up));
-            let (r, p) = press(BTN_DPAD_DOWN);
-            assert_eq!(gip_to_menu_cmd(&r, &p), Some(MenuCommand::Down));
-            let (r, p) = press(BTN_A);
-            assert_eq!(gip_to_menu_cmd(&r, &p), Some(MenuCommand::Select));
-            let (r, p) = press(BTN_MENU);
-            assert_eq!(gip_to_menu_cmd(&r, &p), Some(MenuCommand::Select));
-            let (r, p) = press(BTN_B);
-            assert_eq!(gip_to_menu_cmd(&r, &p), Some(MenuCommand::Back));
-            let (r, p) = press(BTN_X);
-            assert_eq!(gip_to_menu_cmd(&r, &p), None);
+            let (r, p) = press_hat(0); // N = Up
+            assert_eq!(hid_to_menu_cmd(&r, &p), Some(MenuCommand::Up));
+            let (r, p) = press_hat(4); // S = Down
+            assert_eq!(hid_to_menu_cmd(&r, &p), Some(MenuCommand::Down));
+            let (r, p) = press1(HID_BTN_A);
+            assert_eq!(hid_to_menu_cmd(&r, &p), Some(MenuCommand::Select));
+            let (r, p) = press2(HID_BTN_START);
+            assert_eq!(hid_to_menu_cmd(&r, &p), Some(MenuCommand::Select));
+            let (r, p) = press1(HID_BTN_B);
+            assert_eq!(hid_to_menu_cmd(&r, &p), Some(MenuCommand::Back));
+            let (r, p) = press1(HID_BTN_X);
+            assert_eq!(hid_to_menu_cmd(&r, &p), None);
         }
 
         #[test]
         fn look_buttons() {
-            let (r, p) = press(BTN_B);
-            assert_eq!(gip_to_look_cmd(&r, &p), Some(LookCommand::Close));
-            let (r, p) = press(BTN_MENU);
-            assert_eq!(gip_to_look_cmd(&r, &p), Some(LookCommand::Close));
-            let (r, p) = press(BTN_A);
-            assert_eq!(gip_to_look_cmd(&r, &p), None);
+            let (r, p) = press1(HID_BTN_B);
+            assert_eq!(hid_to_look_cmd(&r, &p), Some(LookCommand::Close));
+            let (r, p) = press2(HID_BTN_START);
+            assert_eq!(hid_to_look_cmd(&r, &p), Some(LookCommand::Close));
+            let (r, p) = press1(HID_BTN_A);
+            assert_eq!(hid_to_look_cmd(&r, &p), None);
         }
 
         #[test]
         fn history_buttons() {
-            let (r, p) = press(BTN_DPAD_UP);
+            let (r, p) = press_hat(0); // N = Up
             assert_eq!(
-                gip_to_history_cmd(&r, &p),
+                hid_to_history_cmd(&r, &p),
                 Some(HistoryCommand::Menu(MenuCommand::Up))
             );
-            let (r, p) = press(BTN_DPAD_DOWN);
+            let (r, p) = press_hat(4); // S = Down
             assert_eq!(
-                gip_to_history_cmd(&r, &p),
+                hid_to_history_cmd(&r, &p),
                 Some(HistoryCommand::Menu(MenuCommand::Down))
             );
-            let (r, p) = press(BTN_LB);
-            assert_eq!(gip_to_history_cmd(&r, &p), Some(HistoryCommand::PageUp));
-            let (r, p) = press(BTN_RB);
-            assert_eq!(gip_to_history_cmd(&r, &p), Some(HistoryCommand::PageDown));
-            let (r, p) = press(BTN_A);
+            let (r, p) = press1(HID_BTN_LB);
+            assert_eq!(hid_to_history_cmd(&r, &p), Some(HistoryCommand::PageUp));
+            let (r, p) = press1(HID_BTN_RB);
+            assert_eq!(hid_to_history_cmd(&r, &p), Some(HistoryCommand::PageDown));
+            let (r, p) = press1(HID_BTN_A);
             assert_eq!(
-                gip_to_history_cmd(&r, &p),
+                hid_to_history_cmd(&r, &p),
                 Some(HistoryCommand::Menu(MenuCommand::Back))
             );
-            let (r, p) = press(BTN_B);
+            let (r, p) = press1(HID_BTN_B);
             assert_eq!(
-                gip_to_history_cmd(&r, &p),
+                hid_to_history_cmd(&r, &p),
                 Some(HistoryCommand::Menu(MenuCommand::Back))
             );
+        }
+
+        #[test]
+        fn dpad_hat_edge_detection() {
+            let idle = HidInputReport::default(); // hat=0x08
+            let north = HidInputReport {
+                hat: 0,
+                ..Default::default()
+            };
+            let east = HidInputReport {
+                hat: 2,
+                ..Default::default()
+            };
+            // Centered → direction = newly pressed.
+            assert!(hid_dpad_newly_pressed(&north, &idle));
+            // Direction → same direction = not newly pressed.
+            assert!(!hid_dpad_newly_pressed(&north, &north));
+            // Direction → different direction = newly pressed.
+            assert!(hid_dpad_newly_pressed(&east, &north));
+            // Direction → centered = not newly pressed.
+            assert!(!hid_dpad_newly_pressed(&idle, &north));
         }
     }
 }

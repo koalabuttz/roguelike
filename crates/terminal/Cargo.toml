@@ -17,6 +17,10 @@ serde_json = { workspace = true }
 gilrs = { version = "0.11", optional = true }
 rusb = { version = "0.9", optional = true }
 
+[[example]]
+name = "usb_hid_test"
+required-features = ["raw-usb"]
+
 [[bin]]
 name = "roguelike"
 path = "src/main.rs"

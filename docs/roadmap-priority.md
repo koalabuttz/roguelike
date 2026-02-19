@@ -15,11 +15,11 @@ These items block the most downstream work or are essential for the game to func
 | Item | Blocks | Impact | Effort | Notes |
 |------|--------|--------|--------|-------|
 | ~~Input abstraction~~ | ~~&zwj;~15 items~~ | ~~Medium~~ | ~~S~~ | ~~Controller, replay, platforms, mouse-only, one-handed, auto-explore all depend on this. Single most blocking item.~~ Done. |
-| Save/load | ~6 items | High | M | Unlocks meta-progression, bones, crash recovery. Expected baseline feature. |
+| ~~Save/load~~ | ~~&zwj;~6 items~~ | ~~High~~ | ~~M~~ | ~~Unlocks meta-progression, bones, crash recovery. Expected baseline feature.~~ Done (serde serialization, classic/casual modes, 5 save slots in casual). |
 | Stairs | ~3 items | High | M | Transforms single-room arena into a multi-level dungeon. |
 | Items | ~4 items | High | M | Meaningful player decisions. Unlocks menus, inventory UI, hunger (food is an item). |
-| Message history | 0 | Medium | S | Tiny effort, immediate QoL, essential for screen readers. |
-| Code of Conduct | 0 | Low | S | One file. Should exist before accepting external contributions. |
+| ~~Message history~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~Tiny effort, immediate QoL, essential for screen readers.~~ Done (Ctrl+P, scrollable, gamepad LB/RB page up/down). |
+| ~~Code of Conduct~~ | ~~0~~ | ~~Low~~ | ~~S~~ | ~~One file. Should exist before accepting external contributions.~~ Done. |
 
 ## Tier 2: Core Systems
 
@@ -27,17 +27,18 @@ Fills out the core game loop and addresses high-value, low-effort improvements.
 
 | Item | Blocks | Impact | Effort | Notes |
 |------|--------|--------|--------|-------|
-| Menus | ~3 items | High | M | Needed the moment items exist. Design for keyboard + controller from the start. |
-| Seeded RNG | ~4 items | Medium | S | Unlocks replay, daily challenges, seed sharing. Small refactor, outsized downstream value. |
-| A* pathfinding | ~2 items | High | M | Current greedy chase gets stuck on corners in complex layouts. Unlocks MCP pathfind_to and auto-explore. |
+| ~~Menus~~ | ~~&zwj;~3 items~~ | ~~High~~ | ~~M~~ | ~~Needed the moment items exist. Design for keyboard + controller from the start.~~ Done (title screen, pause menu, settings, seed entry). |
+| ~~Seeded RNG~~ | ~~&zwj;~4 items~~ | ~~Medium~~ | ~~S~~ | ~~Unlocks replay, daily challenges, seed sharing. Small refactor, outsized downstream value.~~ Done (separate RNG streams per system). |
+| ~~A* pathfinding~~ | ~~&zwj;~2 items~~ | ~~High~~ | ~~M~~ | ~~Current greedy chase gets stuck on corners in complex layouts. Unlocks MCP pathfind_to and auto-explore.~~ Done. |
 | Hunger | 0 | Medium | S | Classic mechanic. Simple (decrement per turn, eat food). Depends on items. |
 | Experience/leveling | 0 | High | M | Progression within a run. |
-| Data-driven content | ~2 items | Medium | M | Move templates to RON/TOML. Unlocks hot reload and community content. |
-| Look mode | 0 | Medium | S | "What is that T?" Needed as monster variety grows. |
+| ~~Data-driven content~~ | ~~&zwj;~2 items~~ | ~~Medium~~ | ~~M~~ | ~~Move templates to RON/TOML. Unlocks hot reload and community content.~~ Done (`game.toml` with hot reload via F10). |
+| ~~Look mode~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~"What is that T?" Needed as monster variety grows.~~ Done (cursor-based tile examination, `x` key / Y button). |
 | ~~Colorblind modes~~ | ~~0~~ | ~~High~~ | ~~S~~ | ~~Trivial if colors are in data files. 8% of men affected by current palette.~~ Done (protanopia, deuteranopia palettes in Settings). |
-| MCP autorun tuning | 0 | High | S | Autorun stops every 1 step inside rooms due to open-neighbor count. Only stop at meaningful decision points (corridor forks, room exits). [Playtest: 31% of tool calls wasted.](llm-playtest-2026-02-13.md) |
-| MCP pathfind_to tool | 0 | High | S | Walk to a visible/explored `(x, y)` via shortest path. Requires A*. Eliminates navigation fumbles. [Playtest: 19% of tool calls wasted.](llm-playtest-2026-02-13.md) |
-| MCP explored map tool | 0 | Medium | S | Return all previously-seen tiles so LLM can plan exploration routes instead of wandering. |
+| ~~MCP autorun tuning~~ | ~~0~~ | ~~High~~ | ~~S~~ | ~~Autorun stops every 1 step inside rooms due to open-neighbor count. Only stop at meaningful decision points (corridor forks, room exits).~~ Done (smarter stop conditions). |
+| ~~MCP pathfind_to tool~~ | ~~0~~ | ~~High~~ | ~~S~~ | ~~Walk to a visible/explored `(x, y)` via shortest path. Requires A\*. Eliminates navigation fumbles.~~ Done. |
+| ~~MCP explored map tool~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~Return all previously-seen tiles so LLM can plan exploration routes instead of wandering.~~ Done (`get_explored_map` with frontier markers). |
+| ~~MCP exploration graph~~ | ~~0~~ | ~~High~~ | ~~M~~ | ~~Structured room/corridor graph in observation responses for LLM strategic planning. Delta compression via fingerprint hashing.~~ Done (`exploration_graph.rs`, integrated into all MCP observations). |
 | Wandering monsters | 0 | Medium | S | Spawn new monsters over time to pressure the player forward. Primary anti-camping guard for HP regen — prevents infinite wait-to-heal. Uses existing spawn system. |
 
 ## Tier 3: Extended Features
@@ -49,12 +50,12 @@ Builds on the core systems to add depth, platforms, and accessibility.
 | ~~Platform abstraction~~ | ~~&zwj;~5 items~~ | ~~Low~~ | ~~M~~ | ~~Required before any platform port. Do alongside input abstraction.~~ Done. |
 | ~~Type aliases~~ | ~~&zwj;~2 items~~ | ~~None~~ | ~~S~~ | ~~30-minute refactor. Enables platform-specific type sizing.~~ Done. |
 | ~~Controller support~~ | ~~&zwj;~1 item~~ | ~~High~~ | ~~M~~ | ~~Requires input abstraction. Enables couch play, Steam Deck.~~ Done (gilrs, 8-dir d-pad/stick, LB autorun, context-sensitive button mapping). |
-| Replay system | ~2 items | Medium | M | Requires seeded RNG. Unlocks spectating and seed sharing. |
-| Auto-explore | 0 | High | M | Major QoL. Requires A*. Benefits all players, essential for motor accessibility. |
+| ~~Replay system~~ | ~~&zwj;~2 items~~ | ~~Medium~~ | ~~M~~ | ~~Requires seeded RNG. Unlocks spectating and seed sharing.~~ Done (deterministic recording/playback, golden replays). |
+| ~~Auto-explore~~ | ~~0~~ | ~~High~~ | ~~M~~ | ~~Major QoL. Requires A\*. Benefits all players, essential for motor accessibility.~~ Done (`o` key, gamepad X button, MCP `auto_explore` tool). |
 | Magic/abilities | 0 | High | L | Big design space. Requires targeting UI. Expands combat significantly. |
 | Granular difficulty | 0 | Medium | S | Config toggles. Broadens who can enjoy the game. |
 | Context-sensitive help | 0 | Medium | S | `?` key on any screen. Accessibility and onboarding. |
-| Debug overlay | 0 | Medium | S | See AI decisions, FOV, pathfinding, monster sight boundaries, hidden monsters. Accelerates development. |
+| ~~Debug overlay~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~See AI decisions, FOV, pathfinding, monster sight boundaries, hidden monsters. Accelerates development.~~ Done (F6–F12 toggles: FOV, targets, pathfinding, frontiers, reveal monsters, monster FOV). |
 | ~~MCP spectator mode (file)~~ | ~~&zwj;~1 item~~ | ~~Medium~~ | ~~S~~ | ~~Write rendered frames to a file after each MCP action; viewer process displays them. Proves the concept, upgrades to TCP later. [Design doc.](spectator-mode-options.md)~~ Done (`ROGUELIKE_SPECTATE_PATH` env var, atomic file writes, integrated into all MCP actions). |
 | Meta-progression | 0 | High | L | Persistent unlocks between runs. Requires save/load. |
 | Web (WASM) | ~2 items | High | L | Browser-based play. Requires platform abstraction. |
@@ -77,7 +78,7 @@ Features that build on a stable core and benefit from a wider feature set.
 | SSH server | 0 | Medium | L | Requires platform abstraction. |
 | Options/settings | 0 | Medium | M | Grows naturally as features accumulate. |
 | Targeting | 0 | Medium | M | Needed for ranged magic. Distinct UI mode. |
-| Hot reload | 0 | Medium | S | Requires data-driven content. Dev QoL. |
+| ~~Hot reload~~ | ~~0~~ | ~~Medium~~ | ~~S~~ | ~~Requires data-driven content. Dev QoL.~~ Done (F10 in dev-tools build reloads `game.toml`). |
 | ~~Balance telemetry~~ | ~~0~~ | ~~Medium~~ | ~~M~~ | ~~Useful once there's enough content to balance.~~ Done (per-game analytics, aggregate stats, CI balance workflow with baseline diffing). |
 | Mouse-only play | 0 | Medium | M | Click-to-move + menus. Benefits touchscreen too. |
 | Adjustable input timing | 0 | Low | S | Config option for players who need it. |
@@ -110,16 +111,16 @@ Significant investment. May depend on earlier tiers being complete.
 ## Critical Path
 
 ```
-Input abstraction
-  → Save/load
-    → Items + Menus
+Input abstraction ✓
+  → Save/load ✓
+    → Items + Menus ✓
       → Stairs + Hunger
         → Experience/leveling
           = Complete game loop
 
-  → Seeded RNG
-    → Replay system
-      → Daily challenges / Seed sharing
+  → Seeded RNG ✓
+    → Replay system ✓
+      → Daily challenges / Seed sharing ✓ (seed sharing done)
 
   → Controller support ✓
     → Steam Deck
@@ -132,11 +133,13 @@ Input abstraction
     → MCP spectator (TCP)
       → Live spectating
 
-A* pathfinding
-  → MCP pathfind_to tool
-  → Auto-explore
+A* pathfinding ✓
+  → MCP pathfind_to tool ✓
+  → Auto-explore ✓
+  → MCP exploration graph ✓
 ```
 
-Input abstraction and save/load unlock both the gameplay branch and the
-networking branch. A* pathfinding unlocks MCP and exploration improvements.
-Everything else hangs off those three.
+The foundation is complete — input abstraction, save/load, seeded RNG, A\*
+pathfinding, and platform abstraction are all done. The remaining critical
+path is the gameplay branch (Items → Stairs → XP) and the platform/networking
+branch (WASM, TCP spectator, leaderboards).

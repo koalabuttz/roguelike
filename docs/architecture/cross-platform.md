@@ -4,7 +4,7 @@ How the codebase is structured for multiple platform targets (terminal, SSH, web
 
 ## Current State
 
-The codebase is split into a Cargo workspace with six crates:
+The codebase is split into a Cargo workspace with six crates, plus a `[patch.crates-io]` shim:
 
 ```
 roguelike/
@@ -43,6 +43,7 @@ roguelike/
 │   │       ├── input.rs    (crossterm event polling)
 │   │       ├── terminal_input.rs (InputProvider impl for local terminal)
 │   │       ├── local_saves.rs    (SaveBackend impl for local filesystem)
+│   │       ├── dev_hooks.rs (DevHooks impl for debug overlay keys, dev-tools feature)
 │   │       └── gamepad.rs  (gilrs gamepad input, optional `gamepad` feature)
 │   ├── ssh/                roguelike-ssh: SSH server frontend
 │   │   ├── Cargo.toml      depends on core + tui + russh + argon2
@@ -63,9 +64,10 @@ roguelike/
 │   │       ├── main.rs
 │   │       ├── mcp_server.rs
 │   │       └── spectate.rs  (file-based spectator, ROGUELIKE_SPECTATE_PATH)
+│   ├── libudev-sys-dlopen/ Drop-in libudev-sys replacement via dlopen (not a workspace member)
 │   ├── atproto/            (future: AT Protocol identity + PDS save storage)
 │   ├── web/                (future: WASM browser frontend)
-│   └── gba/                (future: GBA frontend)
+│   ├── gba/                (future: GBA frontend)
 │   └── vita/               (future: PS Vita frontend)
 ```
 
@@ -80,6 +82,8 @@ pub type Coord = i32;  // position/dimension in tile units
 pub type Pos = (Coord, Coord);  // (x, y) tile position
 pub type Stat = i32;   // character stat (HP, ATK, DEF, damage)
 ```
+
+The `libudev-sys-dlopen` crate is a `[patch.crates-io]` replacement for `libudev-sys` that loads `libudev.so.1` via dlopen at runtime instead of linking at build time. This means Linux builds no longer require `libudev-dev` to compile — gamepad support loads when available, keyboard input works regardless. It is not a workspace member.
 
 Only `tui`, `terminal`, and `ssh` import `crossterm`. Only the `mcp` crate imports `rmcp`/`tokio`. The `core` and `saves` crates have zero platform dependencies.
 

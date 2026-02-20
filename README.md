@@ -496,6 +496,8 @@ crates/
   terminal/                 roguelike-terminal: crossterm frontend
     src/
       main.rs               Terminal game entry point
+      render.rs             CrosstermRenderer setup and lifecycle
+      input.rs              Crossterm event polling
       terminal_input.rs     InputProvider impl for local terminal (crossterm events)
       local_saves.rs        SaveBackend impl for local filesystem
       dev_hooks.rs          DevHooks impl for debug overlay keys (dev-tools feature)
@@ -520,6 +522,7 @@ crates/
     tests/
       mcp_integration.rs    Deterministic MCP tool integration tests
       mcp_proptest.rs       Property-based MCP session tests (proptest)
+  libudev-sys-dlopen/       Drop-in libudev-sys replacement via dlopen (Linux gamepad)
 tools/
   visualize.py            Python/matplotlib analytics visualizer (batch, sweep, analysis modes)
   balance_diff.py         Balance diff tool — compares stats JSON, outputs markdown verdict (stdlib only)

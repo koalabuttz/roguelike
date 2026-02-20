@@ -1208,6 +1208,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "459427e2af2b9c839b132acb702a1c654d95e10f8c326bfc2ad11310e458b1c5"
 
 [[package]]
+name = "libloading"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
+
+[[package]]
 name = "libm"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1226,11 +1236,9 @@ dependencies = [
 [[package]]
 name = "libudev-sys"
 version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c8469b4a23b962c1396b9b451dda50ef5b283e8dd309d69033475fa9b334324"
 dependencies = [
  "libc",
- "pkg-config",
+ "libloading",
 ]
 
 [[package]]
@@ -1947,7 +1955,7 @@ dependencies = [
 
 [[package]]
 name = "roguelike-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "proptest",
@@ -1959,7 +1967,7 @@ dependencies = [
 
 [[package]]
 name = "roguelike-mcp"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "proptest",
  "rmcp",
@@ -1973,14 +1981,14 @@ dependencies = [
 
 [[package]]
 name = "roguelike-saves"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "roguelike-core",
 ]
 
 [[package]]
 name = "roguelike-ssh"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2002,7 +2010,7 @@ dependencies = [
 
 [[package]]
 name = "roguelike-terminal"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crossterm",
  "gilrs",
@@ -2015,7 +2023,7 @@ dependencies = [
 
 [[package]]
 name = "roguelike-tui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crossterm",
  "roguelike-core",

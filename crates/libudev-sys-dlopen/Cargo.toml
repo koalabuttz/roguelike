@@ -1,0 +1,11 @@
+[package]
+name = "libudev-sys"
+version = "0.1.4"
+edition = "2021"
+links = "libudev"
+license = "MIT AND GPL-3.0-or-later"
+description = "Drop-in replacement for libudev-sys that loads libudev.so.1 via dlopen at runtime"
+
+[dependencies]
+libc = "0.2"
+libloading = "0.8"

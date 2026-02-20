@@ -14,6 +14,7 @@ Project documentation for the roguelike dungeon crawler.
 | [design/atproto-spectating.md](design/atproto-spectating.md) | Federated spectating via AT Protocol: Jetstream frame delivery, discovery | Future design |
 | [design/c64-atproto-bridge.md](design/c64-atproto-bridge.md) | Self-hostable bridge server connecting C64 (via Ultimate64 Ethernet) to AT Protocol for PDS saves and spectating | Future design |
 | [design/gba-port.md](design/gba-port.md) | GBA frontend: rendering, input, save, audio, no_std core adaptations | Proposed |
+| [design/procgen-exploration.md](design/procgen-exploration.md) | Survey of procedural generation techniques with evaluation against project constraints | Exploration |
 | [design/gameplay-implementation-plan.md](design/gameplay-implementation-plan.md) | Implementation plan for high-leverage gameplay features (6 phases) | Proposed |
 | [design/spectator-mode.md](design/spectator-mode.md) | Spectator mode options (file, stderr, TCP, Unix socket) | Current |
 | [reports/llm-playtest-summary.md](reports/llm-playtest-summary.md) | Consolidated findings from all 4 LLM playtest sessions | Historical |

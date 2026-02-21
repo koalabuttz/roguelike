@@ -11,7 +11,7 @@ pub type Stat = i32;
 
 /// Maximum number of entities (player + monsters) the engine supports.
 ///
-/// Constrained platforms override this: GBA = 128, C64 = 32.
+/// Constrained platforms override this: GBA = 128, C64 = 16.
 /// The wandering spawn system respects this cap alongside `max_wandering`.
 pub const MAX_ENTITIES: usize = 1024;
 

@@ -1,23 +1,47 @@
 # Commodore 64 Port Proposal
 
 **Project:** Roguelike Dungeon Crawler — C64 Edition
-**Date:** 2026-02-20
-**Status:** Proposal / Feasibility Study
+**Date:** 2026-02-21
+**Status:** Proposal — POC validated (rust-mos, 13 KB .PRG, playable on c64.emu)
 
 ---
 
 ## 1. Executive Summary
 
 This document proposes a native Commodore 64 port of the roguelike dungeon
-crawler currently implemented in Rust. The C64 port would be a ground-up
-reimplementation of the core game mechanics in 6502 assembly (with a cc65 C
-fallback for prototyping), targeting the C64's 64 KB memory, 1 MHz MOS 6510
-CPU, and 40x25 PETSCII text display.
+crawler currently implemented in Rust. The C64 port uses **rust-mos** — a fork
+of the Rust compiler backed by the llvm-mos LLVM backend — to compile `no_std`
+Rust directly to MOS 6502 machine code. This keeps the entire project in a
+single language, enables shared game logic between the PC and C64 codebases, and
+preserves Rust's type safety and ownership model on an 8-bit platform.
+
+A working proof-of-concept has been built and tested. The POC implements the
+complete game loop — procedural dungeon generation, Bresenham FOV, entity
+system, melee combat, monster AI, PETSCII rendering, keyboard + joystick
+input, and a message log — in **1,898 lines of `no_std` Rust** compiling to a
+**13 KB .PRG binary**. It runs on both c64.emu (Android) and VICE.
 
 The goal is a faithful adaptation — not a 1:1 clone. The C64 version preserves
 the dungeon-crawling experience (procedural rooms, fog of war, three monster
 types, HP regeneration, and tactical corridor combat) while making principled
 trade-offs for the platform's constraints.
+
+**Why rust-mos over cc65:** The original version of this proposal recommended
+cc65 (a C cross-compiler for 6502) with hand-optimized assembly hot paths.
+Rust-mos was chosen instead because:
+
+1. **Shared language** — The entire project (PC, SSH, MCP, and C64) stays in
+   Rust. Developers don't need to context-switch between Rust and C/asm.
+2. **Shared algorithms** — Map generation, combat, monster spawning, room
+   geometry, and the PRNG live in a single `no_std` crate (`roguelike-common`)
+   compiled for both targets. The same seed produces the same dungeon on both
+   platforms.
+3. **Type safety** — Rust's ownership model catches bugs at compile time that
+   would be runtime crashes on a 6502 (buffer overflows, use-after-free, etc.).
+4. **POC validation** — The 13 KB binary proves code size is competitive with
+   cc65 estimates (~12 KB for assembly, ~18 KB for C).
+5. **Ecosystem** — The `mos-hardware` crate provides type-safe, volatile-correct
+   access to VIC-II, SID, CIA, and Kernal — better than raw `poke` calls.
 
 **Enhanced hardware target:** The proposal assumes an **Ultimate 64** (or a
 stock C64 with an **Ultimate-II+ cartridge**) as the recommended platform,
@@ -29,29 +53,256 @@ gracefully degrade when no UII+ is present.
 
 ---
 
-## 2. Platform Constraints vs. Current Design
+## 2. Toolchain: rust-mos and llvm-mos
 
-| Resource          | Current (Rust/PC)             | Commodore 64                     |
-|-------------------|-------------------------------|----------------------------------|
-| CPU               | Multi-GHz, 64-bit             | MOS 6510 @ 1.023 MHz, 8-bit     |
-| RAM               | Gigabytes                     | 64 KB total (~38 KB usable)      |
-| Screen            | 80x40+ terminal chars         | 40x25 characters (1000 bytes)    |
-| Colors            | 24-bit RGB                    | 16 fixed colors                  |
-| Character set     | Full Unicode / ASCII          | PETSCII (shifted/unshifted)      |
-| Storage           | SSD / RAM disk                | 1541 floppy: 170 KB (~35 sec load) |
-| Networking        | TCP/IP (SSH, MCP servers)     | UII+ Ethernet: 10/100 Mbit TCP/UDP |
-| Integer types     | i32 everywhere                | 8-bit native, 16-bit emulated    |
-| Floating point    | f64 (used in FOV slopes)      | Software FP: ~1000x slower       |
-| Data structures   | Vec, HashSet, String, HashMap | Static arrays, bitfields          |
-| Coordinate space  | `i32` (Coord)                 | `u8` (0-255) or `i8` (-128..127) |
+### 2.1 Overview
 
-### 2.1 The Memory Budget
+[rust-mos](https://github.com/mrk-its/rust-mos) is a fork of the Rust compiler
+maintained by Mariusz Krynski (mrk-its) that adds MOS 6502 target support via
+the [llvm-mos](https://github.com/llvm-mos/llvm-mos) LLVM backend (511 stars,
+actively developed). The Rust fork tracks upstream at approximately Rust 1.76-
+1.78 with active rebase branches up to 1.87.
+
+The toolchain runs via Docker:
+
+```bash
+# x86_64 hosts
+docker pull mrkits/rust-mos
+
+# ARM64 hosts (Apple Silicon, Raspberry Pi)
+docker pull mrkits/rust-mos:13f2838f9-334fc98-8f3a80f8  # tagged ARM64 build
+```
+
+Build command (from the POC Makefile):
+
+```bash
+docker run --rm \
+  -e PATH=/usr/local/rust-mos/bin:/usr/local/bin:/usr/bin:/bin \
+  -v $(pwd):/work -w /work \
+  mrkits/rust-mos:13f2838f9-334fc98-8f3a80f8 \
+  cargo build --release
+```
+
+### 2.2 What Works
+
+- **`core` crate**: Fully functional — algebraic data types, pattern matching,
+  iterators, `Option`, `Result`, traits, generics, closures, `const fn`.
+- **`alloc` crate**: Available via the `mos-alloc` crate (heap allocator). We
+  choose NOT to use it — the game runs entirely on static arrays with no heap.
+- **64-bit integer arithmetic**: Compiles correctly to 8-bit instruction
+  sequences. chirp8-c64 confirmed this: "I was worried about the handling of
+  64-bit variables by LLVM-MOS, but it compiled everything to 8-bit instructions
+  like a champ." (Gergo Erdi, 2021)
+- **FFI with C**: Functions seamlessly for Kernal call wrappers.
+- **`no_std` ecosystem crates**: Any `no_std` crate compiles for MOS targets.
+- **LTO**: Link-time optimization across the entire program, critical for good
+  6502 code generation.
+
+### 2.3 What Does Not Work
+
+| Feature | Status | Workaround |
+|---------|--------|------------|
+| Inline assembly (`asm!`) | Not supported — no 6502 register constraints in Rust's asm infrastructure | Use C FFI wrappers for hardware access, or use `mos-hardware` crate |
+| `std` library | Not available (bare metal) | `no_std` + `core` only |
+| Floating point | Partial — soft float exists but `f64 as i32` casting has bugs | Integer-only algorithms (Bresenham FOV already avoids FP) |
+| 128-bit division | LLVM legalization error | Enable LTO (already required) |
+| Dynamic dispatch (trait objects) | Works but expensive — vtable indirection costs ~20 cycles per call | Use static dispatch (generics) exclusively |
+| Recursion | Works but prevents static stack allocation optimization | Avoid — already mitigated by iterative algorithms |
+
+### 2.4 llvm-mos Code Generation
+
+The llvm-mos backend provides several 6502-specific optimizations:
+
+- **Static stack allocation**: Whole-program call graph analysis at link time
+  places non-recursive function "stack frames" in statically allocated global
+  memory, eliminating the soft stack entirely. This is the single most
+  important optimization — programs without recursion may need no soft stack
+  at all.
+- **Zero page register allocation**: LLVM's register allocator keeps temporary
+  values in zero page ($00-$FF) and CPU registers (A, X, Y), minimizing memory
+  traffic. Zero page accesses are ~1 cycle faster than absolute addressing.
+- **16-bit index optimization**: Rewrites `base_16bit + loop_index_16bit` as
+  `base_16bit + offset_8bit`, enabling efficient `LDA (zp),Y` addressing.
+- **Calling convention**: First arguments in A/X registers, subsequent in zero
+  page pairs RS1-RS7. Return values in A/X. Much more efficient than cc65's
+  stack-based parameter passing.
+
+**Code quality assessment**: llvm-mos produces code that is roughly comparable
+to cc65 for most patterns, 10-11% smaller for simple functions, but can be
+28-39% larger for complex functions (no shared helper library like cc65's
+runtime). The POC's 13 KB binary is within the expected range.
+
+**Critical performance note from chirp8-c64**: "Going through a slice for screen
+manipulation is massively slower than using a raw pointer." For hot paths
+(rendering, FOV), prefer raw pointer arithmetic with `write_volatile` over safe
+Rust slice operations.
+
+### 2.5 Toolchain Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|-----------|--------|------------|
+| Single maintainer (mrk-its) | High | High | llvm-mos (the LLVM backend) has a separate, active team; Mikael Lund maintains a parallel fork; Docker images are self-contained and version-pinned |
+| No path to upstream Rust | Certain | Low | Acceptable for a retro hobby project; Docker pins the toolchain version |
+| Rust version drift | Medium | Medium | Pin Docker image tag; avoid bleeding-edge Rust features |
+| Code generation regressions | Medium | Medium | Pin Docker image; test on VICE before each release |
+
+---
+
+## 3. Ecosystem: mos-hardware and Prior Art
+
+### 3.1 The mos-hardware Crate
+
+[mos-hardware](https://github.com/mlund/mos-hardware) (v0.4.0, ~50 stars, by
+Mikael Lund) is the de facto standard crate for C64 Rust development. It
+provides type-safe, volatile-correct access to all C64 hardware:
+
+| Chip | Module | Features |
+|------|--------|----------|
+| VIC-II (6567/6569) | `vic2` | Sprites, raster IRQs, scrolling, video modes, color constants |
+| SID (6581/8580) | `sid` | 3 voices, ADSR, filters, PSID playback, hardware RNG via `SIDRng` |
+| CIA (6526) | `cia` | Joystick (`JoystickPosition` enum), keyboard matrix, timers, TOD clock |
+| CPU 6510 | `c64::cpu6510` | Memory banking (ROM/RAM/IO switching via typed flags) |
+| Kernal | `cbm_kernal` | File I/O wrappers, device access, `genio::Read` implementation |
+| PETSCII | `petscii` | Character encoding, compile-time `screen_codes!()` / `petscii_codes!()` macros |
+
+**Design principles:**
+- Hardware registers are `#[repr(C, packed)]` structs with `volatile-register`
+  `RW<T>` / `RO<T>` wrappers. Reads are safe; writes require `unsafe`.
+- All multi-bit fields use `bitflags!` — impossible to set invalid combinations.
+- Bank/address calculations are `const fn` — zero runtime cost.
+- Static size assertions verify struct layouts at compile time.
+- Feature-gated modules — include only the chips you need.
+
+**Example — joystick reading with mos-hardware:**
+
+```rust
+use mos_hardware::{c64, cia::JoystickPosition};
+
+let controller = c64::cia1().port_a.read().into();
+let (position, fire) = controller.read_joystick();
+match position {
+    JoystickPosition::Up        => cmd_move_n(),
+    JoystickPosition::DownRight => cmd_move_se(),
+    JoystickPosition::Middle if fire => cmd_wait(),
+    // ...
+}
+```
+
+**Example — SID sound effect with mos-hardware:**
+
+```rust
+use mos_hardware::{c64, sid};
+
+unsafe {
+    let s = c64::sid();
+    s.voice1.frequency.write(0x1CD6);           // ~440 Hz (A4)
+    s.voice1.attack_decay.write(0x09);          // fast attack, medium decay
+    s.voice1.sustain_release.write(0xA0);       // medium sustain, fast release
+    s.voice1.control.write(sid::VoiceControlFlags::TRIANGLE | sid::VoiceControlFlags::GATE);
+}
+```
+
+The POC currently uses hand-rolled `poke`/`peek` wrappers for simplicity.
+The production build should migrate to `mos-hardware` for type safety and
+to leverage its SID, keyboard matrix, and PETSCII support.
+
+### 3.2 Prior Art: rust-mos Projects
+
+| Project | Author | Description | Key Insight |
+|---------|--------|-------------|-------------|
+| [chirp8-c64](https://github.com/gergoerdi/chirp8-c64) | Gergo Erdi | CHIP-8 emulator for C64, split engine/frontend | Proved `no_std` Rust + trait-based platform abstraction works on 6502; raw pointers >> slices for screen writes |
+| [mos-hardware examples](https://github.com/mlund/mos-hardware) | Mikael Lund | 7 C64 demos: plasma, sprites, SID, raster IRQ, joystick, scrolling, 10PRINT | Demonstrates idiomatic Rust patterns for VIC-II/SID/CIA access |
+| [llvm-mos-ferris-demo](https://github.com/mrk-its/llvm-mos-ferris-demo) | mrk-its | Animated Ferris on Atari 8-bit, 95% Rust | Shows rust-mos works on multiple 6502 platforms |
+| [aoc2022](https://github.com/mrk-its/aoc2022) | mrk-its | Advent of Code 2022 on Atari 8-bit | Demonstrates complex algorithms compiled to 6502 |
+
+**chirp8-c64 architecture** (most relevant to our project):
+
+chirp8-c64 uses a split `engine` + `frontend` pattern. The engine crate
+(`chirp8-engine`) is `#![no_std]` and defines a `Peripherals` trait:
+
+```rust
+pub trait Peripherals {
+    fn set_pixel_row(&mut self, y: ScreenY, row: ScreenRow);
+    fn get_keys(&self) -> u16;
+    fn read_ram(&self, addr: Addr) -> Byte;
+    fn write_ram(&mut self, addr: Addr, val: Byte);
+}
+```
+
+The same engine runs on desktop (SDL), AVR microcontrollers, and the C64. Each
+platform implements `Peripherals`. This demonstrates that a shared `no_std` game
+core with platform-specific frontends is a proven pattern for rust-mos.
+
+**Why we don't follow chirp8's trait pattern:** chirp8 needs platform
+abstraction because the same engine runs on fundamentally different hardware
+(SDL vs 6502 vs AVR). Our project has a different constraint: the PC and C64
+engines differ in data structures (`Vec` vs static arrays, `HashSet` vs
+bitfields) more than in algorithms. Instead of abstracting storage behind
+traits — which adds indirection that defeats llvm-mos's static stack
+allocation (§11.3) — we share the algorithms directly by writing them at the
+C64's abstraction level (`u8`, `&mut [u8]`, `&mut [Room]`). See §5 for the
+full design.
+
+### 3.3 Prior Art: C64 Roguelikes
+
+- **Sword of Fargoal (1982)** — Procedural dungeons, fog of war, combat.
+  Proved the concept works beautifully on C64 hardware.
+- **Gateway to Apshai (1983)** — Real-time dungeon crawling with joystick.
+- **Rogue (1980)** — 40x24 display, simpler LOS. The original.
+- **Hack (1985)** — Complex inventory and interaction within tight memory.
+- **Dungeon of the Rogue Daemon (2017-present)** — Leif Bloomquist's
+  [MultiRogueLike](https://github.com/LeifBloomquist/MultiRogueLike), a
+  multiplayer roguelike running on real C64 hardware (RR-Net / 64NIC+ / Ultimate
+  64) with simultaneous web browser and Telnet clients. Uses a thin-client
+  architecture: a Java server handles all game logic, rendering a 21x17 viewport
+  per player and sending pre-rendered screen data over UDP (23-byte fixed
+  packets). The C64 client is pure 6502 assembly (ca65) using the IP65 network
+  library, with a raster IRQ-driven 3-phase game loop (input / network / screen
+  copy). Key lessons from the project: (1) custom character sets work well as
+  roguelike tilesets via VIC-II character mode — the server downloads a custom
+  font via TFTP at boot; (2) UDP with a simple action counter for deduplication
+  is simpler than TCP for latency-sensitive C64 communication; (3) VIC Bank 1
+  ($4000-$7FFF) avoids conflicts with the IP65 network stack; (4) a two-item
+  inventory (one per hand) provides meaningful gameplay depth with minimal UI
+  and memory cost; (5) TFTP-based auto-update at boot elegantly solves
+  distribution for a platform without easy internet access. Presented at
+  Roguelike Celebration in 2018, 2019, and 2020. Our approach differs
+  fundamentally — we use a fat client with local game logic rather than a thin
+  networked terminal — but MultiRogueLike validates that the C64 hardware is
+  capable of a compelling roguelike experience and informs several design
+  decisions in this proposal (see §6.1, §6.7, §6.9, §6.13).
+
+---
+
+## 4. Platform Constraints vs. Current Design
+
+| Resource | Current (Rust/PC) | Commodore 64 |
+|----------|-------------------|--------------|
+| CPU | Multi-GHz, 64-bit | MOS 6510 @ 1.023 MHz, 8-bit |
+| RAM | Gigabytes | 64 KB total (~38 KB usable) |
+| Screen | 80x40+ terminal chars | 40x25 characters (1000 bytes) |
+| Colors | 24-bit RGB | 16 fixed colors |
+| Character set | Full Unicode / ASCII | PETSCII (shifted/unshifted) |
+| Storage | SSD / RAM disk | 1541 floppy: 170 KB (~35 sec load) |
+| Networking | TCP/IP (SSH, MCP servers) | UII+ Ethernet: 10/100 Mbit TCP/UDP |
+| Integer types | i32 everywhere | 8-bit native, 16-bit emulated |
+| Floating point | f64 (used in FOV slopes) | Software FP: buggy in rust-mos |
+| Data structures | Vec, HashSet, String, HashMap | Static arrays, bitfields |
+| Coordinate space | `type Coord = i32` (`types.rs`) | `u8` (0-39 x, 0-21 y) |
+| Stat values | `type Stat = i32` (`types.rs`) | `u8` (0-255) |
+| Max entities | `MAX_ENTITIES = 1024` (types.rs notes "C64 = 16") | `MAX_ENTITIES = 16` |
+| PRNG | `rand::StdRng` (ChaCha20, u64 seed) | Galois LFSR (16-bit, u16 seed) |
+| Shared types | `roguelike-common`: `u8` coords, `Room`, `LfsrRng` | Same — shared crate compiles for both |
+| **Language** | **Rust (std)** | **Rust (no_std, no_alloc) via rust-mos** |
+| **Compiler** | **rustc (upstream)** | **rustc (rust-mos fork) + llvm-mos** |
+
+### 4.1 The Memory Budget
 
 The C64 has 64 KB of address space, but the Kernal ROM, BASIC ROM, I/O
 registers, screen memory, and the zero page consume significant portions:
 
 ```
-$0000-$00FF   Zero Page (256 bytes) — fastest storage, critical registers
+$0000-$00FF   Zero Page (256 bytes) — llvm-mos imaginary register file
 $0100-$01FF   CPU Stack (256 bytes)
 $0200-$03FF   Kernal/BASIC workspace
 $0400-$07FF   Default screen memory (1000 bytes + 24 spare)
@@ -63,429 +314,903 @@ $E000-$FFFF   Kernal ROM (banked out = +8 KB free, but no Kernal calls)
 ```
 
 By banking out BASIC ROM (we don't need it), we get ~46 KB for program + data.
-If we also bank out the Kernal (using our own IRQ handler), we can reach ~50 KB,
-but lose Kernal routines for disk I/O, keyboard scanning, etc. The sweet spot
-is **banking out BASIC only: ~46 KB usable**.
+The sweet spot is **banking out BASIC only: ~46 KB usable**.
 
-### 2.2 Memory Budget Allocation
+### 4.2 Memory Budget Allocation (Updated for rust-mos)
 
 ```
-Program code:           ~12 KB   (6502 assembly, tightly written)
-Map tile data:            1.2 KB  (40 x 24 = 960 tiles, 1 byte/tile + flags)
-Explored bitfield:        120 B   (960 bits = 120 bytes)
-Visible bitfield:         120 B   (960 bits)
-Entity table:             256 B   (16 entities x 16 bytes each)
-Message log:              512 B   (4 lines x 40 chars x ~3 messages)
-RNG state:                  4 B   (16-bit LFSR or xorshift)
-Dungeon generation temp:   2 KB   (room list, corridor scratch)
-FOV scratch tables:       512 B   (precomputed slope tables)
-Screen buffer:            1 KB    (40 x 25 = 1000 bytes)
-Color RAM mirror:         1 KB    (40 x 25 = 1000 nybbles, packed)
+Program code:           ~18 KB   (rust-mos Rust, release+LTO+opt-size)
+  POC measured at 13 KB with full game loop; production adds SID,
+  custom charset, save/load, dirty-rect rendering, items, XP (~5 KB extra)
+  roguelike-common contributes ~1.5 KB (mapgen, prng, combat, rooms,
+  items, leveling, depth scaling, wandering spawn, mood thresholds)
+Map tile data:            840 B   (40 x 21 = 840 tiles, 1 byte/tile)
+Structural wall bits:     105 B   (840 bits)
+Explored bitfield:        105 B   (840 bits)
+Visible bitfield:         105 B   (840 bits)
+Entity parallel arrays:   208 B   (16 entities x 13 bytes across arrays)
+  Base (POC):  10 arrays x 16 = 160 B (x, y, hp, max_hp, atk, def,
+               kind, ai, alive, sight)
+  Gameplay:     3 arrays x 16 =  48 B (xp_value, mood, memory)
+Room list:                 48 B   (12 rooms x 4 bytes)
+Floor items (sparse):      97 B   (32 items x 3 bytes + count)
+Player inventory:          12 B   (10 slots + weapon + armor, u8 type IDs)
+Player state:               4 B   (xp: u16, level: u8, depth: u8)
+Message log:              200 B   (4 lines x ~40 chars + metadata)
+RNG state:                  2 B   (16-bit Galois LFSR — LfsrRng struct)
 Custom charset:           2 KB    (256 chars x 8 bytes)
 Save buffer:              2 KB    (serialized game state for disk)
 Sound/music data:         2 KB    (SID chip patterns)
-Stack headroom:          256 B    (hardware stack)
-─────────────────────────────────
-Total:                  ~24 KB    (~22 KB headroom remaining)
+Zero page (llvm-mos):     32 B    (16 register pairs RC0-RC31)
+────────────────────────────────────
+Total:                  ~25 KB    (~21 KB headroom remaining)
 ```
 
-This leaves comfortable room for expansion (more monster types, items, deeper
-dungeons, larger maps via scrolling viewport, and network features).
-
-Note: The Ultimate-II+ command interface and network buffers live in the UII+
-module's own ARM processor and RAM — they do **not** consume C64 address space.
-The 6502 communicates with the UII+ through a small I/O register window
-(typically 2-4 bytes at a configurable address). We only need ~256 bytes of
-C64 RAM for a network send/receive buffer, already accounted for in the
-headroom above.
+The POC validates the baseline: 13 KB code + ~2 KB static data = ~15 KB total.
+Gameplay features (items, XP, stairs, mood — see the
+[gameplay implementation plan](design/gameplay-implementation-plan.md)) add ~1
+KB of data and ~2 KB of code. Even with all production additions (SID, charset,
+saves, networking, gameplay features), we stay well under the 46 KB budget.
 
 ---
 
-## 3. Design Decisions
+## 5. Code Sharing Strategy
 
-### 3.1 Map Size and Viewport
+The most compelling advantage of using rust-mos over cc65 is the ability to
+share Rust code between the PC and C64 codebases. This section describes a
+practical approach grounded in one key insight: **write the shared code at the
+C64's abstraction level, and let the PC call down to it.**
+
+The PC engine (`roguelike-core`) uses `Vec<Tile>`, `HashSet<Pos>`, `String`,
+`HashMap`, and `rand::StdRng`. The C64 engine uses `static mut [u8; 840]`,
+bitfields, `&'static [u8]`, and a 16-bit Galois LFSR. These storage layers
+are fundamentally incompatible, and abstracting them behind traits would add
+indirection that defeats llvm-mos's static stack allocation (§11.3).
+
+But the **algorithms** are the same. The map generation loop, combat formula,
+room intersection check, monster spawning, and PRNG are line-for-line identical
+in both codebases — just operating on different types. The solution: implement
+these algorithms once using primitive types (`u8`, `&mut [u8]`, `&mut [Room]`)
+that both platforms can use directly.
+
+### 5.1 Existing Architecture
+
+The project is already a **6-crate workspace** with clean separation between
+game logic, save persistence, rendering, and platform-specific binaries:
+
+```
+roguelike/
+  Cargo.toml                        # workspace: 7 members + libudev patch
+  crates/
+    common/       (roguelike-common) # NEW: shared #![no_std] algorithms + data
+    core/         (roguelike-core)   # PC game engine (library, std)
+    saves/        (roguelike-saves)  # SaveBackend trait abstraction
+    tui/          (roguelike-tui)    # Terminal rendering (crossterm)
+    terminal/     (roguelike-terminal) # Desktop app (keyboard + gamepad)
+    ssh/          (roguelike-ssh)    # Multi-user SSH server
+    mcp/          (roguelike-mcp)    # MCP server for AI integration
+    c64/          (roguelike-c64)    # C64 port (standalone, no_std, no_alloc)
+    libudev-sys-dlopen/             # dlopen libudev (patched dependency)
+```
+
+The **dependency graph** puts the shared crate at the bottom:
+
+```
+roguelike-common  (#![no_std], zero deps — the shared soul)
+    ↓                              ↓
+roguelike-core  (std, game engine)  roguelike-c64  (no_std, C64 binary)
+    ↓
+roguelike-saves (SaveBackend trait)
+    ↓
+roguelike-tui   (crossterm rendering + game loop)
+    ↓
+├── roguelike-terminal  (desktop: keyboard + gamepad + local saves)
+├── roguelike-ssh       (SSH server: per-user sessions + accounts)
+└── roguelike-mcp       (MCP server: AI tool interface, core only)
+```
+
+### 5.2 Design Principle: Shared Code IS C64 Code
+
+The shared crate uses the C64's natural types: `u8` coordinates, `&mut [u8]`
+tile buffers, fixed-size `&mut [Room]` arrays, and a concrete `LfsrRng` struct.
+No traits. No generics. No associated types. No type aliases.
+
+This means:
+- The C64 uses shared code **directly** — zero conversion cost, zero indirection.
+- The PC **calls down** to shared code and promotes results to its own types
+  (`u8` → `i32`, `Room` → `Rect`, `&[u8]` → `Vec<Tile>`).
+- The call graph is fully transparent to both `rustc` and `llvm-mos`.
+- Someone reading the shared crate sees a clear, textbook dungeon generator —
+  not a framework.
+
+**Why not type aliases?** The PC engine uses `type Coord = i32` and `type Stat
+= i32` to distinguish spatial values from combat statistics — useful when both
+are `i32`. In the shared crate, everything is `u8`: coordinates, HP, attack,
+defense, tile types, entity indices. A `type Coord = u8` alias doesn't
+distinguish coordinates from anything else — it just adds a layer of
+indirection between the reader and the actual data width. In ~400 lines of
+`no_std` code targeting the 6502, explicit `u8` is both clearer and more
+honest. The PC's own type aliases remain unchanged — they're a concern of
+`roguelike-core`'s API surface, not the shared crate.
+
+`cfg`-adaptive aliases (`#[cfg(c64)] type Coord = u8; #[cfg(not(c64))] type
+Coord = i32;`) are worse: they make "shared" code compile with different
+overflow semantics on each platform, defeating the purpose of sharing.
+
+**Why not traits?** On the 6502, generic/trait code can prevent llvm-mos from
+performing static stack allocation — the compiler needs to see the complete
+call graph at link time. Trait methods through generics create indirect
+references that obstruct this analysis. Concrete functions on primitive types
+produce a clean call graph with guaranteed optimal code generation. See §11.3
+and §11.5.
+
+### 5.3 Shared Crate: `roguelike-common`
+
+```
+roguelike/
+  crates/
+    common/         (roguelike-common)   # #![no_std], zero deps
+      Cargo.toml
+      src/
+        lib.rs        # re-exports
+        prng.rs       # LfsrRng — Galois LFSR (deterministic, shared)
+        room.rs       # Room struct, intersection, center
+        balance.rs    # numeric constants: HP, ATK, DEF, spawn weights, regen,
+                      #   item stats, XP tables, depth scaling, wandering spawn
+                      #   config, mood thresholds (see gameplay-implementation-plan.md)
+        combat.rs     # const fn damage formula + effective_attack/defense helpers
+        mapgen.rs     # generate() on &mut [u8] + &mut [Room]
+        spawn.rs      # pick_monster(), spawn_into_rooms()
+        items.rs      # item type IDs, stat lookup tables (heal amount, ATK/DEF bonus)
+        leveling.rs   # xp_for_level() table, stat growth per level
+        structural.rs # compute_structural_walls() on &[u8] → bitfield
+        seed.rs       # seed code encode/decode (no_std, fixed buffers)
+```
+
+```toml
+# roguelike-common/Cargo.toml
+[package]
+name = "roguelike-common"
+version = "0.1.0"
+edition = "2021"
+
+# Zero dependencies — compiles on host, MOS, thumbv6m, anything
+```
+
+```rust
+// roguelike-common/src/lib.rs
+#![no_std]
+
+pub mod prng;
+pub mod room;
+pub mod balance;
+pub mod combat;
+pub mod mapgen;
+pub mod spawn;
+pub mod items;
+pub mod leveling;
+pub mod structural;
+pub mod seed;
+
+#[cfg(test)]
+extern crate std;
+```
+
+**~550 lines total.** Every function takes concrete types and produces concrete
+outputs. No `alloc`, no `serde`, no `cfg` switches. The gameplay modules
+(`items`, `leveling`) follow the same pattern as the core modules: `u8` types,
+`const` lookup tables, concrete functions. Both platforms import the same
+balance data — the C64 uses it directly, the PC promotes to its own types.
+
+### 5.4 Shared PRNG: `LfsrRng`
+
+The PRNG is the foundation of cross-platform seed sharing. Both platforms use
+the same 16-bit Galois LFSR — same seed, same random sequence, same dungeon.
+
+```rust
+// roguelike-common/src/prng.rs
+
+/// 16-bit Galois LFSR pseudo-random number generator.
+/// Polynomial: x^16 + x^14 + x^13 + x^11 + 1 (taps: 0xB400).
+/// Maximal-length: cycles through all 65535 non-zero states.
+pub struct LfsrRng {
+    state: u16,
+}
+
+impl LfsrRng {
+    pub const fn new(seed: u16) -> Self {
+        Self { state: if seed == 0 { 0xACE1 } else { seed } }
+    }
+
+    pub fn next_u8(&mut self) -> u8 {
+        let lsb = self.state & 1;
+        self.state >>= 1;
+        if lsb != 0 { self.state ^= 0xB400; }
+        self.state as u8
+    }
+
+    pub fn next_u16(&mut self) -> u16 {
+        let lo = self.next_u8() as u16;
+        let hi = self.next_u8() as u16;
+        (hi << 8) | lo
+    }
+
+    /// Random value in [min, max] inclusive. Rejection sampling for no bias.
+    pub fn range(&mut self, min: u8, max: u8) -> u8 {
+        if min >= max { return min; }
+        let span = max - min + 1;
+        let reject = (256u16 % span as u16) as u8;
+        if reject == 0 {
+            return min + (self.next_u8() % span);
+        }
+        let threshold = (256u16 - reject as u16) as u8;
+        loop {
+            let r = self.next_u8();
+            if r < threshold {
+                return min + (r % span);
+            }
+        }
+    }
+
+    /// 50/50 coin flip.
+    pub fn coin(&mut self) -> bool { self.next_u8() & 1 != 0 }
+
+    /// Current state (for seed display / save).
+    pub fn state(&self) -> u16 { self.state }
+}
+```
+
+On the C64, the `LfsrRng` struct (2 bytes) is passed as `&mut LfsrRng`,
+replacing the POC's `static mut RNG_STATE` global. This is one of two
+abstractions that genuinely improve 6502 code generation — see §11.5 for why.
+
+On the PC, `LfsrRng` is used for "challenge mode" (§6.14) while `StdRng`
+remains the default for normal gameplay.
+
+### 5.5 Shared Map Generation
+
+The map generation algorithm is identical on both platforms — random room
+placement with collision checks and L-shaped corridor carving. The shared
+function operates on `&mut [u8]` (tile buffer) and `&mut [Room]` (room list):
+
+```rust
+// roguelike-common/src/mapgen.rs
+
+use crate::prng::LfsrRng;
+use crate::room::Room;
+
+pub const TILE_WALL: u8 = 0;
+pub const TILE_FLOOR: u8 = 1;
+
+/// Generate a dungeon into a flat tile buffer.
+/// Returns (player_x, player_y, rooms_placed).
+pub fn generate(
+    tiles: &mut [u8],
+    width: u8,
+    height: u8,
+    rooms: &mut [Room],
+    rng: &mut LfsrRng,
+    max_rooms: u8,
+    min_size: u8,
+    max_size: u8,
+) -> (u8, u8, u8) {
+    for t in tiles.iter_mut() { *t = TILE_WALL; }
+
+    let mut room_count: u8 = 0;
+    let mut start_x = width / 2;
+    let mut start_y = height / 2;
+
+    for _ in 0..max_rooms {
+        let w = rng.range(min_size, max_size);
+        let h = rng.range(min_size, max_size);
+        if w + 2 >= width || h + 2 >= height { continue; }
+        let x = rng.range(1, width - w - 2);
+        let y = rng.range(1, height - h - 2);
+
+        let new_room = Room { x, y, w, h };
+
+        let mut overlaps = false;
+        for i in 0..room_count {
+            if new_room.intersects(&rooms[i as usize]) {
+                overlaps = true;
+                break;
+            }
+        }
+        if overlaps { continue; }
+
+        carve_room(tiles, width, &new_room);
+
+        if room_count == 0 {
+            start_x = new_room.cx();
+            start_y = new_room.cy();
+        } else {
+            let prev = rooms[(room_count - 1) as usize];
+            if rng.coin() {
+                carve_h_tunnel(tiles, width, prev.cx(), new_room.cx(), prev.cy());
+                carve_v_tunnel(tiles, width, prev.cy(), new_room.cy(), new_room.cx());
+            } else {
+                carve_v_tunnel(tiles, width, prev.cy(), new_room.cy(), prev.cx());
+                carve_h_tunnel(tiles, width, prev.cx(), new_room.cx(), new_room.cy());
+            }
+        }
+
+        rooms[room_count as usize] = new_room;
+        room_count += 1;
+    }
+
+    (start_x, start_y, room_count)
+}
+```
+
+This is essentially the C64 POC's `map::generate()` with globals replaced by
+parameters. No generics, no trait bounds — just a function that fills a byte
+slice and a room array.
+
+### 5.6 How Each Platform Uses Shared Code
+
+**C64 — direct, zero-cost:**
+
+```rust
+// c64/src/map.rs
+use roguelike_common::{mapgen, room::Room, balance, prng::LfsrRng};
+
+static mut TILES: [u8; 840] = [0; 840];
+static mut ROOMS: [Room; 12] = [Room::EMPTY; 12];
+static mut ROOM_COUNT: u8 = 0;
+
+pub fn generate(rng: &mut LfsrRng) -> (u8, u8) {
+    let (px, py, rc) = unsafe {
+        mapgen::generate(
+            &mut TILES, balance::C64_MAP_WIDTH, balance::C64_MAP_HEIGHT,
+            &mut ROOMS, rng, 12, 3, 7,
+        )
+    };
+    unsafe { ROOM_COUNT = rc; }
+    compute_structural_walls(); // C64-specific bitfield version
+    (px, py)
+}
+```
+
+The C64 still owns its `static mut` storage. The shared function just fills it.
+
+**PC — wraps shared code for challenge mode:**
+
+```rust
+// core/src/map.rs (addition, not replacement)
+use roguelike_common::{mapgen, room::Room as SharedRoom, prng::LfsrRng};
+
+impl Map {
+    /// Generate a C64-compatible map (for cross-platform seed challenges).
+    /// Same seed + same LFSR + same function = identical dungeon.
+    pub fn generate_c64_compatible(&mut self, seed: u16) -> Pos {
+        use roguelike_common::balance;
+        let mut rng = LfsrRng::new(seed);
+        let w = balance::C64_MAP_WIDTH;
+        let h = balance::C64_MAP_HEIGHT;
+        let mut tiles_u8 = vec![0u8; (w as usize) * (h as usize)];
+        let mut rooms_buf = [SharedRoom::EMPTY; 12];
+
+        let (px, py, rc) = mapgen::generate(
+            &mut tiles_u8, w, h,
+            &mut rooms_buf, &mut rng, 12, 3, 7,
+        );
+
+        // Promote u8 tiles → Tile enum
+        for (i, &t) in tiles_u8.iter().enumerate() {
+            self.tiles[i] = if t == mapgen::TILE_FLOOR { Tile::Floor } else { Tile::Wall };
+        }
+        for i in 0..rc as usize {
+            let r = rooms_buf[i];
+            self.rooms.push(Rect::new(r.x as Coord, r.y as Coord,
+                                       r.w as Coord, r.h as Coord));
+        }
+
+        self.compute_structural_walls();
+        (px as Coord, py as Coord)
+    }
+}
+```
+
+The PC keeps its existing `Map::generate()` with `StdRng` for normal play.
+The shared function only activates for cross-platform challenges. No
+abstractions pollute the normal code path.
+
+### 5.7 What Can Be Shared
+
+| Category | Shared? | Where | Form |
+|----------|---------|-------|------|
+| **PRNG** | **Yes** | `common/prng.rs` | `LfsrRng` struct — same algorithm on both platforms |
+| **Map generation** | **Yes** | `common/mapgen.rs` | `generate()` on `&mut [u8]` + `&mut [Room]` |
+| **Room geometry** | **Yes** | `common/room.rs` | `Room { x, y, w, h }`, `intersects()`, `center()` |
+| **Combat formula** | **Yes** | `common/combat.rs` | `const fn damage(atk: u8, def: u8) -> u8`, `effective_attack()`, `effective_defense()` |
+| **Monster spawning** | **Yes** | `common/spawn.rs` | `pick_monster()`, `spawn_into_rooms()` |
+| **Structural walls** | **Yes** | `common/structural.rs` | `compute()` on `&[u8]` → `&mut [u8]` bitfield |
+| **Balance constants** | **Yes** | `common/balance.rs` | All HP/ATK/DEF/sight/spawn_weight/regen values |
+| **Item definitions** | **Yes** | `common/items.rs` | Item type IDs, stat lookup tables (heal amount, ATK/DEF bonus, spawn weights) |
+| **Leveling tables** | **Yes** | `common/leveling.rs` | XP thresholds per level, HP/ATK/DEF growth per level |
+| **Depth scaling** | **Yes** | `common/balance.rs` | Monster stat scaling per floor, `min_depth` thresholds |
+| **Wandering spawn config** | **Yes** | `common/balance.rs` | Spawn interval, delay, max active constants |
+| **Mood thresholds** | **Yes** | `common/balance.rs` | Mood trigger values, decay rate, flee/enrage thresholds |
+| **Seed codes** | **Yes** | `common/seed.rs` | Encode/decode with `[u8; 16]` fixed buffers |
+| FOV (compute_fov) | **No** | Separate impls | PC: f64 shadowcasting → HashSet; C64: Bresenham → bitfield |
+| FOV (can_see) | **No** | Separate impls | Intentionally different — see §6.3 |
+| A* pathfinding | **No** | PC only | Requires heap (HashMap, BinaryHeap) |
+| Rendering | **No** | Separate impls | crossterm vs VIC-II screen writes |
+| Input handling | **No** | Separate impls | crossterm vs CIA keyboard/joystick |
+| Save persistence | **No** | Separate impls | JSON vs binary; different backends |
+| Data loading | **No** | Separate impls | TOML parse vs ROM constants |
+| Entity storage | **No** | Separate impls | `Vec<Entity>` vs parallel arrays |
+| Item storage | **No** | Separate impls | `HashMap<Pos, Vec<Item>>` vs sparse parallel arrays (see §6.7) |
+| Message log | **No** | Separate impls | `Vec<String>` vs `[u8; 160]` circular buffer |
+
+### 5.8 Shared Balance Constants
+
+The shared crate is the single source of truth for game balance. Both platforms
+import constants rather than defining them independently:
+
+```rust
+// roguelike-common/src/balance.rs
+
+// --- Monster stat constants ---
+pub const GOBLIN_HP: u8 = 6;
+pub const GOBLIN_ATK: u8 = 3;
+pub const GOBLIN_DEF: u8 = 0;
+pub const GOBLIN_SIGHT: u8 = 6;
+pub const GOBLIN_SPAWN_WEIGHT: u8 = 60;
+pub const GOBLIN_XP: u8 = 5;
+
+pub const ORC_HP: u8 = 12;
+pub const ORC_ATK: u8 = 4;
+pub const ORC_DEF: u8 = 1;
+pub const ORC_SIGHT: u8 = 7;
+pub const ORC_SPAWN_WEIGHT: u8 = 30;
+pub const ORC_XP: u8 = 15;
+
+pub const TROLL_HP: u8 = 20;
+pub const TROLL_ATK: u8 = 6;
+pub const TROLL_DEF: u8 = 3;
+pub const TROLL_SIGHT: u8 = 5;
+pub const TROLL_SPAWN_WEIGHT: u8 = 10;
+pub const TROLL_XP: u8 = 40;
+
+// --- Player defaults ---
+pub const PLAYER_HP: u8 = 30;
+pub const PLAYER_ATK: u8 = 5;
+pub const PLAYER_DEF: u8 = 2;
+
+// --- Config constants ---
+pub const REGEN_INTERVAL: u8 = 3;
+pub const MAX_ROOMS_C64: u8 = 12;
+pub const MAX_MONSTERS_PER_ROOM: u8 = 2;
+pub const C64_MAP_WIDTH: u8 = 40;
+pub const C64_MAP_HEIGHT: u8 = 21;
+
+// --- Wandering spawn (gameplay-implementation-plan.md Phase 1) ---
+pub const WANDERING_SPAWN_INTERVAL: u8 = 40;
+pub const WANDERING_SPAWN_DELAY: u8 = 60;
+pub const WANDERING_MAX_ACTIVE: u8 = 5;
+
+// --- Depth scaling (gameplay-implementation-plan.md Phase 2) ---
+pub const TARGET_DEPTH: u8 = 10;
+pub const MONSTER_HP_PER_FLOOR: u8 = 1;
+// ATK scaling uses integer math: +1 ATK every 2 floors
+pub const MONSTER_ATK_PER_2_FLOORS: u8 = 1;
+
+// --- Leveling (gameplay-implementation-plan.md Phase 4) ---
+pub const XP_PER_LEVEL: [u8; 10] = [0, 20, 50, 100, 180, 255, 255, 255, 255, 255];
+// Note: PC uses Stat (i32) for XP thresholds above 255; C64 caps at u8.
+// Levels 6+ on C64 use the max u8 value — effectively unreachable on a
+// single floor, requiring deeper descent. This is an acceptable divergence.
+pub const HP_PER_LEVEL: u8 = 5;
+pub const ATK_PER_LEVEL: u8 = 1;
+pub const DEF_PER_2_LEVELS: u8 = 1;
+
+// --- Mood (gameplay-implementation-plan.md Phase 5) ---
+pub const MOOD_FLEE_THRESHOLD: i8 = -50;
+pub const MOOD_DISENGAGE_THRESHOLD: i8 = -20;
+pub const MOOD_ENRAGE_THRESHOLD: i8 = 80;
+pub const MOOD_ALLY_DIES_SAME: i8 = -30;
+pub const MOOD_ALLY_DIES_OTHER: i8 = -15;
+pub const MOOD_TAKES_HIT: i8 = -5;
+pub const MOOD_LANDS_HIT: i8 = 10;
+pub const MOOD_LOW_HP: i8 = -20;
+```
+
+All types are `u8` or `i8` — the C64's natural width. The PC promotes to
+`Stat` (`i32`) at the boundary when loading into `GameData`. The C64 uses the
+values directly in its ROM stat tables.
+
+**Relationship to `game.toml`**: The PC's data-file loading (`data.rs`) uses
+these shared constants as compiled-in defaults. Modders can still override
+values via `game.toml` — the shared crate is the baseline, not a constraint.
+A CI test verifies that `game.toml` defaults match `roguelike-common` constants.
+
+**Relationship to gameplay implementation plan**: The constants above correspond
+to Phases 1 (wandering spawns), 2 (depth scaling), 4 (leveling), and 5 (mood)
+of the [gameplay implementation plan](design/gameplay-implementation-plan.md).
+Phase 3 (items) has its own module (`common/items.rs`) rather than constants in
+`balance.rs`, because item definitions include lookup tables for stat bonuses.
+Phase 6 (property bitfields) is PC-only for v1 — the C64 has no immediate use
+for the `u64` property system, though a `u8` subset could be added later.
+
+### 5.9 Testing Strategy
+
+1. **Shared crate tests**: `cargo test -p roguelike-common` on the host with
+   standard rustc. No emulator needed.
+
+2. **CI no_std verification**: Cross-compile for `thumbv6m-none-eabi` to catch
+   accidental `std` dependencies:
+   ```bash
+   cargo check -p roguelike-common --target thumbv6m-none-eabi
+   ```
+
+3. **Balance drift detection**: A CI test in `roguelike-core` verifies that
+   `game.toml` default values match `roguelike-common::balance` constants.
+
+4. **Cross-platform seed determinism**: A test generates a dungeon with a
+   known seed using `roguelike-common::mapgen::generate()` and compares the
+   resulting tile layout against a stored golden snapshot. This catches any
+   accidental changes to the generation algorithm or PRNG.
+
+5. **Shared property tests**:
+   ```rust
+   #[test]
+   fn damage_never_negative() {
+       for atk in 0..=20u8 {
+           for def in 0..=20u8 {
+               assert!(combat::damage(atk, def) <= atk);
+           }
+       }
+   }
+
+   #[test]
+   fn lfsr_has_full_period() {
+       let mut rng = LfsrRng::new(0xACE1);
+       let start = rng.state();
+       for i in 0u32..65536 {
+           rng.next_u8(); rng.next_u8();
+           if rng.state() == start {
+               assert_eq!(i + 1, 65535, "LFSR period too short");
+               return;
+           }
+       }
+       panic!("LFSR did not cycle");
+   }
+
+   #[test]
+   fn room_intersection_is_symmetric() {
+       let a = Room { x: 2, y: 2, w: 5, h: 5 };
+       let b = Room { x: 4, y: 4, w: 5, h: 5 };
+       assert_eq!(a.intersects(&b), b.intersects(&a));
+   }
+   ```
+
+6. **C64-specific tests**: Use `mos-test` crate for target-specific code that
+   must run on the MOS simulator.
+
+7. **Integration testing**: Run the .PRG in VICE with automated input scripts
+   (VICE supports `-keybuf` for automated key injection).
+
+---
+
+## 6. Design Decisions
+
+### 6.1 Map Size and Viewport
 
 **Current:** 80x40 map, fully visible in terminal (no scrolling).
 
-**C64 approach — scrolling viewport over a larger map:**
-
-The C64 screen is 40x25. Reserving 1 row for the status bar and 2 rows for
-the message log leaves a **40x22 visible play area**. However, the actual map
-can be larger (e.g., 64x48) stored in RAM, with the viewport scrolling to
-follow the player.
+**C64 approach:** The C64 screen is 40x25. The
+[gameplay implementation plan](design/gameplay-implementation-plan.md) adds
+items, XP/leveling, and dungeon depth to both platforms. Reserving 1 row for a
+dense status bar and 3 rows for the message log leaves a **40x21 visible play
+area**.
 
 ```
 ┌────────────────────────────────────────┐
-│              40x22 viewport            │  <- Map area
+│              40x21 viewport            │  <- Map area (rows 0-20)
 │         (scrolls to follow @)          │
 │                                        │
 │                                        │
 ├────────────────────────────────────────┤
-│ HP [████████░░░░] 24/30   Kills: 3     │  <- Status bar (row 23)
+│ HP██████░░24/30 Lv3 F4 /⚔ [🛡 K:7 XP:35│  <- Status bar (row 21)
 ├────────────────────────────────────────┤
 │ You attack the Goblin for 5 damage.    │  <- Message log
-│ The Goblin is dead!                    │  <- (rows 24-25)
+│ The Goblin is dead!                    │  <- (rows 22-24, 3 lines)
+│ You see a Healing Potion here.         │
 └────────────────────────────────────────┘
 ```
 
-**Map storage at 64x48:**
-- Tile data: 64 x 48 = 3072 bytes (1 byte/tile)
-- Explored bits: 384 bytes
-- Visible bits: 384 bytes
-- Total: ~3.8 KB — well within budget.
+The status bar packs HP bar (with green/yellow/red color coding), player level,
+current floor, equipped weapon and armor glyphs, kill count, and XP into a
+single 40-character row. This is possible because **inventory is modal** —
+pressing `i` opens a NetHack-style fullscreen inventory overlay on top of the
+map, dismissable with any key. No permanent screen space is needed for item
+lists. Equipment is shown on the status bar as single-character glyphs (`/` for
+sword, `[` for armor) — enough to remind the player what's equipped without
+consuming a dedicated row.
 
-**Alternative — smaller maps:**
-We could also use 40x22 maps (no scrolling) for simplicity in a v1, matching
-the viewport exactly. This would use only 880 bytes for tiles.
+The 3-line message log (up from the POC's 2 lines) provides enough space for
+a full combat exchange ("You attack... / The Goblin dies! / You see a Healing
+Potion here.") without scrolling off important information.
 
-**Recommendation:** Start with fixed 40x22 maps (no scroll) for the initial
-release, then add scrolling viewport in v1.1.
+MultiRogueLike uses 8 rows of UI (21x17 viewport) because it's real-time and
+multiplayer — it needs persistent displays for player count, both hand slots,
+and a larger message area. Our turn-based, single-player design can get by
+with less because the player controls the pace and can open modal screens at
+will.
 
-### 3.2 Map Generation
+**Recommendation:** Start with fixed 40x21 maps (no scroll) for v1 — the POC
+validated 40x22, and the 1-row reduction gains a third message line and richer
+status information. Add scrolling viewport over 64x48 maps in v1.1. The map
+dimensions must be set before cross-platform seeds are published, since they
+flow through `roguelike-common::balance` (see §5.8).
 
-**Current:** Random room placement with corridor carving (`map.rs:222-264`).
-Uses `rand::Rng`, `gen_range()`, room intersection checks, and L-shaped
-tunnels.
+### 6.2 Map Generation
 
-**C64 approach:**
+Map generation uses the shared `roguelike-common::mapgen::generate()` function
+on both platforms, ensuring identical room placement, corridor routing, and
+dungeon topology for any given seed. See §5.5 for the shared function and §5.6
+for platform integration.
 
-The same algorithm works — it's fundamentally just:
-1. Pick random x, y, w, h
-2. Check for overlap with existing rooms
-3. Carve rectangles and corridors
+The C64 calls the shared function directly with its `static mut` tile buffer.
+The PC calls it in "challenge mode" for cross-platform seed compatibility, and
+uses its own `Map::generate()` with `StdRng` for normal play.
 
-The only changes needed:
-- Replace `rand::Rng` with a 16-bit LFSR (linear feedback shift register) or
-  a Galois LFSR for fast pseudo-random numbers on the 6510
-- Room list: static array of 16 rooms max (16 x 4 bytes = 64 bytes), reduced
-  from the current `max_rooms = 30`
-- Room sizes: 3-7 tiles (down from 4-10) to fit the smaller map
-- All coordinates are `u8` instead of `i32`
+Key parameters for C64 maps:
+- **Map size**: 40x21 (fixed — see §6.1 for viewport rationale)
+- **Max rooms**: 12
+- **Room sizes**: 3-7 tiles
+- **PRNG**: `LfsrRng` (shared Galois LFSR)
+- **Storage**: `static mut TILES: [u8; 840]`
+- **Structural walls**: Bitfield (`[u8; 105]`)
 
-```asm
-; 16-bit Galois LFSR — fast PRNG for 6502
-; Input: seed in rng_lo/rng_hi
-; Output: pseudo-random byte in A
-prng:
-    lda rng_lo
-    asl
-    rol rng_hi
-    bcc .no_eor
-    eor #$2D        ; taps: bits 0,2,3,5
-.no_eor:
-    sta rng_lo
-    rts
+### 6.3 Field of View
+
+**PC:** Recursive shadowcasting with `f64` slopes and `HashSet<(i32,i32)>`.
+
+**C64:** Bresenham raycasting (integer-only) with precomputed perimeter table.
+
+```rust
+// Precomputed perimeter offsets for radius 6 — 40 ray targets
+const PERIMETER: [(i8, i8); 40] = [
+    (6, 0), (6, 1), (6, 2), (5, 3), (5, 4), (4, 5), (3, 5), (2, 6),
+    // ... (computed at compile time)
+];
 ```
 
-### 3.3 Field of View
+Visibility stored as `[u8; 110]` bitfield. Cost: ~150 tile checks per FOV
+recompute = ~7,500 cycles = ~7.5 ms. Imperceptible.
 
-**Current:** Recursive shadowcasting (`fov.rs`). Uses `f64` slope values,
-`HashSet<(i32,i32)>` for visible tiles, and recursive function calls per
-octant.
+**FOV is intentionally not shared.** The two algorithms produce slightly
+different visibility results: the PC's shadowcasting handles thin diagonal walls
+and is symmetric (if A sees B, B sees A), while the C64's Bresenham raycasting
+can have angular gaps between rays and uses a different algorithm for monster
+LOS checks (`can_see()` via single ray) than for the player viewport
+(`compute_fov()` via 40 rays).
 
-This is the single hardest subsystem to port. Shadowcasting on a 1 MHz
-8-bit CPU with a 256-byte stack is impractical — the recursion depth and
-floating-point slopes are both showstoppers.
+For cross-platform challenges, this means the same dungeon layout plays
+slightly differently on each platform — the C64's line-of-sight creates a
+grittier, more unpredictable fog of war. This is documented as an intentional
+platform characteristic, not a bug. The shared map and combat ensure the
+dungeon is structurally identical; the FOV difference is what makes each
+platform's experience distinctive.
 
-**C64 approach — raycasting with Bresenham lines:**
+### 6.4 Entity System
 
-Cast rays from the player to each tile on the perimeter of the FOV circle
-(radius 6, reduced from 8). Use Bresenham's line algorithm (integer-only) to
-walk each ray, marking tiles as visible until hitting a wall.
+**C64 approach — parallel arrays:**
 
-```
-FOV radius 6, perimeter ≈ 38 tiles
-Rays cast: ~38
-Avg ray length: ~4 tiles
-Total tile checks: ~150 per FOV recompute
-```
+The POC uses separate `static mut` arrays for each entity field, which produces
+tighter 6502 indexed addressing than an array-of-structs:
 
-At 1 MHz with ~50 cycles per tile check, this takes roughly 7,500 cycles
-(~7.5 ms) — well under a single frame (16.7 ms at 60 Hz NTSC).
+```rust
+// --- Core arrays (POC, 10 arrays = 160 bytes) ---
+static mut ENT_X:      [u8; 16]   = [0; 16];
+static mut ENT_Y:      [u8; 16]   = [0; 16];
+static mut ENT_HP:     [u8; 16]   = [0; 16];
+static mut ENT_MAX_HP: [u8; 16]   = [0; 16];
+static mut ENT_ATK:    [u8; 16]   = [0; 16];
+static mut ENT_DEF:    [u8; 16]   = [0; 16];
+static mut ENT_KIND:   [u8; 16]   = [0; 16];
+static mut ENT_AI:     [u8; 16]   = [0; 16];
+static mut ENT_ALIVE:  [bool; 16] = [false; 16];
+static mut ENT_SIGHT:  [u8; 16]   = [0; 16];
 
-**Visibility storage:** A 120-byte bitfield (for 40x22 = 880 tiles, rounded
-up to 960) replaces the `HashSet`. Checking visibility is a single bit test:
-
-```asm
-; Check if tile (x, y) is visible
-; Input: X = tile_x, Y = tile_y
-; Output: Z flag set if visible
-check_visible:
-    ; bit_index = y * 40 + x
-    ; byte_offset = bit_index >> 3
-    ; bit_mask = 1 << (bit_index & 7)
-    ...
-```
-
-**Trade-off:** Bresenham raycasting produces slightly different visibility
-results than shadowcasting (some corner cases differ), but for a C64 roguelike
-this is entirely acceptable. The original Rogue (1980) used simpler LOS.
-
-### 3.4 Monster AI
-
-**Current:** Per-monster `can_see()` check using shadowcasting, then greedy
-chase toward player (`ai.rs`).
-
-**C64 approach:**
-
-Monster sight checks are expensive if each monster runs full raycasting. Two
-options:
-
-1. **Simplified LOS:** Cast a single Bresenham line from monster to player.
-   If no wall blocks it and distance <= sight_radius, the monster is aware.
-   Cost: ~200 cycles per monster, ~3,200 cycles for 16 monsters.
-
-2. **Distance-only awareness:** Skip LOS entirely. If Chebyshev distance
-   <= sight_radius and monster is in an explored room, it's aware. Much faster
-   but less tactical (monsters "see" through walls within range).
-
-**Recommendation:** Option 1 (single-ray LOS). It's fast enough and preserves
-the tactical depth of the Rust version where walls block monster awareness.
-
-Chase AI is trivial to port — it's just `signum(player - monster)` with
-walkability checks. Three candidate moves, pick the first valid one. Already
-integer-only in the Rust version (`ai.rs:70-85`).
-
-### 3.5 Combat System
-
-**Current:** `damage = max(0, attacker_atk - defender_def)` (`combat.rs`).
-
-This ports directly with no changes. All values fit in `u8`. The formula is a
-single subtraction and a branch:
-
-```asm
-; damage = max(0, atk - def)
-    lda attacker_atk
-    sec
-    sbc defender_def
-    bcs .positive
-    lda #0              ; clamp to 0
-.positive:
-    sta damage
+// --- Gameplay arrays (gameplay-implementation-plan.md, +3 arrays = 48 bytes) ---
+static mut ENT_XP_VALUE: [u8; 16] = [0; 16];   // Phase 4: XP awarded on death
+static mut ENT_MOOD:     [i8; 16] = [0; 16];   // Phase 5: creature mood (-128..127)
+static mut ENT_MEMORY:   [u8; 16] = [0; 16];   // Phase 5: bitflags (SAW_ALLY_DIE, etc.)
 ```
 
-HP regeneration (1 HP every 3 turns) is equally trivial — a turn counter
-modulo 3.
+Total: **13 arrays x 16 entries = 208 bytes** (see §4.2 memory budget).
 
-### 3.6 Entity System
+Stat tables are ROM constants populated from `roguelike-common::balance`.
+Names are `&'static [u8]` references to byte string literals — no heap.
 
-**Current:** `Vec<Entity>` with 12 fields per entity, dynamically allocated
-strings for names, `char` glyphs, `GameColor` enum.
+Player-specific state (XP total, level, depth, inventory, equipment) lives
+outside the entity arrays in dedicated `static mut` variables, matching the PC
+engine's design of keeping progression data on `GameState` rather than `Entity`.
 
-**C64 approach — fixed-size entity table:**
+### 6.5 Monster AI
 
+Single-ray Bresenham LOS check per monster (`can_see()` in `fov.rs`), then
+greedy chase with 3-candidate movement. Wander→Chase transition on player
+detection. All implemented and validated in the POC (`ai.rs`, 120 lines).
+
+### 6.6 Combat System
+
+`damage = max(0, attacker_atk - defender_def)`. The formula is a `const fn` in
+`roguelike-common::combat` — the single source of truth. Both platforms wrap it
+with their respective logging and entity access patterns.
+
+### 6.7 Items and Inventory (C64 Storage Design)
+
+The [gameplay implementation plan](design/gameplay-implementation-plan.md)
+Phase 3 adds items, a fixed-size inventory, and equipment. On the PC, floor
+items use `HashMap<Pos, Vec<Item>>` and inventory uses `Vec<Option<Item>>` —
+both require heap allocation. The C64 needs a `no_std` equivalent.
+
+**Floor items — sparse parallel arrays:**
+
+Rather than a full map overlay (840 bytes for one-item-per-tile), use a sparse
+list capped at 32 items per floor. This mirrors the approach used by
+[MultiRogueLike](https://github.com/LeifBloomquist/MultiRogueLike), which
+stores items in the same entity list rather than as a map layer.
+
+```rust
+static mut ITEM_X:     [u8; 32] = [0; 32];   // x coordinate
+static mut ITEM_Y:     [u8; 32] = [0; 32];   // y coordinate
+static mut ITEM_TYPE:  [u8; 32] = [0; 32];   // item type ID (0 = empty slot)
+static mut ITEM_COUNT: u8 = 0;               // active items on floor
 ```
-Entity structure (16 bytes each):
-  Byte 0:    x position (u8)
-  Byte 1:    y position (u8)
-  Byte 2:    glyph (PETSCII code)
-  Byte 3:    color (0-15, C64 color index)
-  Byte 4:    entity type (0=player, 1=goblin, 2=orc, 3=troll)
-  Byte 5:    flags (bit 0: alive, bit 1: visible_to_player, bit 2-3: AI type)
-  Byte 6:    hp (u8)
-  Byte 7:    max_hp (u8)
-  Byte 8:    attack (u8)
-  Byte 9:    defense (u8)
-  Byte 10:   sight_radius (u8)
-  Bytes 11-15: reserved (future: status effects, inventory slot, etc.)
+
+Cost: **97 bytes** (vs. 840 bytes for a full map overlay). Item lookup at a
+position is a linear scan over `ITEM_COUNT` entries — at 32 max items, this
+is ~200 cycles. Negligible for a turn-based game.
+
+Item type IDs map to stat tables in `roguelike-common::items`:
+
+```rust
+// roguelike-common/src/items.rs
+
+pub const ITEM_NONE: u8 = 0;
+pub const ITEM_HEALING_POTION: u8 = 1;
+pub const ITEM_STRENGTH_POTION: u8 = 2;
+pub const ITEM_SHORT_SWORD: u8 = 3;
+pub const ITEM_LONG_SWORD: u8 = 4;
+pub const ITEM_LEATHER_ARMOR: u8 = 5;
+pub const ITEM_SCROLL_MAPPING: u8 = 6;
+
+/// Heal amount for potion items (0 = not a potion).
+pub const fn heal_amount(item_type: u8) -> u8 {
+    match item_type {
+        ITEM_HEALING_POTION => 10,
+        _ => 0,
+    }
+}
+
+/// ATK bonus for equipment items (0 = not a weapon).
+pub const fn atk_bonus(item_type: u8) -> u8 {
+    match item_type {
+        ITEM_SHORT_SWORD => 2,
+        ITEM_LONG_SWORD => 4,
+        _ => 0,
+    }
+}
+
+/// DEF bonus for equipment items (0 = not armor).
+pub const fn def_bonus(item_type: u8) -> u8 {
+    match item_type {
+        ITEM_LEATHER_ARMOR => 2,
+        _ => 0,
+    }
+}
 ```
 
-**16 entity slots = 256 bytes.** Entity names are not stored per-entity;
-instead, the `entity_type` byte indexes into a ROM string table. The current
-game typically spawns ~15-20 monsters on a 80x40 map; on a 40x22 map with
-fewer rooms, 15 monster slots (+ 1 player) is sufficient.
+**Player inventory and equipment:**
 
-### 3.7 Rendering
+```rust
+static mut INVENTORY: [u8; 10] = [0; 10];     // 10 slots, item type ID (0 = empty)
+static mut EQUIPPED_WEAPON: u8 = 0;            // item type ID
+static mut EQUIPPED_ARMOR: u8 = 0;             // item type ID
+```
 
-**Current:** Crossterm terminal rendering (`tui/render.rs`). Iterates every
-tile, checks visibility/explored, writes characters with fg/bg colors.
+Cost: **12 bytes.** The `effective_attack()` and `effective_defense()` helpers
+in `roguelike-common::combat` take base stats plus equipment type IDs and
+return the effective values — shared between both platforms.
 
-**C64 approach:**
+**Inventory UI — modal overlay:** The inventory screen is a NetHack-style modal
+overlay: pressing `i` writes an item list over the map area (rows 0-20),
+showing slot letters, item names, and "(equipped)" markers. Any key dismisses
+the overlay and redraws the map. This avoids dedicating permanent screen rows
+to inventory display — the equipped weapon and armor are shown as single-glyph
+indicators on the status bar (§6.1). Pickup (`g`), drop (`d`), use (`u`), and
+equip (`e`) commands work without opening the inventory for common actions.
 
-The C64 has two relevant display modes:
+**Item spawning** uses the existing `roguelike-common::spawn` pattern: weighted
+random selection into rooms, with a `max_items_per_room` cap. Item spawn weights
+and `min_depth` thresholds live in `roguelike-common::items`.
 
-1. **Standard character mode (40x25):** Each cell is one character from a
-   256-char set, with per-cell foreground color (from Color RAM at $D800)
-   and a shared background color.
+### 6.8 Rendering
 
-2. **Custom character set:** We define our own 2 KB charset with better-looking
-   dungeon tiles (solid walls, dotted floors, monster glyphs, UI elements).
+The POC uses full-screen redraw each turn via `write_volatile` to screen
+memory ($0400) and color RAM ($D800). Production should add **dirty-rectangle
+tracking** — maintain a previous-frame buffer, only update changed cells.
 
 **Color mapping:**
 
-| GameColor  | C64 Color         | Index |
-|------------|-------------------|-------|
-| Black      | Black             | 0     |
-| White      | White             | 1     |
-| Grey       | Light Grey        | 15    |
-| DarkGrey   | Dark Grey         | 11    |
-| Red        | Red               | 2     |
-| DarkRed    | Brown             | 9     |
-| Green      | Green             | 5     |
-| DarkGreen  | Dark Green (cust) | 5*    |
-| Yellow     | Yellow            | 7     |
-| DarkBlue   | Blue              | 6     |
-| Cyan       | Cyan              | 3     |
+| GameColor | C64 Color | Index |
+|-----------|-----------|-------|
+| Black | Black | 0 |
+| White | White | 1 |
+| Grey | Light Grey | 15 |
+| DarkGrey | Dark Grey | 11 |
+| Red | Red | 2 |
+| Brown | Brown | 9 |
+| Green | Green | 5 |
+| Yellow | Yellow | 7 |
+| Blue | Blue | 6 |
+| Cyan | Cyan | 3 |
 
-*DarkGreen maps to Green since the C64 has no dark green. Alternatively, use a
-multicolor character mode trick to get more shades at the cost of horizontal
-resolution.
+**Status bar:** HP bar uses PETSCII block characters ($A0 = reverse space for
+filled, $65 = light shade for empty) with color coding: green >60% HP,
+yellow >30%, red ≤30%. Validated in the POC.
 
-**Rendering strategy:**
-
-Instead of redrawing the entire screen every frame (expensive at 1 MHz),
-use **dirty-rectangle tracking**:
-
-1. Maintain a "previous frame" buffer (1 KB)
-2. After each game step, compare new state to previous buffer
-3. Only write changed cells to screen memory ($0400) and color RAM ($D800)
-
-Typical turn: player moves 1 tile, 2-3 FOV tiles change, 1-3 monsters move.
-That's ~10-20 cell updates instead of 1000. At ~20 cycles per cell write,
-this takes ~400 cycles — negligible.
-
-**Status bar:** HP bar uses PETSCII block characters (█ = $E0, ░ = $65
-in the C64 charset). The `render_status_bar` logic translates directly.
-
-### 3.8 Custom Character Set
+### 6.9 Custom Character Set
 
 Design a 2 KB custom charset (256 characters x 8 bytes) for better visuals:
 
 ```
-Char $00: empty/black (unexplored)
+Char $00: player '@' (stylized, recognizable)
 Char $01: floor '.' (single dot, centered)
 Char $02: wall '#' (solid block with edge detail)
-Char $03: player '@' (stylized, recognizable)
-Char $04: goblin 'g' (hunched figure)
-Char $05: orc 'o' (broad figure)
-Char $06: troll 'T' (tall figure)
-Char $07: corpse '%' (X marks)
+Char $03-$06: monster glyphs (G, O, T, %)
+Char $07: stairs down '>' (for Phase 2 dungeon levels)
 Char $08-$0F: HP bar segments (empty to full, 8 gradations)
-Char $10-$1F: box-drawing characters for menus
+Char $10-$17: item glyphs (!, /, [, ?, potion, sword, armor, scroll)
+Char $18-$1F: box-drawing characters for menus
 Char $20-$5A: standard PETSCII uppercase letters for messages
-Char $5B-$7F: additional UI glyphs, arrows, borders
 ```
 
-This gives us crisp, purpose-built visuals while staying in fast character
-mode (no bitmap rendering overhead).
+The POC uses the default C64 charset. Production adds custom characters via
+VIC-II bank switching (use `mos-hardware` `vic2::CharsetBank::from(addr)`
+for type-safe configuration).
 
-### 3.9 Input Handling
+**VIC-II bank allocation:** Place the custom charset in **VIC Bank 1
+($4000-$7FFF)** to avoid conflicts with the IP65-compatible network stack
+region and the Kernal workspace below $0800. MultiRogueLike uses the same
+bank for its custom font and reports no conflicts with networking code. Screen
+memory can remain at the default $0400 (VIC Bank 0) since we don't use
+sprites. Specify this in Phase 2 (when the charset is added) to prevent
+conflicts when Phase 3 networking is implemented.
 
-**Current:** Keyboard (vi keys, arrow keys, numpad) and gamepad via crossterm
-events (`terminal/input.rs`, `tui/input.rs`).
+### 6.10 Input Handling
 
-**C64 approach:**
+The POC implements two input methods:
 
-- **Keyboard:** Scan the C64 keyboard matrix via the CIA chip ($DC00/$DC01)
-  or use the Kernal `GETIN` routine ($FFE4). Map keys to game commands.
-- **Joystick:** Read CIA port 2 ($DC00) for joystick input — up/down/left/
-  right/fire. The fire button doubles as "wait" or "confirm." Diagonal
-  movement via simultaneous directions.
-- **No vi keys:** The C64 keyboard layout doesn't lend itself to hjkl. Use
-  WASD, arrow keys, or joystick as primary input methods.
+1. **Kernal keyboard buffer** ($C6/$0277): Relies on the Kernal IRQ handler to
+   scan the keyboard matrix each frame. Works when loaded from BASIC (IRQs
+   already running). Maps WASD, QEZC, arrow keys, and space to game commands.
 
-```
-Joystick mapping:
-  Up          → Move North
-  Down        → Move South
-  Left        → Move West
-  Right       → Move East
-  Up+Right    → Move NE
-  Up+Left     → Move NW
-  Down+Right  → Move SE
-  Down+Left   → Move SW
-  Fire        → Wait (or context action)
-  Fire+Dir    → Autorun in direction
-```
+2. **Joystick port 2** (CIA1 Port A, $DC00): Direct hardware read. Must write
+   $FF to Port A first to deselect keyboard columns (Port A is shared between
+   keyboard column selection and joystick port 2 — a hardware multiplexing
+   subtlety discovered during POC debugging).
 
-### 3.10 Save System
+**POC lesson learned:** CIA1 Port B ($DC01) carries BOTH keyboard rows AND
+joystick Port 1 signals on bits 0-4. Direct matrix scanning via Port B is
+unreliable on emulators where virtual controls map to Port 1. The production
+build should use the Kernal buffer for keyboard (reliable, handles debouncing)
+and Port A for joystick Port 2 (no sharing conflict).
 
-**Current:** JSON serialization via serde, autosave to filesystem, manual
-save slots.
+**Migration to mos-hardware:** The `cia::GameController` and `JoystickPosition`
+enum provide type-safe joystick reading with proper inverted-logic handling.
 
-**C64 approach:**
-
-Serialize game state to a compact binary format. Total save size estimate:
-
-```
-Map tiles:          960 bytes (40x24, 1 byte/tile)
-Explored bitfield:  120 bytes
-Entity table:       256 bytes (16 x 16)
-Game state header:   16 bytes (turn count, seed, HP, flags)
-Message log:        160 bytes (4 x 40)
-Room list:           64 bytes (16 rooms x 4 bytes)
-Checksum:             2 bytes
-─────────────────────────────
-Total:            ~1,578 bytes (< 7 disk sectors)
-```
-
-**Four save backends** (selected at startup based on hardware detection):
-
-1. **1541 Floppy (stock C64):** Sequential file on disk. Writes at ~400
-   bytes/sec, so saving takes ~4 seconds. One save slot. Acceptable for a
-   roguelike where saves are infrequent.
-
-2. **SD2IEC / Pi1541:** Same file format, but writes at modern SD card speed
-   — effectively instant. Multiple save slots become practical.
-
-3. **UII+ Network Save (Ultimate 64):** POST the binary save data to a
-   configurable HTTP endpoint (e.g., a simple REST server on the LAN or
-   internet). Save/load becomes a single TCP transaction — ~50 ms round-trip
-   on a local network. This also enables **cloud saves**: play on your C64 at
-   home, load the same game on VICE at work.
-
-   ```
-   PUT /api/saves/{player_id}    → upload 1,578 bytes
-   GET /api/saves/{player_id}    → download save
-   DELETE /api/saves/{player_id} → permadeath wipe
-   ```
-
-   The server side is trivial — a 50-line endpoint that could be added to
-   the existing Rust roguelike binary (alongside the SSH and MCP servers).
-
-4. **AT Protocol via Bridge (Ultimate 64 + atproto bridge):** Save game
-   state to the player's **Personal Data Server (PDS)** on the AT Protocol
-   network (Bluesky ecosystem) via a self-hosted bridge server. The C64
-   sends compact binary save packets over raw TCP to a bridge on the LAN;
-   the bridge translates them into atproto `putRecord`/`uploadBlob` XRPC
-   calls against the player's PDS.
-
-   This is fully designed in [docs/design/c64-atproto-bridge.md](design/c64-atproto-bridge.md).
-
-   ```
-   C64 ──binary TCP:6510──► Bridge ──HTTPS/XRPC──► PDS (bsky.social)
-                             (Docker)                (user's data)
-   ```
-
-   **Why this matters:** Saves stored on a PDS are portable across all
-   platforms. A game saved from a C64 can be loaded on the SSH client or a
-   future web frontend — they all use the same atproto lexicons
-   (`save.gameState`, `save.settings`). The PDS records produced by the
-   bridge are **schema-identical** to those from any other client. Spectate
-   frames published by the bridge are equally indistinguishable — a Jetstream
-   subscriber cannot tell whether a `spectate.frame` was produced by an SSH
-   session or a Commodore 64.
-
-   The bridge also handles authentication (app passwords or OAuth via a web
-   UI on port 8080), offline caching (saves persist locally if the PDS is
-   unreachable), and PETSCII→ASCII conversion for spectate frames.
-
-   Save slot mapping: `0x00` → `autosave` rkey, `0x01-0x05` → `slot-1`
-   through `slot-5` rkeys. Up to 6 save slots via the bridge.
-
-**Save format:** Binary, identical across all four backends. The first 9
-bytes are a fixed metadata header (turn count, HP, max HP, explored%, seed)
-that the atproto bridge reads to populate record fields; the rest is an
-opaque blob. One slot for stock C64 floppy, multiple for SD2IEC/network/
-atproto. Delete-on-death for classic roguelike mode.
-
-### 3.11 Sound Design
+### 6.11 Sound Design
 
 **Current:** No sound (terminal-based).
 
-The C64 has the legendary **SID chip** (MOS 6581/8580) — three voices with
-multiple waveforms, filters, ADSR envelopes, and ring modulation. This is an
-opportunity to **enhance** the port beyond the original.
+The C64's SID chip (MOS 6581/8580) offers three voices with multiple waveforms,
+filters, ADSR envelopes, and ring modulation.
 
 Proposed sound effects:
 - **Footsteps:** Soft noise-channel tick on each move
@@ -495,683 +1220,561 @@ Proposed sound effects:
 - **Player hurt:** Dissonant chord + noise burst
 - **Player death:** Dramatic descending arpeggio
 - **Level ambience:** Low droning pad (triangle wave + filter sweep)
-- **Door/room discovery:** Rising arpeggio flourish
 
-This is approximately 1-2 KB of sound data and a ~500-byte SID player routine.
+`mos-hardware` provides full SID access including compile-time PSID file
+parsing via the `SidTune` trait, and hardware RNG via `SIDRng` (implements
+`rand_core::RngCore`).
 
-### 3.12 Networking (Ultimate 64 / UII+)
+### 6.12 Save System
 
-**Current Rust version networking:**
-- SSH server (`crates/ssh/`) — multiplayer spectation, remote play
-- MCP server (`crates/mcp/`) — LLM integration for AI-driven gameplay
+Binary serialization to 1541 floppy or SD2IEC. Save size: ~1,578 bytes.
+Kernal file I/O via `mos-hardware`'s `cbm_kernal` module. C FFI wrappers
+needed for `JSR $FFD8` (SAVE) and `JSR $FFD5` (LOAD) since rust-mos lacks
+inline assembly.
 
-**C64 approach with UII+ Ethernet:**
+Additional backends: UII+ network saves, AT Protocol via bridge — unchanged
+from the original proposal. See §6.13.
 
-The Ultimate-II+ module contains an ARM processor running its own firmware
-with a full TCP/IP stack. The 6502 communicates with it through a command
-interface — essentially writing command bytes and reading response bytes
-through an I/O register window. The UII+ handles DNS resolution, TCP
-connection management, HTTP framing, and buffering. From the 6502's
-perspective, networking is just "write bytes to a port, read bytes from a
-port."
+### 6.13 Networking (Ultimate 64 / UII+)
 
-This enables four network features, in order of implementation priority:
-
-#### 3.12.1 Online Leaderboards
-
-After a game ends (player death), submit the run stats to a leaderboard
-server:
-
-```
-POST /api/leaderboard
-{
-  "seed": "a3f2",
-  "kills": 12,
-  "turns": 347,
-  "explored_pct": 83,
-  "player_name": "DAVID",
-  "platform": "c64-u2p"
-}
-```
-
-The response includes the player's rank and top 10. Display on the death
-screen — "You placed #7 of 243 adventurers." The same leaderboard endpoint
-could accept submissions from the Rust PC/SSH version, creating a **cross-
-platform leaderboard** between C64 and modern players.
-
-Payload size: ~150 bytes out, ~500 bytes response. At UII+ speeds this
-completes in under 100 ms.
-
-#### 3.12.2 Daily Challenge Seeds
-
-Fetch a daily seed from the server at the title screen:
-
-```
-GET /api/daily-seed
-→ {"seed": "b7f1", "date": "2026-02-20", "entries": 42}
-```
-
-All players worldwide (C64 and PC) explore the same dungeon for that day.
-Combined with the leaderboard, this creates a competitive daily challenge
-mode — a feature the Rust version doesn't have yet.
-
-#### 3.12.3 Network Spectation
-
-The existing Rust SSH server (`crates/ssh/`) already supports spectation via
-the `FrameSink` trait. The C64 can participate by streaming its game state
-after each turn:
-
-- **Option A — C64 as spectated player:** After each turn, send a compact
-  binary frame (~200 bytes: entity positions, visible tiles, HP, messages) to
-  a relay server. The relay converts this to the format consumed by the SSH
-  spectation system. People watch your C64 run from their terminals.
-
-- **Option B — C64 as spectator:** Receive ASCII frames from the relay and
-  display them on the C64 screen. Watch someone else's PC game on your C64.
-  This is simpler than option A (just receive + display, no game logic).
-
-Frame size at ~200 bytes/turn and ~1 turn/second average, the bandwidth
-requirement is negligible (~1.6 kbps).
-
-#### 3.12.4 LLM Integration via MCP
-
-This is the most ambitious network feature. The existing MCP server
-(`crates/mcp/`) provides a JSON-RPC interface for LLM-driven gameplay. The
-C64 could act as an MCP client:
-
-1. After each turn, serialize the game observation (map ASCII, entity list,
-   stats) into a compact text format
-2. Send it to the MCP server via HTTP POST
-3. Receive the LLM's chosen action as a response
-4. Execute the action and repeat
-
-This creates a surreal scenario: **an AI playing a roguelike on a Commodore
-64 in real time**, with the LLM running in the cloud and the game running
-on a 1 MHz 8-bit machine, connected by Ethernet.
-
-The observation payload would be ~500-800 bytes (the 40x22 ASCII map alone is
-880 bytes, but we can compress explored/visible states). The response is
-tiny (~20 bytes for an action command). Round-trip latency depends on LLM
-inference time (~1-3 seconds), which is fine for a turn-based game.
-
-The MCP server already handles all the game logic translation — the C64 just
-needs to format the observation and parse the response action. Estimated
-client code: ~1 KB of 6502 assembly.
-
-#### 3.12.5 AT Protocol Integration via Bridge Server
-
-The most fully designed network feature. A self-hosted **bridge server**
-(Docker container, runs on a Raspberry Pi or any LAN host) sits between the
-C64's raw TCP connection and the AT Protocol ecosystem, providing:
-
-- **Federated saves** — Game state stored on the player's PDS, portable
-  across all platforms (C64, SSH, web)
-- **Federated spectation** — Spectate frames published as atproto records,
-  visible via Jetstream to any subscriber
-- **Bluesky identity** — The player's atproto handle (e.g.,
-  `player.bsky.social`) is their identity across all platforms
-
-The bridge uses a purpose-built binary wire protocol (little-endian,
-1-byte type + 2-byte length + payload) with 10 message types. The C64 never
-touches TLS, JSON, OAuth, or HTTP — the bridge handles all of that.
+Unchanged from the original proposal. The UII+ command interface and
+all network features (leaderboards, daily seeds, cloud saves, spectation,
+MCP client, AT Protocol bridge) remain as designed.
 
 See [docs/design/c64-atproto-bridge.md](design/c64-atproto-bridge.md) for the
-complete design including wire protocol specification, Docker deployment,
-authentication flow, PETSCII→ASCII conversion, offline caching, spectate
-frame publishing, and phased implementation plan.
+AT Protocol bridge specification.
+
+**Auto-update via UII+:** MultiRogueLike uses TFTP-based auto-update at boot
+to ensure C64 clients always run the latest version — the bootloader downloads
+the current binary from the server before launching the game. The UII+ provides
+a more capable equivalent: HTTP GET to fetch a .prg from the leaderboard/save
+server. Implement a version check at startup: send the current version string
+with the daily seed request, receive a `needs_update: bool` flag, and offer
+the player a one-button update that writes the new .prg to the UII+ SD card.
+This solves the distribution problem for hardware users and accelerates
+iteration during development. Add to Phase 3 networking alongside cloud saves.
+
+**Protocol consideration:** For latency-sensitive features like spectation
+frame streaming, consider UDP alongside the TCP paths used for saves and
+leaderboards. MultiRogueLike found UDP simpler and more reliable than TCP for
+real-time C64 communication (23-byte fixed packets with action counter
+deduplication). The AT Protocol bridge's binary wire protocol
+(§c64-atproto-bridge.md) could also benefit from a UDP transport option for
+spectation frames.
+
+### 6.14 Seed System and Cross-Platform Seed Sharing
+
+The seed system has two layers: **platform-local seeds** for reproducible
+dungeons within a platform, and **cross-platform challenge seeds** for
+identical dungeons across PC and C64.
+
+#### Platform-Local Seeds
+
+**C64:** 16-bit seed (0-65535) from `LfsrRng`. Displayed as 4-character
+base36 code on title and death screens. Seeded from CIA timer jitter at
+first keypress. Validated in the POC.
+
+**PC (normal mode):** 64-bit seed from `rand::StdRng` (ChaCha20). Displayed
+as base36 seed code via the existing `seed_code.rs` system. The full seed
+code format (`<base36_seed>[-<WxH>][<preset>]`) supports custom dimensions
+and map presets.
+
+These are **not cross-compatible** — the same numeric seed produces different
+dungeons on each platform because they use different PRNG algorithms (ChaCha20
+vs LFSR) and different map dimensions (80x40 vs 40x21).
+
+#### Cross-Platform Challenge Mode
+
+The shared `roguelike-common` crate enables a **challenge mode** on the PC that
+generates C64-compatible dungeons:
+
+1. PC creates a `LfsrRng` from a u16 seed (same PRNG as C64).
+2. PC calls `roguelike-common::mapgen::generate()` with C64 parameters
+   (40x21 map, 12 rooms, size 3-7).
+3. Same seed + same LFSR + same function = **identical dungeon** on both
+   platforms.
+
+Since C64 seeds are u16 (0-65535), they encode as 3-4 base36 characters. A
+C64 player sees `r7z` on their death screen, types it into the PC version's
+challenge mode, and gets the same dungeon layout.
+
+**Seed code format extension:**
 
 ```
-C64 (6502)         Bridge (Docker)         PDS
-    │                    │                   │
-    │──SAVE_GAME────────►│                   │
-    │                    │──uploadBlob──────►│
-    │                    │──putRecord───────►│
-    │◄──ACK─────────────│                   │
-    │                    │                   │
-    │──SPECTATE_FRAME──►│                   │
-    │                    │──createRecord────►│   ──► Jetstream
-    │◄──ACK─────────────│                   │       (anyone can watch)
+r7z3kq              → PC normal mode: 80x40, StdRng (existing behavior)
+r7z3kq-120x60       → PC normal mode: 120x60, StdRng
+r7z                  → Challenge mode: u16 seed, 40x21, LfsrRng
+r7z-c                → Explicit challenge suffix (optional — short codes
+                       are unambiguous since u16 max = "1ekf" in base36)
 ```
 
-The bridge is a separate project (`tools/c64-bridge/` or standalone repo),
-not a workspace crate. It reuses the same atproto lexicons as the SSH and
-terminal clients but has its own deployment model.
+The server's daily seed endpoint sends a u16, and both platforms generate from
+it — the PC in challenge mode, the C64 natively. Leaderboards for daily
+challenges are cross-platform; leaderboards for normal PC play are separate.
 
-**Implementation note:** All network features must be **optional and graceful**.
-At startup, the game probes for UII+ presence by reading a signature register.
-If absent (stock C64, VICE emulator), all network codepaths are skipped and
-the game works identically to a stock C64 build. Network menu items are hidden
-when no UII+ is detected.
+#### FOV Divergence in Challenges
 
-```
-; Detect Ultimate-II+ presence
-; UII+ command interface at $DF1C-$DF1F (configurable)
-detect_uii:
-    lda $DF1D           ; read UII+ status register
-    cmp #$C9            ; UII+ identification byte
-    beq .found
-    lda #0
-    sta has_network     ; no UII+ — disable network features
-    rts
-.found:
-    lda #1
-    sta has_network
-    rts
-```
-
-### 3.13 Seed System
-
-**Current:** 64-bit seed encoded as base-36 string (`seed_code.rs`), shared
-between players.
-
-**C64 approach:** Use a 16-bit seed (0-65535). Encode as 4-digit hex or
-3-character base-36 code. Players can enter seeds on the title screen using the
-keyboard. 16 bits gives 65,536 unique dungeons — more than enough for a C64
-game.
-
-The current `SeedParams` struct with width/height/preset encoding is
-unnecessary since the C64 version uses fixed map dimensions.
+Cross-platform challenges produce identical map layouts and monster placements,
+but FOV differences mean the two platforms "see" the dungeon differently (§6.3).
+This is intentional — the same dungeon is a different tactical experience on
+each platform. Leaderboard rankings reflect the platform-specific challenge
+rather than pixel-identical play.
 
 ---
 
-## 4. Implementation Plan
+## 7. Architecture Mapping
 
-### Phase 1: Core Engine (Weeks 1-4)
+The project has four frontends — terminal, SSH, MCP, and C64 — all driven by
+the same game engine (`roguelike-core`). The C64 is unique: it reimplements
+the engine in `no_std` Rust rather than importing `roguelike-core` directly,
+because core depends on `String`, `Vec`, `serde`, and `rand`. The shared
+`roguelike-common` crate bridges the gap by providing the core algorithms and
+balance data that both engines consume.
 
-**Toolchain:** [cc65](https://cc65.github.io/) (C compiler + assembler for
-6502). Prototype in C, then hand-optimize hot paths in assembly.
+### 7.1 How the Frontends Compare
 
-1. **Memory map and startup** — Bank out BASIC ROM, set up custom charset
-   pointer, configure screen/color RAM locations, initialize IRQ handler for
-   keyboard/joystick scanning.
+```
+                    roguelike-core          roguelike-c64
+                    ──────────────          ─────────────
+Depends on:         serde, rand, toml       nothing (zero deps)
+                    roguelike-common        roguelike-common
+Entity storage:     Vec<Entity>             parallel static mut arrays
+Map storage:        Vec<Tile>               static mut [u8; 840]
+FOV:                f64 shadowcasting       integer Bresenham raycasting
+Pathfinding:        A* (HashMap)            greedy chase (no heap)
+Data loading:       game.toml (runtime)     const ROM tables (from balance.rs)
+Message log:        Vec<String>             [u8; 160] circular buffer
+Save format:        JSON (serde_json)       binary (manual serialization)
+PRNG (normal):      StdRng (ChaCha20)       LfsrRng (shared crate)
+PRNG (challenge):   LfsrRng (shared crate)  LfsrRng (shared crate)
+                    ──────────────          ─────────────
+Shared via:              roguelike-common
+                    (PRNG, mapgen, combat, room geometry, spawn logic,
+                     structural walls, balance constants, seed codes,
+                     item defs, leveling tables, depth scaling, mood)
+```
 
-2. **PRNG** — Implement 16-bit Galois LFSR, seeded from CIA timer or user
-   input (key-timing entropy).
+### 7.2 Module-by-Module Mapping
 
-3. **Map generation** — Port `Map::generate()` to C/asm. Room placement with
-   collision detection, L-shaped corridor carving. Target: 8-12 rooms per map.
-   Room dimensions: 3x3 to 6x6.
+```
+Workspace Crate / Module     →  C64 Module (Rust)            Size Est.  POC Actual
+──────────────────────────────────────────────────────────────────────────────────
+NEW: common/src/             →  used by both                 ~1.5 KB   (pending)
+  roguelike-common               (PRNG, mapgen, combat, rooms, balance, seeds,
+                                  items, leveling, depth scaling, mood thresholds)
 
-4. **Entity system** — 16-slot fixed table, type-indexed stat lookup. Port
-   `spawn_monsters()` with weighted random selection.
+core/src/map.rs     (22 KB)  →  c64/src/map.rs               ~0.5 KB   (wraps common)
+  Map::generate()                (calls common::mapgen::generate())
+  Map::is_walkable()             (tile lookup on static mut buffer)
 
-5. **FOV** — Bresenham raycasting, radius 6. Bitfield storage for
-   visible/explored tiles.
+core/src/fov.rs     (6.9 KB) →  c64/src/fov.rs               ~1.5 KB    190 lines
+  compute_fov()                  (Bresenham raycasting — platform-specific)
+  can_see()                      (single-ray LOS — platform-specific)
 
-### Phase 2: Gameplay (Weeks 5-8)
+core/src/entity.rs  (4 KB)   →  c64/src/entity.rs            ~1 KB      248 lines
+  Entity struct                  (parallel arrays, stat tables from balance.rs)
 
-6. **Combat** — Port `melee_attack()`. Direct translation — subtract, clamp,
-   check death. Generate message strings from ROM templates.
+core/src/combat.rs  (3.7 KB) →  c64/src/combat.rs            ~0.3 KB     38 lines
+  melee_attack()                 (wraps common::combat::damage())
 
-7. **AI** — Single-ray LOS awareness check. Greedy chase with 3-candidate
-   movement. Port `run_monster_turns()`.
+core/src/ai.rs      (13 KB)  →  c64/src/ai.rs                ~0.8 KB    138 lines
+  run_monster_turns()            (LOS + greedy chase + wander)
 
-8. **Game loop** — Turn-based step: read input → execute player command →
-   recompute FOV → run monster turns → render. Port the core of
-   `GameState::step()`.
+core/src/spawn.rs   (4.4 KB) →  c64/src/entity.rs            ~0.5 KB    (included)
+  spawn_monsters()               (calls common::spawn functions)
 
-9. **HP regeneration** — Turn counter modulo `regen_interval` (3).
+core/src/game.rs    (91 KB)  →  c64/src/main.rs              ~1.5 KB    185 lines
+  GameState::step()              (main turn loop — drastically simplified)
 
-### Phase 3: UI and Polish (Weeks 9-12)
+core/src/message_log.rs      →  c64/src/msglog.rs            ~0.8 KB    152 lines
+  MessageLog                     (4-slot circular buffer, &[u8] not String)
 
-10. **Rendering** — Custom charset, dirty-rectangle renderer, color RAM
-    management. Status bar with HP bar. Message log (2-line scrolling).
+core/src/data.rs    (27 KB)  →  c64/src/entity.rs            embedded   (included)
+  GameData / MonsterDef          (const ROM tables from common::balance)
+  game.toml parsing              (not needed — values from shared crate)
 
-11. **Title screen** — Seed entry, "New Game" / "Continue" menu. PETSCII art
-    title logo.
+tui/src/render.rs            →  c64/src/render.rs            ~1.5 KB    239 lines
+  CrosstermRenderer              (VIC-II screen + color RAM writes)
 
-12. **Save/Load** — Binary serialization to 1541 floppy. Single save slot,
-    delete-on-death for classic roguelike mode.
+saves/src/lib.rs             →  c64/src/save.rs              ~0.8 KB    (pending)
+  SaveBackend trait              (simplified: binary to floppy / UII+ HTTP)
 
-13. **Sound** — SID chip effects for combat, movement, death, ambience.
+N/A                          →  c64/src/c64.rs               ~1 KB      172 lines
+  (no PC equivalent)             (C64 hardware registers — migrate to mos-hardware)
 
-14. **Joystick support** — Full 8-direction + fire button mapping.
+N/A                          →  c64/src/input.rs             ~1 KB      179 lines
+  (crossterm in tui/)            (Kernal keyboard buffer + CIA joystick Port 2)
 
-### Phase 4: Networking — UII+ Features (Weeks 13-16)
+NEW: core/src/item.rs        →  c64/src/items.rs             ~0.5 KB   (pending)
+  Item, ItemKind                 (sparse arrays + pickup/drop/use/equip logic,
+                                  stat lookups from common::items)
 
-15. **UII+ driver layer** — Hardware detection, command interface init,
-    TCP connect/send/receive primitives. Stub out when UII+ is absent.
+NEW: core/src/game.rs (XP)  →  c64/src/main.rs              embedded  (pending)
+  player_xp, player_level       (XP tracking + level-up in main loop,
+                                  tables from common::leveling)
 
-16. **Cloud saves** — HTTP PUT/GET save data to a server endpoint. Add a
-    minimal save-relay endpoint to the existing Rust binary.
+N/A (new)                    →  c64/src/sid.rs               ~1 KB      (pending)
+  (no sound on PC)               (SID register writes via mos-hardware)
+──────────────────────────────────────────────────────────────────────────────────
+POC total:                       11 source files              1,898 lines = 13 KB
+Production estimate:             15 source files             ~2,600 lines ≈ 18 KB
+  (well within 46 KB budget; shared crate reduces C64-specific code by ~400 lines
+   and ensures gameplay feature parity with the PC version)
+```
 
-17. **Leaderboard + daily seed** — HTTP POST scores, GET daily seed. Add
-    server endpoints. Display top 10 on death screen and daily challenge
-    option on title screen.
+### 7.3 Notable Size Ratios
 
-18. **Spectation relay** — Binary frame streaming to a relay server. Add a
-    relay endpoint to the Rust SSH crate that bridges C64 frames into the
-    existing `FrameSink` spectation system.
+The C64 reimplementations are dramatically smaller than their PC counterparts
+because they drop heap allocation, serde, TOML parsing, menu systems, settings,
+analytics, and accessibility features. The most dramatic example: `game.rs` goes
+from 91 KB to 185 lines — the C64 game loop has no autorun, no menu state
+machine, no undo/redo, no spectation frame capture.
 
-19. **MCP client mode** — Format observations, POST to MCP server, parse
-    action responses. Add "Watch AI Play" option to title menu.
-
-20. **AT Protocol bridge** — Implement the bridge server per the design in
-    [docs/design/c64-atproto-bridge.md](design/c64-atproto-bridge.md). Phase 1
-    (local cache only) can be built immediately; Phase 2 (PDS integration)
-    depends on the atproto lexicons being finalized. The C64-side wire
-    protocol client reuses the same UII+ TCP primitives built in step 15.
-
-### Phase 5: Testing and Release (Weeks 17-20)
-
-21. **Playtesting** — Test on real hardware (Ultimate 64, C64 + UII+ cart,
-    stock C64, C128) and emulators (VICE). Verify disk save/load reliability,
-    network features, atproto bridge end-to-end, timing on PAL vs NTSC.
-
-22. **Performance profiling** — Ensure FOV + AI + render fits within one frame
-    on worst case (many monsters in open room). Profile network round-trips.
-
-23. **Packaging** — Create .d64 disk image, .crt cartridge image (for flash
-    carts like EasyFlash), and .prg file for emulators. Ship separate
-    "network-enabled" and "stock" builds if code size requires it. Publish
-    the atproto bridge Docker image to GHCR.
+With `roguelike-common`, the C64 crate shrinks further — `map.rs` becomes a
+thin wrapper around the shared `mapgen::generate()`, and `combat.rs` wraps
+the shared `damage()` formula. The shared crate also eliminates the balance
+drift risk: when monster stats change, both platforms update automatically.
 
 ---
 
-## 5. What Gets Cut
+## 8. Implementation Plan
 
-Some features from the Rust version don't make sense on the C64:
+### Phase 0: POC (Complete)
 
-| Feature              | Rust Version              | C64 Version          | Reason           |
-|----------------------|---------------------------|----------------------|------------------|
-| Map size             | 80x40 (configurable)      | 40x22 (fixed)        | Screen size      |
-| FOV radius           | 8 tiles                   | 6 tiles              | CPU budget       |
-| FOV algorithm        | Recursive shadowcasting   | Bresenham raycasting | No FP, tiny stack|
-| Max rooms            | 30                        | 12                   | Map size         |
-| Max monsters         | ~20-30                    | 15                   | Memory + CPU     |
-| Monster sight checks | Per-monster shadowcasting  | Per-monster ray LOS  | CPU budget       |
-| Save format          | JSON (serde)              | Binary (compact)     | Disk space/speed |
-| Save slots           | Autosave + 3 manual       | 1 slot               | Disk simplicity  |
-| Settings menu        | 12+ toggle options        | 3 options (sound, speed, joystick) | Screen space |
-| Color palettes       | 4 (default, protanopia, deuteranopia, high-contrast) | 1 (fixed) | 16-color limit |
-| SSH multiplayer      | Full SSH server            | UII+ spectation relay | Client-only (no SSH daemon on 6502) |
-| MCP server           | LLM integration           | UII+ MCP client       | Client-only (MCP server stays on PC) |
-| TOML data files      | Moddable game.toml        | Compiled-in data     | No filesystem    |
-| Auto-explore         | A* pathfinding             | Simplified or cut    | Memory           |
-| Look mode            | Cursor inspection          | Simplified           | Input limits     |
-| Message history      | Scrollable full-screen     | Last 2 messages      | Screen space     |
-| Unicode bar chars    | ████░░░░                  | PETSCII blocks       | Charset          |
+**Status: Done.** rust-mos proof-of-concept validated:
+- 13 KB binary with complete game loop
+- Runs on c64.emu (Android) and VICE
+- All core systems functional: map gen, FOV, entities, combat, AI, rendering,
+  input, messages
+
+### Phase 1: Shared Crate + C64 Refactor (Weeks 1-2)
+
+1. **Create `roguelike-common` crate** — `#![no_std]`, zero dependencies.
+   Implement `LfsrRng`, `Room`, `mapgen::generate()`, `combat::damage()`,
+   `spawn::pick_monster()`, `structural::compute()`, balance constants, and
+   `seed::encode()`/`seed::decode()`. See §5.3-5.5 for design.
+
+2. **Wire up C64 crate** — Replace POC's inline PRNG, map generation, combat
+   formula, and balance constants with imports from `roguelike-common`. Refactor
+   `prng.rs` to use `LfsrRng` struct (passed as `&mut` instead of `static mut`
+   global). See §11.5 for C64 code style guidance.
+
+3. **Wire up PC crate** — Add `roguelike-common` dependency to `roguelike-core`.
+   Add `Map::generate_c64_compatible()` for challenge mode. Add CI test that
+   `game.toml` defaults match `roguelike-common::balance` constants.
+
+4. **Add shared tests** — Property tests for LFSR period, damage formula,
+   room intersection symmetry, mapgen determinism golden snapshot. CI
+   `thumbv6m-none-eabi` check for `no_std` compliance.
+
+5. **Migrate C64 crate to mos-hardware** — Replace hand-rolled `poke`/`peek`
+   wrappers with `mos-hardware`'s type-safe VIC-II, CIA, and SID access.
+   Adopt `JoystickPosition` enum, `screen_codes!()` macro, and
+   `volatile-register` patterns.
+
+### Phase 2: Polish and Production Features (Weeks 3-6)
+
+6. **Dirty-rectangle rendering** — Add previous-frame buffer, compare+update
+   only changed cells. Reduces per-turn screen writes from 1000 to ~20.
+
+7. **Custom character set** — Design dungeon tiles in CharPad, load via VIC-II
+   bank switching.
+
+8. **SID sound effects** — Implement combat sounds, footsteps, death jingle
+   using `mos-hardware`'s SID module.
+
+9. **Save/Load** — Binary serialization to 1541 floppy via Kernal file I/O.
+   C FFI wrappers for `SAVE`/`LOAD` Kernal calls. Follow the `SaveBackend`
+   trait pattern from `roguelike-saves` — the C64 won't implement the full
+   trait (it uses `GameState` which requires `serde`), but the API shape
+   (autosave, slots, metadata) guides the design.
+
+10. **Title screen** — Seed entry (keyboard hex input), "New Game" / "Continue"
+    menu, PETSCII art. Challenge mode seed display.
+
+11. **PC challenge mode UI** — Add 40x21 "C64 Challenge" mode to the terminal
+    client. Accept u16 seed codes, generate via shared mapgen, display on
+    cross-platform leaderboard.
+
+### Phase 3: Networking — UII+ Features (Weeks 7-10)
+
+12. **UII+ driver layer** — Hardware detection, TCP primitives.
+13. **Cloud saves** — HTTP PUT/GET to server endpoint.
+14. **Leaderboard + daily seed** — POST scores, GET daily seed (u16).
+    Cross-platform leaderboard for challenge mode.
+15. **Spectation relay** — Binary frame streaming.
+16. **MCP client mode** — Observation formatting, action parsing.
+17. **AT Protocol bridge** — Per the design in
+    [c64-atproto-bridge.md](design/c64-atproto-bridge.md).
+
+### Phase 4: Testing and Release (Weeks 11-12)
+
+18. **Playtesting** — Real hardware (Ultimate 64, C64 + UII+, stock C64) and
+    emulators (VICE, c64.emu). PAL vs NTSC timing.
+19. **Performance profiling** — VICE cycle counter for FOV + AI + render.
+20. **Cross-platform seed verification** — Generate challenge dungeons on both
+    platforms with the same seeds, verify identical tile layouts.
+21. **Packaging** — .d64 disk image, .prg for emulators, .crt if code fits
+    16 KB cartridge. Publish atproto bridge Docker image.
+
+---
+
+## 9. What Gets Cut / What Gets Added
+
+### What Gets Cut
+
+| Feature | Rust Version | C64 Version | Reason |
+|---------|-------------|-------------|--------|
+| Map size | 80x40 (configurable) | 40x21 (fixed) | Screen size + UI (§6.1) |
+| FOV radius | 8 tiles | 6 tiles | CPU budget |
+| FOV algorithm | Recursive shadowcasting | Bresenham raycasting | No FP, no recursion |
+| Max rooms | 30 | 12 | Map size |
+| Max monsters | ~20-30 | 15 | Memory + CPU |
+| Save format | JSON (serde) | Binary (compact) | Disk space/speed |
+| Color palettes | 4 (accessibility) | 1 (fixed) | 16-color limit |
+| Auto-explore | A* pathfinding | Simplified or cut | Memory |
+| Message history | Scrollable | Last 2 messages | Screen space |
 
 ### What Gets Added
 
-| Feature              | C64 Only                                           |
-|----------------------|----------------------------------------------------|
-| Sound effects        | SID chip combat sounds, ambience, death jingle      |
-| Custom charset       | Purpose-built dungeon tile graphics                 |
-| Joystick control     | Full 8-direction joystick with fire button           |
-| Title screen art     | PETSCII art splash screen                           |
-| Color flash effects  | Screen border flash on hit, death screen effects     |
-| Loading screen       | Animated loading indicator during disk I/O           |
-| Online leaderboards  | Cross-platform scores (C64 + PC) via UII+ Ethernet  |
-| Daily challenge      | Shared daily seed fetched from server                |
-| Cloud saves          | Save/load game state over HTTP via UII+              |
-| AT Protocol saves    | Federated saves to PDS via bridge; portable across platforms |
-| Network spectation   | Stream gameplay to SSH spectation relay via UII+     |
-| Federated spectation | Spectate frames published to atproto via bridge      |
-| Bluesky identity     | Player identified by atproto handle across all clients |
-| LLM auto-play        | MCP client mode — watch an AI play on your C64       |
+| Feature | C64 Only |
+|---------|----------|
+| Sound effects | SID chip combat sounds, ambience, death jingle |
+| Custom charset | Purpose-built dungeon tile graphics |
+| Joystick control | Full 8-direction joystick with fire button |
+| Title screen art | PETSCII art splash screen |
+| Color flash effects | Screen border flash on hit, death screen effects |
+| Online leaderboards | Cross-platform scores (C64 + PC) via UII+ |
+| Daily challenge | Shared daily seed fetched from server |
+| Cloud saves | Save/load game state over HTTP via UII+ |
+| AT Protocol saves | Federated saves to PDS via bridge |
+| Network spectation | Stream gameplay to SSH spectation relay |
+| LLM auto-play | MCP client mode — watch an AI play on your C64 |
+
+### What's Shared (New)
+
+| Feature | How |
+|---------|-----|
+| **Cross-platform seeds** | Same LFSR + same mapgen = identical dungeon on PC and C64 |
+| **Balance constants** | Single source of truth in `roguelike-common::balance` |
+| **Map generation** | `roguelike-common::mapgen::generate()` — shared algorithm |
+| **Combat formula** | `roguelike-common::combat::damage()` — shared `const fn` |
+| **Monster spawning** | `roguelike-common::spawn` — shared weighted selection |
+| **Room geometry** | `roguelike-common::room::Room` — shared struct + intersection |
+| **Seed codes** | `roguelike-common::seed` — encode/decode for sharing |
+| **Item definitions** | `roguelike-common::items` — type IDs, stat lookup tables |
+| **Leveling tables** | `roguelike-common::leveling` — XP thresholds, stat growth |
+| **Depth scaling** | `roguelike-common::balance` — monster scaling per floor |
+| **Mood thresholds** | `roguelike-common::balance` — flee/enrage trigger values |
 
 ---
 
-## 6. Architecture Mapping
+## 10. Risk Assessment
 
-How the Rust crate structure maps to C64 source files:
-
-```
-Rust Crate / Module          →  C64 Source File        Size Est.
-─────────────────────────────────────────────────────────────────
-core/src/map.rs              →  map.s                  ~2 KB
-  Map::generate()                (room placement, corridor carving)
-  Map::is_walkable()             (tile lookup, bounds check)
-
-core/src/fov.rs              →  fov.s                  ~1.5 KB
-  compute_fov()                  (Bresenham raycasting, bitfield)
-  can_see()                      (single-ray LOS for AI)
-
-core/src/entity.rs           →  entity.s               ~0.5 KB
-  Entity table                   (16-slot fixed array)
-  Type-indexed stat tables       (ROM data)
-
-core/src/combat.rs           →  combat.s               ~0.3 KB
-  melee_attack()                 (subtract + clamp + death check)
-
-core/src/ai.rs               →  ai.s                   ~0.8 KB
-  is_aware() + chase_ai()       (LOS + greedy chase)
-  run_monster_turns()            (iterate entity table)
-
-core/src/spawn.rs            →  spawn.s                ~0.5 KB
-  spawn_monsters()               (weighted random per room)
-
-core/src/game.rs             →  game.s                 ~2 KB
-  GameState::step()              (main turn logic)
-  GameState::new()               (initialization)
-  Autorun (simplified)           (repeat-move loop)
-
-core/src/data.rs             →  data.s                 ~0.3 KB
-  Static monster/player defs     (ROM tables, not TOML)
-
-core/src/message_log.rs      →  msglog.s               ~0.5 KB
-  MessageLog                     (circular buffer, 4 entries)
-  Format strings                 (ROM templates)
-
-tui/src/render.rs            →  render.s               ~2 KB
-  render_map()                   (dirty-rect screen update)
-  render_entities()              (entity glyph + color writes)
-  render_status_bar()            (HP bar, kill count)
-  render_message_log()           (bottom 2 rows)
-
-tui/src/game_loop.rs         →  main.s                 ~1.5 KB
-  run_game_loop()                (title→play→pause state machine)
-  Input handling                 (keyboard + joystick scan)
-
-N/A                          →  sid.s                  ~1.5 KB
-  Sound effects                  (SID register writes)
-  Music player (optional)
-
-N/A                          →  charset.bin            ~2 KB
-  Custom character set           (pixel art for all glyphs)
-
-N/A                          →  disk.s                 ~0.8 KB
-  Save/Load                      (binary serialization to floppy)
-
-N/A                          →  uii_net.s              ~2 KB
-  UII+ detection and init        (probe for hardware, configure)
-  TCP/HTTP client                (connect, send, receive wrappers)
-  Leaderboard submit/display     (POST score, parse top 10)
-  Daily seed fetch               (GET seed, parse response)
-  Cloud save/load                (PUT/GET save data)
-
-N/A                          →  spectate.s             ~1 KB
-  Frame serialization            (compact binary game state)
-  Relay client                   (stream frames to server)
-
-N/A                          →  mcp_client.s           ~1 KB
-  Observation formatter          (ASCII map + stats to text)
-  Action parser                  (parse server response to command)
-  MCP client loop                (send obs, receive action, execute)
-
-core/data/game.toml          →  (compiled into data.s)
-  Balance values                 (constants in ROM)
-
-ssh/src/ (spectate relay)    →  (server-side: add endpoint to existing Rust binary)
-mcp/src/ (MCP server)        →  (server-side: already exists, no changes needed)
-
-N/A                          →  tools/c64-bridge/      (standalone)
-  AT Protocol bridge server      (Docker container, Python or Rust)
-  Binary wire protocol handler   (TCP:6510 listener)
-  atproto XRPC client            (save + spectate record management)
-  PETSCII→ASCII conversion       (static lookup table)
-  Web UI                         (config, auth, live spectate viewer)
-  See: docs/design/c64-atproto-bridge.md
-─────────────────────────────────────────────────────────────────
-Total estimated code size:                             ~18 KB
-Total with data + charset:                             ~22 KB
-  (network modules add ~4 KB; still well within 46 KB budget)
-```
+| Risk | Likelihood | Impact | Mitigation |
+|------|-----------|--------|------------|
+| rust-mos single maintainer abandons project | Medium | High | llvm-mos (LLVM backend) has separate active team; Mikael Lund maintains parallel fork; Docker images are self-contained; code can be ported to cc65 C if needed |
+| Code generation produces slow hot paths | Medium | Medium | Profile on VICE; rewrite hot paths as C FFI calls with inline 6502 assembly; raw pointer arithmetic >> slice access |
+| Code size exceeds budget | Low | Medium | POC measured 13 KB; LTO + `opt-level = "s"` + feature-gated mos-hardware keep size down; shared crate reduces total C64 code |
+| No inline assembly for Kernal calls | Certain | Low | C FFI wrappers (proven by chirp8-c64); mos-hardware's `cbm_kernal` module; function pointer stubs for simple instructions |
+| PRNG edge cases (POC bug: rejection sampling overflow) | Resolved | N/A | Fixed in POC — power-of-2 spans handled with early return; shared LfsrRng carries the fix |
+| Keyboard input on emulators (POC bug: CIA Port B conflict) | Resolved | N/A | Fixed in POC — use Kernal buffer + Port A joystick only |
+| Shared crate adds complexity | Low | Low | Shared crate is ~550 lines of concrete `no_std` functions — no traits, no generics. Includes gameplay features (items, leveling, mood). Both platforms can vendor a local copy as fallback |
+| FOV too slow on real hardware | Low | High | Already budgeted at ~7,500 cycles; validated in POC |
+| Custom charset looks bad | Medium | Low | Iterate with CharPad; study Sword of Fargoal, chirp8-c64's 2x2 tile approach |
+| UII+ command interface underdocumented | Medium | Medium | UII+ firmware is open source; test on real hardware early |
+| Network timeout blocks game loop | Medium | High | Non-blocking polls with timeout; game remains playable offline |
+| Cross-platform seed divergence | Low | Medium | Golden snapshot tests in CI; shared mapgen is deterministic; LFSR period test catches PRNG regressions |
 
 ---
 
-## 7. Detailed Technical Notes
+## 11. Detailed Technical Notes
 
-### 7.1 PRNG Seeding
+### 11.1 PRNG: Lessons from the POC
 
-The Rust version uses `rand::random::<u64>()` for seeding. On the C64, we
-seed the 16-bit LFSR from one of:
+The POC's `prng::range()` function had a critical bug: rejection sampling to
+avoid modulo bias used `(256u16 - (256u16 % span)) as u8`, which overflows to
+0 when span evenly divides 256 (span = 2, 4, 8, 16...). This caused infinite
+loops during `spawn_monsters()` for rooms with odd widths/heights (span 2 or 4).
 
-1. **CIA Timer:** Read the free-running Timer A of CIA #1 ($DC04/$DC05) at
-   the moment the player presses a key on the title screen. The low bits are
-   effectively random due to human timing jitter.
+**Fix:** Early return when `256 % span == 0` (no bias exists, accept any value).
 
-2. **SID noise:** Read the SID's oscillator 3 output ($D41B) with noise
-   waveform enabled. Provides hardware-generated random bytes.
+**Lesson:** The 8-bit boundary creates overflow traps that don't exist on 32/64-
+bit targets. Every arithmetic expression must be audited for u8/u16 overflow.
+Rust's type system catches many of these at compile time, but `as` casts are
+silent truncation.
 
-3. **User-entered seed:** Parse a 4-digit hex code from keyboard input.
+The production build moves the PRNG into `roguelike-common::prng::LfsrRng`,
+which carries this fix and is tested by the shared crate's property tests
+(LFSR period verification, range distribution checks).
 
-### 7.2 Integer-Only FOV Slopes
+### 11.2 Input: CIA Port Multiplexing
 
-The Rust shadowcasting uses `f64` slopes (`let l_slope = (dx - 0.5) / (dy + 0.5)`).
-Bresenham raycasting avoids floating point entirely — it uses only integer
-addition and comparison, making it ideal for the 6502.
+CIA1 Port A ($DC00) is shared between:
+- Keyboard column selection (output, active LOW)
+- Joystick Port 2 (input, active LOW, overrides output drivers)
 
-For each ray from the origin to a perimeter tile:
-```
-dx = abs(target_x - origin_x)
-dy = abs(target_y - origin_y)
-error = dx - dy
+CIA1 Port B ($DC01) is shared between:
+- Keyboard row results (input, active LOW)
+- Joystick Port 1 (input, active LOW, bits 0-4)
 
-while not at target:
-    if tile is wall: stop, mark remaining tiles non-visible
-    mark tile visible
-    e2 = 2 * error
-    if e2 > -dy: error -= dy, x += step_x
-    if e2 <  dx: error += dx, y += step_y
-```
+**Consequence:** Direct keyboard matrix scanning (`write $00 to Port A, read
+Port B`) picks up joystick Port 1 signals on bits 0-4. On emulators where
+virtual controls map to Port 1, this appears as "key always pressed" and
+creates infinite release-wait loops.
 
-Total cost per ray: ~6 instructions per step, ~4 steps average = ~24
-instructions = ~50-70 cycles per ray. With ~38 rays, total FOV cost is
-~2,000-2,700 cycles — about 2.5 ms. Imperceptible.
+**Solution:** Use the Kernal keyboard buffer ($C6/$0277) for keyboard input
+(the Kernal IRQ handler properly manages the multiplexing) and read Port A
+with columns deselected ($FF) for joystick Port 2. Never read Port B
+directly for input detection.
 
-### 7.3 Structural Wall Optimization
+### 11.3 Static Stack Allocation
 
-The Rust version precomputes `structural` walls (walls adjacent to floor) to
-skip rendering filler walls (`map.rs:90-114`). On the C64, this optimization
-is even more important because we want to minimize screen writes.
+llvm-mos's static stack allocation is the key to acceptable performance. For
+it to work optimally:
 
-During map generation, compute a `structural` bitfield alongside the tile
-data. During rendering, skip any wall tile that isn't structural — write a
-black/empty character instead. This reduces the number of distinct glyphs on
-screen and speeds up dirty-rect updates.
+- **Avoid recursion** — all game algorithms are iterative (Bresenham FOV,
+  greedy AI, room placement loop).
+- **Minimize function pointers** — trait objects and dynamic dispatch prevent
+  call graph analysis. Use static dispatch via generics.
+- **Avoid trait-heavy abstractions** — generic functions with trait bounds
+  create indirect references that can obstruct call graph analysis. The shared
+  crate uses concrete types (`u8`, `&mut [u8]`, `&mut LfsrRng`) instead of
+  trait bounds, ensuring the call graph is fully visible at link time.
+- **Enable LTO** — whole-program optimization is required for static stack
+  allocation to analyze the complete call graph.
+- **Prefer `&mut` parameters over `static mut` globals** — Rust's borrow
+  checker guarantees that `&mut` references don't alias, which helps the
+  compiler reason about what memory is touched by each function call. See §11.5.
 
-### 7.4 UII+ Network Command Interface
+### 11.4 Turn Timing
 
-The Ultimate-II+ provides network access through a register-based command
-interface. The 6502 writes command bytes to a small I/O window (typically at
-$DF1C-$DF1F, configurable), and the UII+ module's ARM processor handles all
-TCP/IP stack operations independently.
+Total turn processing measured on the POC (full redraw, no dirty-rect):
+~20,000 cycles = ~20 ms. With dirty-rectangle rendering (~500 cycles) and
+amortized AI costs, this drops to ~8,000 cycles = ~8 ms. Well under one
+frame (16.7 ms NTSC / 20 ms PAL).
 
-**Key operations for our use case:**
+### 11.5 C64 Code Style: Which Abstractions Help on the 6502
 
-```
-Command flow for an HTTP GET:
-  1. Write CMD_NET_TCP_OPEN + destination IP + port 80   → UII+ opens socket
-  2. Write CMD_NET_TCP_SEND + "GET /api/daily-seed\r\n"  → UII+ sends HTTP request
-  3. Poll CMD_NET_TCP_STATUS until data available          → ARM handles TCP
-  4. Read CMD_NET_TCP_RECEIVE into C64 buffer              → Copy response bytes
-  5. Write CMD_NET_TCP_CLOSE                               → UII+ closes socket
-```
+The C64 crate should feel like a C64 program written in Rust — idiomatic for
+the hardware, not idiomatic for modern Rust. Most Rust abstractions add
+overhead on the 6502 that doesn't exist on modern CPUs. This section documents
+which patterns help and which hurt.
 
-The critical insight: **the ARM processor handles TCP retransmission, window
-management, DNS, and buffering**. The 6502 never touches raw packets. From
-the 6502's perspective, it's just writing/reading bytes through a port — not
-fundamentally different from talking to a 1541 disk drive, which also has its
-own 6502 processor handling low-level details.
+**Abstractions that help:**
 
-**Polling vs. blocking:** The UII+ status register can be polled non-
-blockingly (check if data is ready, return immediately if not). This lets the
-game loop continue rendering "Connecting..." animations or respond to a
-cancel keypress during network operations. We never hard-block on network
-I/O.
+| Pattern | Why | Cost |
+|---------|-----|------|
+| **`LfsrRng` struct (shared crate)** | Explicit data flow via `&mut LfsrRng` helps llvm-mos's alias analysis. The compiler can prove RNG calls don't affect tile arrays or entity arrays, enabling better optimization of surrounding code. Also required for the shared crate. | ~2 cycles/call for indirect addressing (zero-page pair) vs absolute. Negligible. |
+| **Explicit parameters to AI** | Pass player position `(px, py)` to `run_monster_turns()` instead of reading from entity globals inside the function. Makes data flow visible, helps optimizer, makes the code easier to follow. | ~0 cost — 2 bytes on zero page. |
+| **Module-level accessor functions** | `entity::x(i)`, `entity::hp(i)` etc. provide a clean interface around `static mut` arrays without struct overhead. The module boundary is the abstraction. | Zero — inlines to `LDA base,X`. |
 
-**DNS resolution:** The UII+ firmware handles DNS internally. We can pass
-hostnames (e.g., `roguelike.example.com`) directly instead of hardcoding IP
-addresses. The server address is configured once via the title screen menu
-and stored in the save file or a separate config sector on disk.
+**Abstractions that hurt or don't help:**
 
-### 7.5 Turn Timing and Responsiveness
+| Pattern | Why Not | 6502 Impact |
+|---------|---------|-------------|
+| **Entity struct wrapping parallel arrays** | `static mut ENT_X: [u8; 16]` produces `LDA ENT_X,X` — a single absolute indexed load (4 cycles). Struct field access through a pointer uses `LDA (zp),Y` (5 cycles). With LTO+inlining it probably optimizes to the same code, but "probably" is risky on the less-mature llvm-mos. | 1 cycle/access risk in hot loops |
+| **`#[repr(u8)]` enums for AI/entity types** | Current `match behavior { entity::AI_CHASE => ... }` with `u8` constants generates `CMP #1 / BEQ`. A proper enum `match` should compile identically but risks branch tables on the immature compiler. The safety benefit is small in a ~2000-line codebase. | Potential code size increase |
+| **Newtype wrappers** (`EntityIdx(u8)`) | Requires the compiler to prove transparency for every access. On upstream LLVM this is trivial; on llvm-mos it's unnecessary risk. | Potential codegen regression |
+| **`&mut GameState` through call chain** | Kills absolute addressing — the 6502's fastest mode. A single state pointer means all field accesses go through `LDA (zp),Y` instead of `LDA absolute,X`. The 1-cycle penalty accumulates: in a loop over 16 entities checking 3-4 fields each, that's ~100 extra cycles per monster turn. | ~0.5% of turn budget |
+| **Wrapping `static mut` in a struct** | `static mut ENTS: EntityStore { x: [u8; 16], ... }` doesn't change memory layout, but `ENTS.x[i]` requires the compiler to resolve the field offset. With LTO this should optimize away. Without, you pay for the offset calculation. | Marginal risk, marginal benefit |
 
-The C64 runs at 60 Hz (NTSC) or 50 Hz (PAL). The game is turn-based, so we
-don't need frame-rate rendering. The loop is:
-
-1. Wait for input (blocking)
-2. Process turn (~5,000 cycles max: step + FOV + AI + render)
-3. Update screen (dirty rects: ~500 cycles)
-4. Return to step 1
-
-Total turn processing: ~5,500 cycles = ~5.5 ms. The screen updates during the
-next vertical blank. The game will feel instantaneous.
-
-For autorun animation, insert a ~100 ms delay between steps (6 VBlank frames
-on NTSC) to match the Rust version's `animation_speed_ms = 100` default.
+**Summary:** The C64 crate uses two targeted abstractions (`LfsrRng` struct,
+explicit AI parameters) and keeps everything else flat: `static mut` parallel
+arrays, `u8` constants, module-level functions, liberal `unsafe`. The module
+system provides clean organization without runtime cost. Hot paths (rendering,
+FOV) use raw pointer arithmetic and `write_volatile` per the chirp8-c64
+recommendation.
 
 ---
 
-## 8. Risk Assessment
+## 12. Open Questions
 
-| Risk                        | Likelihood | Impact | Mitigation                        |
-|-----------------------------|------------|--------|-----------------------------------|
-| FOV too slow on real HW     | Low        | High   | Already budgeted at ~2,700 cycles; profile early on VICE |
-| Map gen produces dead-end dungeons on small maps | Medium | Medium | Tune room count/size; add connectivity validation |
-| Save corruption on 1541     | Low        | High   | Add 16-bit checksum; verify on load |
-| Custom charset looks bad    | Medium     | Low    | Iterate with CharPad editor; study existing C64 roguelikes |
-| 256-byte stack overflow     | Low        | High   | Avoid deep recursion (already mitigated by Bresenham FOV) |
-| cc65 C code too large/slow  | Medium     | Medium | Profile early; rewrite hot paths in asm |
-| UII+ command interface underdocumented | Medium | Medium | Study UII+ firmware source (open source on GitHub); test on real hardware early |
-| Network timeout blocks game loop | Medium | High | All network I/O is non-blocking with timeout; game remains playable if server is down |
-| HTTP response too large for C64 buffer | Low | Medium | Server returns minimal payloads; C64 client uses streaming parse (process bytes as they arrive, don't buffer entire response) |
-| MCP round-trip too slow for enjoyable spectation | Low | Low | LLM inference is 1-3s — acceptable for turn-based; add "thinking..." indicator |
-| UII+ firmware version fragmentation | Medium | Medium | Target UII+ firmware 3.x+ command API; document minimum firmware version |
-| Atproto bridge adds deployment complexity | Medium | Low | Bridge is optional; game works fully without it; Docker makes deployment simple; Raspberry Pi on LAN is ideal host |
-| Bluesky deprecates app passwords | Low | Medium | Bridge design includes OAuth upgrade path via web UI; monitor atproto auth discussions |
-| C64↔PC save format incompatibility | High | Medium | v1: separate PDS records per platform; v2: bridge converts binary↔JSON for true portability |
+1. **Map size:** Fixed 40x21 (no scrolling) vs. 64x48 with scrolling viewport?
+   Scrolling is more work but enables richer dungeons. The 40x21 baseline uses
+   a single dense status row plus 3 message lines, with modal inventory (§6.1).
 
----
+2. ~~**Multiple dungeon levels?**~~ **Resolved.** The
+   [gameplay implementation plan](design/gameplay-implementation-plan.md)
+   Phase 2 designs stairs and multi-level dungeons. On the C64, swap map data
+   on descend (840 bytes per floor); optionally hold 2 floors in memory
+   (1,680 bytes) for quick backtracking. Derive floor seeds from the base
+   seed: `LfsrRng::new(base_seed.wrapping_add(depth))`. MultiRogueLike
+   validates this approach — it uses a 3D grid with stairs connecting levels.
 
-## 9. Prior Art
+3. **mos-hardware version pinning:** Should we vendor `mos-hardware` or depend
+   on crates.io? Vendoring avoids breakage from upstream changes; crates.io
+   gets updates automatically.
 
-Roguelikes that have shipped on 8-bit platforms, demonstrating feasibility:
+4. **PAL vs. NTSC timing:** Turn-based so gameplay unaffected, but animation
+   timing and SID tuning differ. Detect at startup with raster counter check.
 
-- **Rogue (1980)** — The original, ran on PDP-11 and early Unix terminals.
-  40x24 display, simpler FOV (line-of-sight only), no shadowcasting.
-- **Sword of Fargoal (1982)** — C64 native. Procedural dungeons, fog of war,
-  combat. Proved the concept works beautifully on this hardware.
-- **Gateway to Apshai (1983)** — C64. Real-time dungeon crawling with
-  joystick control and multiple dungeon levels.
-- **Hack (1985)** — Available on various 8-bit platforms. Complex inventory
-  and interaction systems within tight memory constraints.
-- **C64 Angband variants** — Community ports of Angband-like games to the C64,
-  demonstrating that deep roguelike mechanics fit in 64 KB.
+5. **alloc vs. no-alloc:** The POC runs without `alloc`. Should we stay
+   no-alloc (simpler, predictable memory) or adopt `mos-alloc` for convenience
+   (Vec, String)? Recommendation: stay no-alloc.
 
----
+6. **How much C FFI?** Currently zero in the POC. Kernal calls (disk I/O) will
+   need C wrappers. mos-hardware's `cbm_kernal` module may handle this, but
+   we should audit whether its C build dependency (`cc` crate) works in the
+   Docker workflow.
 
-## 10. Deliverables
-
-1. **Source code** — New `crates/c64/` directory (or standalone repo) containing
-   cc65 C sources and 6502 assembly files.
-2. **Build system** — Makefile targeting cc65, producing .prg, .d64, and .crt
-   outputs for both stock and UII+ builds.
-3. **Custom charset** — `charset.bin` (2 KB) designed in CharPad or similar
-   tool.
-4. **Disk image** — `roguelike.d64` ready for emulators and real hardware.
-5. **Cartridge image** — `roguelike.crt` for EasyFlash/similar flash
-   cartridges (instant load, no disk drive needed).
-6. **Server endpoints** — Leaderboard, daily seed, cloud save, and spectation
-   relay endpoints added to the existing Rust binary (alongside the SSH and
-   MCP servers). Single deployment serves PC, SSH, MCP, and C64 clients.
-7. **AT Protocol bridge** — `tools/c64-bridge/` standalone project. Docker
-   image published to GHCR. Self-hostable on a Raspberry Pi. Provides PDS
-   save storage, federated spectation, and Bluesky identity for C64 players.
-   Designed in [docs/design/c64-atproto-bridge.md](design/c64-atproto-bridge.md).
-8. **Design document** — This proposal, updated with implementation notes.
+7. **mos-hardware code size:** The proposal recommends migrating from hand-
+   rolled `poke`/`peek` to `mos-hardware` for type safety. Budget ~500-1500
+   bytes for mos-hardware's contribution to the binary (volatile-register
+   wrappers, bitflags structs). Measure after migration and compare against
+   the POC's 13 KB baseline.
 
 ---
 
-## 11. Open Questions
+## 13. Conclusion
 
-1. **Map size:** Fixed 40x22 (no scrolling) vs. 64x48 with scrolling viewport?
-   Scrolling is more work but enables richer dungeons.
+The rust-mos approach is validated. The POC proves that Rust compiles to viable
+6502 machine code for a complete roguelike game loop in 13 KB — competitive
+with the original cc65 estimate of 12-18 KB.
 
-2. **Multiple dungeon levels?** The Rust version is single-floor. The C64
-   version could add stairs and multiple levels (swap map data on level
-   change). This is a natural expansion for the "what gets added" column.
+The main advantages over the cc65 approach:
 
-3. **PAL vs. NTSC timing:** The game logic is turn-based so this doesn't
-   affect gameplay, but animation timing and SID tuning differ. Support both
-   with a PAL/NTSC detection routine at startup.
+1. **Single language** — The entire project (7 workspace crates + C64) stays
+   in Rust. The C64 is another frontend in the existing multi-frontend
+   architecture (terminal, SSH, MCP, C64).
+2. **Shared algorithms** — Map generation, combat, spawning, room geometry,
+   item definitions, leveling tables, depth scaling, mood thresholds, and the
+   PRNG live in `roguelike-common`, a ~550-line `#![no_std]` crate with zero
+   dependencies and zero generics. The shared code is written at the C64's
+   abstraction level (`u8`, `&mut [u8]`, `&mut [Room]`, `&mut LfsrRng`) — the
+   C64 uses it directly, and the PC calls down to it for challenge mode. This
+   ensures gameplay feature parity across platforms as the
+   [gameplay implementation plan](design/gameplay-implementation-plan.md)
+   features are implemented.
+3. **Cross-platform seed sharing** — The shared Galois LFSR and shared map
+   generation function mean the same seed produces the same dungeon on both
+   platforms. A C64 player's 4-character seed code works in the PC's challenge
+   mode, enabling cross-platform daily challenges and leaderboards.
+4. **Type safety** — Ownership model, pattern matching, and `Option`/`Result`
+   prevent entire classes of bugs that plague 6502 C/assembly.
+5. **Ecosystem** — `mos-hardware` provides production-quality hardware access;
+   `mos-alloc` and `mos-test` are available if needed.
+6. **Faster iteration** — Cargo workflow with Docker, `write_volatile` for
+   hardware access, Rust's expressive type system for game logic.
 
-4. **Target hardware baseline:** Stock C64 with 1541 drive? Or also support
-   REU (RAM Expansion Unit), SD2IEC, Pi1541, etc.? REU would enable much
-   larger maps and instant saves. The Ultimate 64 (with built-in UII+) is the
-   recommended enhanced target for network features.
+The main risks:
 
-5. **Cartridge vs. disk:** A 16 KB cartridge image means instant loading and
-   no disk I/O for saves (use cartridge EEPROM or skip saves). A disk version
-   supports saves but has slow loading. Possibly ship both.
+1. **Single maintainer** — Mitigated by Docker version pinning and the active
+   llvm-mos backend.
+2. **No inline assembly** — Mitigated by C FFI wrappers and mos-hardware.
+3. **Code generation quality** — Mitigated by raw pointer patterns in hot paths
+   and the validated POC binary size.
 
-6. **UII+ network API stability:** The Ultimate-II+ command interface has
-   evolved across firmware versions. Should we target a minimum firmware
-   version (e.g., 3.10+) or implement version detection with feature
-   negotiation? The UII+ firmware is open source, which helps.
-
-7. **Server hosting:** The leaderboard / daily seed / cloud save endpoints
-   need a server. Options: (a) self-hosted alongside the existing SSH/MCP
-   server, (b) a free-tier cloud endpoint, or (c) a peer-to-peer model
-   where the C64 talks directly to another player's Rust binary on their LAN.
-   Option (a) is simplest since we already have a Rust server binary.
-
-8. **Cross-platform leaderboard fairness:** C64 maps are 40x22 with fewer
-   monsters; PC maps are 80x40. Should leaderboards be per-platform, or
-   should daily challenges use a C64-sized map on all platforms for parity?
-
-9. **MCP client: who controls the game?** When the C64 is in MCP client mode,
-   does the local player watch passively, or can they interrupt and take over
-   mid-game (like a "co-pilot" mode)? The Rust MCP server already supports
-   alternating between human and LLM turns.
-
-10. **Network save authentication:** Cloud saves need some form of player
-    identity. Options: simple player-name string (no security, honor system),
-    a pre-shared key entered once, or a pairing code displayed on the server.
-    For a C64 roguelike, the honor system seems appropriate. The atproto
-    bridge solves this differently — credentials are stored on the bridge,
-    not the C64 (see question 11).
-
-11. **Atproto bridge auth method:** The bridge design proposes app passwords
-    for v1 (simplest) with an OAuth upgrade path. Bluesky has discussed
-    deprecating app passwords in favor of OAuth-only. Should we implement
-    OAuth from the start via the bridge's web UI, or ship with app passwords
-    and upgrade later? See
-    [c64-atproto-bridge.md](design/c64-atproto-bridge.md#authentication)
-    for the full analysis.
-
-12. **Cross-platform save portability:** C64 saves are ~1.6 KB compact binary;
-    PC/SSH saves are ~20-80 KB JSON. The atproto bridge stores C64 saves as
-    opaque blobs with a metadata header. For true cross-platform portability
-    (continue a C64 game on PC, or vice versa), the bridge would need to
-    convert between binary and JSON formats. Is this a v1 requirement, or an
-    aspirational goal for later? See
-    [c64-atproto-bridge.md](design/c64-atproto-bridge.md#open-questions)
-    question 7.
-
----
-
-## 12. Conclusion
-
-The roguelike's architecture is well-suited for a C64 port. The core game
-loop is simple (turn-based, grid-based, integer combat), the Rust codebase
-has clean module boundaries that map naturally to C64 source files, and the
-entire game state fits comfortably in ~4 KB of RAM.
-
-The main engineering challenges are:
-1. Replacing shadowcasting FOV with Bresenham raycasting (solvable, well-understood)
-2. Fitting the map into a 40x22 viewport (solvable, just smaller dungeons)
-3. Disk I/O for saves (slow but acceptable for a roguelike)
-4. UII+ network driver layer (new, but the command interface is documented and
-   the firmware is open source)
-
-What makes this port *exciting* is what the C64 **adds**: SID chip audio,
-custom character graphics, joystick control, and the visceral satisfaction
-of a complete game running on a 1 MHz 8-bit machine from 1982.
-
-The Ultimate 64's Ethernet capability takes this further — from a standalone
-retro port into a **networked node in the same ecosystem** as the PC, SSH,
-and MCP versions. A C64 player's kill count appears on the same leaderboard
-as a PC player's. A daily challenge seed unites players across 44 years of
-hardware. An LLM plays the game through a MCP server while the C64 renders
-each move on a 40-column screen. The server binary is the same Rust binary
-that already serves SSH and MCP — the C64 is just another client.
+The implementation plan is compressed to **12 weeks** (vs. the original 20
+weeks for cc65) because:
+- Phase 0 (POC) is already complete
+- Rust development is faster than C/assembly for game logic
+- mos-hardware eliminates boilerplate hardware register code
+- The shared `roguelike-common` crate reduces duplication and prevents drift
 
 The C64 roguelike wouldn't just be a downport — it would be the most
-interesting client in the fleet.
+interesting client in the fleet. And with cross-platform seed sharing, a C64
+player and a PC player can compete on the same dungeon.
 
-Estimated total effort: **16-20 weeks** for an experienced 6502 developer
-(including network features), **12-16 weeks** for the core game + sound
-without networking, or **6-8 weeks** for the minimum viable game.
+Estimated remaining effort: **10-12 weeks** for production features +
+networking, **6-8 weeks** for the core game + sound without networking.

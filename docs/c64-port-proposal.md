@@ -33,7 +33,7 @@ Rust-mos was chosen instead because:
 1. **Shared language** — The entire project (PC, SSH, MCP, and C64) stays in
    Rust. Developers don't need to context-switch between Rust and C/asm.
 2. **Shared algorithms** — Map generation, combat, monster spawning, room
-   geometry, and the PRNG live in a single `no_std` crate (`roguelike-common`)
+   geometry, and the PRNG live in a single `no_std` crate (`roguelike-rules`)
    compiled for both targets. The same seed produces the same dungeon on both
    platforms.
 3. **Type safety** — Rust's ownership model catches bugs at compile time that
@@ -292,7 +292,7 @@ full design.
 | Stat values | `type Stat = i32` (`types.rs`) | `u8` (0-255) |
 | Max entities | `MAX_ENTITIES = 1024` (types.rs notes "C64 = 16") | `MAX_ENTITIES = 16` |
 | PRNG | `rand::StdRng` (ChaCha20, u64 seed) | Galois LFSR (16-bit, u16 seed) |
-| Shared types | `roguelike-common`: `u8` coords, `Room`, `LfsrRng` | Same — shared crate compiles for both |
+| Shared types | `roguelike-rules`: `u8` coords, `Room`, `LfsrRng` | Same — shared crate compiles for both |
 | **Language** | **Rust (std)** | **Rust (no_std, no_alloc) via rust-mos** |
 | **Compiler** | **rustc (upstream)** | **rustc (rust-mos fork) + llvm-mos** |
 
@@ -322,7 +322,7 @@ The sweet spot is **banking out BASIC only: ~46 KB usable**.
 Program code:           ~18 KB   (rust-mos Rust, release+LTO+opt-size)
   POC measured at 13 KB with full game loop; production adds SID,
   custom charset, save/load, dirty-rect rendering, items, XP (~5 KB extra)
-  roguelike-common contributes ~1.5 KB (mapgen, prng, combat, rooms,
+  roguelike-rules contributes ~1.5 KB (mapgen, prng, combat, rooms,
   items, leveling, depth scaling, wandering spawn, mood thresholds)
 Map tile data:            840 B   (40 x 21 = 840 tiles, 1 byte/tile)
 Structural wall bits:     105 B   (840 bits)
@@ -361,7 +361,7 @@ share Rust code between the PC and C64 codebases. This section describes a
 practical approach grounded in one key insight: **write the shared code at the
 C64's abstraction level, and let the PC call down to it.**
 
-The PC engine (`roguelike-core`) uses `Vec<Tile>`, `HashSet<Pos>`, `String`,
+The PC engine (`roguelike-engine`) uses `Vec<Tile>`, `HashSet<Pos>`, `String`,
 `HashMap`, and `rand::StdRng`. The C64 engine uses `static mut [u8; 840]`,
 bitfields, `&'static [u8]`, and a 16-bit Galois LFSR. These storage layers
 are fundamentally incompatible, and abstracting them behind traits would add
@@ -382,8 +382,8 @@ game logic, save persistence, rendering, and platform-specific binaries:
 roguelike/
   Cargo.toml                        # workspace: 7 members + libudev patch
   crates/
-    common/       (roguelike-common) # NEW: shared #![no_std] algorithms + data
-    core/         (roguelike-core)   # PC game engine (library, std)
+    rules/        (roguelike-rules)    # NEW: shared #![no_std] game rules + balance data
+    engine/       (roguelike-engine)   # PC game engine (library, std) — renamed from core/
     saves/        (roguelike-saves)  # SaveBackend trait abstraction
     tui/          (roguelike-tui)    # Terminal rendering (crossterm)
     terminal/     (roguelike-terminal) # Desktop app (keyboard + gamepad)
@@ -396,9 +396,9 @@ roguelike/
 The **dependency graph** puts the shared crate at the bottom:
 
 ```
-roguelike-common  (#![no_std], zero deps — the shared soul)
+roguelike-rules  (#![no_std], zero deps — the shared soul)
     ↓                              ↓
-roguelike-core  (std, game engine)  roguelike-c64  (no_std, C64 binary)
+roguelike-engine  (std, game engine)  roguelike-c64  (no_std, C64 binary)
     ↓
 roguelike-saves (SaveBackend trait)
     ↓
@@ -408,6 +408,16 @@ roguelike-tui   (crossterm rendering + game loop)
 ├── roguelike-ssh       (SSH server: per-user sessions + accounts)
 └── roguelike-mcp       (MCP server: AI tool interface, core only)
 ```
+
+> **Naming rationale.** The shared crate is called `roguelike-rules` (not
+> `roguelike-common`) because it contains the *game rules* — balance constants,
+> algorithms, and type definitions that both platforms must agree on. The PC
+> runtime is called `roguelike-engine` (not `roguelike-core`) because it is
+> the *engine* that implements those rules with `std` facilities. The
+> relationship reads naturally: "the engine implements the rules." Cargo's
+> feature unification model prevents a single crate from being `std` for one
+> consumer and `no_std` for another, which is why the shared rules live in
+> their own crate rather than inside the engine.
 
 ### 5.2 Design Principle: Shared Code IS C64 Code
 
@@ -431,7 +441,7 @@ distinguish coordinates from anything else — it just adds a layer of
 indirection between the reader and the actual data width. In ~400 lines of
 `no_std` code targeting the 6502, explicit `u8` is both clearer and more
 honest. The PC's own type aliases remain unchanged — they're a concern of
-`roguelike-core`'s API surface, not the shared crate.
+`roguelike-engine`'s API surface, not the shared crate.
 
 `cfg`-adaptive aliases (`#[cfg(c64)] type Coord = u8; #[cfg(not(c64))] type
 Coord = i32;`) are worse: they make "shared" code compile with different
@@ -444,12 +454,12 @@ references that obstruct this analysis. Concrete functions on primitive types
 produce a clean call graph with guaranteed optimal code generation. See §11.3
 and §11.5.
 
-### 5.3 Shared Crate: `roguelike-common`
+### 5.3 Shared Crate: `roguelike-rules`
 
 ```
 roguelike/
   crates/
-    common/         (roguelike-common)   # #![no_std], zero deps
+    rules/          (roguelike-rules)   # #![no_std], zero deps
       Cargo.toml
       src/
         lib.rs        # re-exports
@@ -468,9 +478,9 @@ roguelike/
 ```
 
 ```toml
-# roguelike-common/Cargo.toml
+# crates/rules/Cargo.toml
 [package]
-name = "roguelike-common"
+name = "roguelike-rules"
 version = "0.1.0"
 edition = "2021"
 
@@ -478,7 +488,7 @@ edition = "2021"
 ```
 
 ```rust
-// roguelike-common/src/lib.rs
+// crates/rules/src/lib.rs
 #![no_std]
 
 pub mod prng;
@@ -508,7 +518,7 @@ The PRNG is the foundation of cross-platform seed sharing. Both platforms use
 the same 16-bit Galois LFSR — same seed, same random sequence, same dungeon.
 
 ```rust
-// roguelike-common/src/prng.rs
+// roguelike-rules/src/prng.rs
 
 /// 16-bit Galois LFSR pseudo-random number generator.
 /// Polynomial: x^16 + x^14 + x^13 + x^11 + 1 (taps: 0xB400).
@@ -574,7 +584,7 @@ placement with collision checks and L-shaped corridor carving. The shared
 function operates on `&mut [u8]` (tile buffer) and `&mut [Room]` (room list):
 
 ```rust
-// roguelike-common/src/mapgen.rs
+// roguelike-rules/src/mapgen.rs
 
 use crate::prng::LfsrRng;
 use crate::room::Room;
@@ -652,7 +662,7 @@ slice and a room array.
 
 ```rust
 // c64/src/map.rs
-use roguelike_common::{mapgen, room::Room, balance, prng::LfsrRng};
+use roguelike_rules::{mapgen, room::Room, balance, prng::LfsrRng};
 
 static mut TILES: [u8; 840] = [0; 840];
 static mut ROOMS: [Room; 12] = [Room::EMPTY; 12];
@@ -676,14 +686,14 @@ The C64 still owns its `static mut` storage. The shared function just fills it.
 **PC — wraps shared code for challenge mode:**
 
 ```rust
-// core/src/map.rs (addition, not replacement)
-use roguelike_common::{mapgen, room::Room as SharedRoom, prng::LfsrRng};
+// engine/src/map.rs (addition, not replacement)
+use roguelike_rules::{mapgen, room::Room as SharedRoom, prng::LfsrRng};
 
 impl Map {
     /// Generate a C64-compatible map (for cross-platform seed challenges).
     /// Same seed + same LFSR + same function = identical dungeon.
     pub fn generate_c64_compatible(&mut self, seed: u16) -> Pos {
-        use roguelike_common::balance;
+        use roguelike_rules::balance;
         let mut rng = LfsrRng::new(seed);
         let w = balance::C64_MAP_WIDTH;
         let h = balance::C64_MAP_HEIGHT;
@@ -719,19 +729,19 @@ abstractions pollute the normal code path.
 
 | Category | Shared? | Where | Form |
 |----------|---------|-------|------|
-| **PRNG** | **Yes** | `common/prng.rs` | `LfsrRng` struct — same algorithm on both platforms |
-| **Map generation** | **Yes** | `common/mapgen.rs` | `generate()` on `&mut [u8]` + `&mut [Room]` |
-| **Room geometry** | **Yes** | `common/room.rs` | `Room { x, y, w, h }`, `intersects()`, `center()` |
-| **Combat formula** | **Yes** | `common/combat.rs` | `const fn damage(atk: u8, def: u8) -> u8`, `effective_attack()`, `effective_defense()` |
-| **Monster spawning** | **Yes** | `common/spawn.rs` | `pick_monster()`, `spawn_into_rooms()` |
-| **Structural walls** | **Yes** | `common/structural.rs` | `compute()` on `&[u8]` → `&mut [u8]` bitfield |
-| **Balance constants** | **Yes** | `common/balance.rs` | All HP/ATK/DEF/sight/spawn_weight/regen values |
-| **Item definitions** | **Yes** | `common/items.rs` | Item type IDs, stat lookup tables (heal amount, ATK/DEF bonus, spawn weights) |
-| **Leveling tables** | **Yes** | `common/leveling.rs` | XP thresholds per level, HP/ATK/DEF growth per level |
-| **Depth scaling** | **Yes** | `common/balance.rs` | Monster stat scaling per floor, `min_depth` thresholds |
-| **Wandering spawn config** | **Yes** | `common/balance.rs` | Spawn interval, delay, max active constants |
-| **Mood thresholds** | **Yes** | `common/balance.rs` | Mood trigger values, decay rate, flee/enrage thresholds |
-| **Seed codes** | **Yes** | `common/seed.rs` | Encode/decode with `[u8; 16]` fixed buffers |
+| **PRNG** | **Yes** | `rules/prng.rs` | `LfsrRng` struct — same algorithm on both platforms |
+| **Map generation** | **Yes** | `rules/mapgen.rs` | `generate()` on `&mut [u8]` + `&mut [Room]` |
+| **Room geometry** | **Yes** | `rules/room.rs` | `Room { x, y, w, h }`, `intersects()`, `center()` |
+| **Combat formula** | **Yes** | `rules/combat.rs` | `const fn damage(atk: u8, def: u8) -> u8`, `effective_attack()`, `effective_defense()` |
+| **Monster spawning** | **Yes** | `rules/spawn.rs` | `pick_monster()`, `spawn_into_rooms()` |
+| **Structural walls** | **Yes** | `rules/structural.rs` | `compute()` on `&[u8]` → `&mut [u8]` bitfield |
+| **Balance constants** | **Yes** | `rules/balance.rs` | All HP/ATK/DEF/sight/spawn_weight/regen values |
+| **Item definitions** | **Yes** | `rules/items.rs` | Item type IDs, stat lookup tables (heal amount, ATK/DEF bonus, spawn weights) |
+| **Leveling tables** | **Yes** | `rules/leveling.rs` | XP thresholds per level, HP/ATK/DEF growth per level |
+| **Depth scaling** | **Yes** | `rules/balance.rs` | Monster stat scaling per floor, `min_depth` thresholds |
+| **Wandering spawn config** | **Yes** | `rules/balance.rs` | Spawn interval, delay, max active constants |
+| **Mood thresholds** | **Yes** | `rules/balance.rs` | Mood trigger values, decay rate, flee/enrage thresholds |
+| **Seed codes** | **Yes** | `rules/seed.rs` | Encode/decode with `[u8; 16]` fixed buffers |
 | FOV (compute_fov) | **No** | Separate impls | PC: f64 shadowcasting → HashSet; C64: Bresenham → bitfield |
 | FOV (can_see) | **No** | Separate impls | Intentionally different — see §6.3 |
 | A* pathfinding | **No** | PC only | Requires heap (HashMap, BinaryHeap) |
@@ -749,7 +759,7 @@ The shared crate is the single source of truth for game balance. Both platforms
 import constants rather than defining them independently:
 
 ```rust
-// roguelike-common/src/balance.rs
+// roguelike-rules/src/balance.rs
 
 // --- Monster stat constants ---
 pub const GOBLIN_HP: u8 = 6;
@@ -823,32 +833,32 @@ values directly in its ROM stat tables.
 **Relationship to `game.toml`**: The PC's data-file loading (`data.rs`) uses
 these shared constants as compiled-in defaults. Modders can still override
 values via `game.toml` — the shared crate is the baseline, not a constraint.
-A CI test verifies that `game.toml` defaults match `roguelike-common` constants.
+A CI test verifies that `game.toml` defaults match `roguelike-rules` constants.
 
 **Relationship to gameplay implementation plan**: The constants above correspond
 to Phases 1 (wandering spawns), 2 (depth scaling), 4 (leveling), and 5 (mood)
 of the [gameplay implementation plan](design/gameplay-implementation-plan.md).
-Phase 3 (items) has its own module (`common/items.rs`) rather than constants in
+Phase 3 (items) has its own module (`rules/items.rs`) rather than constants in
 `balance.rs`, because item definitions include lookup tables for stat bonuses.
 Phase 6 (property bitfields) is PC-only for v1 — the C64 has no immediate use
 for the `u64` property system, though a `u8` subset could be added later.
 
 ### 5.9 Testing Strategy
 
-1. **Shared crate tests**: `cargo test -p roguelike-common` on the host with
+1. **Shared crate tests**: `cargo test -p roguelike-rules` on the host with
    standard rustc. No emulator needed.
 
 2. **CI no_std verification**: Cross-compile for `thumbv6m-none-eabi` to catch
    accidental `std` dependencies:
    ```bash
-   cargo check -p roguelike-common --target thumbv6m-none-eabi
+   cargo check -p roguelike-rules --target thumbv6m-none-eabi
    ```
 
-3. **Balance drift detection**: A CI test in `roguelike-core` verifies that
-   `game.toml` default values match `roguelike-common::balance` constants.
+3. **Balance drift detection**: A CI test in `roguelike-engine` verifies that
+   `game.toml` default values match `roguelike-rules::balance` constants.
 
 4. **Cross-platform seed determinism**: A test generates a dungeon with a
-   known seed using `roguelike-common::mapgen::generate()` and compares the
+   known seed using `roguelike-rules::mapgen::generate()` and compares the
    resulting tile layout against a stored golden snapshot. This catches any
    accidental changes to the generation algorithm or PRNG.
 
@@ -943,11 +953,11 @@ will.
 validated 40x22, and the 1-row reduction gains a third message line and richer
 status information. Add scrolling viewport over 64x48 maps in v1.1. The map
 dimensions must be set before cross-platform seeds are published, since they
-flow through `roguelike-common::balance` (see §5.8).
+flow through `roguelike-rules::balance` (see §5.8).
 
 ### 6.2 Map Generation
 
-Map generation uses the shared `roguelike-common::mapgen::generate()` function
+Map generation uses the shared `roguelike-rules::mapgen::generate()` function
 on both platforms, ensuring identical room placement, corridor routing, and
 dungeon topology for any given seed. See §5.5 for the shared function and §5.6
 for platform integration.
@@ -1023,7 +1033,7 @@ static mut ENT_MEMORY:   [u8; 16] = [0; 16];   // Phase 5: bitflags (SAW_ALLY_DI
 
 Total: **13 arrays x 16 entries = 208 bytes** (see §4.2 memory budget).
 
-Stat tables are ROM constants populated from `roguelike-common::balance`.
+Stat tables are ROM constants populated from `roguelike-rules::balance`.
 Names are `&'static [u8]` references to byte string literals — no heap.
 
 Player-specific state (XP total, level, depth, inventory, equipment) lives
@@ -1039,7 +1049,7 @@ detection. All implemented and validated in the POC (`ai.rs`, 120 lines).
 ### 6.6 Combat System
 
 `damage = max(0, attacker_atk - defender_def)`. The formula is a `const fn` in
-`roguelike-common::combat` — the single source of truth. Both platforms wrap it
+`roguelike-rules::combat` — the single source of truth. Both platforms wrap it
 with their respective logging and entity access patterns.
 
 ### 6.7 Items and Inventory (C64 Storage Design)
@@ -1067,10 +1077,10 @@ Cost: **97 bytes** (vs. 840 bytes for a full map overlay). Item lookup at a
 position is a linear scan over `ITEM_COUNT` entries — at 32 max items, this
 is ~200 cycles. Negligible for a turn-based game.
 
-Item type IDs map to stat tables in `roguelike-common::items`:
+Item type IDs map to stat tables in `roguelike-rules::items`:
 
 ```rust
-// roguelike-common/src/items.rs
+// roguelike-rules/src/items.rs
 
 pub const ITEM_NONE: u8 = 0;
 pub const ITEM_HEALING_POTION: u8 = 1;
@@ -1115,7 +1125,7 @@ static mut EQUIPPED_ARMOR: u8 = 0;             // item type ID
 ```
 
 Cost: **12 bytes.** The `effective_attack()` and `effective_defense()` helpers
-in `roguelike-common::combat` take base stats plus equipment type IDs and
+in `roguelike-rules::combat` take base stats plus equipment type IDs and
 return the effective values — shared between both platforms.
 
 **Inventory UI — modal overlay:** The inventory screen is a NetHack-style modal
@@ -1126,9 +1136,9 @@ to inventory display — the equipped weapon and armor are shown as single-glyph
 indicators on the status bar (§6.1). Pickup (`g`), drop (`d`), use (`u`), and
 equip (`e`) commands work without opening the inventory for common actions.
 
-**Item spawning** uses the existing `roguelike-common::spawn` pattern: weighted
+**Item spawning** uses the existing `roguelike-rules::spawn` pattern: weighted
 random selection into rooms, with a `max_items_per_room` cap. Item spawn weights
-and `min_depth` thresholds live in `roguelike-common::items`.
+and `min_depth` thresholds live in `roguelike-rules::items`.
 
 ### 6.8 Rendering
 
@@ -1285,11 +1295,11 @@ vs LFSR) and different map dimensions (80x40 vs 40x21).
 
 #### Cross-Platform Challenge Mode
 
-The shared `roguelike-common` crate enables a **challenge mode** on the PC that
+The shared `roguelike-rules` crate enables a **challenge mode** on the PC that
 generates C64-compatible dungeons:
 
 1. PC creates a `LfsrRng` from a u16 seed (same PRNG as C64).
-2. PC calls `roguelike-common::mapgen::generate()` with C64 parameters
+2. PC calls `roguelike-rules::mapgen::generate()` with C64 parameters
    (40x21 map, 12 rooms, size 3-7).
 3. Same seed + same LFSR + same function = **identical dungeon** on both
    platforms.
@@ -1325,19 +1335,19 @@ rather than pixel-identical play.
 ## 7. Architecture Mapping
 
 The project has four frontends — terminal, SSH, MCP, and C64 — all driven by
-the same game engine (`roguelike-core`). The C64 is unique: it reimplements
-the engine in `no_std` Rust rather than importing `roguelike-core` directly,
+the same game engine (`roguelike-engine`). The C64 is unique: it reimplements
+the engine in `no_std` Rust rather than importing `roguelike-engine` directly,
 because core depends on `String`, `Vec`, `serde`, and `rand`. The shared
-`roguelike-common` crate bridges the gap by providing the core algorithms and
+`roguelike-rules` crate bridges the gap by providing the core algorithms and
 balance data that both engines consume.
 
 ### 7.1 How the Frontends Compare
 
 ```
-                    roguelike-core          roguelike-c64
+                    roguelike-engine          roguelike-c64
                     ──────────────          ─────────────
 Depends on:         serde, rand, toml       nothing (zero deps)
-                    roguelike-common        roguelike-common
+                    roguelike-rules        roguelike-rules
 Entity storage:     Vec<Entity>             parallel static mut arrays
 Map storage:        Vec<Tile>               static mut [u8; 840]
 FOV:                f64 shadowcasting       integer Bresenham raycasting
@@ -1348,7 +1358,7 @@ Save format:        JSON (serde_json)       binary (manual serialization)
 PRNG (normal):      StdRng (ChaCha20)       LfsrRng (shared crate)
 PRNG (challenge):   LfsrRng (shared crate)  LfsrRng (shared crate)
                     ──────────────          ─────────────
-Shared via:              roguelike-common
+Shared via:              roguelike-rules
                     (PRNG, mapgen, combat, room geometry, spawn logic,
                      structural walls, balance constants, seed codes,
                      item defs, leveling tables, depth scaling, mood)
@@ -1359,39 +1369,39 @@ Shared via:              roguelike-common
 ```
 Workspace Crate / Module     →  C64 Module (Rust)            Size Est.  POC Actual
 ──────────────────────────────────────────────────────────────────────────────────
-NEW: common/src/             →  used by both                 ~1.5 KB   (pending)
-  roguelike-common               (PRNG, mapgen, combat, rooms, balance, seeds,
+NEW: rules/src/              →  used by both                 ~1.5 KB   (pending)
+  roguelike-rules               (PRNG, mapgen, combat, rooms, balance, seeds,
                                   items, leveling, depth scaling, mood thresholds)
 
-core/src/map.rs     (22 KB)  →  c64/src/map.rs               ~0.5 KB   (wraps common)
-  Map::generate()                (calls common::mapgen::generate())
+engine/src/map.rs   (22 KB)  →  c64/src/map.rs               ~0.5 KB   (wraps rules)
+  Map::generate()                (calls rules::mapgen::generate())
   Map::is_walkable()             (tile lookup on static mut buffer)
 
-core/src/fov.rs     (6.9 KB) →  c64/src/fov.rs               ~1.5 KB    190 lines
+engine/src/fov.rs   (6.9 KB) →  c64/src/fov.rs               ~1.5 KB    190 lines
   compute_fov()                  (Bresenham raycasting — platform-specific)
   can_see()                      (single-ray LOS — platform-specific)
 
-core/src/entity.rs  (4 KB)   →  c64/src/entity.rs            ~1 KB      248 lines
+engine/src/entity.rs (4 KB)  →  c64/src/entity.rs            ~1 KB      248 lines
   Entity struct                  (parallel arrays, stat tables from balance.rs)
 
-core/src/combat.rs  (3.7 KB) →  c64/src/combat.rs            ~0.3 KB     38 lines
-  melee_attack()                 (wraps common::combat::damage())
+engine/src/combat.rs (3.7 KB) → c64/src/combat.rs            ~0.3 KB     38 lines
+  melee_attack()                 (wraps rules::combat::damage())
 
-core/src/ai.rs      (13 KB)  →  c64/src/ai.rs                ~0.8 KB    138 lines
+engine/src/ai.rs    (13 KB)  →  c64/src/ai.rs                ~0.8 KB    138 lines
   run_monster_turns()            (LOS + greedy chase + wander)
 
-core/src/spawn.rs   (4.4 KB) →  c64/src/entity.rs            ~0.5 KB    (included)
-  spawn_monsters()               (calls common::spawn functions)
+engine/src/spawn.rs (4.4 KB) →  c64/src/entity.rs            ~0.5 KB    (included)
+  spawn_monsters()               (calls rules::spawn functions)
 
-core/src/game.rs    (91 KB)  →  c64/src/main.rs              ~1.5 KB    185 lines
+engine/src/game.rs  (91 KB)  →  c64/src/main.rs              ~1.5 KB    185 lines
   GameState::step()              (main turn loop — drastically simplified)
 
-core/src/message_log.rs      →  c64/src/msglog.rs            ~0.8 KB    152 lines
+engine/src/message_log.rs    →  c64/src/msglog.rs            ~0.8 KB    152 lines
   MessageLog                     (4-slot circular buffer, &[u8] not String)
 
-core/src/data.rs    (27 KB)  →  c64/src/entity.rs            embedded   (included)
-  GameData / MonsterDef          (const ROM tables from common::balance)
-  game.toml parsing              (not needed — values from shared crate)
+engine/src/data.rs  (27 KB)  →  c64/src/entity.rs            embedded   (included)
+  GameData / MonsterDef          (const ROM tables from rules::balance)
+  game.toml parsing              (not needed — values from rules crate)
 
 tui/src/render.rs            →  c64/src/render.rs            ~1.5 KB    239 lines
   CrosstermRenderer              (VIC-II screen + color RAM writes)
@@ -1405,13 +1415,13 @@ N/A                          →  c64/src/c64.rs               ~1 KB      172 li
 N/A                          →  c64/src/input.rs             ~1 KB      179 lines
   (crossterm in tui/)            (Kernal keyboard buffer + CIA joystick Port 2)
 
-NEW: core/src/item.rs        →  c64/src/items.rs             ~0.5 KB   (pending)
+NEW: engine/src/item.rs      →  c64/src/items.rs             ~0.5 KB   (pending)
   Item, ItemKind                 (sparse arrays + pickup/drop/use/equip logic,
-                                  stat lookups from common::items)
+                                  stat lookups from rules::items)
 
-NEW: core/src/game.rs (XP)  →  c64/src/main.rs              embedded  (pending)
+NEW: engine/src/game.rs (XP) → c64/src/main.rs              embedded  (pending)
   player_xp, player_level       (XP tracking + level-up in main loop,
-                                  tables from common::leveling)
+                                  tables from rules::leveling)
 
 N/A (new)                    →  c64/src/sid.rs               ~1 KB      (pending)
   (no sound on PC)               (SID register writes via mos-hardware)
@@ -1430,7 +1440,7 @@ analytics, and accessibility features. The most dramatic example: `game.rs` goes
 from 91 KB to 185 lines — the C64 game loop has no autorun, no menu state
 machine, no undo/redo, no spectation frame capture.
 
-With `roguelike-common`, the C64 crate shrinks further — `map.rs` becomes a
+With `roguelike-rules`, the C64 crate shrinks further — `map.rs` becomes a
 thin wrapper around the shared `mapgen::generate()`, and `combat.rs` wraps
 the shared `damage()` formula. The shared crate also eliminates the balance
 drift risk: when monster stats change, both platforms update automatically.
@@ -1449,19 +1459,19 @@ drift risk: when monster stats change, both platforms update automatically.
 
 ### Phase 1: Shared Crate + C64 Refactor (Weeks 1-2)
 
-1. **Create `roguelike-common` crate** — `#![no_std]`, zero dependencies.
+1. **Create `roguelike-rules` crate** — `#![no_std]`, zero dependencies.
    Implement `LfsrRng`, `Room`, `mapgen::generate()`, `combat::damage()`,
    `spawn::pick_monster()`, `structural::compute()`, balance constants, and
    `seed::encode()`/`seed::decode()`. See §5.3-5.5 for design.
 
 2. **Wire up C64 crate** — Replace POC's inline PRNG, map generation, combat
-   formula, and balance constants with imports from `roguelike-common`. Refactor
+   formula, and balance constants with imports from `roguelike-rules`. Refactor
    `prng.rs` to use `LfsrRng` struct (passed as `&mut` instead of `static mut`
    global). See §11.5 for C64 code style guidance.
 
-3. **Wire up PC crate** — Add `roguelike-common` dependency to `roguelike-core`.
+3. **Wire up PC crate** — Add `roguelike-rules` dependency to `roguelike-engine`.
    Add `Map::generate_c64_compatible()` for challenge mode. Add CI test that
-   `game.toml` defaults match `roguelike-common::balance` constants.
+   `game.toml` defaults match `roguelike-rules::balance` constants.
 
 4. **Add shared tests** — Property tests for LFSR period, damage formula,
    room intersection symmetry, mapgen determinism golden snapshot. CI
@@ -1556,16 +1566,16 @@ drift risk: when monster stats change, both platforms update automatically.
 | Feature | How |
 |---------|-----|
 | **Cross-platform seeds** | Same LFSR + same mapgen = identical dungeon on PC and C64 |
-| **Balance constants** | Single source of truth in `roguelike-common::balance` |
-| **Map generation** | `roguelike-common::mapgen::generate()` — shared algorithm |
-| **Combat formula** | `roguelike-common::combat::damage()` — shared `const fn` |
-| **Monster spawning** | `roguelike-common::spawn` — shared weighted selection |
-| **Room geometry** | `roguelike-common::room::Room` — shared struct + intersection |
-| **Seed codes** | `roguelike-common::seed` — encode/decode for sharing |
-| **Item definitions** | `roguelike-common::items` — type IDs, stat lookup tables |
-| **Leveling tables** | `roguelike-common::leveling` — XP thresholds, stat growth |
-| **Depth scaling** | `roguelike-common::balance` — monster scaling per floor |
-| **Mood thresholds** | `roguelike-common::balance` — flee/enrage trigger values |
+| **Balance constants** | Single source of truth in `roguelike-rules::balance` |
+| **Map generation** | `roguelike-rules::mapgen::generate()` — shared algorithm |
+| **Combat formula** | `roguelike-rules::combat::damage()` — shared `const fn` |
+| **Monster spawning** | `roguelike-rules::spawn` — shared weighted selection |
+| **Room geometry** | `roguelike-rules::room::Room` — shared struct + intersection |
+| **Seed codes** | `roguelike-rules::seed` — encode/decode for sharing |
+| **Item definitions** | `roguelike-rules::items` — type IDs, stat lookup tables |
+| **Leveling tables** | `roguelike-rules::leveling` — XP thresholds, stat growth |
+| **Depth scaling** | `roguelike-rules::balance` — monster scaling per floor |
+| **Mood thresholds** | `roguelike-rules::balance` — flee/enrage trigger values |
 
 ---
 
@@ -1604,7 +1614,7 @@ bit targets. Every arithmetic expression must be audited for u8/u16 overflow.
 Rust's type system catches many of these at compile time, but `as` casts are
 silent truncation.
 
-The production build moves the PRNG into `roguelike-common::prng::LfsrRng`,
+The production build moves the PRNG into `roguelike-rules::prng::LfsrRng`,
 which carries this fix and is tested by the shared crate's property tests
 (LFSR period verification, range distribution checks).
 
@@ -1739,7 +1749,7 @@ The main advantages over the cc65 approach:
    architecture (terminal, SSH, MCP, C64).
 2. **Shared algorithms** — Map generation, combat, spawning, room geometry,
    item definitions, leveling tables, depth scaling, mood thresholds, and the
-   PRNG live in `roguelike-common`, a ~550-line `#![no_std]` crate with zero
+   PRNG live in `roguelike-rules`, a ~550-line `#![no_std]` crate with zero
    dependencies and zero generics. The shared code is written at the C64's
    abstraction level (`u8`, `&mut [u8]`, `&mut [Room]`, `&mut LfsrRng`) — the
    C64 uses it directly, and the PC calls down to it for challenge mode. This
@@ -1770,7 +1780,7 @@ weeks for cc65) because:
 - Phase 0 (POC) is already complete
 - Rust development is faster than C/assembly for game logic
 - mos-hardware eliminates boilerplate hardware register code
-- The shared `roguelike-common` crate reduces duplication and prevents drift
+- The shared `roguelike-rules` crate reduces duplication and prevents drift
 
 The C64 roguelike wouldn't just be a downport — it would be the most
 interesting client in the fleet. And with cross-platform seed sharing, a C64

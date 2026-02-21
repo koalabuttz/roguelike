@@ -63,6 +63,7 @@ fn no_monsters_always_survives() {
     Scenario::new(20, 20, 42)
         .preset(MapPreset::SingleRoom)
         .kill_all()
+        .disable_wandering()
         .run_turns(50)
         .assert_alive()
         .assert_kills(0)
@@ -95,6 +96,65 @@ fn multiple_goblins_survivable() {
         .spawn("goblin", 6, 5)
         .run_turns(100)
         .assert_alive();
+}
+
+// --- Wandering monster tests ---
+
+#[test]
+fn wandering_monsters_spawn_after_grace_period() {
+    // Run long enough past grace period (50) for spawns to occur.
+    let result = Scenario::new(80, 40, 42).kill_all().run_turns(200);
+
+    // At least 1 wanderer should have spawned.
+    assert!(
+        result.gs.wandering_spawned > 0,
+        "Expected at least 1 wandering spawn after 200 turns, got {}",
+        result.gs.wandering_spawned,
+    );
+}
+
+#[test]
+fn no_wandering_during_grace_period() {
+    // Run only 30 turns — well within the 50-turn grace period.
+    let result = Scenario::new(80, 40, 42).kill_all().run_turns(30);
+
+    assert_eq!(
+        result.gs.wandering_spawned, 0,
+        "No wanderers should spawn during grace period",
+    );
+}
+
+#[test]
+fn wandering_cap_respected() {
+    // Run many turns; cap is 5 alive Wander-AI entities.
+    let result = Scenario::new(80, 40, 42).kill_all().run_turns(500);
+
+    let wander_alive = result
+        .gs
+        .entities
+        .iter()
+        .skip(1)
+        .filter(|e| e.alive && e.ai == roguelike_core::entity::AiBehavior::Wander)
+        .count();
+
+    assert!(
+        wander_alive <= 5,
+        "Expected at most 5 alive wanderers, got {}",
+        wander_alive,
+    );
+}
+
+#[test]
+fn disable_wandering_prevents_spawns() {
+    let result = Scenario::new(80, 40, 42)
+        .kill_all()
+        .disable_wandering()
+        .run_turns(200);
+
+    assert_eq!(
+        result.gs.wandering_spawned, 0,
+        "disable_wandering should prevent all spawns",
+    );
 }
 
 // --- Scenario analytics tests ---

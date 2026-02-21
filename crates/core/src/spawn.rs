@@ -5,6 +5,26 @@ use crate::entity::Entity;
 use crate::map::Map;
 use crate::types::Stat;
 
+/// Pick a random monster from the weighted spawn table.
+///
+/// Returns `None` if the table is empty or all weights are zero.
+pub fn pick_monster(table: &[MonsterDef], rng: &mut impl Rng) -> Option<Entity> {
+    let entries: Vec<&MonsterDef> = table.iter().filter(|m| m.spawn_weight > 0).collect();
+    let total_weight: u32 = entries.iter().map(|e| e.spawn_weight).sum();
+    if total_weight == 0 {
+        return None;
+    }
+
+    let mut roll = rng.gen_range(0..total_weight);
+    for entry in &entries {
+        if roll < entry.spawn_weight {
+            return Some(Entity::from_template(entry, 0, 0));
+        }
+        roll -= entry.spawn_weight;
+    }
+    None
+}
+
 /// Spawn monsters in each room (except room 0, where the player starts).
 /// Uses the weighted spawn table to pick monster types.
 pub fn spawn_monsters(
@@ -15,7 +35,6 @@ pub fn spawn_monsters(
 ) -> Vec<Entity> {
     let mut monsters = Vec::new();
 
-    // Filter to entries with positive spawn weight.
     let entries: Vec<&MonsterDef> = table.iter().filter(|m| m.spawn_weight > 0).collect();
     let total_weight: u32 = entries.iter().map(|e| e.spawn_weight).sum();
     if total_weight == 0 {

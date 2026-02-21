@@ -302,6 +302,11 @@ mod tests {
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
+            wandering_seed: 0,
+            wandering_config: Default::default(),
+            idle_count: 0,
+            wandering_spawned: 0,
+            wandering_spawn_table: Vec::new(),
         }
     }
 
@@ -343,6 +348,11 @@ mod tests {
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
+            wandering_seed: 0,
+            wandering_config: Default::default(),
+            idle_count: 0,
+            wandering_spawned: 0,
+            wandering_spawn_table: Vec::new(),
         }
     }
 
@@ -450,6 +460,11 @@ mod tests {
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
+            wandering_seed: 0,
+            wandering_config: Default::default(),
+            idle_count: 0,
+            wandering_spawned: 0,
+            wandering_spawn_table: Vec::new(),
         };
 
         let graph = build_exploration_graph(&gs);
@@ -490,6 +505,11 @@ mod tests {
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
+            wandering_seed: 0,
+            wandering_config: Default::default(),
+            idle_count: 0,
+            wandering_spawned: 0,
+            wandering_spawn_table: Vec::new(),
         };
 
         let graph = build_exploration_graph(&gs);

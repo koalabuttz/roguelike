@@ -9,6 +9,12 @@ pub type Pos = (Coord, Coord);
 /// Character or combat statistic (HP, attack, defense, damage).
 pub type Stat = i32;
 
+/// Maximum number of entities (player + monsters) the engine supports.
+///
+/// Constrained platforms override this: GBA = 128, C64 = 32.
+/// The wandering spawn system respects this cap alongside `max_wandering`.
+pub const MAX_ENTITIES: usize = 1024;
+
 /// Platform-independent color for game rendering.
 ///
 /// Maps to `crossterm::style::Color` in the terminal renderer. Adding a variant

@@ -134,6 +134,16 @@ proptest! {
             // Invariant 6: observe() doesn't panic.
             let _obs = state.observe();
 
+            // Invariant 7: Entity count stays within budget.
+            // max_wandering (default 5) + initial monsters + player.
+            // Allow generous headroom — the real cap is enforced by try_spawn_wandering().
+            let alive_count = state.entities.iter().filter(|e| e.alive).count();
+            prop_assert!(
+                alive_count <= 200,
+                "Alive entity count {} exceeds budget (seed={}, turn={})",
+                alive_count, seed, state.turn_count,
+            );
+
             // Stop stepping if game is over (commands after death are no-ops).
             if state.game_over {
                 break;
@@ -168,5 +178,8 @@ proptest! {
         prop_assert_eq!(state.seed, loaded.seed);
         prop_assert_eq!(state.entities.len(), loaded.entities.len());
         prop_assert_eq!(state.explored.len(), loaded.explored.len());
+        prop_assert_eq!(state.wandering_seed, loaded.wandering_seed);
+        prop_assert_eq!(state.wandering_spawned, loaded.wandering_spawned);
+        prop_assert_eq!(state.idle_count, loaded.idle_count);
     }
 }

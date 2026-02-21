@@ -89,6 +89,11 @@ mod tests {
             dirty: false,
             regen_interval: crate::data::config().regen_interval,
             max_autorun_steps: crate::data::config().max_autorun_steps,
+            wandering_seed: 0,
+            wandering_config: Default::default(),
+            idle_count: 0,
+            wandering_spawned: 0,
+            wandering_spawn_table: Vec::new(),
         }
     }
 

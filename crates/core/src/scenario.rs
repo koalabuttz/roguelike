@@ -112,6 +112,13 @@ impl Scenario {
         self
     }
 
+    /// Disable wandering monster spawns for this scenario.
+    pub fn disable_wandering(self) -> Self {
+        self.mutate(|gs, _| {
+            gs.wandering_config.spawn_chance = 0;
+        })
+    }
+
     /// Add a custom mutation applied after dev commands.
     pub fn mutate(mut self, f: impl FnOnce(&mut GameState, &mut DevSession) + 'static) -> Self {
         self.mutations.push(Box::new(f));

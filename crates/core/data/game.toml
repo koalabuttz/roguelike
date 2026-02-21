@@ -15,6 +15,17 @@ ui_bottom_rows = 5
 max_autorun_steps = 100
 regen_interval = 3
 
+[wandering]
+spawn_interval = 30
+spawn_chance = 50
+grace_period = 50
+max_wandering = 5
+sound_far = 20
+sound_medium = 10
+sound_near = 5
+idle_threshold = 5
+idle_acceleration = 2
+
 [[monsters]]
 name = "Goblin"
 glyph = "g"

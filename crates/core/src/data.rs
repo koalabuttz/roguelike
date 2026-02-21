@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::entity::AiBehavior;
 use crate::types::{Coord, GameColor, Stat};
@@ -12,6 +12,8 @@ fn default_sight_radius() -> Coord {
 pub struct GameData {
     pub player: PlayerDef,
     pub config: GameConfig,
+    #[serde(default)]
+    pub wandering: WanderingConfig,
     pub monsters: Vec<MonsterDef>,
 }
 
@@ -53,6 +55,85 @@ pub struct GameConfig {
     pub regen_interval: Stat,
 }
 
+fn default_spawn_interval() -> Stat {
+    30
+}
+fn default_spawn_chance() -> Stat {
+    50
+}
+fn default_grace_period() -> Stat {
+    50
+}
+fn default_max_wandering() -> Stat {
+    5
+}
+fn default_sound_far() -> Coord {
+    20
+}
+fn default_sound_medium() -> Coord {
+    10
+}
+fn default_sound_near() -> Coord {
+    5
+}
+fn default_idle_threshold() -> Stat {
+    5
+}
+fn default_idle_acceleration() -> Stat {
+    2
+}
+
+/// Configuration for wandering monster spawns and sound cues.
+///
+/// All fields have sensible defaults and can be overridden in `game.toml`.
+/// Forward-compatible with themed floors (per-floor overrides) and SimBudget.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct WanderingConfig {
+    /// Turns between spawn checks.
+    #[serde(default = "default_spawn_interval")]
+    pub spawn_interval: Stat,
+    /// Percent chance per check (0-100).
+    #[serde(default = "default_spawn_chance")]
+    pub spawn_chance: Stat,
+    /// No spawns before this turn.
+    #[serde(default = "default_grace_period")]
+    pub grace_period: Stat,
+    /// Max alive wandering monsters.
+    #[serde(default = "default_max_wandering")]
+    pub max_wandering: Stat,
+    /// Distance threshold for "faint sound" message.
+    #[serde(default = "default_sound_far")]
+    pub sound_far: Coord,
+    /// Distance threshold for "footsteps nearby" message.
+    #[serde(default = "default_sound_medium")]
+    pub sound_medium: Coord,
+    /// Distance threshold for "very close" message.
+    #[serde(default = "default_sound_near")]
+    pub sound_near: Coord,
+    /// Consecutive waits before idle acceleration kicks in.
+    #[serde(default = "default_idle_threshold")]
+    pub idle_threshold: Stat,
+    /// Divisor for spawn_interval when player is idle.
+    #[serde(default = "default_idle_acceleration")]
+    pub idle_acceleration: Stat,
+}
+
+impl Default for WanderingConfig {
+    fn default() -> Self {
+        Self {
+            spawn_interval: default_spawn_interval(),
+            spawn_chance: default_spawn_chance(),
+            grace_period: default_grace_period(),
+            max_wandering: default_max_wandering(),
+            sound_far: default_sound_far(),
+            sound_medium: default_sound_medium(),
+            sound_near: default_sound_near(),
+            idle_threshold: default_idle_threshold(),
+            idle_acceleration: default_idle_acceleration(),
+        }
+    }
+}
+
 impl GameData {
     /// Find a monster definition by name (case-insensitive).
     pub fn monster_by_name(&self, name: &str) -> Option<&MonsterDef> {
@@ -78,6 +159,7 @@ impl MonsterDef {
     pub fn ai_behavior(&self) -> AiBehavior {
         match self.ai.to_lowercase().as_str() {
             "chase" => AiBehavior::Chase,
+            "wander" => AiBehavior::Wander,
             _ => AiBehavior::None,
         }
     }
@@ -137,7 +219,7 @@ mod data_files {
     ];
 
     /// Known AI behavior names — must match the arms of `MonsterDef::ai_behavior()`.
-    const KNOWN_AI: &[&str] = &["chase"];
+    const KNOWN_AI: &[&str] = &["chase", "wander"];
 
     const DEFAULT_TOML: &str = include_str!("../data/game.toml");
 
@@ -260,6 +342,63 @@ mod data_files {
             ));
         }
 
+        // --- Wandering validation ---
+        let w = &data.wandering;
+        if w.spawn_interval <= 0 {
+            warnings.push(format!(
+                "wandering.spawn_interval must be > 0 (got {})",
+                w.spawn_interval
+            ));
+        }
+        if w.spawn_chance < 0 || w.spawn_chance > 100 {
+            warnings.push(format!(
+                "wandering.spawn_chance must be 0-100 (got {})",
+                w.spawn_chance
+            ));
+        }
+        if w.grace_period < 0 {
+            warnings.push(format!(
+                "wandering.grace_period must be >= 0 (got {})",
+                w.grace_period
+            ));
+        }
+        if w.max_wandering <= 0 {
+            warnings.push(format!(
+                "wandering.max_wandering must be > 0 (got {})",
+                w.max_wandering
+            ));
+        }
+        if w.sound_far < w.sound_medium {
+            warnings.push(format!(
+                "wandering.sound_far ({}) < sound_medium ({})",
+                w.sound_far, w.sound_medium
+            ));
+        }
+        if w.sound_medium < w.sound_near {
+            warnings.push(format!(
+                "wandering.sound_medium ({}) < sound_near ({})",
+                w.sound_medium, w.sound_near
+            ));
+        }
+        if w.sound_near <= 0 {
+            warnings.push(format!(
+                "wandering.sound_near must be > 0 (got {})",
+                w.sound_near
+            ));
+        }
+        if w.idle_threshold <= 0 {
+            warnings.push(format!(
+                "wandering.idle_threshold must be > 0 (got {})",
+                w.idle_threshold
+            ));
+        }
+        if w.idle_acceleration <= 0 {
+            warnings.push(format!(
+                "wandering.idle_acceleration must be > 0 (got {})",
+                w.idle_acceleration
+            ));
+        }
+
         // --- Monster validation ---
         let mut seen_names: HashSet<String> = HashSet::new();
         for m in &data.monsters {
@@ -348,6 +487,29 @@ mod data_files {
         diff_config!(ui_bottom_rows);
         diff_config!(max_autorun_steps);
         diff_config!(regen_interval);
+
+        // Wandering config changes.
+        macro_rules! diff_wandering {
+            ($field:ident) => {
+                if old.wandering.$field != new.wandering.$field {
+                    diffs.push(format!(
+                        "wandering.{} {} -> {}",
+                        stringify!($field),
+                        old.wandering.$field,
+                        new.wandering.$field
+                    ));
+                }
+            };
+        }
+        diff_wandering!(spawn_interval);
+        diff_wandering!(spawn_chance);
+        diff_wandering!(grace_period);
+        diff_wandering!(max_wandering);
+        diff_wandering!(sound_far);
+        diff_wandering!(sound_medium);
+        diff_wandering!(sound_near);
+        diff_wandering!(idle_threshold);
+        diff_wandering!(idle_acceleration);
 
         // Player stat changes.
         if old.player.hp != new.player.hp {
@@ -556,7 +718,7 @@ mod tests {
     #[test]
     fn validate_catches_unknown_ai() {
         let mut data = defaults().clone();
-        data.monsters[0].ai = "Wander".to_string();
+        data.monsters[0].ai = "Patrol".to_string();
         let warnings = validate_game_data(&data);
         assert!(warnings.iter().any(|w| w.contains("unknown AI")));
     }

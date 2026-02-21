@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::{RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 
 use crate::ai;
@@ -78,6 +78,7 @@ pub struct GameObservation {
     #[serde(rename = "messages")]
     pub recent_messages: Vec<String>,
     pub game_over: bool,
+    pub turn_count: Stat,
     // --- game stats ---
     pub kills: Stat,
     pub rooms_found: Stat,
@@ -316,6 +317,21 @@ pub struct GameState {
     pub regen_interval: Stat,
     #[serde(default = "default_max_autorun_steps")]
     pub max_autorun_steps: Stat,
+    /// Deterministic RNG seed for wandering monster spawns and movement.
+    #[serde(default)]
+    pub wandering_seed: u64,
+    /// Wandering monster spawn/sound config (copied from GameData at creation).
+    #[serde(default)]
+    pub wandering_config: data::WanderingConfig,
+    /// Consecutive Wait commands (resets on any non-wait action).
+    #[serde(default)]
+    pub idle_count: Stat,
+    /// Total wandering monsters spawned this game (for analytics).
+    #[serde(default)]
+    pub wandering_spawned: Stat,
+    /// Monster spawn table for wandering spawns (rebuilt on load).
+    #[serde(skip)]
+    pub wandering_spawn_table: Vec<data::MonsterDef>,
 }
 
 impl GameState {
@@ -351,6 +367,7 @@ impl GameState {
         let mut master = StdRng::seed_from_u64(seed);
         let mut map_rng = StdRng::from_rng(&mut master).unwrap();
         let mut spawn_rng = StdRng::from_rng(&mut master).unwrap();
+        let wandering_seed = StdRng::from_rng(&mut master).unwrap().next_u64();
 
         let mut map = map::Map::new(width, height);
         let (px, py) = map.from_preset(preset, &mut map_rng);
@@ -385,6 +402,11 @@ impl GameState {
             dirty: false,
             regen_interval: cfg.regen_interval,
             max_autorun_steps: cfg.max_autorun_steps,
+            wandering_seed,
+            wandering_config: game_data.wandering.clone(),
+            idle_count: 0,
+            wandering_spawned: 0,
+            wandering_spawn_table: game_data.monsters.clone(),
         }
     }
 
@@ -406,9 +428,11 @@ impl GameState {
         let cfg = &game_data.config;
 
         // Derive independent RNG streams from the master seed.
+        // Order matters: map (1st), spawn (2nd), wandering (3rd).
         let mut master = StdRng::seed_from_u64(seed);
         let mut map_rng = StdRng::from_rng(&mut master).unwrap();
         let mut spawn_rng = StdRng::from_rng(&mut master).unwrap();
+        let wandering_seed = StdRng::from_rng(&mut master).unwrap().next_u64();
 
         let mut map = map::Map::new(width, height);
         let (px, py) = map.generate(
@@ -448,6 +472,11 @@ impl GameState {
             dirty: false,
             regen_interval: cfg.regen_interval,
             max_autorun_steps: cfg.max_autorun_steps,
+            wandering_seed,
+            wandering_config: game_data.wandering.clone(),
+            idle_count: 0,
+            wandering_spawned: 0,
+            wandering_spawn_table: game_data.monsters.clone(),
         }
     }
 
@@ -481,6 +510,10 @@ impl GameState {
         let mut state: Self = serde_json::from_str(json)?;
         state.map.compute_structural_walls();
         state.update_fov();
+        #[cfg(feature = "data-files")]
+        {
+            state.wandering_spawn_table = data::defaults().monsters.clone();
+        }
         Ok(state)
     }
 
@@ -536,6 +569,155 @@ impl GameState {
         }
     }
 
+    /// Attempt to spawn a wandering monster if conditions are met.
+    ///
+    /// Checks: grace period, spawn interval (with idle acceleration),
+    /// random chance, and wandering cap. Spawns offscreen in a random room.
+    // FUTURE: Replace with SoundEvent for acoustic propagation system.
+    fn try_spawn_wandering(&mut self, rng: &mut impl rand::Rng) {
+        // Read config fields into locals to avoid borrow conflicts with &mut self.
+        // All fields are Copy (Stat/Coord = i32), so this is zero-cost.
+        let grace_period = self.wandering_config.grace_period;
+        let spawn_interval = self.wandering_config.spawn_interval;
+        let idle_threshold = self.wandering_config.idle_threshold;
+        let idle_acceleration = self.wandering_config.idle_acceleration;
+        let spawn_chance = self.wandering_config.spawn_chance;
+        let max_wandering = self.wandering_config.max_wandering;
+
+        if self.turn_count < grace_period {
+            return;
+        }
+
+        let interval = if self.idle_count >= idle_threshold {
+            (spawn_interval / idle_acceleration).max(1)
+        } else {
+            spawn_interval
+        };
+        if interval <= 0 || self.turn_count % interval != 0 {
+            return;
+        }
+        if rng.gen_range(0..100) >= spawn_chance {
+            return;
+        }
+
+        // Respect absolute entity budget (future: read from SimBudget).
+        if self.entities.len() >= crate::types::MAX_ENTITIES {
+            return;
+        }
+
+        // Cap alive wandering monsters (Wander AI = not yet seen player).
+        let wander_alive = self
+            .entities
+            .iter()
+            .skip(1)
+            .filter(|e| e.alive && e.ai == crate::entity::AiBehavior::Wander)
+            .count() as Stat;
+        if wander_alive >= max_wandering {
+            return;
+        }
+
+        if let Some((sx, sy)) = self.pick_offscreen_spawn_pos(rng)
+            && let Some(mut entity) = spawn::pick_monster(&self.wandering_spawn_table, rng)
+        {
+            entity.x = sx;
+            entity.y = sy;
+            entity.ai = crate::entity::AiBehavior::Wander;
+            self.emit_spawn_sound_cue(sx, sy);
+            self.entities.push(entity);
+            self.wandering_spawned += 1;
+        }
+    }
+
+    /// Pick a random floor tile in a room the player isn't in,
+    /// outside the player's FOV and not occupied by another entity.
+    fn pick_offscreen_spawn_pos(&self, rng: &mut impl rand::Rng) -> Option<(Coord, Coord)> {
+        if self.map.rooms.is_empty() {
+            return None;
+        }
+
+        let px = self.entities[0].x;
+        let py = self.entities[0].y;
+
+        for _ in 0..10 {
+            let room_idx = rng.gen_range(0..self.map.rooms.len());
+            let room = &self.map.rooms[room_idx];
+            // Skip rooms the player is standing in.
+            if room.contains_interior(px, py) {
+                continue;
+            }
+            // Pick a random floor tile inside the room.
+            let width = room.x2 - room.x1 - 1;
+            let height = room.y2 - room.y1 - 1;
+            if width <= 0 || height <= 0 {
+                continue;
+            }
+            let sx = room.x1 + 1 + rng.gen_range(0..width);
+            let sy = room.y1 + 1 + rng.gen_range(0..height);
+            if !self.map.is_walkable(sx, sy) {
+                continue;
+            }
+            if self.visible.contains(&(sx, sy)) {
+                continue;
+            }
+            if self.entity_at(sx, sy).is_some() {
+                continue;
+            }
+            return Some((sx, sy));
+        }
+        None
+    }
+
+    /// Emit a distance-based sound cue when a wandering monster spawns.
+    // FUTURE: Replace with SoundEvent for acoustic propagation system.
+    fn emit_spawn_sound_cue(&mut self, sx: Coord, sy: Coord) {
+        let px = self.entities[0].x;
+        let py = self.entities[0].y;
+        let dist = (px - sx).abs() + (py - sy).abs();
+        let cfg = &self.wandering_config;
+
+        if dist <= cfg.sound_near {
+            self.log.add("Something is moving very close!");
+        } else if dist <= cfg.sound_medium {
+            self.log.add("You hear footsteps nearby.");
+        } else if dist <= cfg.sound_far {
+            self.log.add("You hear a faint sound in the distance.");
+        }
+    }
+
+    /// Emit distance-based ambient sound cues for nearby wandering monsters.
+    ///
+    /// Rate-limited: at most 1 cue per turn, only every 5 turns, prioritizing
+    /// the closest wanderer.
+    // FUTURE: Replace with SoundEvent for acoustic propagation system.
+    fn emit_ambient_sound_cues(&mut self) {
+        if self.turn_count % 5 != 0 {
+            return;
+        }
+
+        let px = self.entities[0].x;
+        let py = self.entities[0].y;
+        let cfg = &self.wandering_config;
+
+        // Find the closest alive wandering monster.
+        let mut closest_dist = Coord::MAX;
+        for e in self.entities.iter().skip(1) {
+            if e.alive && e.ai == crate::entity::AiBehavior::Wander {
+                let dist = (px - e.x).abs() + (py - e.y).abs();
+                if dist < closest_dist {
+                    closest_dist = dist;
+                }
+            }
+        }
+
+        if closest_dist <= cfg.sound_near {
+            self.log.add("Something is moving very close!");
+        } else if closest_dist <= cfg.sound_medium {
+            self.log.add("You hear footsteps nearby.");
+        } else if closest_dist <= cfg.sound_far {
+            self.log.add("You hear a faint sound in the distance.");
+        }
+    }
+
     /// Execute one complete game step: player command, FOV update, monster turns.
     ///
     /// This is the atomic turn operation used by the MCP server and any other
@@ -543,15 +725,25 @@ impl GameState {
     /// across multiple calls into a single method.
     pub fn step(&mut self, cmd: GameCommand) -> StepResult {
         let msg_count_before = self.log.len();
+        let is_wait = matches!(cmd, GameCommand::Wait);
         let action_taken = self.handle_command(cmd);
 
         if action_taken {
             self.dirty = true;
+            if is_wait {
+                self.idle_count += 1;
+            } else {
+                self.idle_count = 0;
+            }
             self.update_fov();
-            if ai::run_monster_turns(&mut self.entities, &self.map, &mut self.log) {
+            let mut turn_rng =
+                StdRng::seed_from_u64(self.wandering_seed.wrapping_add(self.turn_count as u64));
+            if ai::run_monster_turns(&mut self.entities, &self.map, &mut self.log, &mut turn_rng) {
                 self.game_over = true;
             }
             self.turn_count += 1;
+            self.try_spawn_wandering(&mut turn_rng);
+            self.emit_ambient_sound_cues();
             self.apply_regen();
         }
 
@@ -800,6 +992,7 @@ impl GameState {
             visible_entities,
             recent_messages: self.log.recent(10).to_vec(),
             game_over: self.game_over,
+            turn_count: self.turn_count,
             kills,
             rooms_found,
             explored_pct,
@@ -1080,6 +1273,11 @@ mod tests {
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
+            wandering_seed: 0,
+            wandering_config: Default::default(),
+            idle_count: 0,
+            wandering_spawned: 0,
+            wandering_spawn_table: Vec::new(),
         }
     }
 
@@ -1380,6 +1578,11 @@ mod tests {
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
+            wandering_seed: 0,
+            wandering_config: Default::default(),
+            idle_count: 0,
+            wandering_spawned: 0,
+            wandering_spawn_table: Vec::new(),
         }
     }
 
@@ -1452,6 +1655,11 @@ mod tests {
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
+            wandering_seed: 0,
+            wandering_config: Default::default(),
+            idle_count: 0,
+            wandering_spawned: 0,
+            wandering_spawn_table: Vec::new(),
         };
 
         let result = gs.autorun(1, 0);
@@ -1498,6 +1706,11 @@ mod tests {
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
+            wandering_seed: 0,
+            wandering_config: Default::default(),
+            idle_count: 0,
+            wandering_spawned: 0,
+            wandering_spawn_table: Vec::new(),
         };
 
         let result = gs.autorun(1, 0);
@@ -1533,6 +1746,11 @@ mod tests {
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
+            wandering_seed: 0,
+            wandering_config: Default::default(),
+            idle_count: 0,
+            wandering_spawned: 0,
+            wandering_spawn_table: Vec::new(),
         };
 
         let result = gs.autorun(1, 0);
@@ -1595,6 +1813,11 @@ mod tests {
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
+            wandering_seed: 0,
+            wandering_config: Default::default(),
+            idle_count: 0,
+            wandering_spawned: 0,
+            wandering_spawn_table: Vec::new(),
         };
 
         let result = gs.autorun(1, 0);
@@ -1634,6 +1857,11 @@ mod tests {
             dirty: false,
             regen_interval: data::config().regen_interval,
             max_autorun_steps: data::config().max_autorun_steps,
+            wandering_seed: 0,
+            wandering_config: Default::default(),
+            idle_count: 0,
+            wandering_spawned: 0,
+            wandering_spawn_table: Vec::new(),
         };
 
         let result = gs.autorun(1, 0);

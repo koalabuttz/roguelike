@@ -15,8 +15,9 @@ pub enum EntityKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum AiBehavior {
-    None,  // Player — no automatic AI
-    Chase, // Greedy chase toward player
+    None,   // Player — no automatic AI
+    Chase,  // Greedy chase toward player
+    Wander, // Random walk; switches to Chase when player enters LOS
 }
 
 #[derive(Serialize, Deserialize)]

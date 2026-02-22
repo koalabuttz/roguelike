@@ -338,18 +338,25 @@ Player inventory:          12 B   (10 slots + weapon + armor, u8 type IDs)
 Player state:               4 B   (xp: u16, level: u8, depth: u8)
 Message log:              200 B   (4 lines x ~40 chars + metadata)
 RNG state:                  2 B   (16-bit Galois LFSR — LfsrRng struct)
-Custom charset:           2 KB    (256 chars x 8 bytes)
+Custom charsets:          6 KB    (3 x 2 KB: dungeon tiles, UI font, message text)
+  Per-zone charset switching via raster interrupts — see §6.9
+Sprite animation data:    1 KB    (63 bytes/frame x 4 frames x 4 entities)
+Raster interrupt code:   200 B    (IRQ handler, gradient table, zone setup)
 Save buffer:              2 KB    (serialized game state for disk)
 Sound/music data:         2 KB    (SID chip patterns)
 Zero page (llvm-mos):     32 B    (16 register pairs RC0-RC31)
 ────────────────────────────────────
-Total:                  ~25 KB    (~21 KB headroom remaining)
+Total:                  ~30 KB    (~16 KB headroom remaining)
 ```
 
 The POC validates the baseline: 13 KB code + ~2 KB static data = ~15 KB total.
 Gameplay features (items, XP, stairs, mood — see the
 [gameplay implementation plan](design/gameplay-implementation-plan.md)) add ~1
-KB of data and ~2 KB of code. Even with all production additions (SID, charset,
+KB of data and ~2 KB of code. The production build adds ~5 KB over the POC
+baseline for raster effects, per-zone charsets, sprite data, and the expanded
+demo-technique-driven rendering pipeline (see
+[C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md)).
+Even with all production additions (SID, charsets, sprites, raster effects,
 saves, networking, gameplay features), we stay well under the 46 KB budget.
 
 ---
@@ -905,6 +912,13 @@ for the `u64` property system, though a `u8` subset could be added later.
 
 ## 6. Design Decisions
 
+> **See also:** The [C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md)
+> evaluates VIC-II demo scene techniques for the roguelike port, identifying
+> raster interrupts, per-zone charset switching, atmospheric color gradients,
+> border removal, and sprite overlays as high-value additions. Several sections
+> below (§6.8 Rendering, §6.9 Charset, §6.11 Sound) and the Phase 2
+> implementation plan (§8) have been updated to incorporate these techniques.
+
 ### 6.1 Map Size and Viewport
 
 **Current:** 80x40 map, fully visible in terminal (no scrolling).
@@ -1165,9 +1179,53 @@ tracking** — maintain a previous-frame buffer, only update changed cells.
 filled, $65 = light shade for empty) with color coding: green >60% HP,
 yellow >30%, red ≤30%. Validated in the POC.
 
+**Atmospheric lighting via raster effects:**
+
+The static color mapping above is functional but flat. A raster interrupt chain
+(see §8, Phase 2 step 6) enables per-scanline VIC-II register changes that add
+dramatic atmosphere at negligible CPU cost. See the
+[C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md) §1
+and §5 for detailed implementation sketches.
+
+1. **Torchlight gradient.** Change `$D021` (background color) on each raster
+   line within the map area, creating a vertical warm-to-dark gradient centered
+   on the player's Y position. Rows near the player use brown (9) or grey (12);
+   rows further away fade to black (0). The gradient table is pre-computed (~25
+   bytes) and shifted on vertical player movement. Cost: one `STA $D021` per
+   raster line in the map area = ~110 cycles/frame. This simulates torchlight
+   falloff *independently of the FOV system* — the FOV determines tile
+   visibility, the gradient determines ambient mood.
+
+2. **Damage flash.** When the player takes damage, set `$D020` (border) to red
+   for 2-3 frames. The raster interrupt handles this independently of the game
+   loop — the flash happens instantly, not on the next turn's render. The raster
+   chain ensures only the border flashes, not the background.
+
+3. **Low-HP warning.** When HP drops below 30%, pulse the border color between
+   black and dark red on alternating frames. The raster interrupt checks player
+   HP and modulates `$D020` accordingly — no game loop involvement.
+
+4. **Zone-specific backgrounds.** The game area (rows 0-20), status bar
+   (row 21), and message log (rows 22-24) each get different `$D021` values.
+   The dungeon uses black, the status bar uses dark grey, the message log uses
+   dark blue. Currently all three zones share one background color.
+
+Raster effects are **orthogonal to dirty-rect rendering** — they modify VIC-II
+registers, not screen RAM. They work correctly even with dirty-rect optimization
+and add no per-turn rendering cost. The total continuous overhead for all
+atmospheric effects is ~660 cycles/frame (~3.4% of the frame budget) — one of
+the highest impact-to-cost ratios available on the VIC-II.
+
 ### 6.9 Custom Character Set
 
-Design a 2 KB custom charset (256 characters x 8 bytes) for better visuals:
+Design **three 2 KB charsets** (6 KB total — see §4.2) with per-zone switching
+via raster interrupts. The VIC-II's charset pointer (`$D018` bits 1-3) is
+changed at zone boundaries by the raster interrupt chain (§8, Phase 2 step 6),
+allowing different screen zones to use different character sets simultaneously.
+See the [C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md)
+§4 for the full per-line charset switching technique.
+
+**Charset 1 — Dungeon tileset (rows 0-20):**
 
 ```
 Char $00: player '@' (stylized, recognizable)
@@ -1178,20 +1236,46 @@ Char $07: stairs down '>' (for Phase 2 dungeon levels)
 Char $08-$0F: HP bar segments (empty to full, 8 gradations)
 Char $10-$17: item glyphs (!, /, [, ?, potion, sword, armor, scroll)
 Char $18-$1F: box-drawing characters for menus
-Char $20-$5A: standard PETSCII uppercase letters for messages
+Char $20-$5A: standard PETSCII uppercase letters (for inventory overlay)
 ```
+
+**Charset 2 — UI font (row 21, status bar):**
+
+Optimized for the dense status bar layout — narrower numerals, compact glyphs
+for equipped weapon (`/`) and armor (`[`), clean HP bar segments. Designed for
+readability at a glance rather than dungeon atmosphere.
+
+**Charset 3 — Message text (rows 22-24):**
+
+Clean, readable text font optimized for message log legibility. Distinct from
+the dungeon tileset to visually separate game messages from the map.
 
 The POC uses the default C64 charset. Production adds custom characters via
 VIC-II bank switching (use `mos-hardware` `vic2::CharsetBank::from(addr)`
 for type-safe configuration).
 
-**VIC-II bank allocation:** Place the custom charset in **VIC Bank 1
-($4000-$7FFF)** to avoid conflicts with the IP65-compatible network stack
-region and the Kernal workspace below $0800. MultiRogueLike uses the same
-bank for its custom font and reports no conflicts with networking code. Screen
-memory can remain at the default $0400 (VIC Bank 0) since we don't use
-sprites. Specify this in Phase 2 (when the charset is added) to prevent
-conflicts when Phase 3 networking is implemented.
+**Animated charset tiles:** Water, lava, torches, and magical effects animate
+by cycling character definitions in charset RAM. Changing 8 bytes (one
+character's pixel data) per frame cycles through animation frames. A bubbling
+water tile or flickering torch costs **8 bytes of charset write per frame**
+(~40 cycles) — and every instance of that character on screen updates
+simultaneously. A dungeon with 50 water tiles animates with the same 8-byte
+write as a dungeon with 1 water tile. See the demo techniques analysis §4.2
+for details.
+
+**VIC-II bank allocation:** Place screen memory and all three charsets in
+**VIC Bank 1 ($4000-$7FFF)**. The VIC-II requires screen memory and the active
+charset to reside in the same 16 KB bank — they cannot be split across banks.
+Screen memory moves from the default $0400 (Bank 0) to **$4400** (Bank 1).
+The three charsets occupy $4800, $5000, and $5800 (or similar 2 KB-aligned
+positions within Bank 1). This leaves room for sprite data blocks if sprites
+are used for the player character (see §12, open question #8).
+
+Bank 1 avoids conflicts with the IP65-compatible network stack region and
+the Kernal workspace below $0800. MultiRogueLike uses the same bank for its
+custom font and reports no conflicts with networking code. Specify the bank
+layout in Phase 2 (when the charset is added) to prevent conflicts when
+Phase 3 networking is implemented.
 
 ### 6.10 Input Handling
 
@@ -1234,6 +1318,19 @@ Proposed sound effects:
 `mos-hardware` provides full SID access including compile-time PSID file
 parsing via the `SidTune` trait, and hardware RNG via `SIDRng` (implements
 `rand_core::RngCore`).
+
+**SID timing requires a raster interrupt.** The SID play routine (updating
+voice registers for ongoing effects and ambience) must be called once per frame
+at a consistent rate. The game loop is turn-based and fires at irregular
+intervals — a player might act 60 times per second while running down a
+corridor, or sit idle for minutes reading messages. Tying SID updates to the
+game loop produces audibly inconsistent playback: effects speed up during fast
+input and stall during pauses. The standard solution on the C64 is to call
+the SID play routine from the raster interrupt chain at a fixed raster line,
+ensuring exactly one call per frame regardless of game loop timing. This is
+set up in Phase 2 step 6 (§8). See the
+[C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md) §1
+for the raster interrupt implementation sketch.
 
 ### 6.12 Save System
 
@@ -1482,49 +1579,85 @@ drift risk: when monster stats change, both platforms update automatically.
    Adopt `JoystickPosition` enum, `screen_codes!()` macro, and
    `volatile-register` patterns.
 
-### Phase 2: Polish and Production Features (Weeks 3-6)
+### Phase 2: Polish and Production Features (Weeks 3-8)
 
-6. **Dirty-rectangle rendering** — Add previous-frame buffer, compare+update
+The scope of Phase 2 has expanded based on the
+[C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md),
+which identified raster interrupts as a foundational prerequisite for SID
+timing, atmospheric effects, and per-zone charset switching. The raster
+interrupt chain is now the first step, unlocking all subsequent work.
+
+6. **Raster interrupt chain** — Set up VIC raster IRQ replacing the Kernal's
+   default IRQ handler. Implement a 3-zone color split (game area / status bar
+   / messages) with different `$D021` background colors per zone. Add a SID
+   player callback at a fixed raster line for frame-rate-independent sound
+   playback. Add per-zone charset pointer switching (`$D018`) for the three
+   charsets (§6.9). **This step unlocks steps 8-11.** See the demo techniques
+   analysis §1 for implementation details. Cost: ~200 bytes of code, ~500
+   cycles/frame.
+
+7. **Dirty-rectangle rendering** — Add previous-frame buffer, compare+update
    only changed cells. Reduces per-turn screen writes from 1000 to ~20.
+   Orthogonal to raster effects — dirty-rect optimizes screen RAM writes,
+   raster effects modify VIC-II registers.
 
-7. **Custom character set** — Design dungeon tiles in CharPad, load via VIC-II
-   bank switching.
+8. **Custom character set** — Design three charsets in CharPad: dungeon
+   tileset (rows 0-20), UI font (row 21), message text (rows 22-24). Load
+   into VIC Bank 1 ($4800/$5000/$5800) with screen memory at $4400. Per-zone
+   switching handled by the raster chain (step 6). Add animated charset tiles
+   for water, torches, and stairs (~8 bytes/frame, ~40 cycles). See §6.9.
 
-8. **SID sound effects** — Implement combat sounds, footsteps, death jingle
-   using `mos-hardware`'s SID module.
+9. **SID sound effects** — Implement combat sounds, footsteps, death jingle
+   using `mos-hardware`'s SID module. The raster interrupt chain (step 6)
+   handles SID playback timing — the play routine runs once per frame at a
+   fixed raster line, independent of the turn-based game loop. See §6.11.
 
-9. **Save/Load** — Binary serialization to 1541 floppy via Kernal file I/O.
-   C FFI wrappers for `SAVE`/`LOAD` Kernal calls. Follow the `SaveBackend`
-   trait pattern from `roguelike-saves` — the C64 won't implement the full
-   trait (it uses `GameState` which requires `serde`), but the API shape
-   (autosave, slots, metadata) guides the design.
+10. **Top/bottom border removal** — Open the vertical borders by toggling
+    RSEL at the exact raster lines where the VIC-II checks the border
+    flip-flop. Two register writes per frame (~20 cycles). The border renders
+    as black — cleaner than the default C64 frame and signals a polished
+    production. See the demo techniques analysis §2.
 
-10. **Title screen** — Seed entry (keyboard hex input), "New Game" / "Continue"
-    menu, PETSCII art. Challenge mode seed display.
+11. **Atmospheric color gradient** — Torchlight vertical gradient centered on
+    the player's Y position via per-line `$D021` changes (~110 cycles/frame).
+    Damage flash (border to red for 2-3 frames). Low-HP border pulse. See
+    §6.8 and the demo techniques analysis §5.
 
-11. **PC challenge mode UI** — Add 40x21 "C64 Challenge" mode to the terminal
+12. **Save/Load** — Binary serialization to 1541 floppy via Kernal file I/O.
+    C FFI wrappers for `SAVE`/`LOAD` Kernal calls. Follow the `SaveBackend`
+    trait pattern from `roguelike-saves` — the C64 won't implement the full
+    trait (it uses `GameState` which requires `serde`), but the API shape
+    (autosave, slots, metadata) guides the design.
+
+13. **Title screen** — Seed entry (keyboard hex input), "New Game" / "Continue"
+    menu, PETSCII art enhanced with raster color bars and animated charset
+    characters. Challenge mode seed display.
+
+14. **PC challenge mode UI** — Add 40x21 "C64 Challenge" mode to the terminal
     client. Accept u16 seed codes, generate via shared mapgen, display on
     cross-platform leaderboard.
 
-### Phase 3: Networking — UII+ Features (Weeks 7-10)
+### Phase 3: Networking — UII+ Features (Weeks 9-12)
 
-12. **UII+ driver layer** — Hardware detection, TCP primitives.
-13. **Cloud saves** — HTTP PUT/GET to server endpoint.
-14. **Leaderboard + daily seed** — POST scores, GET daily seed (u16).
+15. **UII+ driver layer** — Hardware detection, TCP primitives.
+16. **Cloud saves** — HTTP PUT/GET to server endpoint.
+17. **Leaderboard + daily seed** — POST scores, GET daily seed (u16).
     Cross-platform leaderboard for challenge mode.
-15. **Spectation relay** — Binary frame streaming.
-16. **MCP client mode** — Observation formatting, action parsing.
-17. **AT Protocol bridge** — Per the design in
+18. **Spectation relay** — Binary frame streaming.
+19. **MCP client mode** — Observation formatting, action parsing.
+20. **AT Protocol bridge** — Per the design in
     [c64-atproto-bridge.md](design/c64-atproto-bridge.md).
 
-### Phase 4: Testing and Release (Weeks 11-12)
+### Phase 4: Testing and Release (Weeks 13-14)
 
-18. **Playtesting** — Real hardware (Ultimate 64, C64 + UII+, stock C64) and
+21. **Playtesting** — Real hardware (Ultimate 64, C64 + UII+, stock C64) and
     emulators (VICE, c64.emu). PAL vs NTSC timing.
-19. **Performance profiling** — VICE cycle counter for FOV + AI + render.
-20. **Cross-platform seed verification** — Generate challenge dungeons on both
+22. **Performance profiling** — VICE cycle counter for FOV + AI + render +
+    raster chain overhead. Verify continuous raster costs match estimates
+    (~660 cycles/frame — see §11.4).
+23. **Cross-platform seed verification** — Generate challenge dungeons on both
     platforms with the same seeds, verify identical tile layouts.
-21. **Packaging** — .d64 disk image, .prg for emulators, .crt if code fits
+24. **Packaging** — .d64 disk image, .prg for emulators, .crt if code fits
     16 KB cartridge. Publish atproto bridge Docker image.
 
 ---
@@ -1543,17 +1676,20 @@ drift risk: when monster stats change, both platforms update automatically.
 | Save format | JSON (serde) | Binary (compact) | Disk space/speed |
 | Color palettes | 4 (accessibility) | 1 (fixed) | 16-color limit |
 | Auto-explore | A* pathfinding | Simplified or cut | Memory |
-| Message history | Scrollable | Last 2 messages | Screen space |
+| Message history | Scrollable | Last 3 messages | Screen space (§6.1) |
 
 ### What Gets Added
 
 | Feature | C64 Only |
 |---------|----------|
-| Sound effects | SID chip combat sounds, ambience, death jingle |
-| Custom charset | Purpose-built dungeon tile graphics |
+| Raster interrupt chain | 3-zone color split, SID timing, charset switching (§6.8, §6.9, §6.11) |
+| Atmospheric lighting | Torchlight gradient, damage flash, low-HP pulse via raster effects (§6.8) |
+| Border removal | Open top/bottom borders for cleaner visual frame (§8, step 10) |
+| Sound effects | SID chip combat sounds, ambience, death jingle — raster-timed (§6.11) |
+| Custom charsets | 3 per-zone charsets: dungeon tiles, UI font, message text (§6.9) |
+| Animated tiles | Water, torches via charset cycling (~40 cycles/frame) (§6.9) |
 | Joystick control | Full 8-direction joystick with fire button |
-| Title screen art | PETSCII art splash screen |
-| Color flash effects | Screen border flash on hit, death screen effects |
+| Title screen art | PETSCII art splash screen with raster color bars |
 | Online leaderboards | Cross-platform scores (C64 + PC) via UII+ |
 | Daily challenge | Shared daily seed fetched from server |
 | Cloud saves | Save/load game state over HTTP via UII+ |
@@ -1664,6 +1800,38 @@ Total turn processing measured on the POC (full redraw, no dirty-rect):
 amortized AI costs, this drops to ~8,000 cycles = ~8 ms. Well under one
 frame (16.7 ms NTSC / 20 ms PAL).
 
+**Continuous per-frame raster overhead:** In addition to per-turn costs, the
+raster interrupt chain (§8, Phase 2 step 6) introduces a continuous background
+cost that runs every frame regardless of player input. See the
+[C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md)
+§Cycle Budget Impact for the complete breakdown.
+
+```
+Raster interrupt chain:                 ~200 cycles (3-zone split)
+  - Background color gradient:          ~110 cycles (22 lines × 5 cyc)
+  - Border removal:                      ~20 cycles (2 register writes)
+  - SID player callback:                ~300 cycles (typical music driver)
+  - Charset zone switching:              ~30 cycles (2 switches)
+Total continuous overhead:              ~660 cycles/frame (~3.4%)
+```
+
+With dirty-rect rendering and raster effects combined:
+
+```
+Available per frame (PAL):             ~19,656 cycles
+Continuous raster overhead:               ~660 cycles
+Remaining for game logic:              ~18,996 cycles/frame
+Per-turn costs (on player action):
+  FOV:                                  ~7,500 cycles
+  Dirty-rect render:                      ~500 cycles
+  AI + combat:                          ~2,000 cycles
+  Total per-turn:                      ~10,000 cycles (0.5 frames)
+```
+
+Plenty of headroom for sprite animation, smooth scrolling, and future gameplay
+features. The continuous raster cost is independent of per-turn costs — it runs
+in the background via interrupt while the game loop blocks on input.
+
 ### 11.5 C64 Code Style: Which Abstractions Help on the 6502
 
 The C64 crate should feel like a C64 program written in Rust — idiomatic for
@@ -1734,6 +1902,31 @@ recommendation.
    wrappers, bitflags structs). Measure after migration and compare against
    the POC's 13 KB baseline.
 
+8. **Player sprite:** Should the player character use a hardware sprite
+   overlaid on the character-mode dungeon map? A 24x21 sprite enables smooth
+   inter-tile movement (4-frame glide instead of instant snap), idle animation
+   (breathing, torch flicker), and a dramatic visual distinction between
+   the player and the environment — the same approach used by *Sword of
+   Fargoal* (1982). Cost: ~126 cycles/frame for sprite DMA + ~1 KB for
+   animation data (63 bytes/frame x 4 frames x 4 entities if monsters also
+   get sprites). The sprite must reside in the active VIC bank (Bank 1, see
+   §6.9). **Phase 2 or v1.1?** Adding the player sprite alongside the custom
+   charset (Phase 2 step 8) is a natural pairing — the charset handles the
+   dungeon, the sprite handles the player. Monster sprites could follow in
+   v1.1. See the [C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md)
+   §6 for the full design.
+
+9. **Level transition animation:** When the player descends stairs (gameplay
+   plan Phase 2), should there be a visual transition effect? An FLD wipe
+   pushes the current floor off the bottom of the screen over 4-8 frames,
+   then reveals the new floor — much more dramatic than a simple clear-and-
+   redraw. Cost: ~3,150 cycles total per transition (~10 frames × ~315
+   cycles/frame for 21 crunched lines). Two approaches: **FLD** (simpler —
+   pushes the whole display as one block, like a curtain) or **linecrunch**
+   (more flexible — selectively removes rows, like a dissolve). FLD achieves
+   80% of the visual impact with less code. See the demo techniques analysis
+   §3 and §12.
+
 ---
 
 ## 13. Conclusion
@@ -1775,8 +1968,16 @@ The main risks:
 3. **Code generation quality** — Mitigated by raw pointer patterns in hot paths
    and the validated POC binary size.
 
-The implementation plan is compressed to **12 weeks** (vs. the original 20
-weeks for cc65) because:
+The implementation plan spans **14 weeks** (vs. the original 20 weeks for
+cc65), expanded from the initial 12-week estimate to incorporate demo scene
+techniques (raster interrupts, atmospheric effects, per-zone charsets, border
+removal) identified in the
+[C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md).
+The additional 2 weeks are well spent — the raster interrupt chain alone
+unlocks proper SID timing, atmospheric lighting, and per-zone charset
+switching, all for under 700 cycles/frame of continuous overhead.
+
+Timeline compression factors:
 - Phase 0 (POC) is already complete
 - Rust development is faster than C/assembly for game logic
 - mos-hardware eliminates boilerplate hardware register code
@@ -1786,5 +1987,6 @@ The C64 roguelike wouldn't just be a downport — it would be the most
 interesting client in the fleet. And with cross-platform seed sharing, a C64
 player and a PC player can compete on the same dungeon.
 
-Estimated remaining effort: **10-12 weeks** for production features +
-networking, **6-8 weeks** for the core game + sound without networking.
+Estimated remaining effort: **12-14 weeks** for production features +
+networking, **8-10 weeks** for the core game + sound + raster effects without
+networking.

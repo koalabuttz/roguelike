@@ -1,0 +1,176 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # 6:00 AM UTC daily
+  workflow_dispatch:       # manual trigger
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      matrix:
+        include:
+          - name: Linux x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            os_label: linux
+            arch_label: x86_64
+            suffix: ''
+          - name: Linux ARM64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            os_label: linux
+            arch_label: arm64
+            suffix: ''
+          - name: macOS ARM64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            os_label: macos
+            arch_label: arm64
+            suffix: ''
+          - name: Windows x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            os_label: windows
+            arch_label: x86_64
+            suffix: '.exe'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      - run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Rename binaries
+        shell: bash
+        run: |
+          src=target/${{ matrix.target }}/release
+          mkdir -p dist
+          cp "${src}/mcp_server${{ matrix.suffix }}" "dist/mcp_server-${{ matrix.os_label }}-${{ matrix.arch_label }}${{ matrix.suffix }}"
+          cp "${src}/roguelike${{ matrix.suffix }}" "dist/roguelike-${{ matrix.os_label }}-${{ matrix.arch_label }}${{ matrix.suffix }}"
+          cp "${src}/headless${{ matrix.suffix }}" "dist/headless-${{ matrix.os_label }}-${{ matrix.arch_label }}${{ matrix.suffix }}"
+          cp "${src}/roguelike-ssh${{ matrix.suffix }}" "dist/roguelike-ssh-${{ matrix.os_label }}-${{ matrix.arch_label }}${{ matrix.suffix }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nightly-${{ matrix.os_label }}-${{ matrix.arch_label }}
+          path: dist/*
+          retention-days: 7
+
+  balance:
+    name: Nightly Balance (1000 games)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly-linux-x86_64
+          path: bin
+      - run: chmod +x bin/headless-linux-x86_64
+
+      - name: Restore baseline cache
+        id: baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: balance-baseline-nightly.json
+          key: balance-nightly-${{ github.run_id }}
+          restore-keys: balance-nightly-
+
+      - name: Run default preset (1000 games)
+        run: |
+          ./bin/headless-linux-x86_64 \
+            --games 1000 --seed 1 --analytics --analysis \
+            --report balance-report-nightly.html \
+            > stats-nightly.json
+
+      - name: Compare with baseline
+        if: steps.baseline.outputs.cache-hit == 'true'
+        run: |
+          python3 tools/balance_diff.py balance-baseline-nightly.json stats-nightly.json > balance-diff-nightly.md
+          cat balance-diff-nightly.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: No baseline available
+        if: steps.baseline.outputs.cache-hit != 'true'
+        run: |
+          echo "## Nightly Balance Check" >> "$GITHUB_STEP_SUMMARY"
+          echo "**No baseline available** — this run establishes the baseline." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Update baseline
+        run: cp stats-nightly.json balance-baseline-nightly.json
+
+      - name: Save baseline cache
+        uses: actions/cache/save@v4
+        with:
+          path: balance-baseline-nightly.json
+          key: balance-nightly-${{ github.run_id }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-balance-report
+          path: |
+            balance-report-nightly.html
+            stats-nightly.json
+          retention-days: 7
+
+  release:
+    name: Update Nightly Release
+    needs: [build, balance]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: nightly-*
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: cd artifacts && sha256sum * > SHA256SUMS.txt
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Delete existing nightly release
+        run: gh release delete nightly --yes --cleanup-tag 2>/dev/null || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create nightly release
+        run: |
+          gh release create nightly \
+            --prerelease \
+            --title "Nightly (${{ steps.sha.outputs.short }})" \
+            --notes "$(cat <<'EOF'
+          Automated nightly build from \`main\` at ${{ steps.sha.outputs.short }}.
+
+          **These builds are not guaranteed to be stable.**
+
+          | Binary | Description |
+          |--------|-------------|
+          | `roguelike-*` | Terminal game |
+          | `roguelike-ssh-*` | SSH server for multiplayer |
+          | `mcp_server-*` | MCP server for LLM play |
+          | `headless-*` | Automated playtesting runner |
+
+          Verify: `sha256sum -c SHA256SUMS.txt`
+          EOF
+          )" \
+            artifacts/*
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

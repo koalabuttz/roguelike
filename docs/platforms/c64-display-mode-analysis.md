@@ -6,9 +6,9 @@ evaluates whether an alternative VIC-II mode would benefit the roguelike,
 and explains why standard character mode is the correct choice.
 
 **Related:**
-[Port proposal](../c64-port-proposal.md) §6.8-6.9,
+[Port proposal](c64-port-proposal.md) §6.8-6.9,
 [Demo techniques for roguelike](c64-demo-techniques-for-roguelike.md) §4,
-[Demo scene research](../../c64-demo-scene-techniques.md) §6.
+Demo scene research (document removed) §6.
 
 ---
 

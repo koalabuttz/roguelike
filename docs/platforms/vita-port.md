@@ -29,10 +29,10 @@ This proposal covers the **Vita frontend crate** — rendering, input, save, aud
 |-----|----------------------|
 | [cross-platform.md](../architecture/cross-platform.md) | Crate structure, `Renderer`/`InputSource` traits, `GameColor` mapping |
 | [simulation.md](../architecture/simulation.md) | `SimBudget` caps (generous on Vita: 512 entities, 1000+ CA tiles/turn) |
-| [acoustic-propagation.md](acoustic-propagation.md) | `SoundEvent` → real audio rendering. Vita is the first Rust-based platform with hardware capable of doing this justice. |
-| [gameplay-implementation-plan.md](gameplay-implementation-plan.md) | Items, stairs, XP, mood — Vita renders these, doesn't change their logic |
+| [acoustic-propagation.md](../design/acoustic-propagation.md) | `SoundEvent` → real audio rendering. Vita is the first Rust-based platform with hardware capable of doing this justice. |
+| [gameplay-implementation-plan.md](../design/gameplay-implementation-plan.md) | Items, stairs, XP, mood — Vita renders these, doesn't change their logic |
 | [gba-port.md](gba-port.md) | Establishes patterns for constrained Rust ports. Vita deliberately diverges where its hardware allows. |
-| [c64-port-proposal.md](../c64-port-proposal.md) | Defines server-side endpoints (leaderboards, daily seeds, cloud saves, spectation relay) that the Vita consumes over WiFi. Also defines the cross-platform save portability problem (C64's 1.6 KB binary vs Vita/desktop JSON) that atproto must solve. |
+| [c64-port-proposal.md](c64-port-proposal.md) | Defines server-side endpoints (leaderboards, daily seeds, cloud saves, spectation relay) that the Vita consumes over WiFi. Also defines the cross-platform save portability problem (C64's 1.6 KB binary vs Vita/desktop JSON) that atproto must solve. |
 | [c64-atproto-bridge.md](c64-atproto-bridge.md) | Atproto lexicon design for saves and spectation. The Vita uses the same lexicons directly (no bridge needed — it has native HTTPS/OAuth). |
 
 Where those docs specify Vita-relevant details, this doc references rather than duplicates. Where Vita needs something unique (OLED-optimized rendering, touch input, analog stick movement, spatial audio), this doc defines it.
@@ -304,7 +304,7 @@ This is critical for portable play. The user should never lose progress because 
 
 ## Audio
 
-The Vita is the first target platform with audio hardware capable of doing justice to the [acoustic propagation system](acoustic-propagation.md). While the terminal renders sound events as message text and the GBA uses 4-channel PSG, the Vita can produce rich, spatialized procedural audio.
+The Vita is the first target platform with audio hardware capable of doing justice to the [acoustic propagation system](../design/acoustic-propagation.md). While the terminal renders sound events as message text and the GBA uses 4-channel PSG, the Vita can produce rich, spatialized procedural audio.
 
 ### Audio Architecture
 
@@ -344,7 +344,7 @@ Each `SoundEvent` from core maps to a short PCM sample with spatial positioning:
 | `DoorOpen` (future) | Creak | ~200ms | |
 | `ItemPickup` (future) | Chime | ~100ms | |
 
-Samples are short procedurally-generated waveforms (not recorded audio), keeping the binary small and matching the game's abstract aesthetic. This parallels the [C64's SID approach](../c64-port-proposal.md#611-sound-design) — both platforms use procedural audio driven by `SoundKind`, but with different synthesis methods (PCM samples on Vita, SID register writes on C64).
+Samples are short procedurally-generated waveforms (not recorded audio), keeping the binary small and matching the game's abstract aesthetic. This parallels the [C64's SID approach](c64-port-proposal.md#611-sound-design) — both platforms use procedural audio driven by `SoundKind`, but with different synthesis methods (PCM samples on Vita, SID register writes on C64).
 
 ### Spatial Audio
 
@@ -463,13 +463,13 @@ Each phase produces a testable artifact. Phases 1–3 produce a fully playable V
 
 **Goal:** WiFi-enabled features for connected play.
 
-The [C64 port proposal](../c64-port-proposal.md#613-networking-ultimate-64--uii) defines server-side endpoints for leaderboards, daily seeds, cloud saves, and spectation relays — designed to serve both C64 (via UII+ Ethernet) and other clients. The Vita consumes these same endpoints over WiFi, with the advantage of native HTTPS support (no bridge needed, unlike the C64's binary TCP protocol through the UII+).
+The [C64 port proposal](c64-port-proposal.md#613-networking-ultimate-64--uii) defines server-side endpoints for leaderboards, daily seeds, cloud saves, and spectation relays — designed to serve both C64 (via UII+ Ethernet) and other clients. The Vita consumes these same endpoints over WiFi, with the advantage of native HTTPS support (no bridge needed, unlike the C64's binary TCP protocol through the UII+).
 
 - Implement seed code sharing (copy to clipboard / display as QR code on screen).
 - Leaderboard submission on death (same endpoint as C64: `POST /api/leaderboard`). The Vita submits with `"platform": "vita"`. Cross-platform leaderboards show C64, terminal, SSH, and Vita players together.
-- Daily challenge seed fetch (`GET /api/daily-seed`). Same shared seed across all platforms — a C64 player and a Vita player explore the same dungeon on the same day. The [C64 doc's fairness question](../c64-port-proposal.md#12-decisions-and-remaining-questions) (Q8) about map size parity applies: Vita uses desktop-sized maps (80x40) while C64 uses 40x22. Daily challenges should specify map dimensions in the seed code to ensure parity.
+- Daily challenge seed fetch (`GET /api/daily-seed`). Same shared seed across all platforms — a C64 player and a Vita player explore the same dungeon on the same day. The [C64 doc's fairness question](c64-port-proposal.md#12-decisions-and-remaining-questions) (Q8) about map size parity applies: Vita uses desktop-sized maps (80x40) while C64 uses 40x22. Daily challenges should specify map dimensions in the seed code to ensure parity.
 - (Future, depends on atproto) AT Protocol integration for spectating and PDS saves. The Vita can use the atproto lexicons directly via native HTTPS/XRPC — the same lexicons the C64 accesses through its bridge. A game saved from a Vita appears identically in a player's PDS to one saved from the SSH client.
-- **Test:** Seed codes are shareable. Leaderboard submissions work. Network features degrade gracefully when WiFi is off (same principle as the C64's [graceful UII+ absence detection](../c64-port-proposal.md#613-networking-ultimate-64--uii)).
+- **Test:** Seed codes are shareable. Leaderboard submissions work. Network features degrade gracefully when WiFi is off (same principle as the C64's [graceful UII+ absence detection](c64-port-proposal.md#613-networking-ultimate-64--uii)).
 
 **Depends on:** Phase 2. Server endpoints depend on the leaderboard/daily-seed service being deployed (shared with C64). AT Protocol integration depends on the `atproto` crate being implemented.
 
@@ -529,9 +529,9 @@ This is possible because the Vita has real audio hardware with sufficient channe
 
 5. **Right-stick look mode and turn consumption.** The right-stick free-look described in the impressive features section raises a question: does moving the look cursor consume a turn? It should not (it's purely informational), but core's `InputSource::next_command()` is blocking. The Vita input layer needs to handle right-stick input internally (updating the tooltip) without forwarding it to `next_command()`. This is a frontend concern — core doesn't know about the right stick.
 
-6. **Cross-platform leaderboard fairness.** The [C64 proposal raises this question](../c64-port-proposal.md#12-decisions-and-remaining-questions) (Q8): C64 uses 40x22 maps, desktop/Vita use 80x40. Should daily challenge leaderboards be per-platform or require a shared map size? The Vita can generate maps at any size, so it could use C64-sized maps for daily challenges and full-sized maps for freeplay. This is a design decision that affects all networked ports.
+6. **Cross-platform leaderboard fairness.** The [C64 proposal raises this question](c64-port-proposal.md#12-decisions-and-remaining-questions) (Q8): C64 uses 40x22 maps, desktop/Vita use 80x40. Should daily challenge leaderboards be per-platform or require a shared map size? The Vita can generate maps at any size, so it could use C64-sized maps for daily challenges and full-sized maps for freeplay. This is a design decision that affects all networked ports.
 
-7. **Cross-platform save portability.** The C64's binary save format (~1.6 KB) and the Vita's JSON format (~10-50 KB) represent the same game state in incompatible serializations. The [C64 proposal](../c64-port-proposal.md#12-decisions-and-remaining-questions) (Q12) and the [C64 bridge doc](c64-atproto-bridge.md) discuss this at length. If atproto PDS saves are schema-compatible at the lexicon level, a player could in theory continue a C64 game on a Vita (or vice versa) — but this requires a conversion layer. Is this a goal for v1, or aspirational?
+7. **Cross-platform save portability.** The C64's binary save format (~1.6 KB) and the Vita's JSON format (~10-50 KB) represent the same game state in incompatible serializations. The [C64 proposal](c64-port-proposal.md#12-decisions-and-remaining-questions) (Q12) and the [C64 bridge doc](c64-atproto-bridge.md) discuss this at length. If atproto PDS saves are schema-compatible at the lexicon level, a player could in theory continue a C64 game on a Vita (or vice versa) — but this requires a conversion layer. Is this a goal for v1, or aspirational?
 
 ## Testing Strategy
 
@@ -584,7 +584,7 @@ The Vita port sits in a sweet spot: it has the hardware richness to be the most 
 
 ### Shared Server Infrastructure
 
-The [C64 port proposal](../c64-port-proposal.md) defines server-side endpoints that serve multiple clients:
+The [C64 port proposal](c64-port-proposal.md) defines server-side endpoints that serve multiple clients:
 
 | Endpoint | C64 access | Vita access |
 |----------|-----------|-------------|
@@ -600,7 +600,7 @@ The Vita's advantage: it speaks native HTTPS and can use atproto directly (OAuth
 
 The C64 port is architecturally unique among all ports: it targets the MOS 6502 via [rust-mos](https://github.com/mrk-its/rust-mos), with extreme constraints (64 KB RAM, 1 MHz CPU). The C64 runs at tier micro (`u8` coordinates, `u8` stats, fixed-size arrays, LFSR-16 RNG, Bresenham FOV) via `core::tier_micro`, depending on `roguelike-core` directly as a thin frontend just like every other port. The Vita port is at the opposite extreme of hardware capability — it runs at tier standard, reusing `roguelike-core` entirely unchanged, with all effort going into the frontend.
 
-This distinction matters for save compatibility. The C64's binary save format (~1.6 KB, see [C64 doc section 3.10](../c64-port-proposal.md#612-save-system)) is structurally different from the JSON `GameState` serialization used by the Vita and all other Rust-based ports. Cross-platform save portability between C64 and Vita/desktop requires format conversion — either in the atproto bridge (as the [C64 bridge doc](c64-atproto-bridge.md) proposes) or as a server-side translation layer. The Vita doesn't need to solve this problem directly, but its atproto integration should use the same lexicons (`save.gameState`, `save.settings`) so that saves are at least schema-compatible at the PDS level.
+This distinction matters for save compatibility. The C64's binary save format (~1.6 KB, see [C64 doc section 3.10](c64-port-proposal.md#612-save-system)) is structurally different from the JSON `GameState` serialization used by the Vita and all other Rust-based ports. Cross-platform save portability between C64 and Vita/desktop requires format conversion — either in the atproto bridge (as the [C64 bridge doc](c64-atproto-bridge.md) proposes) or as a server-side translation layer. The Vita doesn't need to solve this problem directly, but its atproto integration should use the same lexicons (`save.gameState`, `save.settings`) so that saves are at least schema-compatible at the PDS level.
 
 **"Don't close doors" notes:**
 
@@ -608,7 +608,7 @@ This distinction matters for save compatibility. The C64's binary save format (~
 - The spatial audio system's `spatialize()` function takes abstract `Pos` coordinates and returns pan/volume. If this logic proves useful across platforms (Web Audio, desktop speakers, and potentially as a reference for the C64's SID distance attenuation), extract it to a shared utility in core or a new `audio` crate. But don't extract prematurely — let the Vita implementation prove the interface first.
 - The cell-size selection UI generalizes to any pixel-based renderer (Web canvas, GBA tile sizing, future tileset support on desktop). The setting should live in core's `Settings` struct if it doesn't already have a display-scale concept.
 - The suspend/resume pattern (auto-save to a hidden slot on lifecycle events) applies to mobile/web ports equally. Document it as a pattern, don't hard-code it as Vita-specific.
-- The leaderboard submission and daily seed fetch are intentionally thin HTTP calls (not platform-specific logic). Any platform with network access — Vita (WiFi), C64 (UII+), Web (fetch API), desktop (reqwest) — can consume them. The server endpoints defined in the [C64 proposal](../c64-port-proposal.md#613-networking-ultimate-64--uii) should be documented as a shared protocol, not a C64-specific feature.
+- The leaderboard submission and daily seed fetch are intentionally thin HTTP calls (not platform-specific logic). Any platform with network access — Vita (WiFi), C64 (UII+), Web (fetch API), desktop (reqwest) — can consume them. The server endpoints defined in the [C64 proposal](c64-port-proposal.md#613-networking-ultimate-64--uii) should be documented as a shared protocol, not a C64-specific feature.
 
 ## Effort Estimate
 

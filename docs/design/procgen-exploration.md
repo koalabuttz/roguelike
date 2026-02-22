@@ -568,8 +568,8 @@ Enhancements 1 and 2 are the priority. Together they transform the dungeon from 
 | [gameplay-implementation-plan.md](gameplay-implementation-plan.md) | Phase 2 (stairs) needs floor-type variety — this doc provides it. Phase 3 (items) motivates prefab rooms. Phase 5 (creature mood) benefits from loops (flee routes). |
 | [simulation.md](../architecture/simulation.md) | Tile state layer and CA simulation benefit from organic terrain. Property bitfields can tag rooms/corridors for generation rules. |
 | [acoustic-propagation.md](acoustic-propagation.md) | Sound propagation behaves differently in caves vs. corridors vs. open rooms. Diverse geometry makes the sound system more interesting. |
-| [gba-port.md](gba-port.md) | All recommended enhancements respect GBA memory/CPU constraints. The SimBudget pattern applies to generation (smaller room caps, fewer CA passes on constrained platforms). |
-| [c64-port-proposal.md](../c64-port-proposal.md) | C64 maps are 40×22 with 12 rooms. All techniques scale down. CA caves are especially cheap. Delaunay with 12 points is trivial. |
+| [gba-port.md](../platforms/gba-port.md) | All recommended enhancements respect GBA memory/CPU constraints. The SimBudget pattern applies to generation (smaller room caps, fewer CA passes on constrained platforms). |
+| [c64-port-proposal.md](../platforms/c64-port-proposal.md) | C64 maps are 40×22 with 12 rooms. All techniques scale down. CA caves are especially cheap. Delaunay with 12 points is trivial. |
 | [cross-platform.md](../architecture/cross-platform.md) | Generation stays in `core` with zero platform deps. Platform-specific caps come through `GameConfig` / `SimBudget`, not conditional compilation in the generator. |
 
 ---

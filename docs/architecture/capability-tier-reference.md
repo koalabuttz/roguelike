@@ -2,10 +2,10 @@
 
 **Cross-platform reference for the capability tier hierarchy in `roguelike-core`.**
 Defines per-tier types, algorithms, and the sharing boundary between tiers.
-See the [C64 Port Proposal](c64-port-proposal.md) §5 for motivation and the
-[cross-platform architecture](architecture/cross-platform.md) for workspace layout.
+See the [C64 Port Proposal](../platforms/c64-port-proposal.md) §5 for motivation and the
+[cross-platform architecture](cross-platform.md) for workspace layout.
 For C64-specific hardware guidance (cycle budgets, CIA multiplexing, code style),
-see the [C64 platform guide](c64-platform-guide.md).
+see the [C64 platform guide](../platforms/c64-platform-guide.md).
 
 ---
 
@@ -199,7 +199,7 @@ impl LfsrRng {
 On the C64, the `LfsrRng` struct (2 bytes) is passed as `&mut LfsrRng`,
 replacing the POC's `static mut RNG_STATE` global. This is one of two
 abstractions that genuinely improve 6502 code generation — see the
-[C64 code style guide](c64-platform-guide.md#6-c64-code-style-which-abstractions-help-on-the-6502) for why.
+[C64 code style guide](../platforms/c64-platform-guide.md#6-c64-code-style-which-abstractions-help-on-the-6502) for why.
 
 On PC/Vita, `LfsrRng` is used when playing a micro-tier seed (short seed codes
 that are compatible with all platforms). Standard-tier seeds use ChaCha20 via
@@ -430,7 +430,7 @@ constants are the baseline, not a constraint. A CI test verifies that
 
 **Relationship to gameplay implementation plan**: The constants above correspond
 to Phases 1 (wandering spawns), 2 (depth scaling), 4 (leveling), and 5 (mood)
-of the [gameplay implementation plan](design/gameplay-implementation-plan.md).
+of the [gameplay implementation plan](../design/gameplay-implementation-plan.md).
 Phase 3 (items) has its own module (`core/items.rs`) rather than constants in
 `balance.rs`, because item definitions include lookup tables for stat bonuses.
 Phase 6 (property bitfields) is standard-tier only for now — tier micro has no

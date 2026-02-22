@@ -270,11 +270,11 @@ pip install -r tools/requirements.txt
 
 Alternatively, use the built-in `--report` flag on the headless runner to generate HTML reports without Python.
 
-See the [headless runner docs](docs/headless-runner.md#visualization) for full usage examples.
+See the [headless runner docs](docs/tooling/headless-runner.md#visualization) for full usage examples.
 
 ### LLM Playtesting
 
-The `tools/llm_playtest.py` script requires an `ANTHROPIC_API_KEY` environment variable. This drives games through the Anthropic API, letting an LLM play strategically instead of using the dumb auto-explore AI. See the [LLM playtesting docs](docs/llm-playtesting.md) for full usage.
+The `tools/llm_playtest.py` script requires an `ANTHROPIC_API_KEY` environment variable. This drives games through the Anthropic API, letting an LLM play strategically instead of using the dumb auto-explore AI. See the [LLM playtesting docs](docs/tooling/llm-playtesting.md) for full usage.
 
 The `/playtest` skill works in Claude Code sessions with the MCP server connected — no API key needed since Claude Code uses its own session.
 

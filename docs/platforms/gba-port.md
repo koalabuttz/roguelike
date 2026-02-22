@@ -16,7 +16,7 @@ How to bring the roguelike to the Game Boy Advance while keeping all game logic 
 | Palette RAM | 512 bytes (256 BG colors + 256 sprite colors) | 16 palettes × 16 colors each for BG; same for sprites. Writable during VBlank. |
 | ROM | Up to 32 MB | `const` tables (interaction matrix, tile graphics, monster defs). Zero RAM cost. |
 | Display | 240×160 pixels, 30×20 tiles at 8×8 | Viewport fits ~28×18 gameplay tiles plus a 2-tile status bar. |
-| Sound | 4 PSG channels (2 pulse, 1 wave, 1 noise) + 2 DMA | Procedural audio from register writes. See [acoustic propagation doc](acoustic-propagation.md#gba-psg). |
+| Sound | 4 PSG channels (2 pulse, 1 wave, 1 noise) + 2 DMA | Procedural audio from register writes. See [acoustic propagation doc](../design/acoustic-propagation.md#gba-psg). |
 | Save | SRAM (32 KB), Flash (64/128 KB), or EEPROM (512 B / 8 KB) | SRAM is simplest. 32 KB is sufficient for compact save format. |
 | Input | D-pad, A, B, L, R, Start, Select | 10 buttons. No analog. |
 
@@ -27,10 +27,10 @@ This proposal covers the **GBA frontend crate** — rendering, input, save, and 
 | Doc | What GBA uses from it |
 |-----|----------------------|
 | [cross-platform.md](../architecture/cross-platform.md) | Crate structure, `Renderer`/`InputSource` traits, `GameColor` mapping |
-| [capability-tier-reference.md](../capability-tier-reference.md) | Capability tier hierarchy (GBA uses tier compact), type sizing, seed system |
+| [capability-tier-reference.md](../architecture/capability-tier-reference.md) | Capability tier hierarchy (GBA uses tier compact), type sizing, seed system |
 | [simulation.md](../architecture/simulation.md) | `SimBudget` caps for entity count, CA tiles/turn, event queue depth |
-| [acoustic-propagation.md](acoustic-propagation.md) | PSG channel assignments, sound event → register write mapping |
-| [gameplay-implementation-plan.md](gameplay-implementation-plan.md) | Items, stairs, XP, mood — GBA renders these, doesn't change their logic |
+| [acoustic-propagation.md](../design/acoustic-propagation.md) | PSG channel assignments, sound event → register write mapping |
+| [gameplay-implementation-plan.md](../design/gameplay-implementation-plan.md) | Items, stairs, XP, mood — GBA renders these, doesn't change their logic |
 
 Where those docs specify GBA-relevant details (e.g., PSG audio, SimBudget values), this doc references rather than duplicates them. Where GBA needs something those docs don't cover (tile streaming, palette-based lighting, OAM management, save format), this doc defines it.
 
@@ -281,7 +281,7 @@ Cost: ~20 register writes per frame. The visual effect is a flickering light bou
 
 The flicker state is an `u32` LFSR (linear feedback shift register) seeded from the game's RNG. This keeps flicker deterministic for replay purposes, though since it's purely visual, determinism is optional.
 
-**"Don't close doors" note:** The FOV distance data that drives palette selection comes from `compute_fov()` in core, which already returns `HashSet<Pos>`. The GBA renderer computes Chebyshev distance from the player to each visible tile — this is a per-tile subtraction, not a core change. Other platforms can implement similar lighting if desired (terminal could use ANSI 256-color greyscale; C64 uses color RAM as described in the [acoustic propagation doc](acoustic-propagation.md#visual-complement-dynamic-fov-lighting-c64)). The core doesn't know about palettes.
+**"Don't close doors" note:** The FOV distance data that drives palette selection comes from `compute_fov()` in core, which already returns `HashSet<Pos>`. The GBA renderer computes Chebyshev distance from the player to each visible tile — this is a per-tile subtraction, not a core change. Other platforms can implement similar lighting if desired (terminal could use ANSI 256-color greyscale; C64 uses color RAM as described in the [acoustic propagation doc](../design/acoustic-propagation.md#visual-complement-dynamic-fov-lighting-c64)). The core doesn't know about palettes.
 
 ## Input
 
@@ -365,13 +365,13 @@ The format version enables forward compatibility — if the save format changes,
 
 ### Multi-Level Dungeon Saves
 
-When stairs are implemented ([gameplay plan Phase 2](gameplay-implementation-plan.md#phase-2-stairs--multi-level-dungeons)), the one-way-descent model (recommended v1) means only the current floor needs saving. Previous floors are discarded. This keeps save size constant regardless of depth.
+When stairs are implemented ([gameplay plan Phase 2](../design/gameplay-implementation-plan.md#phase-2-stairs--multi-level-dungeons)), the one-way-descent model (recommended v1) means only the current floor needs saving. Previous floors are discarded. This keeps save size constant regardless of depth.
 
-If bidirectional stairs are added later, the [dormant world pattern](../../simulation-on-retro-hardware.md#4-the-dormant-world-pattern) applies: store each visited floor as `(seed: u64, depth: u8, delta: FloorDelta)` where `FloorDelta` records player-caused changes (killed monsters, picked-up items) as a compact diff. At ~8–32 bytes per floor, 50 floors would cost ~0.4–1.6 KB — well within SRAM budget.
+If bidirectional stairs are added later, the dormant world pattern (document removed) applies: store each visited floor as `(seed: u64, depth: u8, delta: FloorDelta)` where `FloorDelta` records player-caused changes (killed monsters, picked-up items) as a compact diff. At ~8–32 bytes per floor, 50 floors would cost ~0.4–1.6 KB — well within SRAM budget.
 
 ## Audio
 
-The [acoustic propagation doc](acoustic-propagation.md#gba-psg) defines the GBA PSG channel assignments and sound event mapping. This section covers the GBA-specific driver implementation.
+The [acoustic propagation doc](../design/acoustic-propagation.md#gba-psg) defines the GBA PSG channel assignments and sound event mapping. This section covers the GBA-specific driver implementation.
 
 ### PSG Driver
 

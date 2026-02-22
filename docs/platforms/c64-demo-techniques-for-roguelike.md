@@ -1,10 +1,10 @@
 # C64 Demo Scene Techniques for the Roguelike
 
 **Context:** This document analyzes which demo scene techniques could improve the
-C64 roguelike port. It cross-references the [port proposal](../c64-port-proposal.md),
-the [gameplay implementation plan](gameplay-implementation-plan.md), the current
+C64 roguelike port. It cross-references the [port proposal](c64-port-proposal.md),
+the [gameplay implementation plan](../design/gameplay-implementation-plan.md), the current
 POC source (`crates/c64/`), and the
-[demo scene research](../../c64-demo-scene-techniques.md).
+demo scene research (document removed).
 
 **Current state:** The POC uses standard VIC-II character mode (40x25) with no
 raster interrupts, no sprites, no custom charset, and no VIC-II tricks of any

@@ -82,7 +82,7 @@ Significant investment. May depend on earlier tiers being complete.
 | Game Boy Advance | 0 | Low | XL | Runs at tier compact (i16 coords, no_std). Compiles `core::rules` + `core::tier_micro` + `core::tier_compact` (compact is stubs until GBA work begins). Frontend crate needed. |
 | PS Vita | 0 | Low | L | Native ARM via vita-sdk; hardware buttons, OLED display, memory card saves. |
 | Commodore 64 | 0 | Low | XL | Runs at tier micro (u8 coords, u8 stats, fixed arrays, LFSR-16). C64 crate is a thin frontend using `core::tier_micro` + `core::rules`. Builds via rust-mos Docker. |
-| C64 AT Protocol bridge | 0 | Low | L | Self-hostable Docker bridge connecting C64 (via Ultimate64 Ethernet) to PDS saves and spectating. External companion service, not a workspace crate. [Design doc.](design/c64-atproto-bridge.md) |
+| C64 AT Protocol bridge | 0 | Low | L | Self-hostable Docker bridge connecting C64 (via Ultimate64 Ethernet) to PDS saves and spectating. External companion service, not a workspace crate. [Design doc.](platforms/c64-atproto-bridge.md) |
 
 ## Critical Path
 
@@ -174,11 +174,11 @@ Items that have been implemented, organized by original tier.
 | Debug overlay | F6–F12 toggles: FOV, targets, pathfinding, frontiers, reveal monsters, monster FOV. |
 | MCP spectator mode (file) | `ROGUELIKE_SPECTATE_PATH` env var, atomic file writes, integrated into all MCP actions. [Design doc.](design/spectator-mode.md) |
 | High-contrast mode | ColorPalette variant with brighter remappings. |
-| Headless runner | Automated playtesting binary: run N games, configurable seeds/presets, replay support, analytics, parameter sweeps, golden replay management. [Docs.](headless-runner.md) |
+| Headless runner | Automated playtesting binary: run N games, configurable seeds/presets, replay support, analytics, parameter sweeps, golden replay management. [Docs.](tooling/headless-runner.md) |
 | Scenario framework | Fluent builder API for composing specific game states and asserting balance outcomes. |
 | Golden replay regression | Stored deterministic replays with expected results; detects unintended gameplay changes. |
 | Parameter sweeps | Sweep across player stats (HP, ATK, DEF) to find balance boundaries; JSON config, structured output. |
-| LLM playtesting | Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; dual backends, parallel execution, token optimization. [Docs.](llm-playtesting.md) |
+| LLM playtesting | Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; dual backends, parallel execution, token optimization. [Docs.](tooling/llm-playtesting.md) |
 | CI balance check | GitHub Actions workflow runs headless presets on every gameplay change, diffs against cached baseline, posts verdict to workflow summary and PR comments. |
 
 ### Tier 4

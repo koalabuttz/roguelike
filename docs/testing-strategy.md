@@ -3,7 +3,7 @@
 **Project-wide testing approach for the roguelike dungeon crawler.**
 Covers core logic tests, CI verification, cross-platform determinism, and
 property tests. For C64-specific tests (mos-test, VICE integration), see the
-[C64 platform guide](c64-platform-guide.md#7-c64-specific-tests). For
+[C64 platform guide](platforms/c64-platform-guide.md#7-c64-specific-tests). For
 per-feature test plans, see the individual phases in the
 [gameplay implementation plan](design/gameplay-implementation-plan.md).
 
@@ -88,8 +88,8 @@ fn room_intersection_is_symmetric() {
 ## 8. Platform-Specific Tests
 
 - **C64**: `mos-test` for MOS simulator tests, VICE `-keybuf` for integration.
-  See [C64 platform guide](c64-platform-guide.md#7-c64-specific-tests).
+  See [C64 platform guide](platforms/c64-platform-guide.md#7-c64-specific-tests).
 - **GBA**: `mgba-rom-test` headless verification.
-  See [GBA port design](design/gba-port.md).
+  See [GBA port design](platforms/gba-port.md).
 - **Per-feature tests**: See individual feature sections in the
   [gameplay implementation plan](design/gameplay-implementation-plan.md).

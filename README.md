@@ -175,8 +175,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for test categories, scenario/golden repl
 
 ### Developer Tools
 
-- **[Headless runner](docs/headless-runner.md)** — Automated playtesting: run N games with configurable seeds/presets, parameter sweeps, analytics, HTML reports, and golden replay management
-- **[LLM playtesting](docs/llm-playtesting.md)** — Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; dual backends, parallel execution, token optimization
+- **[Headless runner](docs/tooling/headless-runner.md)** — Automated playtesting: run N games with configurable seeds/presets, parameter sweeps, analytics, HTML reports, and golden replay management
+- **[LLM playtesting](docs/tooling/llm-playtesting.md)** — Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; dual backends, parallel execution, token optimization
 - **Debug overlays** — Visualize FOV boundaries, monster AI targets, A\* pathfinding, exploration frontiers, and per-monster FOV (F6–F12 in dev-tools builds)
 - **CI balance check** — GitHub Actions workflow diffs gameplay changes against baseline, posts verdict to PR comments
 

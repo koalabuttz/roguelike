@@ -139,7 +139,7 @@ All platforms generate the same **80x40 map** (see [Part 6: Unified Map Dimensio
 - Scrolling: GBA has hardware BG scroll registers — set X/Y offsets and the hardware handles rendering. A scrolling viewport over a tilemap is what the GBA was designed for.
 
 **C64 (40x22 viewport over 80x40 map):**
-- Tile data: 3,200 bytes (up from 960 bytes for 40x22). The [port proposal](../c64-port-proposal.md#42-memory-budget-allocation-updated-for-rust-mos) budgets ~1.2 KB for tile data with ~22 KB headroom — the extra ~2 KB fits comfortably.
+- Tile data: 3,200 bytes (up from 960 bytes for 40x22). The [port proposal](../platforms/c64-port-proposal.md#42-memory-budget-allocation-updated-for-rust-mos) budgets ~1.2 KB for tile data with ~22 KB headroom — the extra ~2 KB fits comfortably.
 - Explored bitfield: 400 bytes (3,200 bits). Visible bitfield: 400 bytes. Total bitfields: 800 bytes (up from 240).
 - Custom charset: one PETSCII character per tile variant. 12 custom chars x 8 bytes = 96 bytes in the charset (which has a full 2 KB budget for 256 chars).
 - Color RAM: one nybble per tile. C64 has 16 colors — each terrain maps to a fixed color index.
@@ -1058,7 +1058,7 @@ GBA: 28x18 viewport scrolls over 80x40 map (hardware BG scroll registers)
 
 ### C64: 80x40 with Scrolling Viewport
 
-The C64 port proposal ([c64-port-proposal.md](../c64-port-proposal.md) section 3.1) already discusses scrolling viewport over a 64x48 map. Expanding to 80x40 is a modest change.
+The C64 port proposal ([c64-port-proposal.md](../platforms/c64-port-proposal.md) section 3.1) already discusses scrolling viewport over a 64x48 map. Expanding to 80x40 is a modest change.
 
 #### Updated Memory Budget
 
@@ -1137,7 +1137,7 @@ The C64 must also expand from 16-bit seeds to **64-bit seeds** (8 bytes in zero 
 
 ### GBA: 80x40 with Hardware Scrolling
 
-The GBA port ([gba-port.md](gba-port.md)) runs Rust `core` with the `gba` feature flag. It compiles the same `GameRng` (xoshiro128**) for ARM7. Determinism is guaranteed by the compiler — same source code, same algorithm, same output.
+The GBA port ([gba-port.md](../platforms/gba-port.md)) runs Rust `core` with the `gba` feature flag. It compiles the same `GameRng` (xoshiro128**) for ARM7. Determinism is guaranteed by the compiler — same source code, same algorithm, same output.
 
 #### Memory
 
@@ -1271,8 +1271,8 @@ The existing golden replay tests (`crates/core/tests/`) verify determinism by re
 | [procgen-exploration.md](procgen-exploration.md) | This doc builds on its recommended enhancements (Delaunay/MST, CA caves, prefabs, BSP, room shaping) by placing them in a themed-floor pipeline with terrain variety. |
 | [gameplay-implementation-plan.md](gameplay-implementation-plan.md) | Phase 2 (stairs) needs floor-type variety — this doc provides it. Phase 3 (items) motivates treasure vault prefabs. Phase 5 (creature mood) benefits from terrain-aware flee AI. Phase 6 (property bitfields) interacts with terrain (FLAMMABLE + brambles, etc.). |
 | [acoustic-propagation.md](acoustic-propagation.md) | Sound propagation is terrain-aware: ShallowWater is loud, FungalGrowth muffles, Chasm echoes. Each themed floor creates a different acoustic environment. |
-| [gba-port.md](gba-port.md) | GBA uses hardware BG scroll over the unified 80x40 map. `GameRng` (xoshiro128**) is ARM7-native. Tile graphics fit VRAM. Post-processing passes fit SimBudget. Overview map uses bitmap mode. |
-| [c64-port-proposal.md](../c64-port-proposal.md) | C64 generates the full 80x40 map with a scrolling 40x22 viewport (section 3.1 already anticipated scrolling). Replaces Galois LFSR with xoshiro128** for cross-platform seed sharing. Entity table expands from 16 to 48 slots. Memory cost: ~3.4 KB additional from ~22 KB headroom. |
+| [gba-port.md](../platforms/gba-port.md) | GBA uses hardware BG scroll over the unified 80x40 map. `GameRng` (xoshiro128**) is ARM7-native. Tile graphics fit VRAM. Post-processing passes fit SimBudget. Overview map uses bitmap mode. |
+| [c64-port-proposal.md](../platforms/c64-port-proposal.md) | C64 generates the full 80x40 map with a scrolling 40x22 viewport (section 3.1 already anticipated scrolling). Replaces Galois LFSR with xoshiro128** for cross-platform seed sharing. Entity table expands from 16 to 48 slots. Memory cost: ~3.4 KB additional from ~22 KB headroom. |
 | [cross-platform.md](../architecture/cross-platform.md) | `GameRng` lives in `core` with zero platform deps. Unified 80x40 dimensions mean generation code has no platform conditionals. Viewport size is a frontend concern handled by each platform's renderer. Tile enum expansion respects the `no_std` / feature-flag architecture. |
 
 ---

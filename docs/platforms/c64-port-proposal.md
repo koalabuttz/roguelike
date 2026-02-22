@@ -361,11 +361,11 @@ The POC validates the baseline: 13 KB code + ~2 KB static data = ~15 KB total.
 The 64x48 scrolling map adds ~2.5 KB of data over the POC's 40x21 fixed map
 (larger tile buffer, structural/explored bitfields, viewport buffer).
 Gameplay features (items, XP, stairs, mood — see the
-[gameplay implementation plan](design/gameplay-implementation-plan.md)) add ~1
+[gameplay implementation plan](../design/gameplay-implementation-plan.md)) add ~1
 KB of data and ~2 KB of code. The production build adds ~5 KB over the POC
 baseline for raster effects, per-zone charsets, scrolling viewport code, and
 the expanded rendering pipeline (see
-[C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md)).
+[C64 demo techniques analysis](c64-demo-techniques-for-roguelike.md)).
 Even with all production additions (SID, charsets, raster effects, scrolling,
 saves, gameplay features), we stay under the 46 KB budget with ~12 KB headroom.
 
@@ -396,17 +396,17 @@ relative path.
 For the complete architecture — directory tree, dependency graph, build
 pipeline, design principles, module inventory, seed system, and tier
 divergence — see the
-[cross-platform architecture](architecture/cross-platform.md). For code
+[cross-platform architecture](../architecture/cross-platform.md). For code
 listings, platform integration examples, balance constants, and the sharing
 matrix, see the
-[capability tier reference](capability-tier-reference.md). For the
-testing strategy, see [testing-strategy.md](testing-strategy.md).
+[capability tier reference](../architecture/capability-tier-reference.md). For the
+testing strategy, see [testing-strategy.md](../testing-strategy.md).
 
 ---
 
 ## 6. Design Decisions
 
-> **See also:** The [C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md)
+> **See also:** The [C64 demo techniques analysis](c64-demo-techniques-for-roguelike.md)
 > evaluates VIC-II demo scene techniques for the roguelike port, identifying
 > raster interrupts, per-zone charset switching, atmospheric color gradients,
 > border removal, and sprite overlays as high-value additions. Several sections
@@ -418,7 +418,7 @@ testing strategy, see [testing-strategy.md](testing-strategy.md).
 **Current:** 80x40 map, fully visible in terminal (no scrolling).
 
 **C64 approach:** The C64 screen is 40x25. The
-[gameplay implementation plan](design/gameplay-implementation-plan.md) adds
+[gameplay implementation plan](../design/gameplay-implementation-plan.md) adds
 items, XP/leveling, and dungeon depth to both platforms. Reserving 1 row for a
 dense status bar and 3 rows for the message log leaves a **40x21 visible play
 area**.
@@ -471,7 +471,7 @@ platform runs a micro-tier seed, it uses these dimensions. Tier standard uses
 Map generation will use core's `map::generate()` function on both platforms,
 ensuring identical room placement, corridor routing, and dungeon topology for
 any given seed. See the
-[capability tier reference §1.3-1.4](capability-tier-reference.md#13-tier-micro-map-generation)
+[capability tier reference §1.3-1.4](../architecture/capability-tier-reference.md#13-tier-micro-map-generation)
 for the shared function and platform integration examples.
 
 All platforms call the tier-appropriate mapgen function. When running a
@@ -558,7 +558,7 @@ same function directly.
 
 ### 6.7 Items and Inventory (C64 Storage Design)
 
-The [gameplay implementation plan](design/gameplay-implementation-plan.md)
+The [gameplay implementation plan](../design/gameplay-implementation-plan.md)
 Phase 3 adds items, a fixed-size inventory, and equipment. On the PC, floor
 items use `HashMap<Pos, Vec<Item>>` and inventory uses `Vec<Option<Item>>` —
 both require heap allocation. In tier micro, the same fixed-size item storage
@@ -576,7 +576,7 @@ position is a linear scan over active entries — at 32 max items, this
 is ~200 cycles. Negligible for a turn-based game.
 
 Item type IDs map to stat lookup tables in `roguelike_core::rules::items` —
-see [capability tier reference §1.7](capability-tier-reference.md#17-item-definitions)
+see [capability tier reference §1.7](../architecture/capability-tier-reference.md#17-item-definitions)
 for the complete code listing (`heal_amount()`, `atk_bonus()`, `def_bonus()`
 const fns).
 
@@ -629,7 +629,7 @@ yellow >30%, red ≤30%. Validated in the POC.
 The static color mapping above is functional but flat. A raster interrupt chain
 (see §8, Phase 2 step 8) enables per-scanline VIC-II register changes that add
 dramatic atmosphere at negligible CPU cost. See the
-[C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md) §1
+[C64 demo techniques analysis](c64-demo-techniques-for-roguelike.md) §1
 and §5 for detailed implementation sketches.
 
 1. **Torchlight gradient.** Change `$D021` (background color) on each raster
@@ -667,7 +667,7 @@ Design **three 2 KB charsets** (6 KB total — see §4.2) with per-zone switchin
 via raster interrupts. The VIC-II's charset pointer (`$D018` bits 1-3) is
 changed at zone boundaries by the raster interrupt chain (§8, Phase 2 step 8),
 allowing different screen zones to use different character sets simultaneously.
-See the [C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md)
+See the [C64 demo techniques analysis](c64-demo-techniques-for-roguelike.md)
 §4 for the full per-line charset switching technique.
 
 **Charset 1 — Dungeon tileset (rows 0-20):**
@@ -774,7 +774,7 @@ input and stall during pauses. The standard solution on the C64 is to call
 the SID play routine from the raster interrupt chain at a fixed raster line,
 ensuring exactly one call per frame regardless of game loop timing. This is
 set up in Phase 2 step 8 (§8). See the
-[C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md) §1
+[C64 demo techniques analysis](c64-demo-techniques-for-roguelike.md) §1
 for the raster interrupt implementation sketch.
 
 ### 6.12 Save System
@@ -793,7 +793,7 @@ Unchanged from the original proposal. The UII+ command interface and
 all network features (leaderboards, daily seeds, cloud saves, spectation,
 MCP client, AT Protocol bridge) remain as designed.
 
-See [docs/design/c64-atproto-bridge.md](design/c64-atproto-bridge.md) for the
+See [docs/design/c64-atproto-bridge.md](c64-atproto-bridge.md) for the
 AT Protocol bridge specification.
 
 **Auto-update via UII+:** MultiRogueLike uses TFTP-based auto-update at boot
@@ -819,7 +819,7 @@ spectation frames.
 The cross-platform seed design — tier inference from numeric value,
 compatibility selection UI, daily seeds, and per-tier leaderboards — is
 defined in the
-[capability tier reference](capability-tier-reference.md#19-seed-system-and-cross-platform-seeds).
+[capability tier reference](../architecture/capability-tier-reference.md#19-seed-system-and-cross-platform-seeds).
 
 **C64 seed display:** The C64 natively generates micro-tier seeds (u16, 1–4
 base36 characters). CIA timer jitter at first keypress provides the seed.
@@ -979,7 +979,7 @@ milestone is shippable independently — v0.4.0 is a complete standalone game.
    player callback at a fixed raster line for frame-rate-independent sound
    playback. Add per-zone charset pointer switching (`$D018`) for the three
    charsets (§6.9). **This step unlocks Phase 2b.** See the
-   [demo techniques analysis](design/c64-demo-techniques-for-roguelike.md)
+   [demo techniques analysis](c64-demo-techniques-for-roguelike.md)
    §1 for implementation details. Cost: ~200 bytes of code, ~660
    cycles/frame continuous overhead.
 
@@ -1080,7 +1080,7 @@ Also in v0.5.0 (deferred from v0.4.0):
 24. **Spectation relay** — Binary frame streaming.
 25. **MCP client mode** — Observation formatting, action parsing.
 26. **AT Protocol bridge** — Per the design in
-    [c64-atproto-bridge.md](design/c64-atproto-bridge.md).
+    [c64-atproto-bridge.md](c64-atproto-bridge.md).
 
 ---
 
@@ -1159,7 +1159,7 @@ micro-tier parameters.
 For the complete tier divergence table documenting intentional differences
 between tiers (FOV, pathfinding, entity cap, messages, map storage, PRNG, XP
 scaling, save format), see the
-[capability tier reference](capability-tier-reference.md#110-tier-divergence).
+[capability tier reference](../architecture/capability-tier-reference.md#110-tier-divergence).
 
 ---
 
@@ -1188,7 +1188,7 @@ scaling, save format), see the
 
 Companion documents provide detailed implementation references:
 
-- **[Capability Tier Reference](capability-tier-reference.md)** — Cross-platform
+- **[Capability Tier Reference](../architecture/capability-tier-reference.md)** — Cross-platform
   tier architecture, sharing matrix, type sizing, seed system, tier divergence.
 - **[C64 Platform Guide](c64-platform-guide.md)** — C64-specific hardware
   guidance, including:
@@ -1197,7 +1197,7 @@ Companion documents provide detailed implementation references:
   - **Static stack allocation** (§4) — how to keep llvm-mos's key optimization working
   - **Turn timing** (§5) — measured cycle budgets: ~10,000 cycles/turn, ~660 cycles/frame continuous raster overhead
   - **Code style guide** (§6) — which Rust abstractions help vs. hurt on the 6502
-- **[Testing Strategy](testing-strategy.md)** — Project-wide testing approach
+- **[Testing Strategy](../testing-strategy.md)** — Project-wide testing approach
   (core tests, determinism, property tests, CI verification).
 
 ---
@@ -1214,7 +1214,7 @@ Companion documents provide detailed implementation references:
    affect cross-platform seeds. Scrolling added to Phase 2a (§8).
 
 2. ~~**Multiple dungeon levels?**~~ **Resolved.** The
-   [gameplay implementation plan](design/gameplay-implementation-plan.md)
+   [gameplay implementation plan](../design/gameplay-implementation-plan.md)
    Phase 2 designs stairs and multi-level dungeons. On the C64, swap map data
    on descend (~3 KB per floor for 64x48); optionally hold 2 floors in memory
    (~6 KB) for quick backtracking. Derive floor seeds from the base
@@ -1236,7 +1236,7 @@ Companion documents provide detailed implementation references:
    distinction — the same approach used by *Sword of Fargoal* (1982). Cost:
    ~126 cycles/frame for sprite DMA + ~1 KB for animation data. Monster
    sprites could follow later. See the
-   [C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md)
+   [C64 demo techniques analysis](c64-demo-techniques-for-roguelike.md)
    §6 for the full design.
 
 6. ~~**Level transition animation**~~ **Decided: v0.5.0.** Simple
@@ -1296,7 +1296,7 @@ The main advantages over the cc65 approach:
    Core's standard-tier code is unchanged — tier micro is an additive
    submodule, not a rewrite. This ensures gameplay feature parity across
    platforms as the
-   [gameplay implementation plan](design/gameplay-implementation-plan.md)
+   [gameplay implementation plan](../design/gameplay-implementation-plan.md)
    features are implemented.
 3. **Cross-platform seeds with zero divergence** — Within a tier, ALL platforms
    use the same PRNG, map generation, FOV, and pathfinding algorithms. A C64

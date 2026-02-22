@@ -115,7 +115,7 @@ The **saves** crate defines the `SaveBackend` trait for platforms with enough st
 
 The **tui** crate sits between `core`/`saves` and the terminal-based frontends (`terminal`, `ssh`). It provides the shared game loop, crossterm-based rendering, and the `InputProvider` trait. Both `terminal` and `ssh` implement these traits for their respective I/O mechanisms.
 
-The **c64** crate is a Commodore 64 frontend using [rust-mos](https://github.com/mrk-its/rust-mos) — a fork of the Rust compiler backed by the llvm-mos LLVM backend that compiles `no_std` Rust to MOS 6502 machine code. The POC validates the toolchain (1,898 lines, 13 KB `.PRG`, playable on VICE and c64.emu). See [C64 port proposal](../c64-port-proposal.md).
+The **c64** crate is a Commodore 64 frontend using [rust-mos](https://github.com/mrk-its/rust-mos) — a fork of the Rust compiler backed by the llvm-mos LLVM backend that compiles `no_std` Rust to MOS 6502 machine code. The POC validates the toolchain (1,898 lines, 13 KB `.PRG`, playable on VICE and c64.emu). See [C64 port proposal](../platforms/c64-port-proposal.md).
 
 The **libudev-sys-dlopen** crate is a `[patch.crates-io]` replacement for `libudev-sys` that loads `libudev.so.1` via dlopen at runtime instead of linking at build time. This means Linux builds no longer require `libudev-dev` to compile — gamepad support loads when available, keyboard input works regardless.
 
@@ -123,7 +123,7 @@ The **libudev-sys-dlopen** crate is a `[patch.crates-io]` replacement for `libud
 
 Only `tui`, `terminal`, and `ssh` import `crossterm`. Only the `mcp` crate imports `rmcp`/`tokio`. The `core` and `saves` crates have zero platform dependencies.
 
-Type aliases in `crates/core/src/types.rs` centralize platform-sensitive sizing (currently `i32`). The planned [capability tier system](../capability-tier-reference.md) will define per-tier types (`u8` for micro, `i16` for compact, `i32` for standard).
+Type aliases in `crates/core/src/types.rs` centralize platform-sensitive sizing (currently `i32`). The planned [capability tier system](capability-tier-reference.md) will define per-tier types (`u8` for micro, `i16` for compact, `i32` for standard).
 
 ## What Goes Where
 
@@ -149,12 +149,12 @@ Anything that talks to hardware or external services:
 - **Terminal crate**: local crossterm event polling, local filesystem saves, gamepad input (gilrs, optional), terminal lifecycle
 - **SSH crate**: russh server, lobby/accounts system, ANSI input parsing, per-user saves, SSH channel I/O
 - **MCP crate**: rmcp server, tokio runtime, JSON serialization of game state
-- **C64 crate** (POC complete, production planned): thin `no_std` frontend. See [C64 port proposal](../c64-port-proposal.md).
+- **C64 crate** (POC complete, production planned): thin `no_std` frontend. See [C64 port proposal](../platforms/c64-port-proposal.md).
 - **Atproto crate** (future): AT Protocol OAuth, PDS save backend. See [design doc](../design/atproto.md).
 - **Web crate** (future): WASM entry point, canvas rendering. See [design doc](../design/atproto.md#wasm-frontend).
-- **GBA crate** (future): GBA tile/sprite rendering, hardware saves. See [design doc](../design/gba-port.md).
-- **Vita crate** (future): vita-sdk rendering, memory card saves. See [design doc](../design/vita-port.md).
-- **C64 bridge** (future): external companion service proxying C64 TCP packets to AT Protocol. See [design doc](../design/c64-atproto-bridge.md).
+- **GBA crate** (future): GBA tile/sprite rendering, hardware saves. See [design doc](../platforms/gba-port.md).
+- **Vita crate** (future): vita-sdk rendering, memory card saves. See [design doc](../platforms/vita-port.md).
+- **C64 bridge** (future): external companion service proxying C64 TCP packets to AT Protocol. See [design doc](../platforms/c64-atproto-bridge.md).
 - **Steam integration** (future, `steam` feature on terminal crate): Steamworks API for cloud saves and Steam Deck hooks. See [atproto design doc](../design/atproto.md#steam-cloud-coexistence).
 
 ## Color Abstraction
@@ -190,7 +190,7 @@ std = ["serde", "serde_json", "rand"]
 data-files = ["std", "toml"]
 ```
 
-The C64 uses `default-features = false`. The planned [capability tier system](../capability-tier-reference.md) will add `no_std`-compatible tier modules alongside these flags.
+The C64 uses `default-features = false`. The planned [capability tier system](capability-tier-reference.md) will add `no_std`-compatible tier modules alongside these flags.
 
 ## Development Workflow
 
@@ -202,8 +202,8 @@ All development happens on one branch:
 
 ## Planned Work
 
-- **Capability tier hierarchy** — `no_std` support, per-tier types, shared game rules. See [capability tier reference](../capability-tier-reference.md).
-- **Cross-platform seed system** — tier inference from seed value, daily seeds, per-tier leaderboards. See [capability tier reference](../capability-tier-reference.md#19-seed-system-and-cross-platform-seeds).
+- **Capability tier hierarchy** — `no_std` support, per-tier types, shared game rules. See [capability tier reference](capability-tier-reference.md).
+- **Cross-platform seed system** — tier inference from seed value, daily seeds, per-tier leaderboards. See [capability tier reference](capability-tier-reference.md#19-seed-system-and-cross-platform-seeds).
 - **AT Protocol integration** — Bluesky OAuth login, PDS-based portable saves. See [design doc](../design/atproto.md).
 - **WASM frontend** — browser-based play via `web` crate. See [design doc](../design/atproto.md#wasm-frontend).
 
@@ -219,4 +219,4 @@ Key milestones in the cross-platform architecture:
 - SSH server — `ssh` crate with russh, lobby system, per-user accounts and saves
 - `SaveBackend` extracted to `crates/saves` — depends only on `roguelike-core`. See [atproto design doc](../design/atproto.md#prerequisite-extract-savebackend-to-cratessaves).
 - `FrameSink` and `render_frame()` extracted to core — `crates/core/src/spectate.rs`. See [atproto spectating design doc](../design/atproto-spectating.md#phase-0-extract-render_frame-and-define-framesink).
-- C64 POC validated — rust-mos toolchain, 13 KB `.PRG`, playable on VICE and c64.emu. See [C64 port proposal](../c64-port-proposal.md).
+- C64 POC validated — rust-mos toolchain, 13 KB `.PRG`, playable on VICE and c64.emu. See [C64 port proposal](../platforms/c64-port-proposal.md).

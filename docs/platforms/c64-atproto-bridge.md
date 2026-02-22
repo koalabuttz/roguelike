@@ -2,7 +2,7 @@
 
 Design for a self-hostable bridge server that connects a Commodore 64 (via Ultimate64/1541 Ultimate II+ Ethernet) to the AT Protocol ecosystem, enabling PDS save storage and federated spectating for the C64 port of the roguelike.
 
-> **Status:** Unimplemented future design. Depends on both the C64 port (`crates/c64`, Tier 5 on the [roadmap](../roadmap.md)) and AT Protocol integration ([atproto.md](atproto.md), Tier 3). This document captures the architecture for when both prerequisites exist.
+> **Status:** Unimplemented future design. Depends on both the C64 port (`crates/c64`, Tier 5 on the [roadmap](../roadmap.md)) and AT Protocol integration ([atproto.md](../design/atproto.md), Tier 3). This document captures the architecture for when both prerequisites exist.
 
 ## Motivation
 
@@ -20,7 +20,7 @@ The bridge server makes this possible by sitting between the C64's simple binary
 
 1. **Transparent atproto proxy.** The C64 sends tiny binary packets; the bridge translates them to/from atproto XRPC calls. The C64 never knows atproto exists.
 2. **Self-hostable.** Single Docker container, runs on the same LAN as the C64 + Ultimate64. No cloud dependency beyond the user's PDS.
-3. **Reuse existing lexicons.** The bridge writes the same `save.gameState`, `save.settings`, `spectate.frame`, and `spectate.session` records defined in [atproto.md](atproto.md#lexicon-design) and [atproto-spectating.md](atproto-spectating.md#lexicon-design). Saves and spectate frames are indistinguishable from those produced by SSH or web clients.
+3. **Reuse existing lexicons.** The bridge writes the same `save.gameState`, `save.settings`, `spectate.frame`, and `spectate.session` records defined in [atproto.md](../design/atproto.md#lexicon-design) and [atproto-spectating.md](../design/atproto-spectating.md#lexicon-design). Saves and spectate frames are indistinguishable from those produced by SSH or web clients.
 4. **Minimal C64-side complexity.** The C64 binary speaks a fixed protocol over raw TCP. No TLS, no JSON, no OAuth, no strings longer than 255 bytes. All heavy lifting happens on the bridge.
 5. **Offline resilience.** The bridge caches saves locally. If the PDS is unreachable, saves persist in the bridge's local storage and sync when connectivity returns.
 
@@ -77,8 +77,8 @@ Commodore 64                    Bridge Server                    AT Protocol
 **Bridge server:**
 - Listens on TCP port 6510 for C64 connections
 - Authenticates with the user's PDS using stored atproto credentials (configured once via web UI or environment variables)
-- Translates binary save packets → atproto `putRecord`/`uploadBlob` XRPC calls using the [save lexicons](atproto.md#lexicon-design)
-- Translates binary spectate frames → atproto `createRecord` calls using the [spectate lexicons](atproto-spectating.md#lexicon-design)
+- Translates binary save packets → atproto `putRecord`/`uploadBlob` XRPC calls using the [save lexicons](../design/atproto.md#lexicon-design)
+- Translates binary spectate frames → atproto `createRecord` calls using the [spectate lexicons](../design/atproto-spectating.md#lexicon-design)
 - Caches saves locally in a Docker volume for offline resilience
 - Provides an optional web UI on port 8080 for configuration and live spectate viewing
 
@@ -301,7 +301,7 @@ AT Protocol currently mandates Authorization Code + PKCE — no device flow (RFC
 
 **Option C: OAuth via bridge web UI (correct but more complex).**
 
-The bridge's web UI (port 8080) acts as the OAuth client. The user clicks "Login with Bluesky" in the browser, completes the OAuth flow, and the bridge stores the resulting tokens. This is identical to the SSH server's OAuth flow described in [atproto.md](atproto.md#ssh-frontend), except the callback URL points to the bridge's HTTP server.
+The bridge's web UI (port 8080) acts as the OAuth client. The user clicks "Login with Bluesky" in the browser, completes the OAuth flow, and the bridge stores the resulting tokens. This is identical to the SSH server's OAuth flow described in [atproto.md](../design/atproto.md#ssh-frontend), except the callback URL points to the bridge's HTTP server.
 
 This is the most correct approach and works with any PDS. Recommended upgrade path from Option A once the atproto OAuth infrastructure is implemented.
 
@@ -323,7 +323,7 @@ A lightweight web interface on port 8080 provides:
 | `/spectate` | Live spectate viewer — renders the latest frame as ASCII in a `<pre>` element |
 | `/config` | Bridge configuration (port, PDS URL, spectate enable/disable, throttle interval) |
 
-The spectate page is publicly accessible (no auth required) — anyone on the LAN can watch. This mirrors the [atproto spectating design](atproto-spectating.md#no-authentication-required-for-consumers) where spectate consumption is unauthenticated.
+The spectate page is publicly accessible (no auth required) — anyone on the LAN can watch. This mirrors the [atproto spectating design](../design/atproto-spectating.md#no-authentication-required-for-consumers) where spectate consumption is unauthenticated.
 
 ### Local Save Cache
 
@@ -352,7 +352,7 @@ The bridge maintains a local save cache in the Docker volume:
 2. If cache hit and clean, returns cached data immediately
 3. If cache miss, fetches from PDS, caches locally, returns to C64
 
-This is the same caching strategy described in [atproto.md](atproto.md#caching-strategy), adapted for the bridge's filesystem storage.
+This is the same caching strategy described in [atproto.md](../design/atproto.md#caching-strategy), adapted for the bridge's filesystem storage.
 
 ### Spectate Frame Publishing
 
@@ -361,7 +361,7 @@ The bridge converts C64 screen data to atproto spectate records:
 1. C64 sends `SPECTATE_FRAME` with raw PETSCII screen data
 2. Bridge converts PETSCII → ASCII using a static lookup table
 3. Bridge splits the 40×25 screen into 25 lines of 40 characters each
-4. Bridge constructs a `spectate.frame` record matching the [lexicon](atproto-spectating.md#comexampleroguelikespectateframe):
+4. Bridge constructs a `spectate.frame` record matching the [lexicon](../design/atproto-spectating.md#comexampleroguelikespectateframe):
    ```json
    {
      "map": ["<line1>", "<line2>", ...],
@@ -374,9 +374,9 @@ The bridge converts C64 screen data to atproto spectate records:
    ```
 5. Bridge publishes via `createRecord` XRPC call
 
-**Throttling:** Same as [AtprotoFrameSink](atproto-spectating.md#atprotoframesink) — the bridge drops frames arriving faster than a configurable minimum interval (default 500ms). The C64's 1MHz clock and human play speed make this unlikely to trigger, but it protects against rapid-fire saves or test automation.
+**Throttling:** Same as [AtprotoFrameSink](../design/atproto-spectating.md#atprotoframesink) — the bridge drops frames arriving faster than a configurable minimum interval (default 500ms). The C64's 1MHz clock and human play speed make this unlikely to trigger, but it protects against rapid-fire saves or test automation.
 
-**Session lifecycle:** The bridge creates a `spectate.session` record on `SESSION_START` and updates it on `SESSION_END`, matching the [session lifecycle](atproto-spectating.md#comexampleroguelikespectatesession) exactly.
+**Session lifecycle:** The bridge creates a `spectate.session` record on `SESSION_START` and updates it on `SESSION_END`, matching the [session lifecycle](../design/atproto-spectating.md#comexampleroguelikespectatesession) exactly.
 
 ## C64-Side Implementation
 
@@ -399,7 +399,7 @@ This is acceptable — the game's own state ([simulation budget](../architecture
 The C64 networking code is pure 6502 assembly (or compiled from Rust via [rust-mos](https://github.com/mrk-its/rust-mos) if the C64 port uses that toolchain). Key considerations:
 
 - **Blocking I/O is fine.** The game is turn-based. After the player acts, the game can block on a bridge response for save/load operations. No async required.
-- **Spectate frames are fire-and-forget.** Send the frame, don't wait for ACK before the next game tick. If the bridge is slow, frames are dropped — the spectate contract is best-effort ([atproto-spectating.md](atproto-spectating.md#atprotoframesink)).
+- **Spectate frames are fire-and-forget.** Send the frame, don't wait for ACK before the next game tick. If the bridge is slow, frames are dropped — the spectate contract is best-effort ([atproto-spectating.md](../design/atproto-spectating.md#atprotoframesink)).
 - **Save operations block.** When the player saves, the game waits for ACK. This matches the existing save UX (brief pause is expected).
 - **Bridge IP is hardcoded or menu-configurable.** The simplest approach is a compile-time constant. A nicer approach is a settings menu entry where the user enters the IP (4 bytes, displayed as dotted decimal).
 
@@ -425,11 +425,11 @@ If the bridge is not connected (no Ultimate64, or bridge not running), all netwo
 
 | Document | Relationship |
 |----------|-------------|
-| [atproto.md](atproto.md) | The bridge reuses the save lexicons (`save.gameState`, `save.settings`) and the `PdsSaveBackend` concept. It performs the same XRPC operations (uploadBlob, putRecord, getRecord, getBlob) but from a standalone service rather than an in-process Rust crate. The bridge uses app passwords (initially) instead of the full OAuth flow, diverging from atproto.md's OAuth-only stance — this is a pragmatic concession for a headless device. |
-| [atproto-spectating.md](atproto-spectating.md) | The bridge implements the producer side of atproto spectating, publishing `spectate.frame` and `spectate.session` records. Frames are produced from C64 PETSCII screen data instead of `render_frame()`, but the resulting atproto records are schema-identical. Consumers (Jetstream subscribers) cannot distinguish a C64-produced frame from an SSH-produced one. |
+| [atproto.md](../design/atproto.md) | The bridge reuses the save lexicons (`save.gameState`, `save.settings`) and the `PdsSaveBackend` concept. It performs the same XRPC operations (uploadBlob, putRecord, getRecord, getBlob) but from a standalone service rather than an in-process Rust crate. The bridge uses app passwords (initially) instead of the full OAuth flow, diverging from atproto.md's OAuth-only stance — this is a pragmatic concession for a headless device. |
+| [atproto-spectating.md](../design/atproto-spectating.md) | The bridge implements the producer side of atproto spectating, publishing `spectate.frame` and `spectate.session` records. Frames are produced from C64 PETSCII screen data instead of `render_frame()`, but the resulting atproto records are schema-identical. Consumers (Jetstream subscribers) cannot distinguish a C64-produced frame from an SSH-produced one. |
 | [cross-platform.md](../architecture/cross-platform.md) | The C64 crate depends only on `roguelike-core` — no `roguelike-saves`, no `roguelike-atproto`, no networking crates. The bridge is an external companion, not a workspace crate. This preserves the [constrained platform boundary](../architecture/cross-platform.md#frontend-crates): `NullFrameSink` in the C64 crate, atproto frame publishing in the bridge. |
 | [simulation.md](../architecture/simulation.md) | The C64's `SimBudget` (32 entities, 10-tile active radius, event-only simulation) determines the maximum save size. Smaller game state = smaller save packets = faster bridge transfers. The bridge doesn't need to understand simulation details — it treats save data as an opaque blob with a metadata header. |
-| [spectator-mode.md](spectator-mode.md) | The bridge provides the C64's path to remote spectating. Without it, the C64 has no spectating capability at all (no file system for `FileFrameSink`, no network for `AtprotoFrameSink`). The bridge fills this gap with an external service. |
+| [spectator-mode.md](../design/spectator-mode.md) | The bridge provides the C64's path to remote spectating. Without it, the C64 has no spectating capability at all (no file system for `FileFrameSink`, no network for `AtprotoFrameSink`). The bridge fills this gap with an external service. |
 
 ## Configuration
 
@@ -516,7 +516,7 @@ At this point, the bridge is a network save server — the C64 saves/loads over 
 
 ### Phase 2: PDS Save Integration
 
-**Effort:** M (days). Depends on [atproto.md Phase 2](atproto.md#phase-2-pds-save-backend) (lexicon definitions must be finalized).
+**Effort:** M (days). Depends on [atproto.md Phase 2](../design/atproto.md#phase-2-pds-save-backend) (lexicon definitions must be finalized).
 
 Add atproto integration:
 - App password authentication (`createSession`)
@@ -529,7 +529,7 @@ Add atproto integration:
 
 ### Phase 3: Spectate Frame Publishing
 
-**Effort:** M (days). Depends on [atproto-spectating.md Phase 1](atproto-spectating.md#phase-1-lexicon-design-and-frame-publishing) (spectate lexicons must be defined).
+**Effort:** M (days). Depends on [atproto-spectating.md Phase 1](../design/atproto-spectating.md#phase-1-lexicon-design-and-frame-publishing) (spectate lexicons must be defined).
 
 Add spectate support:
 - PETSCII → ASCII conversion
@@ -540,7 +540,7 @@ Add spectate support:
 
 ### Phase 4: OAuth Upgrade
 
-**Effort:** M (days). Depends on [atproto.md Phase 1](atproto.md#phase-1-http-server--oauth-ssh) (OAuth infrastructure).
+**Effort:** M (days). Depends on [atproto.md Phase 1](../design/atproto.md#phase-1-http-server--oauth-ssh) (OAuth infrastructure).
 
 Replace app password auth with proper OAuth:
 - Web UI OAuth flow (browser redirect, callback handler)
@@ -563,7 +563,7 @@ This is the most uncertain phase — it depends on the C64 port's toolchain (rus
 
 ## Open Questions
 
-1. **Lexicon namespace.** Same open question as [atproto.md](atproto.md#open-questions) and [atproto-spectating.md](atproto-spectating.md#open-questions). Must be decided before Phase 2.
+1. **Lexicon namespace.** Same open question as [atproto.md](../design/atproto.md#open-questions) and [atproto-spectating.md](../design/atproto-spectating.md#open-questions). Must be decided before Phase 2.
 
 2. **C64 save format.** The C64 port's save serialization format isn't designed yet. The bridge needs to understand at least the metadata header. This should be co-designed with the C64 port to keep the header simple and fixed-size.
 

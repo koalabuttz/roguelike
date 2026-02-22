@@ -4,7 +4,7 @@
 Covers the C64 module mapping, 6502 code generation patterns, CIA hardware,
 cycle budgets, and which Rust abstractions help or hurt on the 6502. For the
 cross-platform tier architecture, see the
-[capability tier reference](capability-tier-reference.md). For the port
+[capability tier reference](../architecture/capability-tier-reference.md). For the port
 proposal and implementation plan, see the
 [C64 port proposal](c64-port-proposal.md).
 
@@ -143,7 +143,7 @@ frame (16.7 ms NTSC / 20 ms PAL).
 **Continuous per-frame raster overhead:** In addition to per-turn costs, the
 raster interrupt chain ([proposal §8](c64-port-proposal.md#8-implementation-plan), Phase 2a step 7) introduces a continuous background
 cost that runs every frame regardless of player input. See the
-[C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md)
+[C64 demo techniques analysis](c64-demo-techniques-for-roguelike.md)
 §Cycle Budget Impact for the complete breakdown.
 
 ```
@@ -218,4 +218,4 @@ reimplementation in exchange for a testable and recoverable potential
 2. **Integration testing**: Run the .PRG in VICE with automated input scripts
    (VICE supports `-keybuf` for automated key injection).
 
-For the full project-wide testing strategy, see [testing-strategy.md](testing-strategy.md).
+For the full project-wide testing strategy, see [testing-strategy.md](../testing-strategy.md).

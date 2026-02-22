@@ -518,7 +518,7 @@ The "don't close doors" principle means the design must not:
 
 | Capability | GBA | Vita | C64 |
 |-----------|-----|------|-----|
-| **Produce frames** (atproto) | No | Possible (has WiFi) | Via [bridge](c64-atproto-bridge.md) |
+| **Produce frames** (atproto) | No | Possible (has WiFi) | Via [bridge](../platforms/c64-atproto-bridge.md) |
 | **Produce frames** (file) | No (no filesystem) | Yes | No |
 | **Consume frames** (Jetstream) | No | Possible | No |
 | **`FrameSink` trait** | `NullFrameSink` | `FileFrameSink` or `AtprotoFrameSink` | `NullFrameSink` (bridge handles atproto externally) |

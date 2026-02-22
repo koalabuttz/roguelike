@@ -170,9 +170,16 @@ Items that have been implemented, organized by original tier.
 | Replay system | Deterministic recording/playback, golden replays. |
 | Auto-explore | `o` key, gamepad X button, MCP `auto_explore` tool. |
 | Context-sensitive help | Dynamic help from Settings and GameData, `?` key. |
+| Debug console | In-game console (`dev-tools` feature): teleport, god mode, FOV toggle, spawn monsters, stat editing, replay export. |
 | Debug overlay | F6–F12 toggles: FOV, targets, pathfinding, frontiers, reveal monsters, monster FOV. |
 | MCP spectator mode (file) | `ROGUELIKE_SPECTATE_PATH` env var, atomic file writes, integrated into all MCP actions. [Design doc.](design/spectator-mode.md) |
 | High-contrast mode | ColorPalette variant with brighter remappings. |
+| Headless runner | Automated playtesting binary: run N games, configurable seeds/presets, replay support, analytics, parameter sweeps, golden replay management. [Docs.](headless-runner.md) |
+| Scenario framework | Fluent builder API for composing specific game states and asserting balance outcomes. |
+| Golden replay regression | Stored deterministic replays with expected results; detects unintended gameplay changes. |
+| Parameter sweeps | Sweep across player stats (HP, ATK, DEF) to find balance boundaries; JSON config, structured output. |
+| LLM playtesting | Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; dual backends, parallel execution, token optimization. [Docs.](llm-playtesting.md) |
+| CI balance check | GitHub Actions workflow runs headless presets on every gameplay change, diffs against cached baseline, posts verdict to workflow summary and PR comments. |
 
 ### Tier 4
 

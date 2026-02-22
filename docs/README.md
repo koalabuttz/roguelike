@@ -19,6 +19,8 @@ Project documentation for the roguelike dungeon crawler.
 | [c64-port-proposal.md](c64-port-proposal.md) | C64 port proposal: rust-mos toolchain, shared crate design, implementation plan | Proposal — POC validated |
 | [c64-technical-reference.md](c64-technical-reference.md) | Implementation details, code listings, and C64 platform guidance for the port proposal | Reference |
 | [design/spectator-mode.md](design/spectator-mode.md) | Spectator mode options (file, stderr, TCP, Unix socket) | Current |
+| [headless-runner.md](headless-runner.md) | Headless runner: CLI flags, parameter sweeps, visualization tools | Current |
+| [llm-playtesting.md](llm-playtesting.md) | LLM playtesting: dual backends, /playtest skill, token optimization | Current |
 | [reports/llm-playtest-summary.md](reports/llm-playtest-summary.md) | Consolidated findings from all 4 LLM playtest sessions | Historical |
 | [reports/llm-playtest-session-1.md](reports/llm-playtest-session-1.md) | Session 1: baseline, no healing, identified core MCP pain points | Historical |
 | [reports/llm-playtest-session-2.md](reports/llm-playtest-session-2.md) | Session 2: HP regen added, autorun/navigation issues persisted | Historical |

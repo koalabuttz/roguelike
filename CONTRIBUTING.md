@@ -53,6 +53,27 @@ git config core.hooksPath .github/hooks
 
 This points git at the repo's hooks directory so the hook stays in sync with the codebase. CI runs the same checks on every PR, so the hook is technically optional — but it gives much faster feedback than waiting for CI.
 
+### Debug Keys (dev-tools build only)
+
+When building with the `dev-tools` feature (enabled by default), the following debug keys are available:
+
+| Key | Action |
+|-----|--------|
+| `F1` | Dump stats |
+| `F2` | Toggle FOV |
+| `F3` | Toggle god mode |
+| `F4` | Reveal map |
+| `F5` | Kill all monsters |
+| `F6` | Toggle FOV boundary overlay |
+| `F7` | Toggle monster targets overlay |
+| `F8` | Toggle pathfinding overlay |
+| `F9` | Toggle frontiers overlay |
+| `F10` | Reload `game.toml` (hot reload) |
+| `F11` | Toggle reveal monsters overlay |
+| `F12` | Toggle monster FOV overlay |
+
+In pathfinding overlay mode (`F8`) and monster FOV overlay mode (`F12`), arrow keys move a cursor to select individual paths/monsters. Press `Esc` to return to union mode. Monster FOV uses a three-state toggle: off → union (all monster sight boundaries) → cursor (single monster) → off.
+
 ## Edition 2024 Notes
 
 This project uses Rust edition 2024. Key differences:
@@ -89,6 +110,18 @@ Place functions based on **what they operate on**, not who calls them:
 ## Testing Systems
 
 The project has five levels of testing. Use the appropriate level for each type of change.
+
+### Quick Reference
+
+| Category | Command | What it checks |
+|----------|---------|----------------|
+| Unit tests | `cargo test -p roguelike-core --lib` | Module-level logic across core modules |
+| Golden replays | `cargo test -p roguelike-core --test golden_replays` | Deterministic replay regression — detects unintended gameplay changes |
+| Scenario tests | `cargo test -p roguelike-core --test scenarios` | Balance properties — e.g., "player survives 2 goblins", "troll kills weak player" |
+| Invariant tests | `cargo test -p roguelike-core --test invariants` | Property-based: random command sequences verify HP bounds, explored monotonicity, dead-stay-dead, save/load roundtrip |
+| MCP integration | `cargo test -p roguelike-mcp --test mcp_integration` | All 10 MCP tools: response schemas, error paths, session lifecycle |
+| MCP property tests | `cargo test -p roguelike-mcp --test mcp_proptest` | Random MCP tool sequences verify game invariants hold through the JSON interface |
+| Benchmarks | `cargo bench -p roguelike-core` | Criterion benchmarks for FOV, pathfinding, game step, and exploration graph |
 
 ### Unit Tests (module-level)
 
@@ -212,6 +245,19 @@ python3 -c "import json,sys; json.dump({'default':json.load(open('after.json'))}
 python3 tools/balance_diff.py baseline.json current.json
 ```
 
+### CI Pipeline
+
+The `.github/workflows/ci.yml` workflow runs on every push and PR that touches `crates/`, `Cargo.toml`, `Cargo.lock`, or workflow files. It runs four jobs:
+
+1. **Lint** — `cargo fmt --check` + `cargo clippy` (including `raw-usb` feature)
+2. **Test** — `cargo test --workspace` on 4 platforms: Linux x86_64, Linux ARM64, macOS ARM64, Windows x86_64 (plus `raw-usb` feature tests on Linux)
+3. **Benchmark** — `cargo bench -p roguelike-core` with Criterion reports uploaded as artifacts (30-day retention)
+4. **Audit** — `cargo audit` for known vulnerabilities (advisory, non-blocking)
+
+### Release Pipeline
+
+The `.github/workflows/release.yml` workflow triggers on version tags (`v*`). It builds release binaries for all 4 platforms, generates SHA256 checksums, and creates a GitHub Release with all artifacts attached. Each release includes `roguelike`, `mcp_server`, `headless`, and `roguelike-ssh` binaries.
+
 ### Visualization Tools
 
 The `tools/` directory contains Python scripts for analytics visualization. These require a virtual environment:
@@ -224,17 +270,40 @@ pip install -r tools/requirements.txt
 
 Alternatively, use the built-in `--report` flag on the headless runner to generate HTML reports without Python.
 
-See the [README](README.md#visualization) for full usage examples.
+See the [headless runner docs](docs/headless-runner.md#visualization) for full usage examples.
 
 ### LLM Playtesting
 
-The `tools/llm_playtest.py` script requires an `ANTHROPIC_API_KEY` environment variable. This drives games through the Anthropic API, letting an LLM play strategically instead of using the dumb auto-explore AI. See the [README](README.md#llm-playtesting) for usage.
+The `tools/llm_playtest.py` script requires an `ANTHROPIC_API_KEY` environment variable. This drives games through the Anthropic API, letting an LLM play strategically instead of using the dumb auto-explore AI. See the [LLM playtesting docs](docs/llm-playtesting.md) for full usage.
 
 The `/playtest` skill works in Claude Code sessions with the MCP server connected — no API key needed since Claude Code uses its own session.
 
 ## Adding a Monster
 
-The simplest way to contribute content — see the [README](README.md#adding-a-new-monster) for a step-by-step guide.
+The simplest way to contribute content.
+
+**Without recompiling** — add a `[[monsters]]` entry to `game.toml` in the working directory:
+
+```toml
+[[monsters]]
+name = "Dragon"
+glyph = "D"
+color = "Red"
+hp = 40
+attack = 10
+defense = 5
+ai = "Chase"
+spawn_weight = 5
+sight_radius = 8
+```
+
+The terminal, headless runner, and MCP server load `game.toml` on startup. In dev-tools builds, press `F10` to hot-reload without restarting.
+
+**Compiled-in** — edit `crates/core/data/game.toml` (the embedded defaults) to add monsters permanently.
+
+If a monster needs new AI, add a variant to `AiBehavior` in `crates/core/src/entity.rs` and implement it in `crates/core/src/ai.rs`.
+
+When adding a new monster, also add a scenario test to `crates/core/tests/scenarios.rs` to verify the player can survive (or not) as intended. See [Scenario Tests](#scenario-tests-balance-assertions) above.
 
 ## Questions?
 

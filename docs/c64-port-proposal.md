@@ -33,9 +33,15 @@ Rust-mos was chosen instead because:
 1. **Shared language** — The entire project (PC, SSH, MCP, and C64) stays in
    Rust. Developers don't need to context-switch between Rust and C/asm.
 2. **Shared algorithms** — Map generation, combat, monster spawning, room
-   geometry, and the PRNG live in a single `no_std` crate (`roguelike-rules`)
-   compiled for both targets. The same seed produces the same dungeon on both
-   platforms.
+   geometry, and the PRNG will live in `roguelike-core` organized as a
+   **capability tier hierarchy**. The C64's game logic lives in a `tier_micro`
+   module using `u8` types, fixed-size arrays, and `#![no_std]`. Pure game
+   rules (damage formulas, balance constants, XP tables, item definitions)
+   live in a `rules/` module compiled by all tiers. Higher-tier platforms
+   (GBA, Vita, PC) include the micro tier alongside their native tier,
+   enabling cross-platform play: when any platform runs a micro-tier seed, it
+   uses the same algorithms as the C64. The same seed produces the same dungeon
+   on every platform.
 3. **Type safety** — Rust's ownership model catches bugs at compile time that
    would be runtime crashes on a 6502 (buffer overflows, use-after-free, etc.).
 4. **POC validation** — The 13 KB binary proves code size is competitive with
@@ -239,7 +245,7 @@ abstraction because the same engine runs on fundamentally different hardware
 engines differ in data structures (`Vec` vs static arrays, `HashSet` vs
 bitfields) more than in algorithms. Instead of abstracting storage behind
 traits — which adds indirection that defeats llvm-mos's static stack
-allocation ([technical reference §2.3](c64-technical-reference.md#23-static-stack-allocation)) — we share the algorithms directly by writing them at the
+allocation ([C64 platform guide §4](c64-platform-guide.md#4-static-stack-allocation)) — we share the algorithms directly by writing them at the
 C64's abstraction level (`u8`, `&mut [u8]`, `&mut [Room]`). See §5 for the
 full design.
 
@@ -276,7 +282,7 @@ full design.
 
 ## 4. Platform Constraints vs. Current Design
 
-| Resource | Current (Rust/PC) | Commodore 64 |
+| Resource | Tier standard (PC) | Tier micro (C64) |
 |----------|-------------------|--------------|
 | CPU | Multi-GHz, 64-bit | MOS 6510 @ 1.023 MHz, 8-bit |
 | RAM | Gigabytes | 64 KB total (~38 KB usable) |
@@ -290,9 +296,9 @@ full design.
 | Data structures | Vec, HashSet, String, HashMap | Static arrays, bitfields |
 | Coordinate space | `type Coord = i32` (`types.rs`) | `u8` (0-63 x, 0-47 y; 40x21 viewport) |
 | Stat values | `type Stat = i32` (`types.rs`) | `u8` (0-255) |
-| Max entities | `MAX_ENTITIES = 1024` (types.rs notes "C64 = 16") | `MAX_ENTITIES = 16` |
+| Max entities | `MAX_ENTITIES = 1024` | `MAX_ENTITIES = 16` |
 | PRNG | `rand::StdRng` (ChaCha20, u64 seed) | Galois LFSR (16-bit, u16 seed) |
-| Shared types | `roguelike-rules`: `u8` coords, `Room`, `LfsrRng` | Same — shared crate compiles for both |
+| Code sharing | `roguelike-core` tier standard (native) + tier micro (cross-platform) | `roguelike-core::tier_micro` only (`no_std`) |
 | **Language** | **Rust (std)** | **Rust (no_std, no_alloc) via rust-mos** |
 | **Compiler** | **rustc (upstream)** | **rustc (rust-mos fork) + llvm-mos** |
 
@@ -322,8 +328,8 @@ The sweet spot is **banking out BASIC only: ~46 KB usable**.
 Program code:           ~18 KB   (rust-mos Rust, release+LTO+opt-size)
   POC measured at 13 KB with full game loop; production adds SID,
   custom charset, save/load, dirty-rect rendering, items, XP (~5 KB extra)
-  roguelike-rules contributes ~1.5 KB (mapgen, prng, combat, rooms,
-  items, leveling, depth scaling, wandering spawn, mood thresholds)
+  roguelike-core (no_std subset) will contribute ~1.5 KB (mapgen, prng,
+  combat, rooms, items, leveling, depth scaling, wandering spawn, mood)
 Map tile data:          3,072 B   (64 x 48 = 3,072 tiles, 1 byte/tile)
 Structural wall bits:     384 B   (3,072 bits)
 Explored bitfield:        384 B   (3,072 bits)
@@ -368,203 +374,33 @@ saves, gameplay features), we stay under the 46 KB budget with ~12 KB headroom.
 ## 5. Code Sharing Strategy
 
 The most compelling advantage of using rust-mos over cc65 is the ability to
-share Rust code between the PC and C64 codebases. This section describes a
-practical approach grounded in one key insight: **write the shared code at the
-C64's abstraction level, and let the PC call down to it.**
+share Rust code between the PC and C64 codebases. `roguelike-core` is organized
+around a **capability tier hierarchy** — micro (C64, `u8`, `no_std`), compact
+(GBA, `i16`, `no_std`), and standard (PC/Vita, `i32`, `std`) — where each
+platform compiles its native tier plus all lower tiers. A `rules/` module
+(always compiled, `no_std`) contains pure game rules shared by all tiers:
+damage formulas, balance constants, item definitions, monster tables, seed
+encoding, and structured `GameEvent` messages. When a player starts a new game,
+the tier is inferred from the seed's numeric value (`seed <= 0xFFFF` → micro).
+A micro-tier seed plays identically on every platform — same map, same FOV,
+same AI, same entity count.
 
-The PC engine (`roguelike-engine`) uses `Vec<Tile>`, `HashSet<Pos>`, `String`,
-`HashMap`, and `rand::StdRng`. The C64 engine uses `static mut [u8; 840]`,
-bitfields, `&'static [u8]`, and a 16-bit Galois LFSR. These storage layers
-are fundamentally incompatible, and abstracting them behind traits would add
-indirection that defeats llvm-mos's static stack allocation ([technical reference §2.3](c64-technical-reference.md#23-static-stack-allocation)).
+The C64 compiles only `tier_micro` + `rules` (with `default-features = false`).
+The `tier_micro` module uses the C64's natural types directly — `u8`
+coordinates, fixed-size arrays, concrete `LfsrRng` — producing a clean call
+graph that llvm-mos can fully optimize. No traits, no generics, no cfg gates
+within the module. The C64 crate is excluded from the Cargo workspace (it
+builds via a separate rust-mos Docker toolchain) but depends on core via a
+relative path.
 
-But the **algorithms** are the same. The map generation loop, combat formula,
-room intersection check, monster spawning, and PRNG are line-for-line identical
-in both codebases — just operating on different types. The solution: implement
-these algorithms once using primitive types (`u8`, `&mut [u8]`, `&mut [Room]`)
-that both platforms can use directly.
-
-### 5.1 Existing Architecture
-
-The project is already a **6-crate workspace** with clean separation between
-game logic, save persistence, rendering, and platform-specific binaries:
-
-```
-roguelike/
-  Cargo.toml                        # workspace: 7 members + libudev patch
-  crates/
-    rules/        (roguelike-rules)    # NEW: shared #![no_std] game rules + balance data
-    engine/       (roguelike-engine)   # PC game engine (library, std) — renamed from core/
-    saves/        (roguelike-saves)  # SaveBackend trait abstraction
-    tui/          (roguelike-tui)    # Terminal rendering (crossterm)
-    terminal/     (roguelike-terminal) # Desktop app (keyboard + gamepad)
-    ssh/          (roguelike-ssh)    # Multi-user SSH server
-    mcp/          (roguelike-mcp)    # MCP server for AI integration
-    c64/          (roguelike-c64)    # C64 port (standalone, no_std, no_alloc)
-    libudev-sys-dlopen/             # dlopen libudev (patched dependency)
-```
-
-The **dependency graph** puts the shared crate at the bottom:
-
-```
-roguelike-rules  (#![no_std], zero deps — the shared soul)
-    ↓                              ↓
-roguelike-engine  (std, game engine)  roguelike-c64  (no_std, C64 binary)
-    ↓
-roguelike-saves (SaveBackend trait)
-    ↓
-roguelike-tui   (crossterm rendering + game loop)
-    ↓
-├── roguelike-terminal  (desktop: keyboard + gamepad + local saves)
-├── roguelike-ssh       (SSH server: per-user sessions + accounts)
-└── roguelike-mcp       (MCP server: AI tool interface, core only)
-```
-
-> **Naming rationale.** The shared crate is called `roguelike-rules` (not
-> `roguelike-common`) because it contains the *game rules* — balance constants,
-> algorithms, and type definitions that both platforms must agree on. The PC
-> runtime is called `roguelike-engine` (not `roguelike-core`) because it is
-> the *engine* that implements those rules with `std` facilities. The
-> relationship reads naturally: "the engine implements the rules." Cargo's
-> feature unification model prevents a single crate from being `std` for one
-> consumer and `no_std` for another, which is why the shared rules live in
-> their own crate rather than inside the engine.
-
-> **Build pipeline note.** `roguelike-c64` is intentionally **excluded from the
-> workspace `Cargo.toml` members list**. It requires the rust-mos Docker
-> toolchain (a different compiler fork) and builds via its own `Makefile`.
-> Standard `cargo build` at the workspace root builds only the PC crates.
-> The `roguelike-rules` dependency is specified via a relative path
-> (`../../crates/rules`) in the C64 crate's `Cargo.toml`, which works because
-> the Docker container mounts the full project directory as `/work`.
-
-### 5.2 Design Principle: Shared Code IS C64 Code
-
-The shared crate uses the C64's natural types: `u8` coordinates, `&mut [u8]`
-tile buffers, fixed-size `&mut [Room]` arrays, and a concrete `LfsrRng` struct.
-No traits. No generics. No associated types. No type aliases.
-
-This means:
-- The C64 uses shared code **directly** — zero conversion cost, zero indirection.
-- The PC **calls down** to shared code and promotes results to its own types
-  (`u8` → `i32`, `Room` → `Rect`, `&[u8]` → `Vec<Tile>`).
-- The call graph is fully transparent to both `rustc` and `llvm-mos`.
-- Someone reading the shared crate sees a clear, textbook dungeon generator —
-  not a framework.
-
-**Why not type aliases?** The PC engine uses `type Coord = i32` and `type Stat
-= i32` to distinguish spatial values from combat statistics — useful when both
-are `i32`. In the shared crate, everything is `u8`: coordinates, HP, attack,
-defense, tile types, entity indices. A `type Coord = u8` alias doesn't
-distinguish coordinates from anything else — it just adds a layer of
-indirection between the reader and the actual data width. In ~400 lines of
-`no_std` code targeting the 6502, explicit `u8` is both clearer and more
-honest. The PC's own type aliases remain unchanged — they're a concern of
-`roguelike-engine`'s API surface, not the shared crate.
-
-`cfg`-adaptive aliases (`#[cfg(c64)] type Coord = u8; #[cfg(not(c64))] type
-Coord = i32;`) are worse: they make "shared" code compile with different
-overflow semantics on each platform, defeating the purpose of sharing.
-
-**Why not traits?** On the 6502, generic/trait code can prevent llvm-mos from
-performing static stack allocation — the compiler needs to see the complete
-call graph at link time. Trait methods through generics create indirect
-references that obstruct this analysis. Concrete functions on primitive types
-produce a clean call graph with guaranteed optimal code generation. See the
-[technical reference](c64-technical-reference.md) §2.3 and §2.5.
-
-### 5.3 Shared Crate Contents
-
-The `roguelike-rules` crate (~550 lines, 10 modules) provides the shared
-algorithms and data that both platforms consume. Full code listings, module
-structure, and platform integration examples are in the
-**[C64 Port: Technical Reference](c64-technical-reference.md)** §1.
-
-**Modules:**
-
-| Module | Contents |
-|--------|----------|
-| `prng` | `LfsrRng` — 16-bit Galois LFSR, foundation of cross-platform seed sharing |
-| `room` | `Room` struct, `intersects()`, `center()` |
-| `balance` | All numeric constants: monster stats, player defaults, spawn weights, depth scaling, mood thresholds, map dimensions (64×48) |
-| `combat` | `const fn damage()`, `effective_attack()`, `effective_defense()` |
-| `mapgen` | `generate()` — dungeon generation on `&mut [u8]` + `&mut [Room]` |
-| `spawn` | `pick_monster()`, `spawn_into_rooms()` — weighted random placement |
-| `items` | Item type IDs, stat lookup tables (heal amount, ATK/DEF bonus) |
-| `leveling` | XP thresholds per level, stat growth per level |
-| `structural` | `compute_structural_walls()` — wall classification bitfield |
-| `seed` | Seed code encode/decode with `[u8; 16]` fixed buffers |
-
-The C64 uses shared code **directly** — zero conversion cost, zero indirection.
-The PC **calls down** to shared code and promotes results to its own types
-(`u8` → `i32`, `Room` → `Rect`, `&[u8]` → `Vec<Tile>`).
-
-**Relationship to `game.toml`**: The PC's data-file loading (`data.rs`) uses
-shared constants as compiled-in defaults. Modders can still override via
-`game.toml`. A CI test verifies that defaults match.
-
-**Relationship to gameplay implementation plan**: Constants correspond to
-Phases 1-5 of the [gameplay implementation plan](design/gameplay-implementation-plan.md).
-Phase 6 (property bitfields) is PC-only — the C64 has no immediate use for
-the `u64` property system.
-
-### 5.9 Testing Strategy
-
-1. **Shared crate tests**: `cargo test -p roguelike-rules` on the host with
-   standard rustc. No emulator needed.
-
-2. **CI no_std verification**: Cross-compile for `thumbv6m-none-eabi` to catch
-   accidental `std` dependencies:
-   ```bash
-   cargo check -p roguelike-rules --target thumbv6m-none-eabi
-   ```
-
-3. **Balance drift detection**: A CI test in `roguelike-engine` verifies that
-   `game.toml` default values match `roguelike-rules::balance` constants.
-
-4. **Cross-platform seed determinism**: A test generates a dungeon with a
-   known seed using `roguelike-rules::mapgen::generate()` and compares the
-   resulting tile layout against a stored golden snapshot. This catches any
-   accidental changes to the generation algorithm or PRNG.
-
-5. **Shared property tests**:
-   ```rust
-   #[test]
-   fn damage_never_negative() {
-       for atk in 0..=20u8 {
-           for def in 0..=20u8 {
-               assert!(combat::damage(atk, def) <= atk);
-           }
-       }
-   }
-
-   #[test]
-   fn lfsr_has_full_period() {
-       let mut rng = LfsrRng::new(0xACE1);
-       let start = rng.state();
-       for i in 0u32..65536 {
-           rng.next_u8(); rng.next_u8();
-           if rng.state() == start {
-               assert_eq!(i + 1, 65535, "LFSR period too short");
-               return;
-           }
-       }
-       panic!("LFSR did not cycle");
-   }
-
-   #[test]
-   fn room_intersection_is_symmetric() {
-       let a = Room { x: 2, y: 2, w: 5, h: 5 };
-       let b = Room { x: 4, y: 4, w: 5, h: 5 };
-       assert_eq!(a.intersects(&b), b.intersects(&a));
-   }
-   ```
-
-6. **C64-specific tests**: Use `mos-test` crate for target-specific code that
-   must run on the MOS simulator.
-
-7. **Integration testing**: Run the .PRG in VICE with automated input scripts
-   (VICE supports `-keybuf` for automated key injection).
+For the complete architecture — directory tree, dependency graph, build
+pipeline, design principles, module inventory, seed system, and tier
+divergence — see the
+[cross-platform architecture](architecture/cross-platform.md). For code
+listings, platform integration examples, balance constants, and the sharing
+matrix, see the
+[capability tier reference](capability-tier-reference.md). For the
+testing strategy, see [testing-strategy.md](testing-strategy.md).
 
 ---
 
@@ -621,39 +457,42 @@ and a larger message area. Our turn-based, single-player design can get by
 with less because the player controls the pace and can open modal screens at
 will.
 
-**Decision:** Scrolling 40x21 viewport over **64x48 maps**. The POC validated
-40x22 fixed maps, but larger maps enable richer dungeons with more rooms and
-longer corridors. The viewport scrolls to follow the player. Memory cost: ~3 KB
-for the tile buffer (up from 840 B) — fits within the 16 KB headroom (§4.2).
-Scrolling is implemented in Phase 2a step 6 (§8). The map dimensions flow
-through `roguelike-rules::balance` and must be locked before cross-platform
-seeds are published.
+**Decision:** Scrolling 40x21 viewport over **64x48 maps** (tier micro map
+size). The POC validated 40x22 fixed maps, but larger maps enable richer
+dungeons with more rooms and longer corridors. The viewport scrolls to follow
+the player. Memory cost: ~3 KB for the tile buffer (up from 840 B) — fits
+within the 16 KB headroom (§4.2). Scrolling is implemented in Phase 2a step 7
+(§8). Tier micro dimensions (64×48) are stable within a version — when any
+platform runs a micro-tier seed, it uses these dimensions. Tier standard uses
+80×40 (configurable); tier compact uses 128×96.
 
 ### 6.2 Map Generation
 
-Map generation uses the shared `roguelike-rules::mapgen::generate()` function
-on both platforms, ensuring identical room placement, corridor routing, and
-dungeon topology for any given seed. See the
-[technical reference §1.3-1.4](c64-technical-reference.md#13-shared-map-generation)
+Map generation will use core's `map::generate()` function on both platforms,
+ensuring identical room placement, corridor routing, and dungeon topology for
+any given seed. See the
+[capability tier reference §1.3-1.4](capability-tier-reference.md#13-tier-micro-map-generation)
 for the shared function and platform integration examples.
 
-The C64 calls the shared function directly with its `static mut` tile buffer.
-The PC calls it in "challenge mode" for cross-platform seed compatibility, and
-uses its own `Map::generate()` with `StdRng` for normal play.
+All platforms call the tier-appropriate mapgen function. When running a
+micro-tier seed, every platform uses `LfsrRng` and 64×48 dimensions. In
+standard-tier play, `ChaCha20` and 80×40 dimensions are used.
 
 Key parameters for C64 maps:
 - **Map size**: 64x48 (scrolling 40x21 viewport — see §6.1)
 - **Max rooms**: 20
 - **Room sizes**: 3-7 tiles
 - **PRNG**: `LfsrRng` (shared Galois LFSR)
-- **Storage**: `static mut TILES: [u8; 3072]`
-- **Structural walls**: Bitfield (`[u8; 384]`)
+- **Storage**: `[u8; 3072]` tile array (in core's `GameState`)
+- **Structural walls**: Bitfield (`[u8; 384]`, in core's `GameState`)
 
 ### 6.3 Field of View
 
-**PC:** Recursive shadowcasting with `f64` slopes and `HashSet<(i32,i32)>`.
+FOV algorithm is part of the tier definition. Within a tier, ALL platforms use
+the same algorithm — no cross-platform divergence.
 
-**C64:** Bresenham raycasting (integer-only) with precomputed perimeter table.
+**Tier micro / compact — Bresenham raycasting** (integer-only) with
+precomputed perimeter table:
 
 ```rust
 // Precomputed perimeter offsets for radius 6 — 40 ray targets
@@ -666,54 +505,44 @@ const PERIMETER: [(i8, i8); 40] = [
 Visibility stored as `[u8; 110]` bitfield. Cost: ~150 tile checks per FOV
 recompute = ~7,500 cycles = ~7.5 ms. Imperceptible.
 
-**FOV is intentionally not shared.** The two algorithms produce slightly
-different visibility results: the PC's shadowcasting handles thin diagonal walls
-and is symmetric (if A sees B, B sees A), while the C64's Bresenham raycasting
-can have angular gaps between rays and uses a different algorithm for monster
-LOS checks (`can_see()` via single ray) than for the player viewport
-(`compute_fov()` via 40 rays).
+**Tier standard — Recursive shadowcasting** with `f64` slopes and
+`HashSet<(i32,i32)>`. Symmetric (if A sees B, B sees A), handles thin
+diagonal walls cleanly.
 
-For cross-platform challenges, this means the same dungeon layout plays
-slightly differently on each platform — the C64's line-of-sight creates a
-grittier, more unpredictable fog of war. This is documented as an intentional
-platform characteristic, not a bug. The shared map and combat ensure the
-dungeon is structurally identical; the FOV difference is what makes each
-platform's experience distinctive.
+When the PC runs a micro-tier seed, it uses Bresenham — the same algorithm as
+the C64. This eliminates the FOV divergence that would otherwise make
+cross-platform seeds produce different tactical experiences. Same seed, same
+tier, same dungeon, same visibility — on every platform.
 
 ### 6.4 Entity System
 
-**C64 approach — parallel arrays:**
+**Tier-determined entity capacity:**
 
-The POC uses separate `static mut` arrays for each entity field, which produces
-tighter 6502 indexed addressing than an array-of-structs:
+`MAX_ENTITIES` is part of the tier definition: micro = 16, compact = 128,
+standard = 512–1024 (platform-tuned via SimBudget — e.g. Vita 512, PC 1024).
+When the PC runs a micro-tier game, it uses 16 entities.
 
-```rust
-// --- Core arrays (POC, 10 arrays = 160 bytes) ---
-static mut ENT_X:      [u8; 16]   = [0; 16];
-static mut ENT_Y:      [u8; 16]   = [0; 16];
-static mut ENT_HP:     [u8; 16]   = [0; 16];
-static mut ENT_MAX_HP: [u8; 16]   = [0; 16];
-static mut ENT_ATK:    [u8; 16]   = [0; 16];
-static mut ENT_DEF:    [u8; 16]   = [0; 16];
-static mut ENT_KIND:   [u8; 16]   = [0; 16];
-static mut ENT_AI:     [u8; 16]   = [0; 16];
-static mut ENT_ALIVE:  [bool; 16] = [false; 16];
-static mut ENT_SIGHT:  [u8; 16]   = [0; 16];
+The C64 uses `core::tier_micro`'s struct-based `GameState` directly instead of
+`static mut` parallel arrays. Tier micro's entity storage uses a fixed-size
+array bounded by `MAX_ENTITIES` (16).
 
-// --- Gameplay arrays (gameplay-implementation-plan.md, +3 arrays = 48 bytes) ---
-static mut ENT_XP_VALUE: [u8; 16] = [0; 16];   // Phase 4: XP awarded on death
-static mut ENT_MOOD:     [i8; 16] = [0; 16];   // Phase 5: creature mood (-128..127)
-static mut ENT_MEMORY:   [u8; 16] = [0; 16];   // Phase 5: bitflags (SAW_ALLY_DIE, etc.)
-```
+The POC used separate `static mut` arrays for each entity field (10 arrays x
+16 entries = 160 bytes), which produced tight 6502 indexed addressing. The
+production C64 will instead use core's `GameState` struct as a local in
+`main()`. With llvm-mos's static stack allocation + LTO, a `GameState` local
+in non-recursive `main()` gets a fixed static address — the same machine code
+quality as `static mut` but without `unsafe`. If profiling on VICE reveals
+overhead in hot loops, specific arrays can be extracted to statics as a
+targeted optimization.
 
-Total: **13 arrays x 16 entries = 208 bytes** (see §4.2 memory budget).
+Total entity memory: **~208 bytes** (13 fields x 16 entities — see §4.2).
 
-Stat tables are ROM constants populated from `roguelike-rules::balance`.
+Stat tables are ROM constants from `roguelike_core::rules::balance`.
 Names are `&'static [u8]` references to byte string literals — no heap.
 
 Player-specific state (XP total, level, depth, inventory, equipment) lives
-outside the entity arrays in dedicated `static mut` variables, matching the PC
-engine's design of keeping progression data on `GameState` rather than `Entity`.
+on `GameState` rather than on individual entities, keeping progression data
+centralized.
 
 ### 6.5 Monster AI
 
@@ -724,84 +553,39 @@ detection. All implemented and validated in the POC (`ai.rs`, 120 lines).
 ### 6.6 Combat System
 
 `damage = max(0, attacker_atk - defender_def)`. The formula is a `const fn` in
-`roguelike-rules::combat` — the single source of truth. Both platforms wrap it
-with their respective logging and entity access patterns.
+`roguelike_core::rules::damage` — the single source of truth. Both platforms use the
+same function directly.
 
 ### 6.7 Items and Inventory (C64 Storage Design)
 
 The [gameplay implementation plan](design/gameplay-implementation-plan.md)
 Phase 3 adds items, a fixed-size inventory, and equipment. On the PC, floor
 items use `HashMap<Pos, Vec<Item>>` and inventory uses `Vec<Option<Item>>` —
-both require heap allocation. The C64 needs a `no_std` equivalent.
+both require heap allocation. In tier micro, the same fixed-size item storage
+is used — no heap needed. In tier standard, `Vec`-based storage is available.
 
-**Floor items — sparse parallel arrays:**
+**Floor items — sparse fixed-size array:**
 
-Rather than a full map overlay (840 bytes for one-item-per-tile), use a sparse
-list capped at 32 items per floor. This mirrors the approach used by
+Rather than a full map overlay (840 bytes for one-item-per-tile), core will use
+a sparse list capped at 32 items per floor. This mirrors the approach used by
 [MultiRogueLike](https://github.com/LeifBloomquist/MultiRogueLike), which
 stores items in the same entity list rather than as a map layer.
 
-```rust
-static mut ITEM_X:     [u8; 32] = [0; 32];   // x coordinate
-static mut ITEM_Y:     [u8; 32] = [0; 32];   // y coordinate
-static mut ITEM_TYPE:  [u8; 32] = [0; 32];   // item type ID (0 = empty slot)
-static mut ITEM_COUNT: u8 = 0;               // active items on floor
-```
-
 Cost: **97 bytes** (vs. 840 bytes for a full map overlay). Item lookup at a
-position is a linear scan over `ITEM_COUNT` entries — at 32 max items, this
+position is a linear scan over active entries — at 32 max items, this
 is ~200 cycles. Negligible for a turn-based game.
 
-Item type IDs map to stat tables in `roguelike-rules::items`:
+Item type IDs map to stat lookup tables in `roguelike_core::rules::items` —
+see [capability tier reference §1.7](capability-tier-reference.md#17-item-definitions)
+for the complete code listing (`heal_amount()`, `atk_bonus()`, `def_bonus()`
+const fns).
 
-```rust
-// roguelike-rules/src/items.rs
-
-pub const ITEM_NONE: u8 = 0;
-pub const ITEM_HEALING_POTION: u8 = 1;
-pub const ITEM_STRENGTH_POTION: u8 = 2;
-pub const ITEM_SHORT_SWORD: u8 = 3;
-pub const ITEM_LONG_SWORD: u8 = 4;
-pub const ITEM_LEATHER_ARMOR: u8 = 5;
-pub const ITEM_SCROLL_MAPPING: u8 = 6;
-
-/// Heal amount for potion items (0 = not a potion).
-pub const fn heal_amount(item_type: u8) -> u8 {
-    match item_type {
-        ITEM_HEALING_POTION => 10,
-        _ => 0,
-    }
-}
-
-/// ATK bonus for equipment items (0 = not a weapon).
-pub const fn atk_bonus(item_type: u8) -> u8 {
-    match item_type {
-        ITEM_SHORT_SWORD => 2,
-        ITEM_LONG_SWORD => 4,
-        _ => 0,
-    }
-}
-
-/// DEF bonus for equipment items (0 = not armor).
-pub const fn def_bonus(item_type: u8) -> u8 {
-    match item_type {
-        ITEM_LEATHER_ARMOR => 2,
-        _ => 0,
-    }
-}
-```
-
-**Player inventory and equipment:**
-
-```rust
-static mut INVENTORY: [u8; 10] = [0; 10];     // 10 slots, item type ID (0 = empty)
-static mut EQUIPPED_WEAPON: u8 = 0;            // item type ID
-static mut EQUIPPED_ARMOR: u8 = 0;             // item type ID
-```
+**Player inventory and equipment** will be part of core's `GameState`:
+fixed-size arrays (10 inventory slots, weapon/armor type IDs).
 
 Cost: **12 bytes.** The `effective_attack()` and `effective_defense()` helpers
-in `roguelike-rules::combat` take base stats plus equipment type IDs and
-return the effective values — shared between both platforms.
+in `roguelike_core::rules::damage` take base stats plus equipment type IDs and
+return the effective values — used by both platforms directly.
 
 **Inventory UI — modal overlay:** The inventory screen is a NetHack-style modal
 overlay: pressing `i` writes an item list over the map area (rows 0-20),
@@ -811,9 +595,9 @@ to inventory display — the equipped weapon and armor are shown as single-glyph
 indicators on the status bar (§6.1). Pickup (`g`), drop (`d`), use (`u`), and
 equip (`e`) commands work without opening the inventory for common actions.
 
-**Item spawning** uses the existing `roguelike-rules::spawn` pattern: weighted
-random selection into rooms, with a `max_items_per_room` cap. Item spawn weights
-and `min_depth` thresholds live in `roguelike-rules::items`.
+**Item spawning** uses core's `spawn` module: weighted random selection into
+rooms, with a `max_items_per_room` cap. Item spawn weights and `min_depth`
+thresholds live in `roguelike_core::rules::items`.
 
 ### 6.8 Rendering
 
@@ -843,7 +627,7 @@ yellow >30%, red ≤30%. Validated in the POC.
 **Atmospheric lighting via raster effects:**
 
 The static color mapping above is functional but flat. A raster interrupt chain
-(see §8, Phase 2 step 6) enables per-scanline VIC-II register changes that add
+(see §8, Phase 2 step 8) enables per-scanline VIC-II register changes that add
 dramatic atmosphere at negligible CPU cost. See the
 [C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md) §1
 and §5 for detailed implementation sketches.
@@ -874,14 +658,14 @@ and §5 for detailed implementation sketches.
 Raster effects are **orthogonal to dirty-rect rendering** — they modify VIC-II
 registers, not screen RAM. They work correctly even with dirty-rect optimization
 and add no per-turn rendering cost. See the
-[technical reference §2.4](c64-technical-reference.md#24-turn-timing-and-cycle-budgets)
+[C64 platform guide §5](c64-platform-guide.md#5-turn-timing-and-cycle-budgets)
 for the complete cycle budget breakdown.
 
 ### 6.9 Custom Character Set
 
 Design **three 2 KB charsets** (6 KB total — see §4.2) with per-zone switching
 via raster interrupts. The VIC-II's charset pointer (`$D018` bits 1-3) is
-changed at zone boundaries by the raster interrupt chain (§8, Phase 2 step 6),
+changed at zone boundaries by the raster interrupt chain (§8, Phase 2 step 8),
 allowing different screen zones to use different character sets simultaneously.
 See the [C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md)
 §4 for the full per-line charset switching technique.
@@ -989,7 +773,7 @@ game loop produces audibly inconsistent playback: effects speed up during fast
 input and stall during pauses. The standard solution on the C64 is to call
 the SID play routine from the raster interrupt chain at a fixed raster line,
 ensuring exactly one call per frame regardless of game loop timing. This is
-set up in Phase 2 step 6 (§8). See the
+set up in Phase 2 step 8 (§8). See the
 [C64 demo techniques analysis](design/c64-demo-techniques-for-roguelike.md) §1
 for the raster interrupt implementation sketch.
 
@@ -1030,184 +814,74 @@ deduplication). The AT Protocol bridge's binary wire protocol
 (§c64-atproto-bridge.md) could also benefit from a UDP transport option for
 spectation frames.
 
-### 6.14 Seed System and Cross-Platform Seed Sharing
+### 6.14 Seed System and Cross-Platform Seeds
 
-The seed system has two layers: **platform-local seeds** for reproducible
-dungeons within a platform, and **cross-platform challenge seeds** for
-identical dungeons across PC and C64.
+The cross-platform seed design — tier inference from numeric value,
+compatibility selection UI, daily seeds, and per-tier leaderboards — is
+defined in the
+[capability tier reference](capability-tier-reference.md#19-seed-system-and-cross-platform-seeds).
 
-#### Platform-Local Seeds
-
-**C64:** 16-bit seed (0-65535) from `LfsrRng`. Displayed as 4-character
-base36 code on title and death screens. Seeded from CIA timer jitter at
-first keypress. Validated in the POC.
-
-**PC (normal mode):** 64-bit seed from `rand::StdRng` (ChaCha20). Displayed
-as base36 seed code via the existing `seed_code.rs` system. The full seed
-code format (`<base36_seed>[-<WxH>][<preset>]`) supports custom dimensions
-and map presets.
-
-These are **not cross-compatible** — the same numeric seed produces different
-dungeons on each platform because they use different PRNG algorithms (ChaCha20
-vs LFSR) and different map dimensions (80x40 vs 64x48).
-
-#### Cross-Platform Challenge Mode
-
-The shared `roguelike-rules` crate enables a **challenge mode** on the PC that
-generates C64-compatible dungeons:
-
-1. PC creates a `LfsrRng` from a u16 seed (same PRNG as C64).
-2. PC calls `roguelike-rules::mapgen::generate()` with C64 parameters
-   (64x48 map, 20 rooms, size 3-7).
-3. Same seed + same LFSR + same function = **identical dungeon** on both
-   platforms.
-
-Since C64 seeds are u16 (0-65535), they encode as 3-4 base36 characters. A
-C64 player sees `r7z` on their death screen, types it into the PC version's
-challenge mode, and gets the same dungeon layout.
-
-**Seed code format extension:**
-
-```
-r7z3kq              → PC normal mode: 80x40, StdRng (existing behavior)
-r7z3kq-120x60       → PC normal mode: 120x60, StdRng
-r7z                  → Challenge mode: u16 seed, 64x48, LfsrRng
-r7z-c                → Explicit challenge suffix (optional — short codes
-                       are unambiguous since u16 max = "1ekf" in base36)
-```
-
-The server's daily seed endpoint sends a u16, and both platforms generate from
-it — the PC in challenge mode, the C64 natively. Leaderboards for daily
-challenges are cross-platform; leaderboards for normal PC play are separate.
-
-#### FOV Divergence in Challenges
-
-Cross-platform challenges produce identical map layouts and monster placements,
-but FOV differences mean the two platforms "see" the dungeon differently (§6.3).
-This is intentional — the same dungeon is a different tactical experience on
-each platform. Leaderboard rankings reflect the platform-specific challenge
-rather than pixel-identical play.
-
-**Leaderboard scoring:** Challenge mode leaderboards should score on dungeon
-completion metrics (floors cleared, kills, HP remaining) rather than XP total,
-since XP thresholds diverge above level 5 — the C64 caps at `u8` (255) while
-the PC uses `i32`. This makes the leaderboard metric platform-neutral while
-preserving each platform's progression feel.
+**C64 seed display:** The C64 natively generates micro-tier seeds (u16, 1–4
+base36 characters). CIA timer jitter at first keypress provides the seed.
+Displayed on title and death screens. A C64 player sees `r7z` on their death
+screen, and any platform can replay that exact dungeon.
 
 ---
 
 ## 7. Architecture Mapping
 
 The project has four frontends — terminal, SSH, MCP, and C64 — all driven by
-the same game engine (`roguelike-engine`). The C64 is unique: it reimplements
-the engine in `no_std` Rust rather than importing `roguelike-engine` directly,
-because core depends on `String`, `Vec`, `serde`, and `rand`. The shared
-`roguelike-rules` crate bridges the gap by providing the core algorithms and
-balance data that both engines consume.
+`roguelike-core`. Core is organized around capability tiers: the C64 depends on
+`core::tier_micro` (with `default-features = false`), the GBA on
+`core::tier_compact`, and PC/Vita frontends on tier standard (top-level core
+with `std`). Each platform compiles its native tier plus all lower tiers,
+enabling cross-platform seed play.
 
 ### 7.1 How the Frontends Compare
 
 ```
-                    roguelike-engine          roguelike-c64
-                    ──────────────          ─────────────
-Depends on:         serde, rand, toml       nothing (zero deps)
-                    roguelike-rules        roguelike-rules
-Entity storage:     Vec<Entity>             parallel static mut arrays
-Map storage:        Vec<Tile>               static mut [u8; 840]
-FOV:                f64 shadowcasting       integer Bresenham raycasting
-Pathfinding:        A* (HashMap)            greedy chase (no heap)
-Data loading:       game.toml (runtime)     const ROM tables (from balance.rs)
-Message log:        Vec<String>             [u8; 160] circular buffer
-Save format:        JSON (serde_json)       binary (manual serialization)
-PRNG (normal):      StdRng (ChaCha20)       LfsrRng (shared crate)
-PRNG (challenge):   LfsrRng (shared crate)  LfsrRng (shared crate)
-                    ──────────────          ─────────────
-Shared via:              roguelike-rules
-                    (PRNG, mapgen, combat, room geometry, spawn logic,
-                     structural walls, balance constants, seed codes,
-                     item defs, leveling tables, depth scaling, mood)
+                    PC (standard)           PC (micro-tier seed)    roguelike-c64
+                    ──────────────        ──────────────          ─────────────
+Depends on:         core (std)            core::tier_micro        core::tier_micro (no_std)
+                    + serde, rand, toml   (via core, std)         + nothing (zero extra deps)
+Entity storage:     Vec or fixed array    fixed array (16)        fixed array (16) (same)
+Map storage:        core's Map (80×40)    tier_micro Map (64×48)  tier_micro Map (64×48) (same)
+FOV:                f64 shadowcasting     Bresenham raycasting    Bresenham raycasting (same)
+Pathfinding:        A* (HashMap, std)     greedy chase            greedy chase (same)
+Data loading:       game.toml (runtime)   const ROM tables        const ROM tables (same)
+PRNG:               ChaCha20              LFSR-16                 LFSR-16 (same)
+Save format:        JSON (serde_json)     JSON (serde_json)       binary (manual serialization)
+                    ──────────────        ──────────────          ─────────────
+                         When PC runs a micro-tier seed, it uses tier_micro
+                         algorithms — identical gameplay to the C64.
 ```
+
+Shared across all tiers via `core::rules`:
+damage formulas, balance constants, item definitions, leveling tables,
+seed codes, MonsterKind enum, GameEvent messages, Direction enum.
+Per-tier: entity system, PRNG, mapgen, spawn mechanics, FOV, AI, game loop.
 
 ### 7.2 Module-by-Module Mapping
 
-```
-Workspace Crate / Module     →  C64 Module (Rust)            Size Est.  POC Actual
-──────────────────────────────────────────────────────────────────────────────────
-NEW: rules/src/              →  used by both                 ~1.5 KB   (pending)
-  roguelike-rules               (PRNG, mapgen, combat, rooms, balance, seeds,
-                                  items, leveling, depth scaling, mood thresholds)
+The file-by-file mapping of core modules to C64 usage, including POC line
+counts and production estimates, is in the
+[C64 platform guide §1](c64-platform-guide.md#1-c64-module-mapping).
+In summary: core modules (rules, tier_micro) are used directly; the C64 crate
+provides only rendering (VIC-II), input (Kernal/CIA), sound (SID), saves
+(floppy/UII+), and hardware initialization — estimated ~1,200 lines of
+frontend code (down from the POC's ~1,900 lines that reimplemented the engine).
 
-engine/src/map.rs   (22 KB)  →  c64/src/map.rs               ~0.5 KB   (wraps rules)
-  Map::generate()                (calls rules::mapgen::generate())
-  Map::is_walkable()             (tile lookup on static mut buffer)
+### 7.3 C64 as a Thin Frontend
 
-engine/src/fov.rs   (6.9 KB) →  c64/src/fov.rs               ~1.5 KB    190 lines
-  compute_fov()                  (Bresenham raycasting — platform-specific)
-  can_see()                      (single-ray LOS — platform-specific)
+With the tier system, the C64 crate is a thin frontend — comparable to the
+terminal or SSH crates. It implements platform-specific rendering (VIC-II),
+input (Kernal/CIA), sound (SID), and saves (floppy/UII+), but all game logic
+comes from `core::tier_micro`.
 
-engine/src/entity.rs (4 KB)  →  c64/src/entity.rs            ~1 KB      248 lines
-  Entity struct                  (parallel arrays, stat tables from balance.rs)
-
-engine/src/combat.rs (3.7 KB) → c64/src/combat.rs            ~0.3 KB     38 lines
-  melee_attack()                 (wraps rules::combat::damage())
-
-engine/src/ai.rs    (13 KB)  →  c64/src/ai.rs                ~0.8 KB    138 lines
-  run_monster_turns()            (LOS + greedy chase + wander)
-
-engine/src/spawn.rs (4.4 KB) →  c64/src/entity.rs            ~0.5 KB    (included)
-  spawn_monsters()               (calls rules::spawn functions)
-
-engine/src/game.rs  (91 KB)  →  c64/src/main.rs              ~1.5 KB    185 lines
-  GameState::step()              (main turn loop — drastically simplified)
-
-engine/src/message_log.rs    →  c64/src/msglog.rs            ~0.8 KB    152 lines
-  MessageLog                     (4-slot circular buffer, &[u8] not String)
-
-engine/src/data.rs  (27 KB)  →  c64/src/entity.rs            embedded   (included)
-  GameData / MonsterDef          (const ROM tables from rules::balance)
-  game.toml parsing              (not needed — values from rules crate)
-
-tui/src/render.rs            →  c64/src/render.rs            ~1.5 KB    239 lines
-  CrosstermRenderer              (VIC-II screen + color RAM writes)
-
-saves/src/lib.rs             →  c64/src/save.rs              ~0.8 KB    (pending)
-  SaveBackend trait              (simplified: binary to floppy / UII+ HTTP)
-
-N/A                          →  c64/src/c64.rs               ~1 KB      172 lines
-  (no PC equivalent)             (C64 hardware registers — migrate to mos-hardware)
-
-N/A                          →  c64/src/input.rs             ~1 KB      179 lines
-  (crossterm in tui/)            (Kernal keyboard buffer + CIA joystick Port 2)
-
-NEW: engine/src/item.rs      →  c64/src/items.rs             ~0.5 KB   (pending)
-  Item, ItemKind                 (sparse arrays + pickup/drop/use/equip logic,
-                                  stat lookups from rules::items)
-
-NEW: engine/src/game.rs (XP) → c64/src/main.rs              embedded  (pending)
-  player_xp, player_level       (XP tracking + level-up in main loop,
-                                  tables from rules::leveling)
-
-N/A (new)                    →  c64/src/sid.rs               ~1 KB      (pending)
-  (no sound on PC)               (SID register writes via mos-hardware)
-──────────────────────────────────────────────────────────────────────────────────
-POC total:                       11 source files              1,898 lines = 13 KB
-Production estimate:             15 source files             ~2,600 lines ≈ 18 KB
-  (well within 46 KB budget; shared crate reduces C64-specific code by ~400 lines
-   and ensures gameplay feature parity with the PC version)
-```
-
-### 7.3 Notable Size Ratios
-
-The C64 reimplementations are dramatically smaller than their PC counterparts
-because they drop heap allocation, serde, TOML parsing, menu systems, settings,
-analytics, and accessibility features. The most dramatic example: `game.rs` goes
-from 91 KB to 185 lines — the C64 game loop has no autorun, no menu state
-machine, no undo/redo, no spectation frame capture.
-
-With `roguelike-rules`, the C64 crate shrinks further — `map.rs` becomes a
-thin wrapper around the shared `mapgen::generate()`, and `combat.rs` wraps
-the shared `damage()` formula. The shared crate also eliminates the balance
-drift risk: when monster stats change, both platforms update automatically.
+The production C64 crate shrinks from the POC's ~1,900 lines (which
+reimplemented the entire engine) to an estimated ~1,200 lines of frontend code.
+Balance drift is eliminated: when monster stats change in `core::rules`, all
+platforms and all tiers update automatically.
 
 ---
 
@@ -1229,47 +903,77 @@ milestone is shippable independently — v0.4.0 is a complete standalone game.
 
 ### v0.4.0: C64 Core Game (Weeks 1-13, includes 2 weeks buffer)
 
-#### Phase 1: Shared Crate (Weeks 1-2)
+#### Prep PR: Extract `rules/balance.rs`
 
-1. **Create `roguelike-rules` crate** — `#![no_std]`, zero dependencies.
-   Implement `LfsrRng`, `Room`, `mapgen::generate()`, `combat::damage()`,
-   `spawn::pick_monster()`, `structural::compute()`, balance constants, and
-   `seed::encode()`/`seed::decode()`. See
-   [technical reference §1](c64-technical-reference.md#1-shared-crate-roguelike-rules)
-   for the crate design.
+0. **Extract `rules/balance.rs` from existing constants** — Move scattered
+   balance constants (monster stats, player defaults, spawn weights, depth
+   scaling, mood thresholds, map dimensions) from existing modules into
+   `core/src/rules/balance.rs`. Add `Direction` enum in `core/src/command.rs`
+   — `GameCommand::Move(Direction)` replaces coordinate offsets. Add
+   `GameEvent` enum in `core/src/rules/message.rs` for structured messages.
+   This is a standalone refactoring PR with no new features — existing tests
+   must continue to pass.
 
-2. **Wire up C64 crate** — Replace POC's inline PRNG, map generation, combat
-   formula, and balance constants with imports from `roguelike-rules`. Refactor
-   `prng.rs` to use `LfsrRng` struct (passed as `&mut` instead of `static mut`
-   global). See
-   [technical reference §2.5](c64-technical-reference.md#25-c64-code-style-which-abstractions-help-on-the-6502)
+#### Phase 1a: Add Tier Micro to Core (Week 1)
+
+1. **Add `core/src/tier_micro/` module** — Create the tier micro module with
+   `u8` coords, `u8` stats, fixed-size arrays bounded by `MAX_ENTITIES` (16),
+   bitfield visibility storage, `LfsrRng` (Galois LFSR-16), Bresenham FOV,
+   greedy chase pathfinding, and spawn mechanics. Move balance constants and
+   leveling tables into `core/src/rules/`. Core's existing top-level code
+   (i32 types, std collections) remains untouched as tier standard.
+
+2. **Make tier_micro module `no_std`-compatible** — Add
+   `#![cfg_attr(not(feature = "std"), no_std)]` to `lib.rs`. The tier_micro
+   and rules modules compile without `std`. Gate serde derives behind
+   `#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]`. Gate TOML
+   loading behind `#[cfg(feature = "data-files")]` (already exists). Gate
+   tier standard code (A* pathfinding, shadowcasting, `StdRng`) behind
+   `#[cfg(feature = "std")]`. The `std` feature is on by default for PC
+   frontends.
+
+#### Phase 1b: C64 Wiring (Week 2, first half)
+
+3. **Wire up C64 crate** — Replace POC's reimplemented engine with dependency
+   on `roguelike-core` (`default-features = false`). The C64 crate depends on
+   `core::tier_micro` + `core::rules` directly. Replace `static mut` parallel
+   arrays with tier_micro's `MicroGameState`. The C64 crate becomes a thin
+   frontend: rendering, input, sound, saves only. See
+   [C64 platform guide §6](c64-platform-guide.md#6-c64-code-style-which-abstractions-help-on-the-6502)
    for C64 code style guidance.
 
-3. **Wire up PC crate** — Add `roguelike-rules` dependency to `roguelike-engine`.
-   Add `Map::generate_c64_compatible()` for challenge mode. Add CI test that
-   `game.toml` defaults match `roguelike-rules::balance` constants.
+#### Phase 1c: GameStep + PC Micro-Mode (Week 2, second half)
 
-4. **Add shared tests** — Property tests for LFSR period, damage formula,
-   room intersection symmetry, mapgen determinism golden snapshot. CI
-   `thumbv6m-none-eabi` check for `no_std` compliance.
+4. **Add `GameStep` trait** — Define `GameStep` trait in
+   `core/src/game_step.rs` (`#[cfg(feature = "std")]`) so that FrameSink,
+   MCP, and TUI can work with any tier uniformly. PC micro-mode wraps
+   `MicroGameState` with a `GameStep` adapter (wrap, not reimplement).
 
-> **Smoke test:** Build C64 .PRG via Docker, run on VICE, verify shared crate
+5. **Add tier determinism tests** — Property tests for LFSR period, damage
+   formula, room intersection symmetry, mapgen determinism golden snapshot for
+   each tier. GameStep compliance test (adapter produces same GameEvents as
+   direct calls). Direction roundtrip test. CI `thumbv6m-none-eabi` check
+   for tier_micro: `cargo check -p roguelike-core --no-default-features
+   --target thumbv6m-none-eabi`. Verify that tier micro mapgen on the host
+   produces byte-identical output to the golden snapshot.
+
+> **Smoke test:** Build C64 .PRG via Docker, run on VICE, verify core
 > integration produces identical gameplay to POC.
 
 #### Phase 2a: Core Production (Weeks 3-6)
 
-5. **Migrate C64 crate to mos-hardware** — Replace hand-rolled `poke`/`peek`
+6. **Migrate C64 crate to mos-hardware** — Replace hand-rolled `poke`/`peek`
    wrappers with `mos-hardware`'s type-safe VIC-II, CIA, and SID access.
    Adopt `JoystickPosition` enum, `screen_codes!()` macro, and
    `volatile-register` patterns. Vendor mos-hardware into the workspace (§12).
 
-6. **Scrolling viewport** — Implement 40x21 camera over 64x48 map with
+7. **Scrolling viewport** — Implement 40x21 camera over 64x48 map with
    player-follow logic and edge clamping. Expand tile buffer from 840 B to
-   ~3 KB. Update `roguelike-rules::balance` map dimension constants. This is
+   ~3 KB. Update `roguelike_core::rules::balance` map dimension constants. This is
    the most significant architectural change from the POC — rendering must
    now offset all screen writes by the camera position.
 
-7. **Raster interrupt chain** — Set up VIC raster IRQ replacing the Kernal's
+8. **Raster interrupt chain** — Set up VIC raster IRQ replacing the Kernal's
    default IRQ handler. Implement a 3-zone color split (game area / status bar
    / messages) with different `$D021` background colors per zone. Add a SID
    player callback at a fixed raster line for frame-rate-independent sound
@@ -1279,12 +983,12 @@ milestone is shippable independently — v0.4.0 is a complete standalone game.
    §1 for implementation details. Cost: ~200 bytes of code, ~660
    cycles/frame continuous overhead.
 
-8. **Dirty-rectangle rendering** — Add previous-frame buffer, compare+update
+9. **Dirty-rectangle rendering** — Add previous-frame buffer, compare+update
    only changed cells. Critical for scrolling — full viewport redraw is 840
    cells/frame; dirty-rect limits to the visible delta. Orthogonal to raster
    effects.
 
-9. **Save/Load** — Binary serialization to 1541 floppy via Kernal file I/O.
+10. **Save/Load** — Binary serialization to 1541 floppy via Kernal file I/O.
    C FFI wrappers for `SAVE`/`LOAD` Kernal calls. Follow the `SaveBackend`
    trait pattern from `roguelike-saves` — the C64 won't implement the full
    trait, but the API shape (autosave, slots, metadata) guides the design.
@@ -1294,51 +998,58 @@ milestone is shippable independently — v0.4.0 is a complete standalone game.
 
 #### Phase 2b: Visual Polish + Audio (Weeks 7-10)
 
-10. **Custom character sets** — Design three charsets in CharPad: dungeon
+11. **Custom character sets** — Design three charsets in CharPad: dungeon
     tileset (rows 0-20), UI font (row 21), message text (rows 22-24). Load
     into VIC Bank 1 ($4800/$5000/$5800) with screen memory at $4400. Per-zone
-    switching handled by the raster chain (step 7). Add animated charset tiles
+    switching handled by the raster chain (step 8). Add animated charset tiles
     for water, torches, and stairs (~8 bytes/frame, ~40 cycles). See §6.9.
     **Budget 2 weeks for this step** — charset design is an art/design task
     requiring CharPad iteration, readability testing on real hardware, and
     potentially multiple revision cycles (1 week design + 1 week integration).
 
-11. **SID sound effects** — Implement combat sounds, footsteps, death jingle
-    using `mos-hardware`'s SID module. The raster interrupt chain (step 7)
+12. **SID sound effects** — Implement combat sounds, footsteps, death jingle
+    using `mos-hardware`'s SID module. The raster interrupt chain (step 8)
     handles SID playback timing — the play routine runs once per frame at a
     fixed raster line, independent of the turn-based game loop. See §6.11.
 
-12. **Atmospheric effects + border removal** — Torchlight vertical gradient
+13. **Atmospheric effects + border removal** — Torchlight vertical gradient
     centered on the player's Y position via per-line `$D021` changes. Damage
     flash (border to red for 2-3 frames). Low-HP border pulse. Open
     top/bottom borders by toggling RSEL. See §6.8 and the demo techniques
     analysis §2, §5.
 
-13. **Title screen** — Seed entry (keyboard hex input), "New Game" / "Continue"
+14. **Title screen** — Seed entry (keyboard hex input), "New Game" / "Continue"
     menu, PETSCII art enhanced with raster color bars and animated charset
-    characters. Challenge mode seed display.
+    characters. Micro-tier seed display with platform compatibility indicator.
 
 > **Smoke test:** Full playthrough on VICE with all effects enabled.
 
-#### Phase 2c: PC Challenge Mode (parallel with 2a/2b)
+#### Phase 2c: PC Compatibility Selection (parallel with 2a/2b)
 
-14. **PC challenge mode UI** — Add 40x21 "C64 Challenge" mode to the terminal
-    client. Accept u16 seed codes, generate via shared mapgen, display on
-    cross-platform leaderboard. Can begin any time after Phase 1 completes.
+15. **PC compatibility selection UI** — Add new game screen offering
+    standard/compact/micro compatibility choice. When the player selects micro,
+    the terminal client wraps `MicroGameState` with the `GameStep` adapter
+    (Phase 1c) — no second implementation needed. The adapter provides the
+    same FrameSink/TUI interface as standard-tier `GameState`. Seed entry
+    auto-detects tier from seed numeric value. Display platform compatibility
+    ("Plays on: C64 · GBA · Vita · PC") in the seed confirmation screen.
+    Cross-platform leaderboard per tier. Can begin any time after Phase 1
+    completes.
 
 #### Phase 3: Testing + Release (Weeks 11-13)
 
 Testing is continuous — each sub-phase has a smoke test checkpoint. This final
 phase focuses on cross-platform verification and hardware-specific edge cases.
 
-15. **Playtesting** — Real hardware (Ultimate 64, C64 + UII+, stock C64) and
+16. **Playtesting** — Real hardware (Ultimate 64, C64 + UII+, stock C64) and
     emulators (VICE, c64.emu). PAL vs NTSC timing.
-16. **Performance profiling** — VICE cycle counter for FOV + AI + render +
+17. **Performance profiling** — VICE cycle counter for FOV + AI + render +
     raster chain overhead. Verify continuous raster costs match estimates
-    (see [technical reference §2.4](c64-technical-reference.md#24-turn-timing-and-cycle-budgets)).
-17. **Cross-platform seed verification** — Generate challenge dungeons on both
-    platforms with the same seeds, verify identical tile layouts.
-18. **Packaging** — .d64 disk image, .prg for emulators, .crt if code fits
+    (see [C64 platform guide §5](c64-platform-guide.md#5-turn-timing-and-cycle-budgets)).
+18. **Tier determinism verification** — Generate micro-tier dungeons on C64
+    and PC with the same seeds, verify identical tile layouts, entity
+    placements, and FOV results. Repeat for compact-tier on GBA and PC.
+19. **Packaging** — .d64 disk image, .prg for emulators, .crt if code fits
     16 KB cartridge.
 
 ---
@@ -1347,11 +1058,12 @@ phase focuses on cross-platform verification and hardware-specific edge cases.
 
 #### Phase 4: UII+ Networking Core
 
-19. **UII+ driver layer** — Hardware detection, TCP primitives.
-20. **Cloud saves** — HTTP PUT/GET to server endpoint.
-21. **Leaderboard + daily seed** — POST scores, GET daily seed (u16).
-    Cross-platform leaderboard for challenge mode.
-22. **Auto-update via UII+** — Version check at startup, one-button update
+20. **UII+ driver layer** — Hardware detection, TCP primitives.
+21. **Cloud saves** — HTTP PUT/GET to server endpoint.
+22. **Leaderboard + daily seed** — POST scores, GET daily seed (u16,
+    micro-tier). Per-tier leaderboards — micro-tier daily challenges are
+    cross-platform across all platforms.
+23. **Auto-update via UII+** — Version check at startup, one-button update
     that writes new .prg to UII+ SD card (see §6.13).
 
 Also in v0.5.0 (deferred from v0.4.0):
@@ -1365,26 +1077,30 @@ Also in v0.5.0 (deferred from v0.4.0):
 
 #### Phase 5: Extended Network Features
 
-23. **Spectation relay** — Binary frame streaming.
-24. **MCP client mode** — Observation formatting, action parsing.
-25. **AT Protocol bridge** — Per the design in
+24. **Spectation relay** — Binary frame streaming.
+25. **MCP client mode** — Observation formatting, action parsing.
+26. **AT Protocol bridge** — Per the design in
     [c64-atproto-bridge.md](design/c64-atproto-bridge.md).
 
 ---
 
 ## 9. What Gets Cut / What Gets Added
 
-### What Gets Cut
+### What Gets Cut (Tier Micro vs. Tier Standard)
 
-| Feature | Rust Version | C64 Version | Reason |
-|---------|-------------|-------------|--------|
-| Map size | 80x40 (configurable) | 64x48 (scrolling 40x21 viewport) | Screen size + UI (§6.1) |
+These are tier micro constraints, not C64 limitations. The PC in standard mode
+has none of these cuts. When the PC runs a micro-tier seed, it uses the
+micro-tier parameters.
+
+| Feature | Tier standard | Tier micro | Reason |
+|---------|--------------|-----------|--------|
+| Map size | 80×40 (configurable) | 64×48 (scrolling 40×21 viewport) | Screen size + UI (§6.1) |
 | FOV radius | 8 tiles | 6 tiles | CPU budget |
 | FOV algorithm | Recursive shadowcasting | Bresenham raycasting | No FP, no recursion |
 | Max rooms | 30 | 12 | Map size |
-| Max monsters | ~20-30 | 15 | Memory + CPU |
+| Max entities | 512–1024 | 16 | Memory + CPU |
 | Save format | JSON (serde) | Binary (compact) | Disk space/speed |
-| Color palettes | 4 (accessibility) | 1 (fixed) | 16-color limit |
+| Color palettes | 4 (accessibility) | 1 (fixed) | 16-color limit (C64 hardware) |
 | Auto-explore | A* pathfinding | Simplified or cut | Memory |
 | Message history | Scrollable | Last 3 messages | Screen space (§6.1) |
 
@@ -1392,7 +1108,7 @@ Also in v0.5.0 (deferred from v0.4.0):
 
 | Feature | C64 Only | Milestone |
 |---------|----------|-----------|
-| Scrolling viewport | 40x21 camera over 64x48 map with player follow | v0.4.0 |
+| Scrolling viewport | 40×21 camera over 64×48 map with player follow | v0.4.0 |
 | Raster interrupt chain | 3-zone color split, SID timing, charset switching (§6.8, §6.9, §6.11) | v0.4.0 |
 | Atmospheric lighting | Torchlight gradient, damage flash, low-HP pulse via raster effects (§6.8) | v0.4.0 |
 | Border removal | Open top/bottom borders for cleaner visual frame | v0.4.0 |
@@ -1403,28 +1119,47 @@ Also in v0.5.0 (deferred from v0.4.0):
 | Title screen art | PETSCII art splash screen with raster color bars | v0.4.0 |
 | Player sprite | Hardware sprite overlay for smooth movement + animation | v0.5.0 |
 | Level transitions | FLD wipe animation between dungeon floors | v0.5.0 |
-| Online leaderboards | Cross-platform scores (C64 + PC) via UII+ | v0.5.0 |
-| Daily challenge | Shared daily seed fetched from server | v0.5.0 |
+| Online leaderboards | Per-tier scores via UII+ | v0.5.0 |
+| Daily challenge | Micro-tier daily seed — all platforms play identically | v0.5.0 |
 | Cloud saves | Save/load game state over HTTP via UII+ | v0.5.0 |
 | AT Protocol saves | Federated saves to PDS via bridge | v0.6.0 |
 | Network spectation | Stream gameplay to SSH spectation relay | v0.6.0 |
 | LLM auto-play | MCP client mode — watch an AI play on your C64 | v0.6.0 |
 
-### What's Shared (New)
+| Feature | Cross-Platform | Milestone |
+|---------|---------------|-----------|
+| Compatibility selection | New game screen: standard/compact/micro choice (§6.14) | v0.4.0 |
+| Micro-tier play on all platforms | PC/Vita/GBA can run micro-tier seeds with C64-identical gameplay | v0.4.0 |
 
-| Feature | How |
-|---------|-----|
-| **Cross-platform seeds** | Same LFSR + same mapgen = identical dungeon on PC and C64 |
-| **Balance constants** | Single source of truth in `roguelike-rules::balance` |
-| **Map generation** | `roguelike-rules::mapgen::generate()` — shared algorithm |
-| **Combat formula** | `roguelike-rules::combat::damage()` — shared `const fn` |
-| **Monster spawning** | `roguelike-rules::spawn` — shared weighted selection |
-| **Room geometry** | `roguelike-rules::room::Room` — shared struct + intersection |
-| **Seed codes** | `roguelike-rules::seed` — encode/decode for sharing |
-| **Item definitions** | `roguelike-rules::items` — type IDs, stat lookup tables |
-| **Leveling tables** | `roguelike-rules::leveling` — XP thresholds, stat growth |
-| **Depth scaling** | `roguelike-rules::balance` — monster scaling per floor |
-| **Mood thresholds** | `roguelike-rules::balance` — flee/enrage trigger values |
+### What's Shared (via `roguelike-core`)
+
+| Feature | Module | Tier |
+|---------|--------|------|
+| **Cross-platform seeds** | `core::rules::seed_code` | Rules — tier inferred from seed numeric value |
+| **Balance constants** | `core::rules::balance` | Rules — single source of truth |
+| **Combat formula** | `core::rules::damage::damage()` | Rules — `const fn` |
+| **Monster tables** | `core::rules::monster_table` | Rules — MonsterKind, pick_monster(), stat tables |
+| **Room geometry** | `core::rules::map::Room` | Rules — struct + intersection |
+| **Item definitions** | `core::rules::items` | Rules — type IDs, stat lookup tables |
+| **Leveling tables** | `core::rules::leveling` | Rules — XP thresholds, stat growth |
+| **Depth scaling** | `core::rules::balance` | Rules — monster scaling per floor |
+| **Mood thresholds** | `core::rules::balance` | Rules — flee/enrage trigger values |
+| **GameStep trait** | `core::game_step` | Rules — `#[cfg(feature = "std")]`, uniform tier interface |
+| **Direction enum** | `core::command::Direction` | Rules — 8-way movement, no coord offsets |
+| **GameEvent enum** | `core::rules::message::GameEvent` | Rules — structured messages (Copy, no_std) |
+| **Spawn mechanics** | `core::tier_micro::spawn` / `core::spawn` | Per-tier — placement using SpawnDirective |
+| **Map generation** | `core::tier_micro::map` / `core::map` | Per-tier — same algorithm, tier-specific params |
+| **Entity system** | `core::tier_micro::entity` / `core::entity` | Per-tier — fixed array (micro) vs Vec (standard) |
+| **FOV** | `core::tier_micro::fov` / `core::fov` | Per-tier — Bresenham (micro/compact) vs shadowcasting (standard) |
+| **AI** | `core::tier_micro::ai` / `core::ai` | Per-tier — greedy chase (micro/compact) vs A* (standard) |
+| **Game loop** | `core::tier_micro::game` / `core::game` | Per-tier — GameState with tier-appropriate types |
+
+### Tier Divergence
+
+For the complete tier divergence table documenting intentional differences
+between tiers (FOV, pathfinding, entity cap, messages, map storage, PRNG, XP
+scaling, save format), see the
+[capability tier reference](capability-tier-reference.md#110-tier-divergence).
 
 ---
 
@@ -1434,31 +1169,36 @@ Also in v0.5.0 (deferred from v0.4.0):
 |------|-----------|--------|------------|
 | rust-mos single maintainer abandons project | Medium | High | llvm-mos (LLVM backend) has separate active team; Mikael Lund maintains parallel fork; Docker images are self-contained; code can be ported to cc65 C if needed |
 | Code generation produces slow hot paths | Medium | Medium | Profile on VICE; rewrite hot paths as C FFI calls with inline 6502 assembly; raw pointer arithmetic >> slice access |
-| Code size exceeds budget | Low | Medium | POC measured 13 KB; LTO + `opt-level = "s"` + feature-gated mos-hardware keep size down; shared crate reduces total C64 code |
+| Code size exceeds budget | Low | Medium | POC measured 13 KB; LTO + `opt-level = "s"` + feature-gated mos-hardware keep size down; core provides game logic directly |
 | No inline assembly for Kernal calls | Certain | Low | C FFI wrappers (proven by chirp8-c64); mos-hardware's `cbm_kernal` module; function pointer stubs for simple instructions |
 | PRNG edge cases (POC bug: rejection sampling overflow) | Resolved | N/A | Fixed in POC — power-of-2 spans handled with early return; shared LfsrRng carries the fix |
 | Keyboard input on emulators (POC bug: CIA Port B conflict) | Resolved | N/A | Fixed in POC — use Kernal buffer + Port A joystick only |
-| Shared crate adds complexity | Low | Low | Shared crate is ~550 lines of concrete `no_std` functions — no traits, no generics. Includes gameplay features (items, leveling, mood). Both platforms can vendor a local copy as fallback |
+| Tier complexity in core | Low | Low | Tier micro is an additive submodule — core's standard-tier code is unchanged. No cfg gates on types or collections within a tier. Rules modules work across all tiers. |
+| `GameState` struct access on 6502 | Low | Medium | With llvm-mos static stack allocation + LTO, a `GameState` local in `main()` gets a fixed address. Profile on VICE after integration; extract hot arrays to statics if needed |
 | FOV too slow on real hardware | Low | High | Already budgeted at ~7,500 cycles; validated in POC |
 | Custom charset looks bad | Medium | Low | Iterate with CharPad; study Sword of Fargoal, chirp8-c64's 2x2 tile approach |
 | UII+ command interface underdocumented | Medium | Medium | UII+ firmware is open source; test on real hardware early |
 | Network timeout blocks game loop | Medium | High | Non-blocking polls with timeout; game remains playable offline |
 | Cross-platform seed divergence | Low | Medium | Golden snapshot tests in CI; shared mapgen is deterministic; LFSR period test catches PRNG regressions |
+| Directive pattern complexity | Low | Low | SpawnDirective is a simple struct; pattern is well-established in ECS architectures |
 
 ---
 
 ## 11. Technical Reference
 
-Detailed implementation notes — POC lessons, cycle budgets, static stack
-allocation guidance, and C64 code style recommendations — have been extracted
-to the companion **[C64 Port: Technical Reference](c64-technical-reference.md)**.
+Companion documents provide detailed implementation references:
 
-Key topics covered there:
-- **PRNG overflow bug** (§2.1) — 8-bit rejection sampling fix carried into `LfsrRng`
-- **CIA port multiplexing** (§2.2) — why direct matrix scanning fails on emulators
-- **Static stack allocation** (§2.3) — how to keep llvm-mos's key optimization working
-- **Turn timing** (§2.4) — measured cycle budgets: ~10,000 cycles/turn, ~660 cycles/frame continuous raster overhead
-- **Code style guide** (§2.5) — which Rust abstractions help vs. hurt on the 6502
+- **[Capability Tier Reference](capability-tier-reference.md)** — Cross-platform
+  tier architecture, sharing matrix, type sizing, seed system, tier divergence.
+- **[C64 Platform Guide](c64-platform-guide.md)** — C64-specific hardware
+  guidance, including:
+  - **PRNG overflow bug** (§2) — 8-bit rejection sampling fix carried into `LfsrRng`
+  - **CIA port multiplexing** (§3) — why direct matrix scanning fails on emulators
+  - **Static stack allocation** (§4) — how to keep llvm-mos's key optimization working
+  - **Turn timing** (§5) — measured cycle budgets: ~10,000 cycles/turn, ~660 cycles/frame continuous raster overhead
+  - **Code style guide** (§6) — which Rust abstractions help vs. hurt on the 6502
+- **[Testing Strategy](testing-strategy.md)** — Project-wide testing approach
+  (core tests, determinism, property tests, CI verification).
 
 ---
 
@@ -1470,7 +1210,7 @@ Key topics covered there:
    Larger maps enable richer dungeons. Memory cost is ~3 KB tiles (up from
    840 B) — fits within the 16 KB headroom. The viewport uses a single dense
    status row plus 3 message lines, with modal inventory (§6.1). Map
-   dimensions are locked — they flow through `roguelike-rules::balance` and
+   dimensions are locked — they flow through `roguelike_core::rules::balance` and
    affect cross-platform seeds. Scrolling added to Phase 2a (§8).
 
 2. ~~**Multiple dungeon levels?**~~ **Resolved.** The
@@ -1504,19 +1244,33 @@ Key topics covered there:
    cycles total per transition. FLD achieves 80% of visual impact with less
    code than linecrunch. See the demo techniques analysis §3.
 
+7. ~~**Separate `roguelike-rules` crate vs. unified core**~~ **Decided:
+   Capability tier hierarchy in unified core.** Rather than creating a separate
+   `roguelike-rules` crate or refactoring all of core to C64 types,
+   `roguelike-core` is organized around capability tiers. Tier micro
+   (`core::tier_micro`) uses `u8` coordinates, `u8` stats, fixed-size arrays,
+   and bitfields — `no_std`-compatible. Tier standard (top-level core) retains
+   `i32` types and `std` collections. Rules modules (damage, balance, items,
+   leveling, monster tables, GameEvent, Direction) produce pure values and
+   directive structs across all tiers. Spawn mechanics remain per-tier. The
+   C64 depends on core with `default-features = false` and uses
+   `core::tier_micro` + `core::rules` directly. This eliminates ~1,200 lines
+   of C64 engine reimplementation while keeping the PC's standard-tier code
+   unchanged.
+
 ### Remaining Open
 
-7. **PAL vs. NTSC timing:** Turn-based so gameplay unaffected, but animation
+8. **PAL vs. NTSC timing:** Turn-based so gameplay unaffected, but animation
    timing and SID tuning differ. Detect at startup with raster counter check.
 
-8. **How much C FFI?** Currently zero in the POC. Kernal calls (disk I/O) will
+9. **How much C FFI?** Currently zero in the POC. Kernal calls (disk I/O) will
    need C wrappers. mos-hardware's `cbm_kernal` module may handle this, but
    we should audit whether its `cc` build dependency works in the Docker
-   workflow. Audit after mos-hardware migration (Phase 2a step 5).
+   workflow. Audit after mos-hardware migration (Phase 2a step 6).
 
-9. **mos-hardware code size:** Budget ~500-1500 bytes for mos-hardware's
+10. **mos-hardware code size:** Budget ~500-1500 bytes for mos-hardware's
    contribution to the binary (volatile-register wrappers, bitflags structs).
-   Measure after migration (Phase 2a step 5) and compare against the POC's
+   Measure after migration (Phase 2a step 6) and compare against the POC's
    13 KB baseline.
 
 ---
@@ -1529,22 +1283,30 @@ with the original cc65 estimate of 12-18 KB.
 
 The main advantages over the cc65 approach:
 
-1. **Single language** — The entire project (7 workspace crates + C64) stays
-   in Rust. The C64 is another frontend in the existing multi-frontend
+1. **Single language** — The entire project (6 workspace crates + C64) stays
+   in Rust. The C64 will be another frontend in the existing multi-frontend
    architecture (terminal, SSH, MCP, C64).
-2. **Shared algorithms** — Map generation, combat, spawning, room geometry,
-   item definitions, leveling tables, depth scaling, mood thresholds, and the
-   PRNG live in `roguelike-rules`, a ~550-line `#![no_std]` crate with zero
-   dependencies and zero generics. The shared code is written at the C64's
-   abstraction level (`u8`, `&mut [u8]`, `&mut [Room]`, `&mut LfsrRng`) — the
-   C64 uses it directly, and the PC calls down to it for challenge mode. This
-   ensures gameplay feature parity across platforms as the
+2. **Capability tier hierarchy** — `roguelike-core` is organized around
+   capability tiers: tier micro (`u8` coords, LFSR-16, Bresenham FOV, `no_std`)
+   for C64 and cross-platform play; tier compact (`i16` coords, LFSR-32) for
+   GBA; tier standard (`i32` coords, ChaCha20, shadowcasting, `std`) for
+   Vita/PC. Each platform compiles its native tier plus all lower tiers. Rules
+   modules (damage, balance, items, leveling, monster tables, GameEvent,
+   Direction) produce pure values and directive structs across all tiers.
+   Core's standard-tier code is unchanged — tier micro is an additive
+   submodule, not a rewrite. This ensures gameplay feature parity across
+   platforms as the
    [gameplay implementation plan](design/gameplay-implementation-plan.md)
    features are implemented.
-3. **Cross-platform seed sharing** — The shared Galois LFSR and shared map
-   generation function mean the same seed produces the same dungeon on both
-   platforms. A C64 player's 4-character seed code works in the PC's challenge
-   mode, enabling cross-platform daily challenges and leaderboards.
+3. **Cross-platform seeds with zero divergence** — Within a tier, ALL platforms
+   use the same PRNG, map generation, FOV, and pathfinding algorithms. A C64
+   player's 4-character seed code plays identically on every platform — same
+   map, same visibility, same tactical experience. No FOV divergence, no
+   "challenge mode" caveat. Seeds are clean (no tier prefix); the game infers
+   the tier from the seed's numeric value and shows platform compatibility in
+   the UI. Players choose compatibility level when starting a new game. Daily
+   challenges use micro-tier seeds, playable on everything from the C64 to
+   the PC.
 4. **Type safety** — Ownership model, pattern matching, and `Option`/`Result`
    prevent entire classes of bugs that plague 6502 C/assembly.
 5. **Ecosystem** — `mos-hardware` provides production-quality hardware access;
@@ -1562,9 +1324,10 @@ The main risks:
 
 The implementation plan is structured across three milestones:
 
-- **v0.4.0** (~13 weeks including 2 weeks buffer) — Core game with scrolling
+- **v0.4.0** (~13 weeks including 2 weeks buffer) — Prep PR extracts
+  `rules/balance.rs` and adds Direction + GameEvent. Core game with scrolling
   viewport, raster effects, SID audio, custom charsets, save/load, and the
-  shared `roguelike-rules` crate. Shippable standalone release.
+  tier micro module in core. Shippable standalone release.
 - **v0.5.0** (+6 weeks) — UII+ networking: cloud saves, leaderboards, daily
   seeds, auto-update. Plus deferred polish: player sprites, level transition
   animations.
@@ -1575,8 +1338,9 @@ Timeline compression factors:
 - Phase 0 (POC) is already complete
 - Rust development is faster than C/assembly for game logic
 - mos-hardware eliminates boilerplate hardware register code
-- The shared `roguelike-rules` crate reduces duplication and prevents drift
+- Tier micro as a submodule means zero disruption to existing PC code
 
 The C64 roguelike wouldn't just be a downport — it would be the most
-interesting client in the fleet. And with cross-platform seed sharing, a C64
-player and a PC player can compete on the same dungeon.
+interesting client in the fleet. And with tier-encoded seeds, a C64 player and
+a PC player compete on genuinely identical dungeons — same map, same FOV, same
+algorithms.

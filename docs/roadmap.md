@@ -79,9 +79,9 @@ Significant investment. May depend on earlier tiers being complete.
 | Tileset support | 0 | Medium | L | Alternative renderer. |
 | Scripting | 0 | Medium | XL | Lua/Rhai embedding. Only if community content demands it. |
 | Map editor | 0 | Low | L | For hand-crafted content if needed. |
-| Game Boy Advance | 0 | Low | XL | Requires no_std rewrite of data structures. |
+| Game Boy Advance | 0 | Low | XL | Runs at tier compact (i16 coords, no_std). Compiles `core::rules` + `core::tier_micro` + `core::tier_compact` (compact is stubs until GBA work begins). Frontend crate needed. |
 | PS Vita | 0 | Low | L | Native ARM via vita-sdk; hardware buttons, OLED display, memory card saves. |
-| Commodore 64 | 0 | Low | XL | Requires no_std, 8-bit types, custom toolchain. |
+| Commodore 64 | 0 | Low | XL | Runs at tier micro (u8 coords, u8 stats, fixed arrays, LFSR-16). C64 crate is a thin frontend using `core::tier_micro` + `core::rules`. Builds via rust-mos Docker. |
 | C64 AT Protocol bridge | 0 | Low | L | Self-hostable Docker bridge connecting C64 (via Ultimate64 Ethernet) to PDS saves and spectating. External companion service, not a workspace crate. [Design doc.](design/c64-atproto-bridge.md) |
 
 ## Critical Path

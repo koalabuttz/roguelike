@@ -139,7 +139,7 @@ All platforms generate the same **80x40 map** (see [Part 6: Unified Map Dimensio
 - Scrolling: GBA has hardware BG scroll registers — set X/Y offsets and the hardware handles rendering. A scrolling viewport over a tilemap is what the GBA was designed for.
 
 **C64 (40x22 viewport over 80x40 map):**
-- Tile data: 3,200 bytes (up from 960 bytes for 40x22). The [port proposal](../c64-port-proposal.md#22-memory-budget-allocation) budgets ~1.2 KB for tile data with ~22 KB headroom — the extra ~2 KB fits comfortably.
+- Tile data: 3,200 bytes (up from 960 bytes for 40x22). The [port proposal](../c64-port-proposal.md#42-memory-budget-allocation-updated-for-rust-mos) budgets ~1.2 KB for tile data with ~22 KB headroom — the extra ~2 KB fits comfortably.
 - Explored bitfield: 400 bytes (3,200 bits). Visible bitfield: 400 bytes. Total bitfields: 800 bytes (up from 240).
 - Custom charset: one PETSCII character per tile variant. 12 custom chars x 8 bytes = 96 bytes in the charset (which has a full 2 KB budget for 256 chars).
 - Color RAM: one nybble per tile. C64 has 16 colors — each terrain maps to a fixed color index.

@@ -22,11 +22,12 @@ How to bring the roguelike to the Game Boy Advance while keeping all game logic 
 
 ## Relationship to Existing Docs
 
-This proposal covers the **GBA frontend crate** — rendering, input, save, audio, and the `no_std` adaptations needed in core. It does not redesign game logic. Several existing docs define systems that the GBA port consumes:
+This proposal covers the **GBA frontend crate** — rendering, input, save, and audio. The `no_std` adaptations are handled by the capability tier system in core (see [What Changes in Core](#what-changes-in-core)), not by GBA-specific work. This doc does not redesign game logic. Several existing docs define systems that the GBA port will consume:
 
 | Doc | What GBA uses from it |
 |-----|----------------------|
-| [cross-platform.md](../architecture/cross-platform.md) | Crate structure, `Renderer`/`InputSource` traits, feature-flag type sizing, `GameColor` mapping |
+| [cross-platform.md](../architecture/cross-platform.md) | Crate structure, `Renderer`/`InputSource` traits, `GameColor` mapping |
+| [capability-tier-reference.md](../capability-tier-reference.md) | Capability tier hierarchy (GBA uses tier compact), type sizing, seed system |
 | [simulation.md](../architecture/simulation.md) | `SimBudget` caps for entity count, CA tiles/turn, event queue depth |
 | [acoustic-propagation.md](acoustic-propagation.md) | PSG channel assignments, sound event → register write mapping |
 | [gameplay-implementation-plan.md](gameplay-implementation-plan.md) | Items, stairs, XP, mood — GBA renders these, doesn't change their logic |
@@ -39,7 +40,7 @@ Where those docs specify GBA-relevant details (e.g., PSG audio, SimBudget values
 
 ```
 crates/gba/
-├── Cargo.toml          depends on roguelike-core (no_std, gba feature)
+├── Cargo.toml          depends on roguelike-core (no_std, uses tier_compact + tier_micro)
 ├── src/
 │   ├── main.rs         Entry point: #![no_std], #![no_main], gba crate setup
 │   ├── render.rs       GbaRenderer: Renderer trait impl, tile streaming, palette mgmt
@@ -53,70 +54,93 @@ crates/gba/
 │       └── sprites.rs  const sprite graphics (8×8 or 16×16 pixel data)
 ```
 
-The GBA crate depends only on `roguelike-core` (with the `gba` feature flag) and the [`agb`](https://github.com/agbrs/agb) or [`gba`](https://crates.io/crates/gba) hardware abstraction crate. It does **not** depend on `roguelike-saves` — save handling is hardware-specific (SRAM) and doesn't need JSON serialization or multiple save slots.
+The GBA crate will depend only on `roguelike-core` (importing `core::tier_compact` for GBA-native types and `core::tier_micro` for cross-platform seed support, no `std` feature) and the [`agb`](https://github.com/agbrs/agb) or [`gba`](https://crates.io/crates/gba) hardware abstraction crate. It will **not** depend on `roguelike-saves` — save handling is hardware-specific (SRAM) and will not need JSON serialization or multiple save slots.
 
 ### What Changes in Core
 
-The [cross-platform architecture doc](../architecture/cross-platform.md) already defines the feature-flag mechanism for type sizing. The GBA port activates it and adds one new requirement: `no_std` compatibility for core when the `gba` feature is enabled.
+`roguelike-core` is organized around a **capability tier hierarchy**. Each tier is a self-contained module with its own type definitions, RNG, and FOV algorithm, rather than a single set of types switched by feature flags:
 
-#### Feature flag in `crates/core/Cargo.toml`
-
-```toml
-[features]
-default = ["dev-tools", "data-files"]
-dev-tools = []
-data-files = ["toml"]
-gba = []        # Enables i16 Coord/Stat, no_std-compatible paths
+```
+crates/core/src/
+  rules/          # Pure functions + constants: damage, balance, items, leveling,
+                  #   seed_code, monster_table, GameEvent — no_std, always compiled
+  command.rs      # GameCommand with Direction enum — no Coord dependency, no_std
+  tier_micro/     # u8 coords, u8 stats, LFSR-16, Bresenham FOV, fixed arrays — no_std
+  tier_compact/   # i16 coords, u8 stats, LFSR-32, Bresenham FOV, fixed arrays — no_std
+                  #   (stubs only — types.rs + prng.rs — until GBA port fleshes it out)
+  game_step.rs    # #[cfg(feature = "std")] GameStep trait — cross-tier interface
+  (top-level)     # tier standard: i32 coords, i32 stats, ChaCha20, shadowcasting FOV, Vec — std
 ```
 
-#### Type sizing in `types.rs`
+The three named tiers are:
 
-Already specified in cross-platform.md:
+| Tier | Target | Coord | Stats | Entities | Map size | RNG | FOV | Alloc |
+|------|--------|-------|-------|----------|----------|-----|-----|-------|
+| **micro** | C64 | `u8` | `u8` | 16 | 64×48 | LFSR-16 | Bresenham | `no_std` |
+| **compact** | GBA | `i16` | `u8` | 128 | 128×96 | LFSR-32 | Bresenham | `no_std` |
+| **standard** | Vita/PC | `i32` | `i32` | 512–1024 | 80×40+ | ChaCha20 | Shadowcasting | `std` |
+
+The compact tier is initially stubs only — `tier_compact/types.rs` (type aliases) and `tier_compact/prng.rs` (`LfsrRng32`). The full compact tier (game state, mapgen, entity storage, FOV) will be fleshed out when GBA work begins.
+
+**GBA runs natively at tier compact.** It compiles `core::rules` (pure game rules), `core::tier_micro` (for cross-platform seed compatibility — short seeds generated anywhere play back at tier micro) and `core::tier_compact` (the GBA-native module with `i16` coords, 128-entity fixed arrays, LFSR-32 RNG, and Bresenham FOV). No feature flags are needed to get the right types — each tier module defines its own.
+
+#### Tier-specific types (no `cfg` switching)
+
+Each tier defines its own coordinate, stat, and position types directly. There is no `cfg`-gated type alias that switches between `u8` and `i16` — each tier's module owns its types:
 
 ```rust
-#[cfg(feature = "gba")]
-pub type Coord = i16;
-#[cfg(feature = "gba")]
-pub type Stat = i8;
+// core::tier_micro::types
+pub type Coord = u8;
+pub type Stat = u8;
+pub struct Pos { pub x: u8, pub y: u8 }
 
-#[cfg(not(feature = "gba"))]
+// core::tier_compact::types
+pub type Coord = i16;
+pub type Stat = u8;
+pub struct Pos { pub x: i16, pub y: i16 }
+
+// core (top-level, tier standard)
 pub type Coord = i32;
-#[cfg(not(feature = "gba"))]
 pub type Stat = i32;
+pub struct Pos { pub x: i32, pub y: i32 }
 ```
 
-`Stat` becomes `i8` on GBA (HP values 0–127 are sufficient; ATK/DEF values fit easily). `Coord` becomes `i16` (maps up to 32767×32767 tiles — far beyond GBA screen size).
+`Stat` is `u8` on both constrained tiers — HP values 0–255 are sufficient for C64 and GBA. Tier standard widens to `i32` for Vita/PC where balance headroom is useful. The GBA uses `i16` coordinates natively (maps up to 128×96, well within `i16` range) without any opt-in.
 
 #### `no_std` in core
 
-The `gba` feature implies `no_std`. Core's current `std` dependencies:
+Tier micro and tier compact are `#![no_std]` modules. The GBA compiles these directly — it gets `no_std` compatibility from the tier system, not from a feature flag toggling `std` on or off. Tier standard (the top-level module) uses `std` collections and is compiled by Vita/PC/desktop builds.
 
-| Usage | Current | `no_std` replacement |
-|-------|---------|---------------------|
-| `HashSet<Pos>` for FOV/explored | `std::collections::HashSet` | Fixed-size bitset indexed by `map.idx()`. A 30×20 map = 600 bits = 75 bytes. |
-| `Vec<Entity>` for entity list | `std::vec::Vec` | `ArrayVec<Entity, N>` from `heapless` or a fixed-size array with a count. `N` comes from `SimBudget::max_entities` (128 for GBA). |
-| `Vec<Tile>` for map tiles | `std::vec::Vec` | Fixed-size array `[Tile; MAX_TILES]`. 30×20 = 600 bytes. |
-| `Vec<Rect>` for rooms | `std::vec::Vec` | `ArrayVec<Rect, MAX_ROOMS>`. 30 rooms × ~10 bytes = 300 bytes. |
-| `Vec<String>` for messages | `std::vec::Vec` + `String` | `ArrayVec<ArrayString<64>, 8>` from `heapless` / `arrayvec`. 8 messages × 64 chars. |
-| `String` for entity names | `std::string::String` | `ArrayString<16>` or `&'static str` (monster names are compile-time known). |
-| `HashMap` for floor items | `std::collections::HashMap` | Not needed on GBA until items are implemented. When needed: parallel array indexed by `map.idx()`, or `ArrayVec` of `(Pos, Item)`. |
+Pure game rules (damage formulas, balance constants, item definitions, leveling tables, monster tables, `GameEvent` messages, seed encoding) live in `core::rules` and are tier-agnostic — pure functions and constants with no game state interaction, using only `u8`/`i16` arithmetic that works at every tier. Game mechanics (applying damage, inserting spawned monsters, spawn placement) remain per-tier.
 
-The approach: **gate `std` collections behind `#[cfg(not(feature = "gba"))]`**, with `no_std` alternatives behind `#[cfg(feature = "gba")]`. This is a significant refactor but is mechanical — the logic doesn't change, only the container types. The `heapless` crate provides `Vec`, `String`, and other `std`-like types backed by fixed-size arrays, reducing the diff.
+Core containers used by tier micro and tier compact, and their tier standard equivalents:
 
-A type alias layer can reduce churn:
+| Usage | Tier micro / compact | Tier standard |
+|-------|---------------------|---------------|
+| FOV / explored set | Fixed-size bitset indexed by `map.idx()`. 64×48 = 384 bytes (micro), 128×96 = 1536 bytes (compact). | `HashSet<Pos>` |
+| Entity list | Fixed-size array. Capacity 16 (micro), 128 (compact). | `Vec<Entity>` |
+| Map tiles | Fixed-size array `[Tile; MAX_TILES]`. 64×48 (micro), 128×96 (compact). | `Vec<Tile>` |
+| Rooms | Fixed-size array `[Rect; MAX_ROOMS]`. | `Vec<Rect>` |
+| Messages | Fixed-size array of fixed-size byte buffers. 8 messages × 64 chars. | `Vec<String>` |
+| Entity names | `&'static str` (monster names are compile-time known). | `&'static str` |
+| Floor items | Parallel array indexed by `map.idx()`, or fixed-size array of `(Pos, Item)`. | `HashMap<Pos, Item>` |
+
+Tier compact uses the same fixed-array approach as tier micro, but with larger capacities (128 entities vs 16, 128×96 maps vs 64×48). Both constrained tiers avoid heap allocation entirely.
+
+A type alias layer within each tier keeps call sites clean:
 
 ```rust
-#[cfg(feature = "gba")]
-pub type EntityVec = heapless::Vec<Entity, 128>;
-#[cfg(not(feature = "gba"))]
-pub type EntityVec = std::vec::Vec<Entity>;
+// In tier_compact:
+pub type EntityVec = ArrayVec<Entity, 128>;
+pub type RoomVec = ArrayVec<Rect, MAX_ROOMS>;
+pub type MessageBuf = ArrayVec<ArrayString<64>, 8>;
 ```
 
-This keeps call sites unchanged: `entities.push()`, `entities.iter()`, `entities[i]` all work on both types.
+This keeps call sites unchanged: `entities.push()`, `entities.iter()`, `entities[i]` all work regardless of tier. The capacity constants are baked into each tier module, not set dynamically.
 
-**Risk:** This is the most invasive change the GBA port requires. It affects every module in core that uses `Vec`, `String`, or `HashSet`. The mitigation is that all existing tests continue to pass under the default feature set — the `gba` feature only activates when the GBA crate builds. CI tests both feature sets.
+**Risk:** The tier system is already the target architecture for core. The compact tier will initially be stubs only (type aliases + PRNG); the full compact tier (game state, mapgen, entity storage, FOV) will be fleshed out when GBA work begins. The GBA-specific work is writing the GBA frontend crate and completing the compact tier — no other core refactoring is needed.
 
-**"Don't close doors" note:** The `no_std` refactor benefits the C64 port (which also needs `no_std` with even tighter caps) and any future embedded target. It does not affect terminal/SSH/MCP/web builds, which continue using `std` collections with no capacity limits.
+**"Don't close doors" note:** The tier hierarchy benefits every port. The GBA compiles `rules/` + tier compact (its native tier) + tier micro (for cross-platform seeds). The Vita compiles all tiers. The C64 compiles `rules/` + tier micro only. Desktop/terminal/SSH/MCP/web builds compile everything. Each platform gets exactly the types and capacities it needs without feature flags or `cfg` switching. Game rules in `rules/` are written once and reused across all tiers; game mechanics remain per-tier.
 
 ## Rendering
 
@@ -267,8 +291,8 @@ GBA buttons map to `GameCommand` and `MenuCommand`:
 
 | Input | Command | Notes |
 |-------|---------|-------|
-| D-pad | `Move { dx, dy }` | 4 cardinal directions |
-| D-pad + L | Diagonal `Move` | L acts as a modifier for NE/NW/SE/SW. D-pad Up+Right with L held = `Move { dx: 1, dy: -1 }`. |
+| D-pad | `Move(Direction)` | 4 cardinal directions |
+| D-pad + L | Diagonal `Move(Direction)` | L acts as a modifier for NE/NW/SE/SW. D-pad Up+Right with L held = `Move(Direction::NorthEast)`. |
 | A | `Wait` | |
 | B | Pause menu | |
 | R | Auto-explore | |
@@ -394,7 +418,7 @@ Estimated IWRAM (32 KB) usage for hot data:
 
 | Data | Size | Notes |
 |------|------|-------|
-| Entity array | 128 × 20 bytes = 2,560 B | `Entity` with `i16` coords, `i8` stats, properties, mood/memory |
+| Entity array | 128 × 20 bytes = 2,560 B | `Entity` with `i16` coords (tier compact), `u8` stats, properties, mood/memory |
 | Map tiles | 600 B (30×20) | `Tile` is 1 byte |
 | FOV bitset | 75 B (600 bits) | Replaces `HashSet<Pos>` |
 | Explored bitset | 75 B | Same |
@@ -431,7 +455,7 @@ Each phase is independently testable. Phases 1–3 produce a playable GBA build.
 **Goal:** GBA binary boots, renders a static dungeon map, player is visible.
 
 - Set up `crates/gba/` with `agb` or `gba` crate, `#![no_std]`, `#![no_main]`.
-- Activate `gba` feature on core. Begin `no_std` refactor for core containers (this is the bulk of the effort — see [What Changes in Core](#what-changes-in-core)).
+- Import `core::tier_compact` and `core::tier_micro`. The tier system already provides `no_std` modules with fixed-size containers and `i16` coords (see [What Changes in Core](#what-changes-in-core)), so no additional refactoring is needed.
 - Implement `GbaRenderer` with static tile rendering (no scrolling yet). Render the map as background tiles in Mode 0.
 - Render the player as OAM sprite 0.
 - Display a static HP bar using background tiles on a second layer (BG1) or the bottom 2 tile rows of BG0.
@@ -443,7 +467,7 @@ Each phase is independently testable. Phases 1–3 produce a playable GBA build.
 
 **Goal:** Playable turn-based game — move, attack, die.
 
-- Implement `GbaInput` (`InputSource` trait). D-pad → cardinal movement, L modifier → diagonals.
+- Implement `GbaInput` (`InputSource` trait). D-pad → `Move(Direction)` for cardinal movement, L modifier → diagonal `Direction` variants.
 - Wire up the game loop: read input → `GameState::step()` → re-render changed tiles.
 - Render monsters as sprites. Assign OAM slots to visible entities.
 - Display messages in the bottom tile rows (fixed-width font, 30 chars per line, 2 lines).
@@ -503,13 +527,13 @@ Each phase is independently testable. Phases 1–3 produce a playable GBA build.
 1. **`agb` vs `gba` crate.** `agb` is higher-level (provides allocator, sprite management, tiled backgrounds) but opinionated. The `gba` crate is thinner and more manual. `agb` may fight the project's own rendering approach; `gba` requires more boilerplate but fewer surprises. Needs evaluation against the specific tile streaming and OAM management requirements above.
 
 2. **Map size clamping.** Desktop-generated maps can be 80×40 or larger. The GBA viewport is 28×18 with a 32×32 screenblock. Options:
-   - Generate GBA-sized maps (30×20) when the `gba` feature is active, via `GameConfig` overrides.
+   - Generate GBA-sized maps (30×20) when building for GBA, via `GameConfig` overrides.
    - Support larger maps with tile streaming (Phase 3 handles this). The screenblock wraps, so maps up to ~60×60 work. Beyond that, a second screenblock is needed (BG0 supports two screenblocks at the cost of VRAM).
    - The simplest v1: cap map size to 30×20 on GBA via `game.toml` defaults baked into ROM.
 
-3. **Seed code compatibility.** GBA-generated dungeons (30×20 map, `i16` coords, `i8` stats) will not produce the same dungeon as desktop for the same seed — the map dimensions and RNG consumption differ. Seed codes should encode the platform or dimensions (the format already supports `seed-WxH`, e.g., `r7z3kq-30x20`) so that seed sharing is explicit about what generated the dungeon. Sharing seeds across platforms with different map sizes is not a goal.
+3. **Seed code compatibility.** GBA-generated dungeons at tier compact (128×96 map, `i16` coords, LFSR-32 RNG) will not produce the same dungeon as desktop tier standard for the same seed — the map dimensions, RNG algorithm, and FOV differ. Short seeds (tier micro) are cross-platform by design: any platform can play back a tier micro seed. Tier is determined by the seed's numeric value (`seed <= 0xFFFF` → micro, `seed <= 0xFFFFFFFF` → compact, else standard), so seed sharing is explicit about what generated the dungeon.
 
-4. **`no_std` refactor scope.** The `Vec` → `heapless::Vec` / `ArrayVec` refactor could be done incrementally (start with the modules GBA actually exercises — `map`, `entity`, `fov`, `combat`, `ai`, `spawn`, `game` — and leave `analytics`, `scenario`, `exploration_graph` as `std`-only behind feature gates) or all at once. Incremental is lower risk but means some core modules aren't available on GBA. Since those modules are dev-tools or MCP-specific, gating them behind `#[cfg(not(feature = "gba"))]` is fine.
+4. **`no_std` tier module scope.** Tier micro and tier compact are `no_std` modules with fixed-size arrays. The GBA uses these directly. Dev-tools-only modules (`analytics`, `scenario`, `exploration_graph`) live at tier standard behind `std`, which is fine since the GBA does not need them.
 
 5. **Tile art style.** Pixel art tiles versus rendered font glyphs. Using actual ASCII glyphs in an 8×8 font preserves the terminal aesthetic and is simpler to implement (one tile per character, palette swap for color). Custom pixel art tiles are more visually interesting but require an artist or generated assets. A reasonable path: start with font-glyph tiles, add pixel art later as a separate tileset (the tile index mapping is the same either way).
 
@@ -527,27 +551,33 @@ The CI matrix ([cross-platform.md](../architecture/cross-platform.md)) already t
 - name: Build GBA
   run: cargo build --target thumbv4t-none-eabi -p roguelike-gba
 
-- name: Test core with GBA features
-  run: cargo test -p roguelike-core --features gba --no-default-features
+- name: Test core tier_compact
+  run: cargo test -p roguelike-core --lib --no-default-features -- tier_compact
+
+- name: Test core tier_micro
+  run: cargo test -p roguelike-core --lib --no-default-features -- tier_micro
 ```
 
-This catches regressions where a core change breaks `no_std` compatibility or overflows a fixed-size container.
+This catches regressions where a core change breaks `no_std` tier modules or overflows a fixed-size container.
 
 ### Gameplay Parity
 
-The deterministic replay system can verify that a given seed + command sequence produces the same outcomes on GBA-featured core as on default core (accounting for map size differences). This is a property test: "for any command sequence, GBA and desktop produce the same combat results, XP awards, etc. when given the same seed and map dimensions."
+The deterministic replay system can verify that a given seed + command sequence produces the same outcomes on tier compact as on tier standard (accounting for map size and RNG differences). For tier micro seeds (cross-platform), all tiers must produce identical results. This is a property test: "for any command sequence, tier compact and tier standard produce the same combat results, XP awards, etc. when given the same tier micro seed and map dimensions."
 
 ## Relationship to Other Constrained Ports
 
 The patterns established here are reusable:
 
-| Pattern | GBA | Vita | C64 |
+| Pattern | GBA (tier compact) | Vita/PC (tier standard) | C64 (tier micro) |
 |---------|-----|------|-----|
-| Feature-flag type sizing | `i16` / `i8` | `i32` / `i32` (same as desktop) | `i8` / `i8` |
-| `no_std` core | Required | Not required (Vita has `std`) | Required |
-| Fixed-size containers | `heapless` or `ArrayVec` | Not needed | Same as GBA, smaller caps |
-| Compact save format | `postcard` over SRAM | vita-sdk save API (can use JSON) | Custom binary over disk |
-| Hardware-specific renderer | Tiles + OAM | vita2d library | PETSCII + color RAM |
-| `SimBudget` caps | 128 entities, 256 CA tiles/turn | 512 entities, 1000 CA tiles/turn | 32 entities, 64 CA tiles/turn |
+| Core module | `core::rules` + `core::tier_compact` + `core::tier_micro` | `core::rules` + all tiers | `core::rules` + `core::tier_micro` |
+| Coord / Stat types | `i16` / `u8` | `i32` / `i32` | `u8` / `u8` |
+| RNG | LFSR-32 | ChaCha20 | LFSR-16 |
+| FOV | Bresenham | Shadowcasting | Bresenham |
+| `no_std` / `std` | `no_std` (tier compact/micro are `no_std`) | `std` | `no_std` (tier micro is `no_std`) |
+| Containers | Fixed-size arrays (128 entities, 128×96 maps) | `Vec`, `HashMap`, `HashSet` | Fixed-size arrays (16 entities, 64×48 maps) |
+| Compact save format | `postcard` over SRAM | JSON / `postcard` | Custom binary over disk |
+| Hardware-specific renderer | Tiles + OAM | vita2d / terminal / GPU | PETSCII + color RAM |
+| Entity cap | 128 | 512–1024 | 16 |
 
-The Vita port can skip the `no_std` refactor entirely — it has a full OS. The C64 port benefits directly from the GBA's `no_std` work, needing only tighter capacity bounds and `i8` type sizing. This is the "don't close doors" principle in action: the GBA port's infrastructure investment pays forward.
+All platforms use `roguelike-core` directly, each compiling `core::rules` (pure game rules) plus its native tier. The C64 compiles `core::rules` + `core::tier_micro` (`u8` coords, 16 entities, LFSR-16). The GBA compiles `core::rules` + `core::tier_compact` (`i16` coords, 128 entities, LFSR-32) + `core::tier_micro` for cross-platform seed playback. The Vita and desktop compile `core::rules` + all tiers. Game rules in `core::rules` are written once — pure functions and constants with no state interaction. Game mechanics (spawn placement, damage application) remain per-tier. This is the "don't close doors" principle in action: the tier hierarchy gives every platform exactly the types and capacities it needs without feature flags or conditional compilation.

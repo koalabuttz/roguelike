@@ -172,9 +172,10 @@ Mood changes happen in `combat.rs` during `melee_attack()`. This creates emergen
 
 **Files:** `data.rs`, `settings.rs`, `game.rs`
 
-The `Platform` enum (`settings.rs`) already has GBA and C64 variants. Add a budget struct to `data.rs`:
+The tier hierarchy defines capability levels that platforms map to. Add a budget struct to `data.rs`:
 
 ```rust
+// SimBudget is a component of the tier definition.
 pub struct SimBudget {
     pub max_entities: usize,
     pub active_sim_radius: Coord,
@@ -184,13 +185,15 @@ pub struct SimBudget {
 }
 ```
 
-| Parameter | Desktop | GBA | C64 |
+| Parameter | Tier micro (C64) | Tier compact (GBA) | Tier standard (Vita/PC) |
 |-----------|---------|-----|-----|
-| `max_entities` | 1024 | 128 | 32 |
-| `active_sim_radius` | 40 | 16 | 10 |
-| `ca_tiles_per_turn` | 2000 | 256 | 64 |
-| `max_events_per_turn` | 100 | 16 | 4 |
-| `enable_tile_state` | true | true | false |
+| `max_entities` | 32 | 128 | 512–1024 |
+| `active_sim_radius` | 10 | 16 | 40 |
+| `ca_tiles_per_turn` | 64 | 256 | 1000–2000 |
+| `max_events_per_turn` | 4 | 16 | 100 |
+| `enable_tile_state` | false | true | true |
+
+SimBudget is a component of the tier definition. When a higher platform runs a lower-tier game, it uses the lower tier’s SimBudget — ensuring gameplay parity. Within tier standard, Vita and PC may use different `max_entities` values (512 vs 1024) as a platform tuning parameter, not a tier distinction.
 
 All simulation systems respect these caps. On C64, the tile state layer is omitted entirely — environmental effects use only the event queue and interaction table.
 

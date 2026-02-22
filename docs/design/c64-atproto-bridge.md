@@ -6,7 +6,7 @@ Design for a self-hostable bridge server that connects a Commodore 64 (via Ultim
 
 ## Motivation
 
-The C64 is classified as a [constrained platform](../architecture/cross-platform.md#what-moves-to-frontend-crates) — no `SaveBackend` dependency, no HTTP stack, no TLS, no JSON parsing, 64KB RAM, 1MHz 6510 CPU. It cannot participate in the atproto ecosystem directly. Every other connected platform (SSH, terminal, web) talks to the user's PDS natively via XRPC. The C64 cannot.
+The C64 is classified as a [constrained platform](../architecture/cross-platform.md#frontend-crates) — no `SaveBackend` dependency, no HTTP stack, no TLS, no JSON parsing, 64KB RAM, 1MHz 6510 CPU. It cannot participate in the atproto ecosystem directly. Every other connected platform (SSH, terminal, web) talks to the user's PDS natively via XRPC. The C64 cannot.
 
 But the game's atproto features — portable saves, federated spectating, Bluesky identity — are valuable regardless of which platform you play on. A C64 player should be able to:
 
@@ -427,7 +427,7 @@ If the bridge is not connected (no Ultimate64, or bridge not running), all netwo
 |----------|-------------|
 | [atproto.md](atproto.md) | The bridge reuses the save lexicons (`save.gameState`, `save.settings`) and the `PdsSaveBackend` concept. It performs the same XRPC operations (uploadBlob, putRecord, getRecord, getBlob) but from a standalone service rather than an in-process Rust crate. The bridge uses app passwords (initially) instead of the full OAuth flow, diverging from atproto.md's OAuth-only stance — this is a pragmatic concession for a headless device. |
 | [atproto-spectating.md](atproto-spectating.md) | The bridge implements the producer side of atproto spectating, publishing `spectate.frame` and `spectate.session` records. Frames are produced from C64 PETSCII screen data instead of `render_frame()`, but the resulting atproto records are schema-identical. Consumers (Jetstream subscribers) cannot distinguish a C64-produced frame from an SSH-produced one. |
-| [cross-platform.md](../architecture/cross-platform.md) | The C64 crate depends only on `roguelike-core` — no `roguelike-saves`, no `roguelike-atproto`, no networking crates. The bridge is an external companion, not a workspace crate. This preserves the [constrained platform boundary](../architecture/cross-platform.md#what-moves-to-frontend-crates): `NullFrameSink` in the C64 crate, atproto frame publishing in the bridge. |
+| [cross-platform.md](../architecture/cross-platform.md) | The C64 crate depends only on `roguelike-core` — no `roguelike-saves`, no `roguelike-atproto`, no networking crates. The bridge is an external companion, not a workspace crate. This preserves the [constrained platform boundary](../architecture/cross-platform.md#frontend-crates): `NullFrameSink` in the C64 crate, atproto frame publishing in the bridge. |
 | [simulation.md](../architecture/simulation.md) | The C64's `SimBudget` (32 entities, 10-tile active radius, event-only simulation) determines the maximum save size. Smaller game state = smaller save packets = faster bridge transfers. The bridge doesn't need to understand simulation details — it treats save data as an opaque blob with a metadata header. |
 | [spectator-mode.md](spectator-mode.md) | The bridge provides the C64's path to remote spectating. Without it, the C64 has no spectating capability at all (no file system for `FileFrameSink`, no network for `AtprotoFrameSink`). The bridge fills this gap with an external service. |
 

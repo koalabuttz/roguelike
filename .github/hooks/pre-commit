@@ -10,6 +10,14 @@
 
 set -e  # Exit on first failure
 
+# Skip checks if no Rust/TOML/workflow files are staged
+if git diff --cached --name-only | grep -qE '\.(rs|toml|yml|yaml|lock)$'; then
+    : # Build-relevant files staged — run full checks
+else
+    echo "No build-relevant files changed — skipping build checks."
+    exit 0
+fi
+
 echo "Running pre-commit checks..."
 echo ""
 

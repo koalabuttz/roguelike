@@ -14,8 +14,8 @@ These items block the most downstream work or are essential for the game to func
 
 | Item | Blocks | Impact | Effort | Notes |
 |------|--------|--------|--------|-------|
-| Stairs | ~3 items | High | M | Transforms single-room arena into a multi-level dungeon. |
-| Items | ~4 items | High | M | Meaningful player decisions. Unlocks menus, inventory UI, hunger (food is an item). |
+| Items | ~4 items | High | M-L | Most blocking feature. Unlocks inventory UI, hunger (food is an item), equipment, consumables. [Implementation plan.](design/gameplay-implementation-plan.md#phase-2-items--inventory) |
+| Stairs | ~3 items | High | M | Transforms single-room arena into a multi-level dungeon. Win condition. [Implementation plan.](design/gameplay-implementation-plan.md#phase-3-stairs--multi-level-dungeons) |
 
 ## Tier 2: Core Systems
 
@@ -24,8 +24,7 @@ Fills out the core game loop and addresses high-value, low-effort improvements.
 | Item | Blocks | Impact | Effort | Notes |
 |------|--------|--------|--------|-------|
 | Hunger | 0 | Medium | S | Classic mechanic. Simple (decrement per turn, eat food). Depends on items. |
-| Experience/leveling | 0 | High | M | Progression within a run. |
-| Wandering monsters | 0 | Medium | S | Spawn new monsters over time to pressure the player forward. Primary anti-camping guard for HP regen — prevents infinite wait-to-heal. Uses existing spawn system. |
+| Experience/leveling | 0 | High | M | Progression within a run. [Implementation plan.](design/gameplay-implementation-plan.md#phase-4-experience--leveling) |
 
 ## Tier 3: Extended Features
 
@@ -36,7 +35,6 @@ Builds on the core systems to add depth, platforms, and accessibility.
 | Magic/abilities | 0 | High | L | Big design space. Requires targeting UI. Expands combat significantly. |
 | Granular difficulty | 0 | Medium | S | Config toggles. Broadens who can enjoy the game. |
 | Meta-progression | 0 | High | L | Persistent unlocks between runs. Requires save/load. |
-| Thread FrameSink through game loop | ~2 items | Low | S | Done. `run_game_loop` accepts `&dyn FrameSink`, `SpectatorWriter` renamed to `FileFrameSink` (implements `FrameSink`). Terminal and SSH pass `&NullFrameSink`. [Design doc.](design/atproto-spectating.md#phase-0-extract-render_frame-and-define-framesink) |
 | AT Protocol integration | ~2 items | High | L | Bluesky login via OAuth on SSH (HTTP callback bridge) and terminal (loopback redirect). Saves stored in user's PDS for cross-platform portability. [Design doc.](design/atproto.md) |
 | Web (WASM) | ~2 items | High | L | Browser-based play. Requires platform abstraction + `roguelike-saves`. CanvasRenderer, Web Worker for blocking game loop. [Design doc.](design/atproto.md#wasm-frontend) |
 | One-handed play (remaining) | 0 | Medium | S | Partially done (left-hand QWEASDZXC and WEASDZXCR layouts). Mouse-only and macros still TODO. |
@@ -87,47 +85,47 @@ Significant investment. May depend on earlier tiers being complete.
 ## Critical Path
 
 ```
-Input abstraction ✓
-  → Save/load ✓
-    → Items + Menus ✓
-      → Stairs + Hunger
-        → Experience/leveling
-          = Complete game loop
+Gameplay branch (current focus):
+  Save/load ✓
+    → Menus ✓
+    → Wandering monsters ✓
+      → Items
+        → Stairs + Hunger
+          → Experience/leveling
+            = Complete game loop
 
-  → Seeded RNG ✓
-    → Replay system ✓
-      → Daily challenges / Seed sharing ✓ (seed sharing done)
-
-  → Controller support ✓
-    → Steam Deck + Steam Cloud (Auto-Cloud syncs local save/cache dir)
-
-  → Platform abstraction ✓
+Platform/identity branch (deferred until gameplay branch completes):
+  Platform abstraction ✓
     → SSH server ✓
       → Extract SaveBackend to crates/saves ✓
         → AT Protocol OAuth (SSH + terminal login with Bluesky)
           → PDS save backend (portable saves across all frontends)
             → WASM frontend (browser play + same saves)
 
-  → MCP spectator (file) ✓
+Spectating branch:
+  MCP spectator (file) ✓
     → Extract FrameSink/render_frame to core ✓
       → Thread FrameSink through game loop ✓
         → Atproto spectating (federated live spectating via Jetstream)
           → Web spectate viewer (lightweight JS, no full WASM needed)
 
-A* pathfinding ✓
-  → MCP pathfind_to tool ✓
-  → Auto-explore ✓
-  → MCP exploration graph ✓
+Other completed branches:
+  Input abstraction ✓ → Controller support ✓ → Steam Deck + Steam Cloud
+  Seeded RNG ✓ → Replay system ✓ → Daily challenges / Seed sharing ✓ (seed sharing done)
+  A* pathfinding ✓ → MCP pathfind_to ✓, Auto-explore ✓, MCP exploration graph ✓
 ```
 
-The foundation is complete — input abstraction, save/load, seeded RNG, A\*
-pathfinding, platform abstraction, the SSH server, SaveBackend extraction,
-FrameSink/render\_frame extraction, and FrameSink game loop threading are all
-done. The remaining critical path is the gameplay branch (Items → Stairs → XP)
-and the platform/identity branch (atproto OAuth → PDS saves → WASM). The
-spectating branch now goes through atproto (federated spectating via Jetstream)
-rather than TCP. See the [atproto design doc](design/atproto.md) (4 phases) and
-the [atproto spectating design doc](design/atproto-spectating.md) (5 phases).
+The foundation is complete. The **immediate priority is the gameplay branch**:
+Items → Stairs → XP. This completes the core game loop. See the
+[gameplay implementation plan](design/gameplay-implementation-plan.md) for
+detailed designs and playtest gates for each phase.
+
+The platform/identity branch (atproto OAuth → PDS saves → WASM) and the
+spectating branch (atproto spectating via Jetstream) are deferred until the
+gameplay branch is complete — there's no value in platform expansion until the
+game has items, stairs, and progression. See the
+[atproto design doc](design/atproto.md) (4 phases) and the
+[atproto spectating design doc](design/atproto-spectating.md) (5 phases).
 
 ## Completed
 
@@ -156,6 +154,7 @@ Items that have been implemented, organized by original tier.
 | MCP pathfind_to tool | Walk to a visible/explored `(x, y)` via shortest path. |
 | MCP explored map tool | `get_explored_map` with frontier markers. |
 | MCP exploration graph | `exploration_graph.rs`, integrated into all MCP observations. |
+| Wandering monsters | Time-pressure spawning with grace period, idle acceleration, spawn chance, max cap. `Wander` AI behavior (switches to Chase on LOS). Distance-based sound cues. Data-driven via `[wandering]` in `game.toml`. |
 
 ### Tier 3
 

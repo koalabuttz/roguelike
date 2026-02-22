@@ -80,4 +80,4 @@ Project documentation for the roguelike dungeon crawler.
 
 - [README.md](../README.md) — Project overview, feature list, and roadmap summary
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — How to contribute
-- [claude.md](../claude.md) — AI assistant context for working on this codebase
+- [CLAUDE.md](../CLAUDE.md) — AI assistant context for working on this codebase

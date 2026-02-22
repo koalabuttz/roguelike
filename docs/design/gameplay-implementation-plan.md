@@ -1,222 +1,63 @@
 # Gameplay Implementation Plan
 
-> **Status:** Proposed. Implementation plan for high-leverage gameplay features identified through codebase analysis and LLM playtest findings.
-
-Six features prioritized by impact-to-effort ratio and downstream unlock potential. Each phase is independently shippable and testable — no phase requires a later phase to be valuable.
+> **Status:** In progress. Phase 1 (wandering monsters) is complete. Phase 2 (items) is next.
 
 ## Motivation
 
 Four LLM playtest sessions ([summary](../reports/llm-playtest-summary.md)) converged on the same diagnosis:
 
-1. **No win condition.** After clearing the dungeon, the game continues with nothing to do.
-2. **Regen is too generous.** The player fully heals between every encounter — no resource tension remains.
-3. **Combat is solved arithmetic.** Every encounter has exactly one correct answer. `auto_fight` perfectly matches the combat depth.
-4. **No progression.** Killing monsters has no benefit beyond survival.
+1. **No win condition.** After clearing the dungeon, the game continues with nothing to do. *Solved when: the game can end in victory.*
+2. **Regen is too generous.** The player fully heals between every encounter — no resource tension remains. *Solved when: LLM survival rate drops below 80% and waiting is no longer the dominant strategy.*
+3. **Combat is solved arithmetic.** Every encounter has exactly one correct answer. `auto_fight` perfectly matches the combat depth. *Solved when: `auto_fight` is not the optimal strategy in >50% of encounters (item use, flee, or positioning matter).*
+4. **No progression.** Killing monsters has no benefit beyond survival. *Solved when: the player's power increases over the course of a run, enabling harder content.*
 
-The MCP interface reached maturity in Session 4 (0% wasted tool calls). The bottleneck shifted from interface to content. These six features address the content gap.
+The MCP interface reached maturity in Session 4 (0% wasted tool calls). The bottleneck shifted from interface to content.
 
 ## Overview
 
-| Phase | Feature | Effort | Impact | Depends on |
-|-------|---------|--------|--------|------------|
-| 1 | [Wandering monsters](#phase-1-wandering-monsters) | S | Medium-High | — |
-| 2 | [Stairs / multi-level dungeons](#phase-2-stairs--multi-level-dungeons) | M | High | — |
-| 3 | [Items & inventory](#phase-3-items--inventory) | M-L | High | — |
-| 4 | [Experience & leveling](#phase-4-experience--leveling) | M | High | Phase 2 (benefits from floor scaling) |
-| 5 | [Creature mood & memory](#phase-5-creature-mood--memory) | M | Medium-High | — |
-| 6 | [Property bitfields & interaction table](#phase-6-property-bitfields--interaction-table) | S-M | Medium | — |
+### Part 1: Core Loop Completion
 
-Phases 1, 2, 3, 5, and 6 are independent and can be developed in parallel. Phase 4 benefits from Phase 2 (leveling needs something to scale against) but is not strictly blocked by it.
+Four phases, each addressing one playtest finding. Independently shippable. Sequentially validated via LLM playtesting. **All four must be complete before moving to Part 2.**
 
----
+| Phase | Feature | Effort | Addresses | Status |
+|-------|---------|--------|-----------|--------|
+| 1 | [Wandering monsters](#phase-1-wandering-monsters) | S | Problem #2: Regen too generous | **Complete** |
+| 2 | [Items & inventory](#phase-2-items--inventory) | M-L | Problem #3: Combat is solved arithmetic | Next |
+| 3 | [Stairs / multi-level dungeons](#phase-3-stairs--multi-level-dungeons) | M | Problem #1: No win condition | — |
+| 4 | [Experience & leveling](#phase-4-experience--leveling) | M | Problem #4: No progression | — |
 
-## Phase 1: Wandering Monsters
+Phase 4 benefits from Phase 3 (leveling needs something to scale against) but is not strictly blocked by it. Items is ordered before stairs because it blocks ~4 downstream features (the most of any item on the roadmap) and combines with wandering monsters to create a resource economy.
 
-**The highest leverage-per-effort feature in the entire roadmap.**
+### Part 2: Simulation Enrichment (deferred)
 
-### Problem
+These phases add emergent depth but do not address the core loop gap. **Defer until Part 1 is complete and playtested** — the core loop will inform their design. See the [simulation architecture doc](../architecture/simulation.md) for full design context.
 
-HP regen (1 HP / 3 turns) is too generous. The player can `wait` indefinitely between encounters to fully heal. All four playtest sessions flagged this. The game has no time pressure.
+| Phase | Feature | Effort | Prerequisite |
+|-------|---------|--------|--------------|
+| 5 | [Creature mood & memory](#phase-5-creature-mood--memory) | M | Part 1 complete |
+| 6 | [Property bitfields & interaction table](#phase-6-property-bitfields--interaction-table) | S-M | Part 1 complete |
 
-### Design
+## Phase Interactions
 
-Spawn new monsters over time, pressuring the player to keep moving. This makes time a cost — waiting to heal means more enemies to fight.
+While each phase is independently valuable, some combinations produce emergent gameplay that neither creates alone:
 
-#### New config in `game.toml`
+- **Wandering monsters + Items:** Healing potions become a finite resource under time pressure. This is where "solved arithmetic" actually breaks — the decision isn't "fight or not" but "use the potion now or save it for deeper floors."
+- **Items + Stairs:** Carrying loot between floors creates persistent investment. Dying on floor 5 with a Long Sword hurts more than dying on floor 5 with nothing.
+- **Stairs + XP:** Depth scaling and player scaling race against each other. The player can grind floor 1 for XP (safe but slow, wandering monsters punish this) or push deeper for better XP (risky but faster).
 
-```toml
-[config]
-# ... existing fields ...
-wandering_spawn_interval = 40    # Spawn a wandering monster every N turns
-wandering_spawn_delay = 60       # No wandering spawns before turn N
-wandering_max_active = 5         # Cap on simultaneous wandering monsters
-```
-
-#### Spawn rules
-
-1. Every `wandering_spawn_interval` turns (after `wandering_spawn_delay`), spawn one monster.
-2. Pick a random room that is **not** the player's current room and **not** in the player's FOV.
-3. Use the existing weighted spawn table from `spawn.rs` to pick the monster type.
-4. Cap active wandering monsters at `wandering_max_active` to prevent unbounded growth.
-5. Wandering monsters use the existing `Chase` AI — they behave identically to placed monsters once spawned.
-
-#### Files touched
-
-| File | Change |
-|------|--------|
-| `data.rs` | Add `wandering_spawn_interval`, `wandering_spawn_delay`, `wandering_max_active` to `GameConfig`. |
-| `game.toml` | Add default values for the three new config fields. |
-| `game.rs` | Add `wandering_spawned: Stat` field to `GameState`. Add `maybe_spawn_wanderer()` called from `step()` after `apply_regen()`. |
-| `spawn.rs` | Extract weighted monster selection into a reusable `pick_monster()` function (currently inline in `spawn_monsters()`). New `spawn_wanderer()` function that picks a room and calls `pick_monster()`. |
-
-#### Integration point
-
-In `GameState::step()`, after the existing regen call:
-
-```rust
-pub fn step(&mut self, cmd: GameCommand) -> StepResult {
-    // ... existing: handle_command, update_fov, run_monster_turns, turn_count++, apply_regen ...
-    self.maybe_spawn_wanderer();
-    // ...
-}
-```
-
-#### MCP impact
-
-The `observe` and `act` responses already include monster lists. Wandering monsters appear naturally. The `auto_explore` tool will stop when a new monster enters FOV (existing `MonsterSpotted` stop reason). No MCP tool changes needed.
-
-#### Testing
-
-- **Unit test:** `maybe_spawn_wanderer()` spawns at correct intervals, respects delay, respects cap.
-- **Unit test:** Wanderer spawns outside player's current room and FOV.
-- **Scenario test:** Player waiting 200 turns accumulates wandering monsters.
-- **Golden replays:** Regenerate (wandering spawns will change outcomes).
-- **Balance CI:** Will detect the shift automatically — expect higher monster counts and lower survival rates.
+These interactions mean balance tuning after Phase 4 will differ significantly from tuning after Phase 1 alone. Re-run balance CI after the full set, not just per-phase.
 
 ---
 
-## Phase 2: Stairs / Multi-Level Dungeons
+## Phase 1: Wandering Monsters ✓
 
-**Addresses the #1 playtest complaint: no win condition.**
+**Complete.** Implemented with `[wandering]` config in `game.toml`, `try_spawn_wandering()` in `game.rs`, `Wander` AI behavior in `entity.rs`, distance-based sound cues, idle acceleration, and grace period. The implementation exceeded the original proposal — it includes spawn chance, idle threshold/acceleration for camping detection, and multi-distance sound cues (`sound_far`, `sound_medium`, `sound_near`).
 
-### Design
-
-Add descending stairs (`>`) to each floor. Entering stairs generates a new, harder floor. The game ends when the player dies or reaches a target depth (or plays indefinitely in endless mode).
-
-#### Dungeon model
-
-Each floor is a complete `GameState`. On descend, generate a new floor from a derived seed. On ascend, restore the previous floor from memory.
-
-```rust
-/// In game.rs or a new dungeon.rs
-pub struct DungeonState {
-    /// The current floor's full game state.
-    pub current: GameState,
-    /// Completed floors the player can return to (index 0 = floor 1).
-    pub floors_above: Vec<GameState>,
-    /// Current depth (1-indexed, floor 1 is the starting floor).
-    pub depth: Stat,
-    /// Maximum depth reached (for scoring).
-    pub max_depth: Stat,
-}
-```
-
-**Alternative (simpler, recommended for v1):** No ascent. One-way descent. `GameState` gains a `depth: Stat` field and `descend()` method. Previous floors are discarded. This avoids the complexity of storing multiple floors and aligns with many classic roguelikes (Brogue, early DCSS).
-
-#### Floor generation
-
-```rust
-impl GameState {
-    pub fn descend(&mut self, game_data: &GameData) {
-        self.depth += 1;
-        // Derive a new seed: original_seed + depth ensures determinism
-        let floor_seed = self.seed.wrapping_add(self.depth as u64);
-        // Generate new map, spawn monsters scaled to depth
-        // Preserve player entity (HP, stats, inventory, XP)
-        // Place player at the up-stairs position
-    }
-}
-```
-
-#### Difficulty scaling
-
-New `game.toml` section:
-
-```toml
-[depth_scaling]
-monster_hp_per_floor = 1        # +1 HP per floor
-monster_atk_per_floor = 0.5     # +0.5 ATK per floor (rounded)
-monster_density_per_floor = 0.1  # +10% monsters per floor
-max_monster_scaling = 3.0        # Cap at 3x base stats
-```
-
-Alternatively, introduce new monster types at deeper floors by adding a `min_depth` field to `MonsterDef`:
-
-```toml
-[[monsters]]
-name = "Dragon"
-# ...
-min_depth = 5
-spawn_weight = 5
-```
-
-This is more interesting than stat scaling because it introduces qualitatively new threats.
-
-#### Stair placement
-
-Place `>` (down stairs) in a room far from the player start. On floors 2+, also place `<` (up stairs) at the player's spawn point. Add `Tile::StairsDown` and `Tile::StairsUp` variants:
-
-```rust
-pub enum Tile {
-    Wall,
-    Floor,
-    StairsDown,  // '>'
-    StairsUp,    // '<'
-}
-```
-
-#### New config in `game.toml`
-
-```toml
-[config]
-# ... existing fields ...
-target_depth = 10               # Win condition: reach this floor
-```
-
-#### Files touched
-
-| File | Change |
-|------|--------|
-| `map.rs` | Add `StairsDown`/`StairsUp` to `Tile` enum. `move_cost()` returns 1 for stairs. Place stairs during `generate()`. |
-| `game.rs` | Add `depth: Stat` and `max_depth: Stat` to `GameState`. Add `descend()` method. Handle `>` tile interaction in `handle_command()`. |
-| `data.rs` | Add depth scaling config. Optional `min_depth` field on `MonsterDef`. |
-| `game.toml` | Add depth scaling defaults. |
-| `entity.rs` | No changes — player entity is preserved across floors. |
-| `spawn.rs` | Filter `MonsterDef` by `min_depth <= current_depth`. Apply stat scaling. |
-| `command.rs` | Add `Descend` / `Ascend` to `GameCommand` (or handle via movement onto stair tiles). |
-
-#### Rendering
-
-TUI: Render `>` as `>` in the floor color (or a distinct color like cyan). Render `<` as `<`.
-
-MCP: Add `depth`, `max_depth`, and `target_depth` to `GameObservation`. Stairs appear as `>`/`<` in the ASCII map.
-
-#### Win condition
-
-When the player descends past `target_depth`, trigger a victory screen. Add `game_won: bool` to `GameState` alongside `game_over`.
-
-#### Testing
-
-- **Unit test:** Stairs are placed on every generated map. Descend produces a valid new floor.
-- **Unit test:** Player stats (HP, etc.) are preserved across descend.
-- **Unit test:** Floor seed is deterministic (`seed + depth`).
-- **Scenario test:** Player can reach floor 5 with god mode, verifying the descent chain works.
-- **Golden replays:** Regenerate (stairs change map layout).
-- **Invariant tests:** Add `depth >= 1` and `max_depth >= depth` to property checks.
+Playtest gate validation is pending — run LLM playtest sessions to measure survival rate impact before proceeding to Phase 2.
 
 ---
 
-## Phase 3: Items & Inventory
+## Phase 2: Items & Inventory
 
 **The most blocking feature on the roadmap — unlocks ~4 downstream features.**
 
@@ -288,12 +129,9 @@ spawn_weight = 15
 min_depth = 1
 ```
 
-#### Floor items
-
-Items on the ground live in a `HashMap` on `Map`, keyed by position:
+#### State additions
 
 ```rust
-// In map.rs or game.rs
 pub struct GameState {
     // ... existing fields ...
     pub floor_items: HashMap<Pos, Vec<Item>>,
@@ -328,22 +166,7 @@ max_items_per_room = 1
 
 #### Combat integration
 
-In `combat.rs`, `melee_attack()` reads effective ATK/DEF from the entity's base stats plus equipment bonuses. Add a helper:
-
-```rust
-/// Effective attack including equipment bonuses.
-pub fn effective_attack(entity: &Entity, equipped: &EquippedItems) -> Stat {
-    let bonus = equipped.weapon.as_ref()
-        .and_then(|w| match &w.kind {
-            ItemKind::Equipment { attack_bonus, .. } => Some(*attack_bonus),
-            _ => None,
-        })
-        .unwrap_or(0);
-    entity.attack + bonus
-}
-```
-
-Only the player has equipment — monsters use base stats. This keeps `melee_attack()` simple: pass effective stats rather than changing the function signature.
+In `combat.rs`, `melee_attack()` reads effective ATK/DEF from the entity's base stats plus equipment bonuses. Only the player has equipment — monsters use base stats. This keeps `melee_attack()` simple: pass effective stats rather than changing the function signature.
 
 #### Files touched
 
@@ -384,6 +207,118 @@ Keep it small — 4-6 items total. More can be added via `game.toml` without cod
 - **Scenario test:** Player with a sword kills a goblin faster than without.
 - **Golden replays:** Regenerate.
 
+#### Playtest gate
+
+Run 3+ LLM playtest sessions after implementation. Validate:
+
+- **Item decisions happen.** LLMs should use `pickup` and `use_item` actions. If they ignore items, the items aren't impactful enough.
+- **`auto_fight` is no longer optimal.** Using a healing potion mid-fight or equipping a weapon before a fight should produce better outcomes than raw `auto_fight`.
+- **Inventory creates trade-offs.** Full inventory forces drop decisions.
+
+If LLMs play identically with and without items, the item effects need to be stronger or more varied before proceeding.
+
+---
+
+## Phase 3: Stairs / Multi-Level Dungeons
+
+**Addresses the #1 playtest complaint: no win condition.**
+
+### Design
+
+Add descending stairs (`>`) to each floor. Entering stairs generates a new, harder floor. The game ends when the player dies or reaches a target depth (or plays indefinitely in endless mode).
+
+#### Dungeon model
+
+One-way descent. `GameState` gains a `depth: Stat` field and `descend()` method. Previous floors are discarded. This avoids the complexity of storing multiple floors and aligns with many classic roguelikes (Brogue, early DCSS).
+
+On descend, derive a new seed (`original_seed + depth`) for determinism. Generate a new map, spawn monsters scaled to depth, preserve the player entity (HP, stats, inventory, XP), and place the player at the up-stairs position.
+
+#### Difficulty scaling
+
+New `game.toml` section:
+
+```toml
+[depth_scaling]
+monster_hp_per_floor = 1        # +1 HP per floor
+monster_atk_per_floor = 0.5     # +0.5 ATK per floor (rounded)
+monster_density_per_floor = 0.1  # +10% monsters per floor
+max_monster_scaling = 3.0        # Cap at 3x base stats
+```
+
+Alternatively, introduce new monster types at deeper floors by adding a `min_depth` field to `MonsterDef`:
+
+```toml
+[[monsters]]
+name = "Dragon"
+# ...
+min_depth = 5
+spawn_weight = 5
+```
+
+This is more interesting than stat scaling because it introduces qualitatively new threats.
+
+#### Stair placement
+
+Place `>` (down stairs) in a room far from the player start. On floors 2+, also place `<` (up stairs) at the player's spawn point. Add `Tile::StairsDown` and `Tile::StairsUp` variants:
+
+```rust
+pub enum Tile {
+    Wall,
+    Floor,
+    StairsDown,  // '>'
+    StairsUp,    // '<'
+}
+```
+
+#### New config in `game.toml`
+
+```toml
+[config]
+# ... existing fields ...
+target_depth = 10               # Win condition: reach this floor
+```
+
+#### Win condition
+
+When the player descends past `target_depth`, trigger a victory screen. Add `game_won: bool` to `GameState` alongside `game_over`.
+
+#### Files touched
+
+| File | Change |
+|------|--------|
+| `map.rs` | Add `StairsDown`/`StairsUp` to `Tile` enum. `move_cost()` returns 1 for stairs. Place stairs during `generate()`. |
+| `game.rs` | Add `depth: Stat` and `max_depth: Stat` to `GameState`. Add `descend()` method. Handle `>` tile interaction in `handle_command()`. |
+| `data.rs` | Add depth scaling config. Optional `min_depth` field on `MonsterDef`. |
+| `game.toml` | Add depth scaling defaults. |
+| `entity.rs` | No changes — player entity is preserved across floors. |
+| `spawn.rs` | Filter `MonsterDef` by `min_depth <= current_depth`. Apply stat scaling. |
+| `command.rs` | Add `Descend` / `Ascend` to `GameCommand` (or handle via movement onto stair tiles). |
+
+#### Rendering
+
+TUI: Render `>` as `>` in the floor color (or a distinct color like cyan). Render `<` as `<`.
+
+MCP: Add `depth`, `max_depth`, and `target_depth` to `GameObservation`. Stairs appear as `>`/`<` in the ASCII map.
+
+#### Testing
+
+- **Unit test:** Stairs are placed on every generated map. Descend produces a valid new floor.
+- **Unit test:** Player stats (HP, etc.) are preserved across descend.
+- **Unit test:** Floor seed is deterministic (`seed + depth`).
+- **Scenario test:** Player can reach floor 5 with god mode, verifying the descent chain works.
+- **Golden replays:** Regenerate (stairs change map layout).
+- **Invariant tests:** Add `depth >= 1` and `max_depth >= depth` to property checks.
+
+#### Playtest gate
+
+Run 3+ LLM playtest sessions after implementation. Validate:
+
+- **LLMs find and use stairs.** The MCP observation includes `>` on the map and `depth`/`target_depth` in stats — LLMs should navigate to stairs and descend.
+- **Difficulty ramps.** Survival rate should decrease on deeper floors. If floor 5 feels the same as floor 1, scaling needs tuning.
+- **The game has a win condition.** At least one LLM session should reach (or attempt to reach) the target depth.
+
+If LLMs don't engage with stairs, consider adding a `descend` action to the MCP `act` tool (rather than requiring pathfind-to + move onto `>`).
+
 ---
 
 ## Phase 4: Experience & Leveling
@@ -397,7 +332,6 @@ Monsters award XP on death. Accumulating enough XP triggers a level-up with stat
 #### Player progression fields
 
 ```rust
-// In entity.rs or game.rs
 pub struct GameState {
     // ... existing fields ...
     pub player_xp: Stat,
@@ -438,28 +372,11 @@ xp = 40
 
 #### Level-up logic
 
-In `combat.rs` or `game.rs`, after a monster dies:
-
-```rust
-fn award_xp(&mut self, monster_idx: usize) {
-    let xp = self.monster_xp_value(monster_idx);
-    self.player_xp += xp;
-    while self.player_xp >= self.xp_for_next_level() {
-        self.player_level += 1;
-        self.entities[0].max_hp += hp_per_level;
-        self.entities[0].hp += hp_per_level;  // Heal on level-up
-        self.entities[0].attack += attack_per_level;
-        if self.player_level % 2 == 0 {
-            self.entities[0].defense += defense_per_2_levels;
-        }
-        self.log.add(format!("Level up! You are now level {}.", self.player_level));
-    }
-}
-```
+On monster death, award XP equal to the monster's `xp` value. When accumulated XP crosses the next threshold in `xp_per_level`, increment level and apply stat bonuses (+HP, +ATK every level, +DEF every 2 levels). Multiple level-ups can trigger from a single kill.
 
 #### Synergy with stairs
 
-With depth scaling (Phase 2), leveling creates a natural power curve: the player gets stronger as floors get harder. Without stairs, leveling still works — it just doesn't have as much to scale against.
+With depth scaling (Phase 3), leveling creates a natural power curve: the player gets stronger as floors get harder. Without stairs, leveling still works — it just doesn't have as much to scale against.
 
 #### Files touched
 
@@ -482,6 +399,20 @@ Add `xp`, `level`, `xp_to_next_level` to `GameObservation`. LLMs can now factor 
 - **Scenario test:** Player reaches level 3 after clearing a floor of goblins.
 - **Balance CI:** Will detect stat growth impact automatically.
 
+#### Playtest gate
+
+Run 3+ LLM playtest sessions after implementation. This is the final Part 1 gate — validate the complete core loop:
+
+- **Progression is visible.** LLMs should reach level 2+ in a typical session. If they don't, XP thresholds are too high or monster XP values are too low.
+- **Risk/reward decisions emerge.** With items, stairs, and XP all active, LLMs should exhibit varied strategies — some grinding for XP, some pushing deep quickly.
+- **The four motivating problems are resolved.** Revisit each: (1) win condition exists via stairs, (2) regen is punished by wandering monsters, (3) combat involves item decisions, (4) kills award progression. If any remain unresolved, iterate before moving to Part 2.
+
+---
+
+## Part 2: Simulation Enrichment
+
+> **Prerequisite:** Part 1 (Phases 1-4) is complete and validated via LLM playtesting. The core loop shapes the design of these phases — mood and properties are more useful when there are items to interact with, floors to flee across, and progression to modulate.
+
 ---
 
 ## Phase 5: Creature Mood & Memory
@@ -497,7 +428,6 @@ Add `mood: i8` and `memory: u8` to `Entity`. Mood influences AI behavior: fright
 #### Entity changes
 
 ```rust
-// In entity.rs
 pub struct Entity {
     // ... existing fields ...
     pub mood: i8,       // -128 (terrified) to 127 (enraged). Default 0 (neutral).
@@ -505,25 +435,7 @@ pub struct Entity {
 }
 ```
 
-Memory flags:
-
-```rust
-pub const SAW_ALLY_DIE: u8  = 1 << 0;
-pub const WAS_HIT: u8       = 1 << 1;
-pub const LANDED_HIT: u8    = 1 << 2;
-pub const LOW_HP: u8        = 1 << 3;
-```
-
-#### AI behavior expansion
-
-```rust
-pub enum AiBehavior {
-    None,       // Player
-    Chase,      // Greedy chase toward player
-    Flee,       // Run away from player (reverse of chase vector)
-    Wander,     // Random movement (not toward or away from player)
-}
-```
+Memory flags: `SAW_ALLY_DIE` (bit 0), `WAS_HIT` (bit 1), `LANDED_HIT` (bit 2), `LOW_HP` (bit 3).
 
 #### Mood thresholds
 
@@ -548,32 +460,7 @@ The natural decay toward 0 prevents permanent mood states — a fleeing goblin w
 
 #### Flee AI
 
-```rust
-fn flee_ai(entities: &mut [Entity], idx: usize, px: Coord, py: Coord, map: &Map) {
-    let mx = entities[idx].x;
-    let my = entities[idx].y;
-    // Move away from player (opposite of chase vector)
-    let step_x = (mx - px).signum();
-    let step_y = (my - py).signum();
-    // Try diagonal away, then cardinal away, then any walkable
-    let candidates = [
-        (mx + step_x, my + step_y),
-        (mx + step_x, my),
-        (mx, my + step_y),
-    ];
-    for (nx, ny) in candidates {
-        if map.is_walkable(nx, ny) && !is_occupied_by_monster(entities, nx, ny, idx) {
-            entities[idx].x = nx;
-            entities[idx].y = ny;
-            break;
-        }
-    }
-}
-```
-
-#### Species awareness
-
-For "ally dies" to work, monsters need to recognize allies. Use `glyph` equality as a proxy for species (all goblins are `g`, all orcs are `o`). This requires no new data — `entity.glyph` already exists.
+Move away from the player (opposite of chase vector). Try diagonal away, then cardinal away, then any walkable tile. Species awareness uses `glyph` equality as a proxy (all goblins are `g`, all orcs are `o`) — no new data needed.
 
 #### Message log integration
 
@@ -620,7 +507,6 @@ Add a `properties: u64` bitfield to `Entity` (and eventually `Tile`). Add a dama
 #### Property bitfield
 
 ```rust
-// New file: crates/core/src/properties.rs
 pub type Properties = u64;
 
 pub const ORGANIC:      Properties = 1 << 0;
@@ -666,10 +552,6 @@ The table is a `const` array indexed by `[DamageType][property_bit_index]`. The 
 | `game.toml` | Add `properties` lists to monster definitions. |
 | `combat.rs` | (Future) Check properties during damage calculation. |
 
-#### Why now
-
-Phase 6 is cheap (S effort for the bitfield, M for the interaction table) and forward-compatible with everything. Once items exist (Phase 3), a fire potion immediately gets interesting interactions because the property system is already in place. It also enriches MCP observations — the LLM can see that a troll is `organic, regenerating` and reason about it.
-
 #### Testing
 
 - **Unit test:** Property bitfield operations (set, check, combine).
@@ -703,31 +585,43 @@ Each phase adds fields to `GameObservation`. Monitor the JSON payload size — t
 ### Headless runner updates
 
 The headless auto-play AI (`bin/headless.rs`) will need updates for:
-- **Phase 2:** Descend stairs when the floor is cleared.
-- **Phase 3:** Pick up and use items (simple heuristic: always pick up, use healing potions when low).
+- **Phase 2:** Pick up and use items (simple heuristic: always pick up, use healing potions when low).
+- **Phase 3:** Descend stairs when the floor is cleared.
 - **Phase 4:** No changes needed — XP is automatic.
 - **Phase 5:** No changes needed — mood affects monster AI, not player AI.
 
 ---
 
-## Implementation Order Recommendation
+## Implementation Order
 
 ```
-Phase 1: Wandering Monsters (S)
-    Immediate tension fix. No dependencies. Ship and playtest.
+Part 1: Core Loop Completion
+──────────────────────────────────────────────
 
-Phase 2: Stairs (M)
-    Win condition. Ship and playtest.
+Phase 1: Wandering Monsters (S) ✓
+    Complete. Playtest gate validation pending.
 
-    Phase 5: Creature Mood (M)          Phase 6: Properties (S-M)
-    Independent. Can develop             Independent. Foundation
-    in parallel with Phase 2-3.          for future simulation.
+Phase 2: Items & Inventory (M-L)          ← NEXT
+    Most blocking feature. Creates resource decisions.
+    Combined with Phase 1, transforms the resource economy.
+    Ship → playtest gate → validate.
 
-Phase 3: Items & Inventory (M-L)
-    Biggest single feature. Ship and playtest.
+Phase 3: Stairs / Multi-Level Dungeons (M)
+    Win condition. More interesting with items (carry loot
+    between floors, depth-gated items).
+    Ship → playtest gate → validate.
 
 Phase 4: Experience & Leveling (M)
-    Best after stairs exist to scale against.
+    Benefits from stairs (difficulty scaling) and items
+    (XP decisions interact with resource decisions).
+    Ship → final playtest gate → validate all 4 problems resolved.
+
+Part 2: Simulation Enrichment (deferred until Part 1 validated)
+──────────────────────────────────────────────
+
+Phase 5: Creature Mood & Memory (M)
+Phase 6: Property Bitfields & Interaction Table (S-M)
+    Independent. Can develop in parallel once Part 1 is stable.
 ```
 
-After all six phases, the game has: time pressure (wandering monsters), a win condition (stairs), resource management (items), progression (XP), emergent AI behavior (mood), and a foundation for simulation depth (properties). This transforms the current "solved arithmetic arena" into a game with meaningful decisions on every turn.
+After Part 1, the game has: time pressure (wandering monsters), resource management (items), a win condition (stairs), and progression (XP). This transforms the current "solved arithmetic arena" into a game with meaningful decisions on every turn. Part 2 adds emergent depth on top of that foundation.

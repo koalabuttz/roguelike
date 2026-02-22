@@ -29,6 +29,7 @@ The game adapts to your terminal size automatically.
 
 - `@` is you. Monsters appear as colored letters (`g`oblin, `o`rc, `T`roll).
 - Monsters have their own sight range and chase you when *they* see you (not when you see them). Trolls are dim-sighted and easy to sneak past; goblins are alert scouts.
+- New monsters spawn over time, creating time pressure — waiting to heal between fights means more enemies to deal with. Distance-based sound cues warn you when wandering monsters are nearby.
 - `%` marks a corpse. Dead monsters stay on the map.
 - The HP bar and message log are at the bottom of the screen.
 - **Title screen** lets you start a new game, enter a seed code, load a save, or adjust settings.
@@ -93,6 +94,8 @@ Configurable fields under `[config]`:
 | `ui_bottom_rows` | 5 | Rows reserved for status bar and log |
 | `max_autorun_steps` | 100 | Maximum steps per autorun command |
 | `regen_interval` | 3 | Turns between HP regeneration ticks |
+
+Wandering monster spawning is configured under `[wandering]` with tuning for spawn interval, spawn chance, grace period, idle acceleration, max active wandering monsters, and distance-based sound cue thresholds.
 
 ## SSH Server (Multiplayer)
 
@@ -199,16 +202,19 @@ See [docs/architecture/cross-platform.md](docs/architecture/cross-platform.md) f
 
 ## Roadmap
 
-See [docs/roadmap.md](docs/roadmap.md) for the full breakdown with dependencies, effort estimates, and critical path. See [docs/README.md](docs/README.md) for all design documents and session reports.
+See [docs/roadmap.md](docs/roadmap.md) for the full breakdown with dependencies, effort estimates, and critical path. See [docs/design/gameplay-implementation-plan.md](docs/design/gameplay-implementation-plan.md) for the detailed implementation plan for the next features. See [docs/README.md](docs/README.md) for all design documents and session reports.
 
-**Next up:**
+**Next up** (gameplay branch — current focus):
 - Items, inventory, and equipment
 - Multi-level dungeons (stairs)
 - Experience and leveling
+
+**Later** (deferred until gameplay branch completes):
 - Web (WASM) frontend
+- AT Protocol integration (Bluesky login, PDS saves)
 - Daily challenges and shared leaderboard
 
-**Completed highlights:** Platform abstraction, save/load, A\* pathfinding, gamepad support, SSH multiplayer, MCP server for AI play, data-driven content with hot reload, full CI/CD with balance regression testing, seed sharing.
+**Completed highlights:** Wandering monsters with time pressure and sound cues, platform abstraction, save/load, A\* pathfinding, gamepad support, SSH multiplayer, MCP server for AI play, data-driven content with hot reload, full CI/CD with balance regression testing, seed sharing.
 
 ## David's Statement on AI Use
 

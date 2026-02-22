@@ -34,6 +34,7 @@ cargo test -p roguelike-core --test golden_replays # 5 golden replay regression 
 cargo test -p roguelike-core --test scenarios      # 8 balance integration tests
 cargo test -p roguelike-core --test invariants     # Property-based core game invariant tests
 cargo test -p roguelike-mcp                        # MCP integration + property tests
+cargo bench -p roguelike-core              # Criterion benchmarks (FOV, pathfinding, step)
 cargo clippy --workspace -- -D warnings
 cargo fmt --all --check
 ```
@@ -48,6 +49,7 @@ cargo fmt --all --check
 | Invariant tests | `cargo test -p roguelike-core --test invariants` | Property-based: random command sequences verify HP bounds, explored monotonicity, dead-stay-dead, save/load roundtrip |
 | MCP integration | `cargo test -p roguelike-mcp --test mcp_integration` | All 10 MCP tools: response schemas, error paths, session lifecycle |
 | MCP property tests | `cargo test -p roguelike-mcp --test mcp_proptest` | Random MCP tool sequences verify game invariants hold through the JSON interface |
+| Benchmarks | `cargo bench -p roguelike-core` | Criterion benchmarks for FOV, pathfinding, game step, and exploration graph |
 
 ### Golden Replays
 
@@ -172,8 +174,11 @@ Set `ROGUELIKE_SPECTATE_PATH` to watch the LLM play in a separate terminal:
 # Terminal 1: start the MCP server with spectating enabled
 ROGUELIKE_SPECTATE_PATH=/tmp/roguelike-spectate.txt cargo run --bin mcp_server
 
-# Terminal 2: watch the game
-watch -n 0.1 cat /tmp/roguelike-spectate.txt
+# Terminal 2: watch the game (using the helper script)
+./tools/spectate.sh
+
+# Or watch a specific seed:
+./tools/spectate.sh 12345
 ```
 
 Frames are written atomically after every action. The spectator file shows the full explored map, HP/turn/kills status, and recent log messages.
@@ -361,6 +366,19 @@ The `.github/workflows/balance.yml` workflow runs automatically when gameplay-re
 
 The diff classifies changes as **STABLE**, **MINOR SHIFT** (2pp+ win rate or 5%+ avg turns), or **BALANCE SHIFT** (5pp+ win rate or 10%+ turns/kills). Since all runs use `--seed 1`, results are deterministic — any delta means actual gameplay behavior changed.
 
+### CI Pipeline
+
+The `.github/workflows/ci.yml` workflow runs on every push and PR that touches `crates/`, `Cargo.toml`, `Cargo.lock`, or workflow files. It runs four jobs:
+
+1. **Lint** — `cargo fmt --check` + `cargo clippy` (including `raw-usb` feature)
+2. **Test** — `cargo test --workspace` on 4 platforms: Linux x86_64, Linux ARM64, macOS ARM64, Windows x86_64 (plus `raw-usb` feature tests on Linux)
+3. **Benchmark** — `cargo bench -p roguelike-core` with Criterion reports uploaded as artifacts (30-day retention)
+4. **Audit** — `cargo audit` for known vulnerabilities (advisory, non-blocking)
+
+### Release Pipeline
+
+The `.github/workflows/release.yml` workflow triggers on version tags (`v*`). It builds release binaries for all 4 platforms, generates SHA256 checksums, and creates a GitHub Release with all artifacts attached. Each release includes `roguelike`, `mcp_server`, `headless`, and `roguelike-ssh` binaries.
+
 ### LLM Playtesting
 
 Strategic LLM-driven playtesting where an LLM plays the game making tactical decisions (fight, flee, explore) rather than the headless runner's simple auto-explore + auto-fight AI.
@@ -482,6 +500,8 @@ crates/
       scenarios.rs          Balance integration tests
       invariants.rs         Property-based game invariant tests (proptest)
       golden_replays/       Stored golden replay JSON files
+    benches/
+      core_benchmarks.rs    Criterion benchmarks (FOV, pathfinding, step, exploration graph)
   saves/                    roguelike-saves: SaveBackend trait (connected platforms)
     src/
       lib.rs                SaveBackend trait definition (depends only on core)
@@ -523,13 +543,24 @@ crates/
       mcp_integration.rs    Deterministic MCP tool integration tests
       mcp_proptest.rs       Property-based MCP session tests (proptest)
   libudev-sys-dlopen/       Drop-in libudev-sys replacement via dlopen (Linux gamepad)
+  c64/                      roguelike-c64: C64 port proof-of-concept (standalone, not in workspace)
+    src/
+      main.rs, c64.rs       Entry point + C64 hardware abstraction (VIC-II, SID, CIA)
+      map.rs, render.rs     40x25 scrolling map, PETSCII rendering
+      entity.rs, combat.rs  8-bit entity system, simplified combat
+      ai.rs, fov.rs         Monster AI + field of view (no_std)
+      input.rs, prng.rs     Keyboard polling, hand-rolled xorshift PRNG
+      msglog.rs             Fixed-size message log
 tools/
   visualize.py            Python/matplotlib analytics visualizer (batch, sweep, analysis modes)
   balance_diff.py         Balance diff tool — compares stats JSON, outputs markdown verdict (stdlib only)
   llm_playtest.py         Dual-backend LLM playtesting (claude-code CLI or Anthropic API) with parallel execution
   playtest_analytics.py   Shared analytics module for LLM playtesting tools
+  spectate.sh             Helper script to watch LLM play in real time (wraps watch + cat)
   requirements.txt        Python dependencies (matplotlib, anthropic)
 .github/workflows/
+  ci.yml                  CI pipeline — lint, test matrix (4 platforms), benchmarks, cargo audit
+  release.yml             Release pipeline — tag-triggered multi-platform builds, GitHub Release with checksums
   balance.yml             CI balance check — runs headless presets, diffs against baseline, posts to PR/summary
 ```
 
@@ -557,15 +588,18 @@ Configurable fields under `[config]`:
 - [rusb](https://crates.io/crates/rusb) 0.9 — raw USB HID gamepad access (optional `raw-usb` feature)
 - [rand](https://crates.io/crates/rand) 0.8 — random number generation
 - [serde](https://crates.io/crates/serde) 1 / [serde_json](https://crates.io/crates/serde_json) 1 — serialization for save/load and game observations
+- [toml](https://crates.io/crates/toml) 0.8 — data-driven game configuration (`game.toml`)
 - [rmcp](https://crates.io/crates/rmcp) 0.15 — MCP server (official Rust SDK)
 - [russh](https://crates.io/crates/russh) 0.49 / [russh-keys](https://crates.io/crates/russh-keys) 0.49 — SSH server for multiplayer
 - [argon2](https://crates.io/crates/argon2) 0.5 — Password hashing for SSH account system
 - [tokio](https://crates.io/crates/tokio) 1 — async runtime for MCP and SSH servers
 - [tracing](https://crates.io/crates/tracing) 0.1 / [tracing-subscriber](https://crates.io/crates/tracing-subscriber) 0.3 — structured logging for MCP and SSH servers
+- [criterion](https://crates.io/crates/criterion) 0.5 — benchmarks (dev dependency)
+- [proptest](https://crates.io/crates/proptest) 1 — property-based testing (dev dependency)
 
 ## Roadmap
 
-See [docs/roadmap.md](docs/roadmap.md) for a detailed breakdown with dependencies, effort estimates, and a critical path diagram.
+See [docs/roadmap.md](docs/roadmap.md) for a detailed breakdown with dependencies, effort estimates, and a critical path diagram. See [docs/README.md](docs/README.md) for a full index of design documents, architecture notes, and session reports.
 
 ### Foundation (enables networking, platforms & advanced features)
 - [x] **Input abstraction** — `GameCommand` enum, decouple game logic from terminal input
@@ -619,7 +653,7 @@ Design principles (not checkboxes — follow these always):
 - [ ] **Game Boy Advance** — Native ARM via `thumbv4t-none-eabi` target + `gba` crate; no_std, fixed-size containers
 - [ ] **PS Vita** — Native ARM via vita-sdk + vitasdk-sys; hardware buttons, OLED display, memory card saves
 - [x] **SSH server** — Server-side play via russh, NetHack-server style (players connect via SSH); dgamelaunch-style lobby with account registration/login, per-user persistent saves
-- [ ] **Commodore 64** — Native 6502 via rust-mos; no_std, fixed-size containers, 8-bit types, C64 screen/keyboard I/O
+- [ ] **Commodore 64** — Native 6502 via rust-mos; no_std, fixed-size containers, 8-bit types, C64 screen/keyboard I/O (POC validated in `crates/c64/`; [proposal](docs/c64-port-proposal.md), [technical reference](docs/c64-technical-reference.md))
 
 ### Modding
 - [x] **Data-driven content** — Game balance data in TOML; drop a `game.toml` in the working directory to override player stats, config knobs, and monster definitions without recompiling

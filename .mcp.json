@@ -5,6 +5,14 @@
         ".claude/mcp/safe-fetch-server.py"
       ],
       "command": "python3"
+    },
+    "roguelike": {
+      "command": "cargo",
+      "args": [
+        "run",
+        "--bin",
+        "mcp_server"
+      ]
     }
   }
 }

@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Regenerate golden replay files for item system changes (#13)
 - Add item system to roguelike (#2)
 
 ### Fixed

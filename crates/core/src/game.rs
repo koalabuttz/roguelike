@@ -575,14 +575,9 @@ impl GameState {
         if let Some(target_idx) = self.entity_at(new_x, new_y)
             && target_idx != 0
         {
-            // Apply equipment bonuses temporarily for combat.
-            let atk_bonus = self.equipment.attack_bonus();
-            let def_bonus = self.equipment.defense_bonus();
-            self.entities[0].attack += atk_bonus;
-            self.entities[0].defense += def_bonus;
-            combat::melee_attack(&mut self.entities, 0, target_idx, &mut self.log);
-            self.entities[0].attack -= atk_bonus;
-            self.entities[0].defense -= def_bonus;
+            let atk = self.effective_attack();
+            let def = self.entities[target_idx].defense;
+            combat::melee_attack(&mut self.entities, 0, target_idx, atk, def, &mut self.log);
             return true;
         }
 
@@ -852,7 +847,14 @@ impl GameState {
             self.update_fov();
             let mut turn_rng =
                 StdRng::seed_from_u64(self.wandering_seed.wrapping_add(self.turn_count as u64));
-            if ai::run_monster_turns(&mut self.entities, &self.map, &mut self.log, &mut turn_rng) {
+            let player_def = self.effective_defense();
+            if ai::run_monster_turns(
+                &mut self.entities,
+                &self.map,
+                &mut self.log,
+                &mut turn_rng,
+                player_def,
+            ) {
                 self.game_over = true;
             }
             self.turn_count += 1;

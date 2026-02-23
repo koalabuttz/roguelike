@@ -5,7 +5,7 @@ use crate::entity::{AiBehavior, Entity};
 use crate::fov;
 use crate::map::Map;
 use crate::message_log::MessageLog;
-use crate::types::Coord;
+use crate::types::{Coord, Stat};
 
 /// Check whether a monster is aware of the player.
 ///
@@ -26,11 +26,15 @@ fn is_aware(entities: &[Entity], idx: usize, px: Coord, py: Coord, map: &Map) ->
 }
 
 /// Run all monster turns. Returns true if the player was killed.
+///
+/// `player_def` is the player's effective defense (base + equipment bonus).
+/// Monsters don't have equipment, so their raw stats are used directly.
 pub fn run_monster_turns(
     entities: &mut [Entity],
     map: &Map,
     log: &mut MessageLog,
     rng: &mut impl Rng,
+    player_def: Stat,
 ) -> bool {
     let px = entities[0].x;
     let py = entities[0].y;
@@ -45,14 +49,14 @@ pub fn run_monster_turns(
         match entities[i].ai {
             AiBehavior::Chase => {
                 if aware {
-                    chase_ai(entities, i, px, py, map, log);
+                    chase_ai(entities, i, px, py, map, log, player_def);
                 }
             }
             AiBehavior::Wander => {
                 if aware {
                     entities[i].ai = AiBehavior::Chase;
                     log.add(format!("The {} notices you!", entities[i].name));
-                    chase_ai(entities, i, px, py, map, log);
+                    chase_ai(entities, i, px, py, map, log, player_def);
                 } else {
                     wander_ai(entities, i, map, rng);
                 }
@@ -71,6 +75,7 @@ fn chase_ai(
     py: Coord,
     map: &Map,
     log: &mut MessageLog,
+    player_def: Stat,
 ) {
     let mx = entities[idx].x;
     let my = entities[idx].y;
@@ -79,7 +84,8 @@ fn chase_ai(
 
     // If adjacent, attack
     if dist_x <= 1 && dist_y <= 1 {
-        combat::melee_attack(entities, idx, 0, log);
+        let atk = entities[idx].attack;
+        combat::melee_attack(entities, idx, 0, atk, player_def, log);
         return;
     }
 
@@ -194,7 +200,8 @@ mod tests {
         let orig_y = dead_monster.y;
 
         let mut entities = vec![make_player(5, 5), dead_monster];
-        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng());
+        let pdef = entities[0].defense;
+        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng(), pdef);
         // Dead monster should not have moved
         assert_eq!(entities[1].x, orig_x);
         assert_eq!(entities[1].y, orig_y);
@@ -216,7 +223,8 @@ mod tests {
         let orig_y = monster.y;
 
         let mut entities = vec![make_player(5, 5), monster];
-        run_monster_turns(&mut entities, &walled_map, &mut log, &mut test_rng());
+        let pdef = entities[0].defense;
+        run_monster_turns(&mut entities, &walled_map, &mut log, &mut test_rng(), pdef);
         assert_eq!(entities[1].x, orig_x);
         assert_eq!(entities[1].y, orig_y);
     }
@@ -228,7 +236,8 @@ mod tests {
 
         let mut entities = vec![make_player(5, 5), make_monster(5, 4)]; // adjacent
         let player_hp_before = entities[0].hp;
-        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng());
+        let pdef = entities[0].defense;
+        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng(), pdef);
         // Monster should have attacked, reducing player HP (goblin atk=3, player def=2, dmg=1)
         assert!(entities[0].hp < player_hp_before);
     }
@@ -239,7 +248,8 @@ mod tests {
         let mut log = MessageLog::new();
 
         let mut entities = vec![make_player(5, 5), make_monster(2, 2)]; // far away
-        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng());
+        let pdef = entities[0].defense;
+        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng(), pdef);
         // Monster should have moved closer to player
         let dx = (entities[1].x - 5).abs();
         let dy = (entities[1].y - 5).abs();
@@ -261,7 +271,8 @@ mod tests {
 
         // Player at (5,3), monster at (3,3) — within sight radius on open tiles
         let mut entities = vec![make_player(5, 3), make_monster(3, 3)];
-        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng());
+        let pdef = entities[0].defense;
+        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng(), pdef);
         // Monster should not be at (4, 3) — that's a wall
         assert!(!(entities[1].x == 4 && entities[1].y == 3));
     }
@@ -274,7 +285,8 @@ mod tests {
         // Monster at (3,5) wants to go toward player at (5,5).
         // Another monster at (4,5) blocks the direct path.
         let mut entities = vec![make_player(5, 5), make_monster(3, 5), make_monster(4, 5)];
-        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng());
+        let pdef = entities[0].defense;
+        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng(), pdef);
         // First monster (index 1) should not end up at (4,5) — that's where monster 2 is
         assert!(!(entities[1].x == 4 && entities[1].y == 5));
     }
@@ -288,7 +300,8 @@ mod tests {
         player.hp = 1; // Nearly dead
         player.defense = 0;
         let mut entities = vec![player, make_monster(5, 4)]; // adjacent goblin, atk=3
-        let player_died = run_monster_turns(&mut entities, &map, &mut log, &mut test_rng());
+        let pdef = entities[0].defense;
+        let player_died = run_monster_turns(&mut entities, &map, &mut log, &mut test_rng(), pdef);
         assert!(player_died);
         assert!(!entities[0].alive);
     }
@@ -299,7 +312,8 @@ mod tests {
         let mut log = MessageLog::new();
 
         let mut entities = vec![make_player(5, 5), make_monster(5, 4)];
-        let player_died = run_monster_turns(&mut entities, &map, &mut log, &mut test_rng());
+        let pdef = entities[0].defense;
+        let player_died = run_monster_turns(&mut entities, &map, &mut log, &mut test_rng(), pdef);
         assert!(!player_died);
     }
 
@@ -312,7 +326,8 @@ mod tests {
         // Goblin has sight_radius=6. Player at (5,5), monster at (8,5) — distance 3.
         let mut entities = vec![make_player(5, 5), make_monster(8, 5)];
         let orig_x = entities[1].x;
-        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng());
+        let pdef = entities[0].defense;
+        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng(), pdef);
         // Monster should have moved toward the player
         assert!(entities[1].x < orig_x, "monster should chase toward player");
     }
@@ -327,7 +342,8 @@ mod tests {
         let orig_x = monster.x;
         let orig_y = monster.y;
         let mut entities = vec![make_player(5, 5), monster];
-        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng());
+        let pdef = entities[0].defense;
+        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng(), pdef);
         // Monster should NOT have moved — player is beyond its sight radius
         assert_eq!(entities[1].x, orig_x);
         assert_eq!(entities[1].y, orig_y);
@@ -347,7 +363,8 @@ mod tests {
         let orig_x = monster.x;
         let orig_y = monster.y;
         let mut entities = vec![make_player(5, 5), monster];
-        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng());
+        let pdef = entities[0].defense;
+        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng(), pdef);
         assert_eq!(entities[1].x, orig_x);
         assert_eq!(entities[1].y, orig_y);
     }
@@ -367,7 +384,8 @@ mod tests {
         let orig_b_x = monster_b.x;
         let orig_b_y = monster_b.y;
         let mut entities = vec![make_player(5, 5), monster_a, monster_b];
-        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng());
+        let pdef = entities[0].defense;
+        run_monster_turns(&mut entities, &map, &mut log, &mut test_rng(), pdef);
         // Monster A should have moved (can see)
         assert!(entities[1].x < orig_a_x, "monster A should chase");
         // Monster B should NOT have moved (can't see)

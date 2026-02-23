@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::rules::balance;
 use crate::types::{Coord, GameColor, Stat};
 
 /// Maximum number of items on the ground the engine supports.
@@ -8,7 +9,7 @@ use crate::types::{Coord, GameColor, Stat};
 pub const MAX_GROUND_ITEMS: usize = 256;
 
 /// Maximum items spawned per room during map generation.
-pub const MAX_ITEMS_PER_ROOM: Stat = 1;
+pub const MAX_ITEMS_PER_ROOM: Stat = balance::MAX_ITEMS_PER_ROOM as Stat;
 
 /// All item spawn weights for the weighted spawn table.
 const ALL_KINDS: [ItemKind; 3] = [
@@ -79,16 +80,16 @@ pub fn item_name(kind: ItemKind) -> &'static str {
 /// Higher weight = more common. Set to 0 to disable spawning.
 pub fn item_spawn_weight(kind: ItemKind) -> u32 {
     match kind {
-        ItemKind::HealthPotion => 50,
-        ItemKind::ShortSword => 30,
-        ItemKind::LeatherArmor => 20,
+        ItemKind::HealthPotion => balance::HEALTH_POTION_SPAWN_WEIGHT as u32,
+        ItemKind::ShortSword => balance::SHORT_SWORD_SPAWN_WEIGHT as u32,
+        ItemKind::LeatherArmor => balance::LEATHER_ARMOR_SPAWN_WEIGHT as u32,
     }
 }
 
 /// HP restored when a health potion is consumed. Returns 0 for non-consumables.
 pub fn item_heal_amount(kind: ItemKind) -> Stat {
     match kind {
-        ItemKind::HealthPotion => 10,
+        ItemKind::HealthPotion => balance::HEALTH_POTION_HEAL as Stat,
         _ => 0,
     }
 }
@@ -96,7 +97,7 @@ pub fn item_heal_amount(kind: ItemKind) -> Stat {
 /// Attack bonus granted by equipping this item. Returns 0 for non-weapons.
 pub fn item_attack_bonus(kind: ItemKind) -> Stat {
     match kind {
-        ItemKind::ShortSword => 3,
+        ItemKind::ShortSword => balance::SHORT_SWORD_ATK_BONUS as Stat,
         _ => 0,
     }
 }
@@ -104,7 +105,7 @@ pub fn item_attack_bonus(kind: ItemKind) -> Stat {
 /// Defense bonus granted by equipping this item. Returns 0 for non-armor.
 pub fn item_defense_bonus(kind: ItemKind) -> Stat {
     match kind {
-        ItemKind::LeatherArmor => 2,
+        ItemKind::LeatherArmor => balance::LEATHER_ARMOR_DEF_BONUS as Stat,
         _ => 0,
     }
 }

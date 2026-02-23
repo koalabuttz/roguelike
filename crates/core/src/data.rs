@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::entity::AiBehavior;
+use crate::rules::balance;
 use crate::types::{Coord, GameColor, Stat};
 
 fn default_sight_radius() -> Coord {
-    8
+    balance::FOV_RADIUS as Coord
 }
 
 /// Top-level game data — player stats, config knobs, and monster definitions.
@@ -45,15 +46,15 @@ pub struct MonsterDef {
 }
 
 fn default_target_depth() -> Stat {
-    5
+    balance::TARGET_DEPTH as Stat
 }
 
 fn default_hp_per_floor() -> Stat {
-    1
+    balance::MONSTER_HP_PER_FLOOR as Stat
 }
 
 fn default_atk_per_floor() -> Stat {
-    1
+    balance::MONSTER_ATK_PER_FLOOR as Stat
 }
 
 /// Game-wide tuning knobs — change these to rebalance without touching logic.
@@ -90,31 +91,31 @@ impl Default for DepthScaling {
 }
 
 fn default_spawn_interval() -> Stat {
-    30
+    balance::WANDERING_SPAWN_INTERVAL as Stat
 }
 fn default_spawn_chance() -> Stat {
-    50
+    balance::WANDERING_SPAWN_CHANCE as Stat
 }
 fn default_grace_period() -> Stat {
-    50
+    balance::WANDERING_GRACE_PERIOD as Stat
 }
 fn default_max_wandering() -> Stat {
-    5
+    balance::WANDERING_MAX_ACTIVE as Stat
 }
 fn default_sound_far() -> Coord {
-    20
+    balance::WANDERING_SOUND_FAR as Coord
 }
 fn default_sound_medium() -> Coord {
-    10
+    balance::WANDERING_SOUND_MEDIUM as Coord
 }
 fn default_sound_near() -> Coord {
-    5
+    balance::WANDERING_SOUND_NEAR as Coord
 }
 fn default_idle_threshold() -> Stat {
-    5
+    balance::WANDERING_IDLE_THRESHOLD as Stat
 }
 fn default_idle_acceleration() -> Stat {
-    2
+    balance::WANDERING_IDLE_ACCELERATION as Stat
 }
 
 /// Configuration for wandering monster spawns and sound cues.
@@ -913,5 +914,109 @@ spawn_weight = 100
         }
         let diffs = diff_game_data(&old, &new);
         assert!(diffs.iter().any(|d| d.contains("sight 6 -> 10")));
+    }
+
+    // --- Balance constants verification ---
+    // Ensures game.toml defaults stay in sync with rules::balance constants.
+
+    #[test]
+    fn game_toml_matches_balance_constants() {
+        let data = defaults();
+
+        // Player defaults
+        assert_eq!(data.player.hp, balance::PLAYER_HP as Stat);
+        assert_eq!(data.player.attack, balance::PLAYER_ATK as Stat);
+        assert_eq!(data.player.defense, balance::PLAYER_DEF as Stat);
+        assert_eq!(data.player.glyph_char(), balance::PLAYER_GLYPH);
+
+        // Config
+        assert_eq!(data.config.fov_radius, balance::FOV_RADIUS as Coord);
+        assert_eq!(data.config.max_rooms, balance::MAX_ROOMS as Stat);
+        assert_eq!(data.config.room_size_min, balance::ROOM_SIZE_MIN as Coord);
+        assert_eq!(data.config.room_size_max, balance::ROOM_SIZE_MAX as Coord);
+        assert_eq!(
+            data.config.max_monsters_per_room,
+            balance::MAX_MONSTERS_PER_ROOM as Stat
+        );
+        assert_eq!(data.config.ui_bottom_rows, balance::UI_BOTTOM_ROWS as Stat);
+        assert_eq!(
+            data.config.max_autorun_steps,
+            balance::MAX_AUTORUN_STEPS as Stat
+        );
+        assert_eq!(data.config.regen_interval, balance::REGEN_INTERVAL as Stat);
+        assert_eq!(data.config.target_depth, balance::TARGET_DEPTH as Stat);
+
+        // Depth scaling
+        assert_eq!(
+            data.depth_scaling.monster_hp_per_floor,
+            balance::MONSTER_HP_PER_FLOOR as Stat
+        );
+        assert_eq!(
+            data.depth_scaling.monster_atk_per_floor,
+            balance::MONSTER_ATK_PER_FLOOR as Stat
+        );
+
+        // Wandering config
+        assert_eq!(
+            data.wandering.spawn_interval,
+            balance::WANDERING_SPAWN_INTERVAL as Stat
+        );
+        assert_eq!(
+            data.wandering.spawn_chance,
+            balance::WANDERING_SPAWN_CHANCE as Stat
+        );
+        assert_eq!(
+            data.wandering.grace_period,
+            balance::WANDERING_GRACE_PERIOD as Stat
+        );
+        assert_eq!(
+            data.wandering.max_wandering,
+            balance::WANDERING_MAX_ACTIVE as Stat
+        );
+        assert_eq!(
+            data.wandering.sound_far,
+            balance::WANDERING_SOUND_FAR as Coord
+        );
+        assert_eq!(
+            data.wandering.sound_medium,
+            balance::WANDERING_SOUND_MEDIUM as Coord
+        );
+        assert_eq!(
+            data.wandering.sound_near,
+            balance::WANDERING_SOUND_NEAR as Coord
+        );
+        assert_eq!(
+            data.wandering.idle_threshold,
+            balance::WANDERING_IDLE_THRESHOLD as Stat
+        );
+        assert_eq!(
+            data.wandering.idle_acceleration,
+            balance::WANDERING_IDLE_ACCELERATION as Stat
+        );
+
+        // Monster stats
+        let g = goblin();
+        assert_eq!(g.hp, balance::GOBLIN_HP as Stat);
+        assert_eq!(g.attack, balance::GOBLIN_ATK as Stat);
+        assert_eq!(g.defense, balance::GOBLIN_DEF as Stat);
+        assert_eq!(g.sight_radius, balance::GOBLIN_SIGHT as Coord);
+        assert_eq!(g.spawn_weight, balance::GOBLIN_SPAWN_WEIGHT as u32);
+        assert_eq!(g.glyph_char(), balance::GOBLIN_GLYPH);
+
+        let o = orc();
+        assert_eq!(o.hp, balance::ORC_HP as Stat);
+        assert_eq!(o.attack, balance::ORC_ATK as Stat);
+        assert_eq!(o.defense, balance::ORC_DEF as Stat);
+        assert_eq!(o.sight_radius, balance::ORC_SIGHT as Coord);
+        assert_eq!(o.spawn_weight, balance::ORC_SPAWN_WEIGHT as u32);
+        assert_eq!(o.glyph_char(), balance::ORC_GLYPH);
+
+        let t = troll();
+        assert_eq!(t.hp, balance::TROLL_HP as Stat);
+        assert_eq!(t.attack, balance::TROLL_ATK as Stat);
+        assert_eq!(t.defense, balance::TROLL_DEF as Stat);
+        assert_eq!(t.sight_radius, balance::TROLL_SIGHT as Coord);
+        assert_eq!(t.spawn_weight, balance::TROLL_SPAWN_WEIGHT as u32);
+        assert_eq!(t.glyph_char(), balance::TROLL_GLYPH);
     }
 }

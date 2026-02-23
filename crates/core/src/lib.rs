@@ -1,3 +1,5 @@
+pub mod rules;
+
 pub mod ai;
 #[cfg(feature = "dev-tools")]
 pub mod analytics;

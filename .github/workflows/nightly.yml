@@ -76,6 +76,7 @@ jobs:
         run: |
           docker run --rm \
             --user "$(id -u):$(id -g)" \
+            -e CARGO_HOME=/tmp/cargo \
             -e PATH=/usr/local/rust-mos/bin:/usr/local/bin:/usr/bin:/bin \
             -v "${{ github.workspace }}/crates/c64:/work" \
             -w /work \

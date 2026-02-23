@@ -1,6 +1,6 @@
 # Gameplay Implementation Plan
 
-> **Status:** In progress. Phase 1 (wandering monsters) is complete. Phase 2 (items) is next.
+> **Status:** In progress. Phases 1-3 complete (wandering monsters, items, stairs). Phase 4 (item-based progression) is next.
 
 ## Motivation
 
@@ -24,9 +24,9 @@ Four phases, each addressing one playtest finding. Independently shippable. Sequ
 | 1 | [Wandering monsters](#phase-1-wandering-monsters) | S | Problem #2: Regen too generous | **Complete** |
 | 2 | [Items & inventory](#phase-2-items--inventory) | M-L | Problem #3: Combat is solved arithmetic | Next |
 | 3 | [Stairs / multi-level dungeons](#phase-3-stairs--multi-level-dungeons) | M | Problem #1: No win condition | — |
-| 4 | [Experience & leveling](#phase-4-experience--leveling) | M | Problem #4: No progression | — |
+| 4 | [Item-based progression](#phase-4-item-based-progression) | M | Problem #4: No progression | — |
 
-Phase 4 benefits from Phase 3 (leveling needs something to scale against) but is not strictly blocked by it. Items is ordered before stairs because it blocks ~4 downstream features (the most of any item on the roadmap) and combines with wandering monsters to create a resource economy.
+Phase 4 benefits from Phase 3 (deeper floors drop better gear) but is not strictly blocked by it. Items is ordered before stairs because it blocks ~4 downstream features (the most of any item on the roadmap) and combines with wandering monsters to create a resource economy.
 
 ### Part 2: Simulation Enrichment (deferred)
 
@@ -43,7 +43,7 @@ While each phase is independently valuable, some combinations produce emergent g
 
 - **Wandering monsters + Items:** Healing potions become a finite resource under time pressure. This is where "solved arithmetic" actually breaks — the decision isn't "fight or not" but "use the potion now or save it for deeper floors."
 - **Items + Stairs:** Carrying loot between floors creates persistent investment. Dying on floor 5 with a Long Sword hurts more than dying on floor 5 with nothing.
-- **Stairs + XP:** Depth scaling and player scaling race against each other. The player can grind floor 1 for XP (safe but slow, wandering monsters punish this) or push deeper for better XP (risky but faster).
+- **Stairs + Item Progression:** Depth-gated items create a pull toward deeper floors — better equipment only spawns below `min_depth`. The player can farm floor 1 for consumables (safe but gear-capped, wandering monsters punish this) or push deeper for powerful equipment and enchantment scrolls (risky but rewarding).
 
 These interactions mean balance tuning after Phase 4 will differ significantly from tuning after Phase 1 alone. Re-run balance CI after the full set, not just per-phase.
 
@@ -231,7 +231,7 @@ Add descending stairs (`>`) to each floor. Entering stairs generates a new, hard
 
 One-way descent. `GameState` gains a `depth: Stat` field and `descend()` method. Previous floors are discarded. This avoids the complexity of storing multiple floors and aligns with many classic roguelikes (Brogue, early DCSS).
 
-On descend, derive a new seed (`original_seed + depth`) for determinism. Generate a new map, spawn monsters scaled to depth, preserve the player entity (HP, stats, inventory, XP), and place the player at the up-stairs position.
+On descend, derive a new seed (`original_seed + depth`) for determinism. Generate a new map, spawn monsters scaled to depth, preserve the player entity (HP, stats, inventory, equipment), and place the player at the up-stairs position.
 
 #### Difficulty scaling
 
@@ -321,91 +321,173 @@ If LLMs don't engage with stairs, consider adding a `descend` action to the MCP 
 
 ---
 
-## Phase 4: Experience & Leveling
+## Phase 4: Item-Based Progression
 
-**Gives kills meaning beyond survival.**
+**Gives exploration and combat meaning beyond survival — through discovery and decisions, not counters.**
 
 ### Design
 
-Monsters award XP on death. Accumulating enough XP triggers a level-up with stat increases. This creates a reason to seek out fights (risk/reward) and enables tackling harder floors.
+Progression comes from the item system, not XP. The player grows stronger by finding depth-gated equipment, using enchantment scrolls to upgrade gear, and collecting rare permanent consumables. This creates a power curve driven by exploration and decision-making rather than a number ticking up from kills.
 
-#### Player progression fields
+**Why not XP/leveling:** The gameplay plan's Problem #3 was "combat is solved arithmetic." XP/leveling adds more arithmetic — stats go up predictably, monsters scale with depth, and the game becomes a race between two linear curves. The player doesn't make decisions around XP; it just accumulates from kills they were going to make anyway (especially since wandering monsters already punish grinding). Item-based progression creates real decisions: which item to keep, when to use consumables, what to enchant, whether to push deeper for better gear or farm the current floor for safety.
+
+#### Three progression pillars
+
+**1. Depth-gated items** — Better equipment spawns on deeper floors via `min_depth`. This is the baseline power curve: floor 1 has basic gear, floor 3 has stronger weapons, floor 5 has the best equipment. The player gets stronger by descending, not by grinding.
+
+**2. Enchantment scrolls** — The core progression resource (inspired by Brogue). Finding a Scroll of Enchantment lets the player permanently upgrade one piece of equipment: a +2 sword becomes +3, or +2 armor becomes +3. The player chooses where the power goes — offense vs defense. This is stat growth through item decisions.
+
+**3. Permanent consumables** — Rare stat-boosting potions that provide milestone moments. Strength Potion (+1 ATK permanent) already exists in Phase 2's item set. Phase 4 expands this family: Toughness Potion (+1 DEF), Potion of Sight (+1 FOV radius). These are rare enough to feel like events, common enough to provide a progression arc.
+
+#### New items
+
+Expand the item pool from Phase 2's 6 items. New items use the existing `ItemKind` enum and spawn system — no new data model needed.
+
+```toml
+# Enchantment scrolls — the core progression mechanic
+[[items]]
+name = "Scroll of Enchantment"
+glyph = "?"
+color = "Magenta"
+type = "scroll"
+effect = "enchant"
+spawn_weight = 8
+min_depth = 2
+
+# Permanent consumables — rare milestone moments
+[[items]]
+name = "Toughness Potion"
+glyph = "!"
+color = "Blue"
+type = "potion"
+effect = "toughness"
+spawn_weight = 5
+min_depth = 3
+
+[[items]]
+name = "Potion of Sight"
+glyph = "!"
+color = "Yellow"
+type = "potion"
+effect = "sight"
+spawn_weight = 3
+min_depth = 4
+
+# Depth-gated equipment — better gear on deeper floors
+[[items]]
+name = "Chain Mail"
+glyph = "["
+color = "White"
+type = "equipment"
+slot = "armor"
+attack_bonus = 0
+defense_bonus = 4
+spawn_weight = 5
+min_depth = 3
+
+[[items]]
+name = "Scroll of Teleport"
+glyph = "?"
+color = "Cyan"
+type = "scroll"
+effect = "teleport"
+spawn_weight = 8
+min_depth = 1
+```
+
+#### Enchantment system
+
+Equipment gains an `enchant_level: u8` field (default 0). When the player uses a Scroll of Enchantment, they choose which equipped item to upgrade. The enchantment adds +1 to the item's primary stat (ATK for weapons, DEF for armor). Enchantment stacks — a Short Sword (+2 ATK base) enchanted twice becomes a +4 Short Sword.
 
 ```rust
-pub struct GameState {
-    // ... existing fields ...
-    pub player_xp: Stat,
-    pub player_level: Stat,
+// Addition to ItemKind or Equipment
+pub enchant_level: u8,  // +1 per enchantment scroll used
+
+// Effective stats
+fn effective_attack(base_atk: Stat, weapon: &Equipment) -> Stat {
+    base_atk + weapon.attack_bonus + weapon.enchant_level as Stat
 }
 ```
 
-Keep XP/level on `GameState` rather than `Entity` — only the player levels up, and it avoids bloating the entity struct for all monsters.
-
-#### XP config in `game.toml`
+Config in `game.toml`:
 
 ```toml
-[leveling]
-xp_per_level = [0, 20, 50, 100, 180, 300, 500, 800, 1200, 2000]
-hp_per_level = 5           # +5 max HP on level-up (also heals 5)
-attack_per_level = 1       # +1 ATK every level
-defense_per_2_levels = 1   # +1 DEF every 2 levels
+[enchantment]
+max_enchant_level = 5       # Cap to prevent runaway scaling
 ```
 
-#### Monster XP values
+#### Enchantment UI
 
-Add `xp: Stat` to `MonsterDef`:
+Using a Scroll of Enchantment opens a simple selection prompt:
 
-```toml
-[[monsters]]
-name = "Goblin"
-# ... existing fields ...
-xp = 5
-
-[[monsters]]
-name = "Orc"
-xp = 15
-
-[[monsters]]
-name = "Troll"
-xp = 40
+```
+Enchant which item?
+  a) Short Sword +2 ATK (+1 enchant)
+  b) Leather Armor +2 DEF
 ```
 
-#### Level-up logic
+On C64, this is a 2-line PETSCII overlay — no complex UI needed.
 
-On monster death, award XP equal to the monster's `xp` value. When accumulated XP crosses the next threshold in `xp_per_level`, increment level and apply stat bonuses (+HP, +ATK every level, +DEF every 2 levels). Multiple level-ups can trigger from a single kill.
+#### Permanent consumable effects
+
+| Potion | Effect | Config key |
+|--------|--------|-----------|
+| Strength Potion | +1 ATK permanently | `strength_potion_bonus = 1` |
+| Toughness Potion | +1 DEF permanently | `toughness_potion_bonus = 1` |
+| Potion of Sight | +1 FOV radius permanently | `sight_potion_bonus = 1` |
+
+These modify the player's base stats directly. The effect is immediate and logged ("You feel stronger! +1 ATK.").
+
+#### Progression curve example
+
+```
+Floor 1: Bare fists (5 ATK, 2 DEF). Find Short Sword (+2 ATK) and Leather Armor (+2 DEF).
+Floor 2: Find Scroll of Enchantment → enchant sword to +3 ATK. Total: 10 ATK, 4 DEF.
+Floor 3: Find Chain Mail (+4 DEF), swap out Leather Armor. Find Strength Potion (+1 ATK permanent).
+Floor 4: Find Long Sword (+4 ATK), equip it. Enchant it once. Total: 14 ATK, 6 DEF.
+Floor 5: Well-equipped for the final push. Consumable stockpile (potions, scrolls) is the buffer.
+```
+
+The player's power increases through discovery and choices, not automatic accumulation. Bad luck on item drops is mitigated by enchantment scrolls (upgrade what you have) and permanent consumables (direct stat boosts).
 
 #### Synergy with stairs
 
-With depth scaling (Phase 3), leveling creates a natural power curve: the player gets stronger as floors get harder. Without stairs, leveling still works — it just doesn't have as much to scale against.
+Depth-gated items create a natural pull toward descending — the best gear is deeper. This interacts with wandering monsters: spending too long on one floor is punished, but pushing too fast means facing harder monsters without adequate equipment. The tension between "farm this floor for consumables" and "descend for better gear" replaces the XP grind/push dynamic with item-driven decisions.
 
 #### Files touched
 
 | File | Change |
 |------|--------|
-| `data.rs` | Add `LevelingConfig` struct, `xp: Stat` to `MonsterDef`. |
-| `game.toml` | Add `[leveling]` section, `xp` to each `[[monsters]]` entry. |
-| `game.rs` | Add `player_xp`, `player_level` to `GameState`. Add `award_xp()`, `xp_for_next_level()`. Call `award_xp()` after monster death in `step()`. |
-| `combat.rs` | Return monster index on kill (or handle XP award in `step()` by checking death after `melee_attack()`). |
+| `item.rs` | Add `ScrollEffect::Enchant` variant. Add `enchant_level: u8` to equipment. Add `PotionEffect::Toughness`, `PotionEffect::Sight` variants. |
+| `data.rs` | Add `EnchantmentConfig` struct to `GameData`. Parse new items from TOML. |
+| `game.toml` | Add `[enchantment]` section. Add new `[[items]]` entries for enchantment scrolls, permanent consumables, and depth-gated equipment. |
+| `game.rs` | Handle enchantment scroll use (prompt for target, apply bonus). Handle permanent consumable effects (modify base stats). |
+| `command.rs` | Add `EnchantTarget(usize)` to `GameCommand` for enchantment selection. |
 
 #### MCP impact
 
-Add `xp`, `level`, `xp_to_next_level` to `GameObservation`. LLMs can now factor XP into risk/reward calculations (e.g., "fight the orc for 15 XP or flee and save HP").
+Add `enchant_level` to equipment info in observations. Add `enchant` action to the `act` tool (with target slot). LLMs can now factor equipment quality and enchantment decisions into strategy.
 
 #### Testing
 
-- **Unit test:** Killing a goblin awards 5 XP. Killing an orc awards 15 XP.
-- **Unit test:** XP accumulates across kills. Level-up triggers at threshold.
-- **Unit test:** Level-up increases stats correctly. DEF increases every 2 levels.
-- **Scenario test:** Player reaches level 3 after clearing a floor of goblins.
-- **Balance CI:** Will detect stat growth impact automatically.
+- **Unit test:** Enchantment scroll increases equipment's enchant_level by 1.
+- **Unit test:** Effective ATK/DEF includes enchantment bonus.
+- **Unit test:** Enchantment caps at `max_enchant_level`.
+- **Unit test:** Toughness Potion permanently increases base DEF.
+- **Unit test:** Potion of Sight permanently increases FOV radius.
+- **Unit test:** Depth-gated items don't spawn above their `min_depth`.
+- **Scenario test:** Player with enchanted weapon kills monsters faster than with base weapon.
+- **Golden replays:** Regenerate.
+- **Balance CI:** Will detect progression impact automatically.
 
 #### Playtest gate
 
 Run 3+ LLM playtest sessions after implementation. This is the final Part 1 gate — validate the complete core loop:
 
-- **Progression is visible.** LLMs should reach level 2+ in a typical session. If they don't, XP thresholds are too high or monster XP values are too low.
-- **Risk/reward decisions emerge.** With items, stairs, and XP all active, LLMs should exhibit varied strategies — some grinding for XP, some pushing deep quickly.
-- **The four motivating problems are resolved.** Revisit each: (1) win condition exists via stairs, (2) regen is punished by wandering monsters, (3) combat involves item decisions, (4) kills award progression. If any remain unresolved, iterate before moving to Part 2.
+- **Progression is visible.** LLMs should have noticeably better equipment on floor 3+ than on floor 1. If gear quality feels flat across floors, depth-gating needs steeper differentiation.
+- **Enchantment decisions happen.** LLMs should use enchantment scrolls and choose between weapon vs armor upgrades. If they always enchant the same slot, the decision isn't meaningful enough.
+- **Risk/reward decisions emerge.** With items, stairs, and item-based progression all active, LLMs should exhibit varied strategies — some farming for consumables, some pushing deep for better gear.
+- **The four motivating problems are resolved.** Revisit each: (1) win condition exists via stairs, (2) regen is punished by wandering monsters, (3) combat involves item decisions, (4) progression comes from item discovery and enchantment. If any remain unresolved, iterate before moving to Part 2.
 
 ---
 
@@ -587,7 +669,7 @@ Each phase adds fields to `GameObservation`. Monitor the JSON payload size — t
 The headless auto-play AI (`bin/headless.rs`) will need updates for:
 - **Phase 2:** Pick up and use items (simple heuristic: always pick up, use healing potions when low).
 - **Phase 3:** Descend stairs when the floor is cleared.
-- **Phase 4:** No changes needed — XP is automatic.
+- **Phase 4:** Use enchantment scrolls (heuristic: enchant the weaker equipment slot). Use permanent consumables immediately.
 - **Phase 5:** No changes needed — mood affects monster AI, not player AI.
 
 ---
@@ -611,9 +693,10 @@ Phase 3: Stairs / Multi-Level Dungeons (M)
     between floors, depth-gated items).
     Ship → playtest gate → validate.
 
-Phase 4: Experience & Leveling (M)
-    Benefits from stairs (difficulty scaling) and items
-    (XP decisions interact with resource decisions).
+Phase 4: Item-Based Progression (M)
+    Expands item system: enchantment scrolls, permanent
+    consumables, depth-gated gear. Benefits from stairs
+    (deeper floors = better equipment).
     Ship → final playtest gate → validate all 4 problems resolved.
 
 Part 2: Simulation Enrichment (deferred until Part 1 validated)
@@ -624,4 +707,4 @@ Phase 6: Property Bitfields & Interaction Table (S-M)
     Independent. Can develop in parallel once Part 1 is stable.
 ```
 
-After Part 1, the game has: time pressure (wandering monsters), resource management (items), a win condition (stairs), and progression (XP). This transforms the current "solved arithmetic arena" into a game with meaningful decisions on every turn. Part 2 adds emergent depth on top of that foundation.
+After Part 1, the game has: time pressure (wandering monsters), resource management (items), a win condition (stairs), and progression (enchantment scrolls, depth-gated gear, permanent consumables). This transforms the current "solved arithmetic arena" into a game with meaningful decisions on every turn. Part 2 adds emergent depth on top of that foundation.

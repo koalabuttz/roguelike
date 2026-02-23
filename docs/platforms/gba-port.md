@@ -30,7 +30,7 @@ This proposal covers the **GBA frontend crate** — rendering, input, save, and 
 | [capability-tier-reference.md](../architecture/capability-tier-reference.md) | Capability tier hierarchy (GBA uses tier compact), type sizing, seed system |
 | [simulation.md](../architecture/simulation.md) | `SimBudget` caps for entity count, CA tiles/turn, event queue depth |
 | [acoustic-propagation.md](../design/acoustic-propagation.md) | PSG channel assignments, sound event → register write mapping |
-| [gameplay-implementation-plan.md](../design/gameplay-implementation-plan.md) | Items, stairs, XP, mood — GBA renders these, doesn't change their logic |
+| [gameplay-implementation-plan.md](../design/gameplay-implementation-plan.md) | Items, stairs, enchantment, mood — GBA renders these, doesn't change their logic |
 
 Where those docs specify GBA-relevant details (e.g., PSG audio, SimBudget values), this doc references rather than duplicates them. Where GBA needs something those docs don't cover (tile streaming, palette-based lighting, OAM management, save format), this doc defines it.
 
@@ -62,7 +62,7 @@ The GBA crate will depend only on `roguelike-core` (importing `core::tier_compac
 
 ```
 crates/core/src/
-  rules/          # Pure functions + constants: damage, balance, items, leveling,
+  rules/          # Pure functions + constants: damage, balance, items, enchantment,
                   #   seed_code, monster_table, GameEvent — no_std, always compiled
   command.rs      # GameCommand with Direction enum — no Coord dependency, no_std
   tier_micro/     # u8 coords, u8 stats, LFSR-16, Bresenham FOV, fixed arrays — no_std
@@ -111,7 +111,7 @@ pub struct Pos { pub x: i32, pub y: i32 }
 
 Tier micro and tier compact are `#![no_std]` modules. The GBA compiles these directly — it gets `no_std` compatibility from the tier system, not from a feature flag toggling `std` on or off. Tier standard (the top-level module) uses `std` collections and is compiled by Vita/PC/desktop builds.
 
-Pure game rules (damage formulas, balance constants, item definitions, leveling tables, monster tables, `GameEvent` messages, seed encoding) live in `core::rules` and are tier-agnostic — pure functions and constants with no game state interaction, using only `u8`/`i16` arithmetic that works at every tier. Game mechanics (applying damage, inserting spawned monsters, spawn placement) remain per-tier.
+Pure game rules (damage formulas, balance constants, item definitions, enchantment caps, monster tables, `GameEvent` messages, seed encoding) live in `core::rules` and are tier-agnostic — pure functions and constants with no game state interaction, using only `u8`/`i16` arithmetic that works at every tier. Game mechanics (applying damage, inserting spawned monsters, spawn placement) remain per-tier.
 
 Core containers used by tier micro and tier compact, and their tier standard equivalents:
 
@@ -562,7 +562,7 @@ This catches regressions where a core change breaks `no_std` tier modules or ove
 
 ### Gameplay Parity
 
-The deterministic replay system can verify that a given seed + command sequence produces the same outcomes on tier compact as on tier standard (accounting for map size and RNG differences). For tier micro seeds (cross-platform), all tiers must produce identical results. This is a property test: "for any command sequence, tier compact and tier standard produce the same combat results, XP awards, etc. when given the same tier micro seed and map dimensions."
+The deterministic replay system can verify that a given seed + command sequence produces the same outcomes on tier compact as on tier standard (accounting for map size and RNG differences). For tier micro seeds (cross-platform), all tiers must produce identical results. This is a property test: "for any command sequence, tier compact and tier standard produce the same combat results, item spawns, etc. when given the same tier micro seed and map dimensions."
 
 ## Relationship to Other Constrained Ports
 

@@ -207,7 +207,7 @@ See [docs/roadmap.md](docs/roadmap.md) for the full breakdown with dependencies,
 **Next up** (gameplay branch — current focus):
 - Items, inventory, and equipment
 - Multi-level dungeons (stairs)
-- Experience and leveling
+- Item-based progression (enchantment scrolls, depth-gated gear)
 
 **Later** (deferred until gameplay branch completes):
 - Web (WASM) frontend

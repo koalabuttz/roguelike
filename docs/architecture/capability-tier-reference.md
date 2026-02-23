@@ -20,13 +20,13 @@ see the [C64 platform guide](../platforms/c64-platform-guide.md).
 - **tier compact** (GBA): `i16` coords, `u8` stats, 128 entities, 128x96 maps, LFSR-32, Bresenham FOV, `no_std` — initially stubs only (type aliases + PRNG) until GBA port begins
 - **tier standard** (Vita/PC): `i32` coords/stats, 512-1024 entities, 80x40+ maps, ChaCha20, shadowcasting FOV, `std`
 
-The distinction between **game rules** and **game mechanics** is key: rules are pure functions (damage calculation, XP thresholds) that produce values; mechanics are stateful operations (applying damage to entities, inserting spawned monsters) that remain per-tier.
+The distinction between **game rules** and **game mechanics** is key: rules are pure functions (damage calculation, item stat lookups, enchantment caps) that produce values; mechanics are stateful operations (applying damage to entities, inserting spawned monsters) that remain per-tier.
 
 Tier micro code lives in `tier_micro/` and is always compiled. Standard-tier
 code (shadowcasting FOV, A\* pathfinding, `Vec`-based collections) is gated
 behind the `std` feature. The C64 depends on core with
 `default-features = false`. Pure game rules (damage formulas, balance constants,
-item stats, XP tables, seed encoding) live in `rules/` and are used by all tiers:
+item stats, enchantment caps, seed encoding) live in `rules/` and are used by all tiers:
 
 ```
 roguelike/
@@ -38,11 +38,11 @@ roguelike/
         rules/        # Pure functions + constants, always compiled, no_std
           mod.rs
           balance.rs  # numeric constants: HP, ATK, DEF, spawn weights, regen,
-                      #   item stats, XP tables, depth scaling, wandering spawn
+                      #   item stats, enchantment caps, depth scaling, wandering spawn
                       #   config, mood thresholds (see gameplay-implementation-plan.md)
           damage.rs   # const fn damage(), effective_attack(), effective_defense()
-          items.rs    # item type IDs, stat lookup tables (heal amount, ATK/DEF bonus)
-          leveling.rs # xp_for_level() table, stat growth per level
+          items.rs    # item type IDs, stat lookup tables (heal amount, ATK/DEF bonus,
+                      #   enchantment limits, permanent consumable bonuses)
           seed_code.rs # no_std encode_to_buf()/decode_from_bytes() + std String wrappers
           monster_table.rs # MonsterKind enum, stat lookup by kind
           message.rs  # GameEvent enum — structured message events (Copy, no_std)
@@ -100,7 +100,7 @@ toml = { version = "0.8", optional = true }
 #![cfg_attr(not(feature = "std"), no_std)]
 
 // --- Always compiled (no_std compatible) ---
-pub mod rules;         // pure game rules: damage, balance, items, leveling,
+pub mod rules;         // pure game rules: damage, balance, items, enchantment,
                        //   seed_code, monster_table, GameEvent — no state interaction
 pub mod command;       // GameCommand with Direction enum — no Coord dependency
 pub mod tier_micro;    // u8 types, LFSR-16, Bresenham FOV, fixed arrays
@@ -383,7 +383,7 @@ the `std` feature. The C64 uses `default-features = false` and only accesses
 | **Spawn mechanics** | Per-tier | Per-tier | `core/tier_*/spawn.rs`, `core/spawn.rs` | Applies `SpawnDirective` to tier-specific entity storage |
 | **Balance constants** | All | **Rules** | `core/rules/balance.rs` | All HP/ATK/DEF/sight/spawn_weight/regen values |
 | **Item definitions** | All | **Rules** | `core/rules/items.rs` | Item type IDs, stat lookup tables (heal amount, ATK/DEF bonus, spawn weights) |
-| **Leveling tables** | All | **Rules** | `core/rules/leveling.rs` | XP thresholds per level, HP/ATK/DEF growth per level |
+| **Enchantment config** | All | **Rules** | `core/rules/items.rs` | Max enchant level, enchantment stat bonus per level |
 | **Depth scaling** | All | **Rules** | `core/rules/balance.rs` | Monster stat scaling per floor, `min_depth` thresholds |
 | **Wandering spawn config** | All | **Rules** | `core/rules/balance.rs` | Spawn interval, delay, max active constants |
 | **Mood thresholds** | All | **Rules** | `core/rules/balance.rs` | Mood trigger values, decay rate, flee/enrage thresholds |
@@ -409,13 +409,13 @@ the `std` feature. The C64 uses `default-features = false` and only accesses
 Core's balance module is the single source of truth for game balance. All tiers
 and platforms use the same constants directly. The module defines:
 
-- **Monster stats** (per kind: Goblin, Orc, Troll): HP, ATK, DEF, sight range, spawn weight, XP reward — all `u8`
+- **Monster stats** (per kind: Goblin, Orc, Troll): HP, ATK, DEF, sight range, spawn weight — all `u8`
 - **Player defaults**: HP (`30`), ATK (`5`), DEF (`2`) — all `u8`
 - **Config constants**: regen interval, max monsters per room — `u8`
 - **Per-tier map dimensions**: micro (`64×48`, 12 rooms, 16 entities), compact (`128×96`, 24 rooms, 128 entities), standard (`80×40`) — `u8`
 - **Wandering spawn** (Phase 1): spawn interval (`40`), delay (`60`), max active (`5`) — `u8`
 - **Depth scaling** (Phase 2): target depth (`10`), HP per floor (`+1`), ATK per 2 floors (`+1`) — `u8`
-- **Leveling** (Phase 4): XP table (`[u8; 10]`, capped at 255 for tier micro — levels 6+ effectively require deeper descent), HP/ATK/DEF growth per level — `u8`
+- **Enchantment** (Phase 4): max enchant level (`5`), enchantment bonus per level (`+1`) — `u8`
 - **Mood thresholds** (Phase 5): flee (`-50`), disengage (`-20`), enrage (`80`), ally-dies/takes-hit/lands-hit/low-HP triggers — `i8`
 
 All balance types are `u8` or `i8` — values that fit in the smallest tier's
@@ -429,12 +429,13 @@ constants are the baseline, not a constraint. A CI test verifies that
 `game.toml` defaults match `roguelike_core::rules::balance` constants.
 
 **Relationship to gameplay implementation plan**: The constants above correspond
-to Phases 1 (wandering spawns), 2 (depth scaling), 4 (leveling), and 5 (mood)
+to Phases 1 (wandering spawns), 2 (depth scaling), 4 (enchantment), and 5 (mood)
 of the [gameplay implementation plan](../design/gameplay-implementation-plan.md).
-Phase 3 (items) has its own module (`core/items.rs`) rather than constants in
-`balance.rs`, because item definitions include lookup tables for stat bonuses.
-Phase 6 (property bitfields) is standard-tier only for now — tier micro has no
-immediate use for the `u64` property system, though a `u8` subset could be
+Phase 3 (items) and Phase 4 (item-based progression, including enchantment scrolls
+and permanent consumables) share the items module (`core/rules/items.rs`) which
+includes lookup tables for stat bonuses, enchantment caps, and permanent consumable
+effects. Phase 6 (property bitfields) is standard-tier only for now — tier micro
+has no immediate use for the `u64` property system, though a `u8` subset could be
 added later.
 
 ### 1.7 Item Definitions
@@ -554,11 +555,11 @@ hardware constraints.
 | Messages | GameEvent enum (Copy) | GameEvent enum (Copy) | GameEvent → String formatting |
 | Map storage | Flat `[u8; W*H]` | Flat `[u8; W*H]` | `Vec<Vec<Tile>>` |
 | PRNG | LFSR-16 | LFSR-32 | ChaCha20 |
-| XP scaling | Compressed tables | Compressed tables | Full tables |
+| Enchantment cap | 5 (u8) | 5 (u8) | 5 (configurable) |
 | Save format | Binary (platform-specific) | Binary (platform-specific) | JSON via serde |
 
-The `rules/` module produces tier-independent values (damage amounts, XP
-thresholds, monster stats) that all tiers consume identically. Divergence
-occurs in how tiers *apply* those values to their state — entity insertion,
-map storage layout, message formatting, and save serialization are all
-per-tier mechanics.
+The `rules/` module produces tier-independent values (damage amounts, item
+stats, enchantment caps, monster stats) that all tiers consume identically.
+Divergence occurs in how tiers *apply* those values to their state — entity
+insertion, map storage layout, message formatting, and save serialization are
+all per-tier mechanics.

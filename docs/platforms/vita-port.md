@@ -30,7 +30,7 @@ This proposal covers the **Vita frontend crate** — rendering, input, save, aud
 | [cross-platform.md](../architecture/cross-platform.md) | Crate structure, `Renderer`/`InputSource` traits, `GameColor` mapping |
 | [simulation.md](../architecture/simulation.md) | `SimBudget` caps (generous on Vita: 512 entities, 1000+ CA tiles/turn) |
 | [acoustic-propagation.md](../design/acoustic-propagation.md) | `SoundEvent` → real audio rendering. Vita is the first Rust-based platform with hardware capable of doing this justice. |
-| [gameplay-implementation-plan.md](../design/gameplay-implementation-plan.md) | Items, stairs, XP, mood — Vita renders these, doesn't change their logic |
+| [gameplay-implementation-plan.md](../design/gameplay-implementation-plan.md) | Items, stairs, enchantment, mood — Vita renders these, doesn't change their logic |
 | [gba-port.md](gba-port.md) | Establishes patterns for constrained Rust ports. Vita deliberately diverges where its hardware allows. |
 | [c64-port-proposal.md](c64-port-proposal.md) | Defines server-side endpoints (leaderboards, daily seeds, cloud saves, spectation relay) that the Vita consumes over WiFi. Also defines the cross-platform save portability problem (C64's 1.6 KB binary vs Vita/desktop JSON) that atproto must solve. |
 | [c64-atproto-bridge.md](c64-atproto-bridge.md) | Atproto lexicon design for saves and spectation. The Vita uses the same lexicons directly (no bridge needed — it has native HTTPS/OAuth). |

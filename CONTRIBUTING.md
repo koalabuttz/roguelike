@@ -108,7 +108,7 @@ Place functions based on **what they operate on**, not who calls them:
 - **Test coverage** — Add or update tests when adding features or changing behavior
 - **Tier-friendly coding** — A capability tier refactor (micro/compact/standard) is planned for cross-platform support. When adding gameplay features to `core`, minimize eventual refactor cost:
   - Prefer **enums over strings** for game concepts (item types, effects, equipment slots) — these map to `u8` discriminants on constrained platforms
-  - Write **pure functions for rules** — if a calculation (damage, XP, item effects) doesn't need `&self`, make it a free function that can lift into a shared `rules/` module later
+  - Write **pure functions for rules** — if a calculation (damage, enchantment, item effects) doesn't need `&self`, make it a free function that can lift into a shared `rules/` module later
   - Use **named constants for limits** (inventory size, max items per room) rather than hardcoded literals
   - Keep **balance data in `game.toml`** — the existing data-driven pattern already separates data from logic
 

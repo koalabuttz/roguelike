@@ -22,8 +22,7 @@ Core Module                  →  C64 Usage                    Tier     Notes
 ───────────────────────────────────────────────────────────────────────────────────────
 core/src/rules/damage.rs     →  used directly from core      Rules    damage formula
 core/src/rules/balance.rs    →  used directly from core      Rules    all game constants
-core/src/rules/items.rs      →  used directly from core      Rules    item types, stat tables
-core/src/rules/leveling.rs   →  used directly from core      Rules    XP thresholds, growth
+core/src/rules/items.rs      →  used directly from core      Rules    item types, stats, enchantment
 core/src/rules/seed_code.rs  →  used directly from core      Rules    seed encode/decode
 core/src/rules/monster_table.rs → used directly from core    Rules    MonsterKind, pick_monster()
 core/src/rules/message.rs    →  used directly from core      Rules    GameEvent enum

@@ -36,7 +36,7 @@ Rust-mos was chosen instead because:
    geometry, and the PRNG will live in `roguelike-core` organized as a
    **capability tier hierarchy**. The C64's game logic lives in a `tier_micro`
    module using `u8` types, fixed-size arrays, and `#![no_std]`. Pure game
-   rules (damage formulas, balance constants, XP tables, item definitions)
+   rules (damage formulas, balance constants, item definitions, enchantment caps)
    live in a `rules/` module compiled by all tiers. Higher-tier platforms
    (GBA, Vita, PC) include the micro tier alongside their native tier,
    enabling cross-platform play: when any platform runs a micro-tier seed, it
@@ -327,9 +327,9 @@ The sweet spot is **banking out BASIC only: ~46 KB usable**.
 ```
 Program code:           ~18 KB   (rust-mos Rust, release+LTO+opt-size)
   POC measured at 13 KB with full game loop; production adds SID,
-  custom charset, save/load, dirty-rect rendering, items, XP (~5 KB extra)
+  custom charset, save/load, dirty-rect rendering, items, enchantment (~5 KB extra)
   roguelike-core (no_std subset) will contribute ~1.5 KB (mapgen, prng,
-  combat, rooms, items, leveling, depth scaling, wandering spawn, mood)
+  combat, rooms, items, enchantment, depth scaling, wandering spawn, mood)
 Map tile data:          3,072 B   (64 x 48 = 3,072 tiles, 1 byte/tile)
 Structural wall bits:     384 B   (3,072 bits)
 Explored bitfield:        384 B   (3,072 bits)
@@ -337,11 +337,11 @@ Visible bitfield:         105 B   (840 bits — viewport-sized, not map-sized)
 Entity parallel arrays:   208 B   (16 entities x 13 bytes across arrays)
   Base (POC):  10 arrays x 16 = 160 B (x, y, hp, max_hp, atk, def,
                kind, ai, alive, sight)
-  Gameplay:     3 arrays x 16 =  48 B (xp_value, mood, memory)
+  Gameplay:     2 arrays x 16 =  32 B (mood, memory)
 Room list:                 80 B   (20 rooms x 4 bytes)
 Floor items (sparse):      97 B   (32 items x 3 bytes + count)
 Player inventory:          12 B   (10 slots + weapon + armor, u8 type IDs)
-Player state:               4 B   (xp: u16, level: u8, depth: u8)
+Player state:               1 B   (depth: u8)
 Message log:              200 B   (4 lines x ~40 chars + metadata)
 RNG state:                  2 B   (16-bit Galois LFSR — LfsrRng struct)
 Custom charsets:          6 KB    (3 x 2 KB: dungeon tiles, UI font, message text)
@@ -360,7 +360,7 @@ Total:                  ~34 KB    (~12 KB headroom remaining)
 The POC validates the baseline: 13 KB code + ~2 KB static data = ~15 KB total.
 The 64x48 scrolling map adds ~2.5 KB of data over the POC's 40x21 fixed map
 (larger tile buffer, structural/explored bitfields, viewport buffer).
-Gameplay features (items, XP, stairs, mood — see the
+Gameplay features (items, enchantment, stairs, mood — see the
 [gameplay implementation plan](../design/gameplay-implementation-plan.md)) add ~1
 KB of data and ~2 KB of code. The production build adds ~5 KB over the POC
 baseline for raster effects, per-zone charsets, scrolling viewport code, and
@@ -419,7 +419,7 @@ testing strategy, see [testing-strategy.md](../testing-strategy.md).
 
 **C64 approach:** The C64 screen is 40x25. The
 [gameplay implementation plan](../design/gameplay-implementation-plan.md) adds
-items, XP/leveling, and dungeon depth to both platforms. Reserving 1 row for a
+items, equipment enchantment, and dungeon depth to both platforms. Reserving 1 row for a
 dense status bar and 3 rows for the message log leaves a **40x21 visible play
 area**.
 
@@ -430,7 +430,7 @@ area**.
 │                                        │
 │                                        │
 ├────────────────────────────────────────┤
-│ HP██████░░24/30 Lv3 F4 /⚔ [🛡 K:7 XP:35│  <- Status bar (row 21)
+│ HP██████░░24/30 F4 /+2⚔ [+3🛡 K:7      │  <- Status bar (row 21)
 ├────────────────────────────────────────┤
 │ You attack the Goblin for 5 damage.    │  <- Message log
 │ The Goblin is dead!                    │  <- (rows 22-24, 3 lines)
@@ -438,8 +438,8 @@ area**.
 └────────────────────────────────────────┘
 ```
 
-The status bar packs HP bar (with green/yellow/red color coding), player level,
-current floor, equipped weapon and armor glyphs, kill count, and XP into a
+The status bar packs HP bar (with green/yellow/red color coding),
+current floor, equipped weapon and armor glyphs with enchantment level, and kill count into a
 single 40-character row. This is possible because **inventory is modal** —
 pressing `i` opens a NetHack-style fullscreen inventory overlay on top of the
 map, dismissable with any key. No permanent screen space is needed for item
@@ -540,9 +540,9 @@ Total entity memory: **~208 bytes** (13 fields x 16 entities — see §4.2).
 Stat tables are ROM constants from `roguelike_core::rules::balance`.
 Names are `&'static [u8]` references to byte string literals — no heap.
 
-Player-specific state (XP total, level, depth, inventory, equipment) lives
-on `GameState` rather than on individual entities, keeping progression data
-centralized.
+Player-specific state (depth, inventory, equipment with enchantment levels)
+lives on `GameState` rather than on individual entities, keeping progression
+data centralized.
 
 ### 6.5 Monster AI
 
@@ -857,7 +857,7 @@ Save format:        JSON (serde_json)     JSON (serde_json)       binary (manual
 ```
 
 Shared across all tiers via `core::rules`:
-damage formulas, balance constants, item definitions, leveling tables,
+damage formulas, balance constants, item definitions, enchantment caps,
 seed codes, MonsterKind enum, GameEvent messages, Direction enum.
 Per-tier: entity system, PRNG, mapgen, spawn mechanics, FOV, AI, game loop.
 
@@ -920,7 +920,7 @@ milestone is shippable independently — v0.4.0 is a complete standalone game.
    `u8` coords, `u8` stats, fixed-size arrays bounded by `MAX_ENTITIES` (16),
    bitfield visibility storage, `LfsrRng` (Galois LFSR-16), Bresenham FOV,
    greedy chase pathfinding, and spawn mechanics. Move balance constants and
-   leveling tables into `core/src/rules/`. Core's existing top-level code
+   item and enchantment constants into `core/src/rules/`. Core's existing top-level code
    (i32 types, std collections) remains untouched as tier standard.
 
 2. **Make tier_micro module `no_std`-compatible** — Add
@@ -1141,7 +1141,7 @@ micro-tier parameters.
 | **Monster tables** | `core::rules::monster_table` | Rules — MonsterKind, pick_monster(), stat tables |
 | **Room geometry** | `core::rules::map::Room` | Rules — struct + intersection |
 | **Item definitions** | `core::rules::items` | Rules — type IDs, stat lookup tables |
-| **Leveling tables** | `core::rules::leveling` | Rules — XP thresholds, stat growth |
+| **Enchantment config** | `core::rules::items` | Rules — enchantment caps, permanent consumable bonuses |
 | **Depth scaling** | `core::rules::balance` | Rules — monster scaling per floor |
 | **Mood thresholds** | `core::rules::balance` | Rules — flee/enrage trigger values |
 | **GameStep trait** | `core::game_step` | Rules — `#[cfg(feature = "std")]`, uniform tier interface |
@@ -1157,8 +1157,8 @@ micro-tier parameters.
 ### Tier Divergence
 
 For the complete tier divergence table documenting intentional differences
-between tiers (FOV, pathfinding, entity cap, messages, map storage, PRNG, XP
-scaling, save format), see the
+between tiers (FOV, pathfinding, entity cap, messages, map storage, PRNG,
+enchantment cap, save format), see the
 [capability tier reference](../architecture/capability-tier-reference.md#110-tier-divergence).
 
 ---
@@ -1251,7 +1251,7 @@ Companion documents provide detailed implementation references:
    (`core::tier_micro`) uses `u8` coordinates, `u8` stats, fixed-size arrays,
    and bitfields — `no_std`-compatible. Tier standard (top-level core) retains
    `i32` types and `std` collections. Rules modules (damage, balance, items,
-   leveling, monster tables, GameEvent, Direction) produce pure values and
+   enchantment, monster tables, GameEvent, Direction) produce pure values and
    directive structs across all tiers. Spawn mechanics remain per-tier. The
    C64 depends on core with `default-features = false` and uses
    `core::tier_micro` + `core::rules` directly. This eliminates ~1,200 lines
@@ -1291,7 +1291,7 @@ The main advantages over the cc65 approach:
    for C64 and cross-platform play; tier compact (`i16` coords, LFSR-32) for
    GBA; tier standard (`i32` coords, ChaCha20, shadowcasting, `std`) for
    Vita/PC. Each platform compiles its native tier plus all lower tiers. Rules
-   modules (damage, balance, items, leveling, monster tables, GameEvent,
+   modules (damage, balance, items, enchantment, monster tables, GameEvent,
    Direction) produce pure values and directive structs across all tiers.
    Core's standard-tier code is unchanged — tier micro is an additive
    submodule, not a rewrite. This ensures gameplay feature parity across

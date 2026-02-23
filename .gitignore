@@ -20,6 +20,10 @@ tools/.venv/
 tools/output/
 __pycache__/
 
+# Chainlink issue tracker (per-developer state)
+.chainlink/issues.db
+.chainlink/.cache/
+
 # OS artifacts
 Thumbs.db
 .DS_Store

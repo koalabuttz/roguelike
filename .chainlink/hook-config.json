@@ -1,0 +1,19 @@
+{
+  "tracking_mode": "normal",
+  "blocked_git_commands": [
+    "git push", "git commit", "git merge", "git rebase", "git cherry-pick",
+    "git reset", "git checkout .", "git restore .", "git clean",
+    "git stash", "git tag", "git am", "git apply",
+    "git branch -d", "git branch -D", "git branch -m"
+  ],
+  "allowed_bash_prefixes": [
+    "chainlink ",
+    "git status", "git diff", "git log", "git branch", "git show",
+    "cargo test", "cargo build", "cargo check", "cargo clippy", "cargo fmt",
+    "cargo run", "cargo bench", "cargo doc",
+    "python3 ", "python3",
+    "ls", "dir", "pwd", "echo",
+    "cat ", "head ", "tail ",
+    "pkg-config"
+  ]
+}

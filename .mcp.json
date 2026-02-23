@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "chainlink-safe-fetch": {
+      "args": [
+        ".claude/mcp/safe-fetch-server.py"
+      ],
+      "command": "python3"
+    }
+  }
+}

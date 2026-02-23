@@ -1,7 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::data::{MonsterDef, PlayerDef};
+use crate::rules::monster_table::MonsterKind;
 use crate::types::{Coord, GameColor, Stat};
+
+// AiBehavior is defined in rules::monster_table, re-exported here for
+// backwards compatibility — existing `use crate::entity::AiBehavior` keeps working.
+pub use crate::rules::monster_table::AiBehavior;
 
 fn default_entity_sight_radius() -> Coord {
     8
@@ -11,13 +16,6 @@ fn default_entity_sight_radius() -> Coord {
 pub enum EntityKind {
     Player,
     Monster,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub enum AiBehavior {
-    None,   // Player — no automatic AI
-    Chase,  // Greedy chase toward player
-    Wander, // Random walk; switches to Chase when player enters LOS
 }
 
 #[derive(Serialize, Deserialize)]
@@ -37,6 +35,10 @@ pub struct Entity {
     pub alive: bool,
     #[serde(default = "default_entity_sight_radius")]
     pub sight_radius: Coord,
+    /// The canonical monster type, if this entity is a known monster kind.
+    /// `None` for the player or custom/modded monsters without a matching kind.
+    #[serde(default)]
+    pub monster_kind: Option<MonsterKind>,
 }
 
 impl Entity {
@@ -56,6 +58,7 @@ impl Entity {
             defense: def.defense,
             alive: true,
             sight_radius: 0, // Player FOV managed by GameState.fov_radius
+            monster_kind: None,
         }
     }
 
@@ -81,6 +84,7 @@ impl Entity {
             defense: template.defense,
             alive: true,
             sight_radius: template.sight_radius,
+            monster_kind: template.monster_kind(),
         }
     }
 }

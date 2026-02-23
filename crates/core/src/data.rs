@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::entity::AiBehavior;
 use crate::rules::balance;
+use crate::rules::monster_table::{self, MonsterKind};
 use crate::types::{Coord, GameColor, Stat};
 
 fn default_sight_radius() -> Coord {
@@ -197,6 +198,12 @@ impl MonsterDef {
             "wander" => AiBehavior::Wander,
             _ => AiBehavior::None,
         }
+    }
+
+    /// Map this definition's name to a canonical `MonsterKind`.
+    /// Returns `None` for custom/modded monsters without a matching kind.
+    pub fn monster_kind(&self) -> Option<MonsterKind> {
+        monster_table::from_name(&self.name)
     }
 }
 
@@ -1002,6 +1009,7 @@ spawn_weight = 100
         assert_eq!(g.sight_radius, balance::GOBLIN_SIGHT as Coord);
         assert_eq!(g.spawn_weight, balance::GOBLIN_SPAWN_WEIGHT as u32);
         assert_eq!(g.glyph_char(), balance::GOBLIN_GLYPH);
+        assert_eq!(g.monster_kind(), Some(MonsterKind::Goblin));
 
         let o = orc();
         assert_eq!(o.hp, balance::ORC_HP as Stat);
@@ -1010,6 +1018,7 @@ spawn_weight = 100
         assert_eq!(o.sight_radius, balance::ORC_SIGHT as Coord);
         assert_eq!(o.spawn_weight, balance::ORC_SPAWN_WEIGHT as u32);
         assert_eq!(o.glyph_char(), balance::ORC_GLYPH);
+        assert_eq!(o.monster_kind(), Some(MonsterKind::Orc));
 
         let t = troll();
         assert_eq!(t.hp, balance::TROLL_HP as Stat);
@@ -1018,5 +1027,6 @@ spawn_weight = 100
         assert_eq!(t.sight_radius, balance::TROLL_SIGHT as Coord);
         assert_eq!(t.spawn_weight, balance::TROLL_SPAWN_WEIGHT as u32);
         assert_eq!(t.glyph_char(), balance::TROLL_GLYPH);
+        assert_eq!(t.monster_kind(), Some(MonsterKind::Troll));
     }
 }

@@ -400,7 +400,7 @@ fn run_single_game_tracked(
     let mut path: Vec<Pos> = Vec::new();
     let mut path_idx: usize = 0;
 
-    while !gs.game_over && gs.turn_count < max_turns {
+    while !gs.game_over && !gs.game_won && gs.turn_count < max_turns {
         let before = analytics::snapshot_entities(&gs);
 
         let cmd = if gs.has_adjacent_monster() {
@@ -479,7 +479,7 @@ fn run_single_game(
     let mut path: Vec<Pos> = Vec::new();
     let mut path_idx: usize = 0;
 
-    while !gs.game_over && gs.turn_count < max_turns {
+    while !gs.game_over && !gs.game_won && gs.turn_count < max_turns {
         let cmd = if gs.has_adjacent_monster() {
             // Attack weakest adjacent monster.
             path.clear();
@@ -558,7 +558,7 @@ fn run_and_save_golden(
     let mut path: Vec<Pos> = Vec::new();
     let mut path_idx: usize = 0;
 
-    while !gs.game_over && gs.turn_count < max_turns {
+    while !gs.game_over && !gs.game_won && gs.turn_count < max_turns {
         let cmd = if gs.has_adjacent_monster() {
             path.clear();
             fight_command(&gs)

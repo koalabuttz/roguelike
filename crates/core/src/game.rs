@@ -26,6 +26,8 @@ pub struct StepResult {
     pub new_messages: Vec<String>,
     /// Whether the game ended this step (player died).
     pub game_over: bool,
+    /// Whether the player won this step (descended past target depth).
+    pub game_won: bool,
 }
 
 /// Why autorun stopped.
@@ -99,6 +101,10 @@ pub struct GameObservation {
     pub explored_pct: Stat,
     pub seed: u64,
     pub seed_code: String,
+    // --- depth ---
+    pub depth: Stat,
+    pub target_depth: Stat,
+    pub game_won: bool,
 }
 
 /// Result of an auto-fight sequence — combat resolved in one call.
@@ -317,6 +323,24 @@ fn default_regen_interval() -> Stat {
 fn default_max_autorun_steps() -> Stat {
     100
 }
+fn default_depth() -> Stat {
+    1
+}
+fn default_target_depth() -> Stat {
+    5
+}
+fn default_map_config() -> Stat {
+    30
+}
+fn default_room_size_min() -> Coord {
+    4
+}
+fn default_room_size_max() -> Coord {
+    10
+}
+fn default_max_monsters_per_room() -> Stat {
+    2
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct GameState {
@@ -362,6 +386,27 @@ pub struct GameState {
     /// Player's equipped items.
     #[serde(default)]
     pub equipment: Equipment,
+    /// Current dungeon depth (1-based).
+    #[serde(default = "default_depth")]
+    pub depth: Stat,
+    /// Target depth — reaching this wins the game.
+    #[serde(default = "default_target_depth")]
+    pub target_depth: Stat,
+    /// Whether the player has won by descending past target_depth.
+    #[serde(default)]
+    pub game_won: bool,
+    /// Depth scaling config (copied from GameData at creation).
+    #[serde(default)]
+    pub depth_scaling: data::DepthScaling,
+    /// Map generation config (copied from GameConfig at creation, persists across floors).
+    #[serde(default = "default_map_config")]
+    pub max_rooms: Stat,
+    #[serde(default = "default_room_size_min")]
+    pub room_size_min: Coord,
+    #[serde(default = "default_room_size_max")]
+    pub room_size_max: Coord,
+    #[serde(default = "default_max_monsters_per_room")]
+    pub max_monsters_per_room: Stat,
 }
 
 impl GameState {
@@ -420,6 +465,8 @@ impl GameState {
         let visible = fov::compute_fov(&map, px, py, cfg.fov_radius);
         let explored = visible.clone();
 
+        map.place_stairs_down();
+
         let mut log = MessageLog::new();
         log.add(format!("Welcome! Map preset: {:?}", preset));
 
@@ -444,6 +491,14 @@ impl GameState {
             wandering_spawn_table: game_data.monsters.clone(),
             ground_items,
             equipment: Equipment::default(),
+            depth: 1,
+            target_depth: cfg.target_depth,
+            game_won: false,
+            depth_scaling: game_data.depth_scaling.clone(),
+            max_rooms: cfg.max_rooms,
+            room_size_min: cfg.room_size_min,
+            room_size_max: cfg.room_size_max,
+            max_monsters_per_room: cfg.max_monsters_per_room,
         }
     }
 
@@ -480,6 +535,7 @@ impl GameState {
             &mut map_rng,
         );
         map.compute_structural_walls();
+        map.place_stairs_down();
 
         let mut entities = vec![Entity::player_from_def(&game_data.player, px, py)];
         let monsters = spawn::spawn_monsters(
@@ -519,6 +575,14 @@ impl GameState {
             wandering_spawn_table: game_data.monsters.clone(),
             ground_items,
             equipment: Equipment::default(),
+            depth: 1,
+            target_depth: cfg.target_depth,
+            game_won: false,
+            depth_scaling: game_data.depth_scaling.clone(),
+            max_rooms: cfg.max_rooms,
+            room_size_min: cfg.room_size_min,
+            room_size_max: cfg.room_size_max,
+            max_monsters_per_room: cfg.max_monsters_per_room,
         }
     }
 
@@ -655,12 +719,109 @@ impl GameState {
         self.entities[0].defense + self.equipment.defense_bonus()
     }
 
+    /// Attempt to descend stairs. Returns `true` if successful (turn consumed).
+    ///
+    /// The player must be standing on a `StairsDown` tile. On success:
+    /// - Depth increments by 1
+    /// - If past target_depth: game is won
+    /// - Otherwise: generate a new floor, spawn monsters with depth scaling,
+    ///   preserve player HP/equipment, reset exploration
+    pub fn descend(&mut self) -> bool {
+        let px = self.entities[0].x;
+        let py = self.entities[0].y;
+        let idx = self.map.idx(px, py);
+        if self.map.tiles[idx] != map::Tile::StairsDown {
+            self.log.add("There are no stairs here.");
+            return false;
+        }
+
+        self.depth += 1;
+
+        if self.depth > self.target_depth {
+            self.game_won = true;
+            self.log.add(format!(
+                "You ascend from the dungeon victorious! You conquered all {} depths!",
+                self.target_depth
+            ));
+            return true;
+        }
+
+        // Derive new seed from original seed + depth for deterministic floors.
+        let floor_seed = self.seed.wrapping_add(self.depth as u64);
+
+        // Derive independent RNG streams (same pattern as with_data).
+        let mut master = StdRng::seed_from_u64(floor_seed);
+        let mut map_rng = StdRng::from_rng(&mut master).unwrap();
+        let mut spawn_rng = StdRng::from_rng(&mut master).unwrap();
+        let wandering_seed = StdRng::from_rng(&mut master).unwrap().next_u64();
+        let mut item_rng = StdRng::from_rng(&mut master).unwrap();
+
+        // Generate new map with same dimensions.
+        let width = self.map.width;
+        let height = self.map.height;
+        let mut new_map = map::Map::new(width, height);
+
+        let (new_px, new_py) = if let Some(preset) = self.preset {
+            new_map.from_preset(preset, &mut map_rng)
+        } else {
+            new_map.generate(
+                self.max_rooms,
+                self.room_size_min,
+                self.room_size_max,
+                &mut map_rng,
+            )
+        };
+        new_map.compute_structural_walls();
+        new_map.place_stairs_down();
+
+        // Spawn monsters and apply depth scaling.
+        let spawn_table = &self.wandering_spawn_table;
+        let mut monsters = spawn::spawn_monsters(
+            &new_map,
+            spawn_table,
+            self.max_monsters_per_room,
+            &mut spawn_rng,
+        );
+        for m in &mut monsters {
+            self.apply_depth_scaling(m);
+        }
+
+        // Spawn items on new floor.
+        let ground_items = spawn::spawn_items(&new_map, item::MAX_ITEMS_PER_ROOM, &mut item_rng);
+
+        // Preserve player entity with current HP/stats, move to new start.
+        self.entities[0].x = new_px;
+        self.entities[0].y = new_py;
+        // Replace entities: keep player, add new monsters.
+        self.entities.truncate(1);
+        self.entities.extend(monsters);
+
+        // Replace map and reset exploration.
+        self.map = new_map;
+        self.ground_items = ground_items;
+        self.visible = fov::compute_fov(&self.map, new_px, new_py, self.fov_radius);
+        self.explored = self.visible.clone();
+
+        // Reset wandering state for new floor.
+        self.wandering_seed = wandering_seed;
+        self.wandering_spawned = 0;
+        self.idle_count = 0;
+
+        self.log.add(format!(
+            "You descend to depth {}/{}...",
+            self.depth, self.target_depth
+        ));
+
+        true
+    }
+
     /// Dispatch a game command. Returns `true` if the player took an action
     /// (i.e. a turn was consumed), `false` otherwise.
     pub fn handle_command(&mut self, cmd: GameCommand) -> bool {
         match cmd {
             GameCommand::Move { dx, dy } => self.player_move_or_attack(dx, dy),
             GameCommand::Wait => true,
+            GameCommand::Descend => self.descend(),
             // Autorun, AutoExplore, Look, Help are handled at a higher level (main loop / MCP).
             GameCommand::Autorun { .. }
             | GameCommand::AutoExplore
@@ -681,6 +842,15 @@ impl GameState {
     /// Attempt to spawn a wandering monster if conditions are met.
     ///
     /// Checks: grace period, spawn interval (with idle acceleration),
+    /// Apply depth-based stat scaling to a monster entity.
+    fn apply_depth_scaling(&self, entity: &mut Entity) {
+        let bonus_hp = (self.depth - 1) * self.depth_scaling.monster_hp_per_floor;
+        let bonus_atk = (self.depth - 1) * self.depth_scaling.monster_atk_per_floor;
+        entity.hp += bonus_hp;
+        entity.max_hp += bonus_hp;
+        entity.attack += bonus_atk;
+    }
+
     /// random chance, and wandering cap. Spawns offscreen in a random room.
     // FUTURE: Replace with SoundEvent for acoustic propagation system.
     fn try_spawn_wandering(&mut self, rng: &mut impl rand::Rng) {
@@ -731,6 +901,7 @@ impl GameState {
             entity.x = sx;
             entity.y = sy;
             entity.ai = crate::entity::AiBehavior::Wander;
+            self.apply_depth_scaling(&mut entity);
             self.emit_spawn_sound_cue(sx, sy);
             self.entities.push(entity);
             self.wandering_spawned += 1;
@@ -845,28 +1016,33 @@ impl GameState {
                 self.idle_count = 0;
             }
             self.update_fov();
-            let mut turn_rng =
-                StdRng::seed_from_u64(self.wandering_seed.wrapping_add(self.turn_count as u64));
-            let player_def = self.effective_defense();
-            if ai::run_monster_turns(
-                &mut self.entities,
-                &self.map,
-                &mut self.log,
-                &mut turn_rng,
-                player_def,
-            ) {
-                self.game_over = true;
+
+            // Skip monster turns and spawning if the player just won.
+            if !self.game_won {
+                let mut turn_rng =
+                    StdRng::seed_from_u64(self.wandering_seed.wrapping_add(self.turn_count as u64));
+                let player_def = self.effective_defense();
+                if ai::run_monster_turns(
+                    &mut self.entities,
+                    &self.map,
+                    &mut self.log,
+                    &mut turn_rng,
+                    player_def,
+                ) {
+                    self.game_over = true;
+                }
+                self.turn_count += 1;
+                self.try_spawn_wandering(&mut turn_rng);
+                self.emit_ambient_sound_cues();
+                self.apply_regen();
             }
-            self.turn_count += 1;
-            self.try_spawn_wandering(&mut turn_rng);
-            self.emit_ambient_sound_cues();
-            self.apply_regen();
         }
 
         StepResult {
             action_taken,
             new_messages: self.log.messages_since(msg_count_before),
             game_over: self.game_over,
+            game_won: self.game_won,
         }
     }
 
@@ -1061,6 +1237,7 @@ impl GameState {
                         match self.map.tiles[self.map.idx(x, y)] {
                             map::Tile::Floor => line.push('.'),
                             map::Tile::Wall => line.push('#'),
+                            map::Tile::StairsDown => line.push('>'),
                         }
                     }
                 } else {
@@ -1135,6 +1312,9 @@ impl GameState {
             explored_pct,
             seed: self.seed,
             seed_code: self.seed_code(),
+            depth: self.depth,
+            target_depth: self.target_depth,
+            game_won: self.game_won,
         }
     }
 
@@ -1147,6 +1327,7 @@ impl GameState {
             player_max_hp: player.max_hp,
             explored_pct: self.explored_pct(),
             player_name: None,
+            depth: self.depth,
         }
     }
 
@@ -1165,7 +1346,7 @@ impl GameState {
             .explored
             .iter()
             .filter(|&&(x, y)| {
-                self.map.in_bounds(x, y) && self.map.tiles[self.map.idx(x, y)] == map::Tile::Floor
+                self.map.in_bounds(x, y) && self.map.tiles[self.map.idx(x, y)].is_walkable()
             })
             .count() as Stat;
         (explored_floors * 100) / floor_count
@@ -1222,6 +1403,7 @@ impl GameState {
                         match self.map.tiles[self.map.idx(x, y)] {
                             map::Tile::Floor => line.push('.'),
                             map::Tile::Wall => line.push('#'),
+                            map::Tile::StairsDown => line.push('>'),
                         }
                     }
                 } else {
@@ -1285,6 +1467,7 @@ impl GameState {
         let terrain = match tile {
             map::Tile::Floor => "Floor".into(),
             map::Tile::Wall => "Wall".into(),
+            map::Tile::StairsDown => "Stairs down".into(),
         };
 
         // Show entity info if visible, or if reveal_monsters is active (alive only).
@@ -1332,6 +1515,7 @@ impl GameState {
             self.glyph_at(x, y).unwrap_or(match tile {
                 map::Tile::Floor => '.',
                 map::Tile::Wall => '#',
+                map::Tile::StairsDown => '>',
             })
         } else if entity.is_some() {
             // Revealed monster — show its glyph.
@@ -1340,6 +1524,7 @@ impl GameState {
             match tile {
                 map::Tile::Floor => '.',
                 map::Tile::Wall => '#',
+                map::Tile::StairsDown => '>',
             }
         };
 
@@ -1441,6 +1626,14 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            depth: 1,
+            target_depth: 5,
+            game_won: false,
+            depth_scaling: Default::default(),
+            max_rooms: 30,
+            room_size_min: 4,
+            room_size_max: 10,
+            max_monsters_per_room: 2,
         }
     }
 
@@ -1748,6 +1941,14 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            depth: 1,
+            target_depth: 5,
+            game_won: false,
+            depth_scaling: Default::default(),
+            max_rooms: 30,
+            room_size_min: 4,
+            room_size_max: 10,
+            max_monsters_per_room: 2,
         }
     }
 
@@ -1827,6 +2028,14 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            depth: 1,
+            target_depth: 5,
+            game_won: false,
+            depth_scaling: Default::default(),
+            max_rooms: 30,
+            room_size_min: 4,
+            room_size_max: 10,
+            max_monsters_per_room: 2,
         };
 
         let result = gs.autorun(1, 0);
@@ -1880,6 +2089,14 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            depth: 1,
+            target_depth: 5,
+            game_won: false,
+            depth_scaling: Default::default(),
+            max_rooms: 30,
+            room_size_min: 4,
+            room_size_max: 10,
+            max_monsters_per_room: 2,
         };
 
         let result = gs.autorun(1, 0);
@@ -1922,6 +2139,14 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            depth: 1,
+            target_depth: 5,
+            game_won: false,
+            depth_scaling: Default::default(),
+            max_rooms: 30,
+            room_size_min: 4,
+            room_size_max: 10,
+            max_monsters_per_room: 2,
         };
 
         let result = gs.autorun(1, 0);
@@ -1991,6 +2216,14 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            depth: 1,
+            target_depth: 5,
+            game_won: false,
+            depth_scaling: Default::default(),
+            max_rooms: 30,
+            room_size_min: 4,
+            room_size_max: 10,
+            max_monsters_per_room: 2,
         };
 
         let result = gs.autorun(1, 0);
@@ -2037,6 +2270,14 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            depth: 1,
+            target_depth: 5,
+            game_won: false,
+            depth_scaling: Default::default(),
+            max_rooms: 30,
+            room_size_min: 4,
+            room_size_max: 10,
+            max_monsters_per_room: 2,
         };
 
         let result = gs.autorun(1, 0);
@@ -3146,5 +3387,208 @@ mod tests {
         let with_defaults = gs.look_at_with(3, 3, &LookOptions::default());
         assert_eq!(normal.entity.is_some(), with_defaults.entity.is_some());
         assert_eq!(normal.glyph, with_defaults.glyph);
+    }
+
+    // --- Stairs & depth tests ---
+
+    #[test]
+    fn generated_map_has_stairs() {
+        let gs = GameState::with_seed(80, 40, 42);
+        let has_stairs = gs.map.tiles.iter().any(|t| *t == Tile::StairsDown);
+        assert!(has_stairs, "Generated map should have stairs down");
+    }
+
+    #[test]
+    fn descend_fails_when_not_on_stairs() {
+        let mut gs = test_game();
+        let result = gs.handle_command(GameCommand::Descend);
+        assert!(!result, "Descend should fail when not on stairs");
+        assert_eq!(gs.depth, 1);
+    }
+
+    #[test]
+    fn descend_succeeds_on_stairs() {
+        let mut gs = GameState::with_seed(80, 40, 42);
+        // Find the stairs tile and move the player there.
+        let stairs_pos = gs
+            .map
+            .tiles
+            .iter()
+            .enumerate()
+            .find(|(_, t)| **t == Tile::StairsDown)
+            .map(|(i, _)| (i as i32 % gs.map.width, i as i32 / gs.map.width))
+            .unwrap();
+        gs.entities[0].x = stairs_pos.0;
+        gs.entities[0].y = stairs_pos.1;
+        gs.update_fov();
+
+        let old_map_tiles = gs.map.tiles.clone();
+        let hp_before = gs.entities[0].hp;
+
+        let result = gs.descend();
+        assert!(result, "Descend should succeed on stairs");
+        assert_eq!(gs.depth, 2);
+        assert!(!gs.game_won);
+        // Player HP should be preserved.
+        assert_eq!(gs.entities[0].hp, hp_before);
+        // Map should be regenerated (different tiles).
+        assert_ne!(
+            gs.map.tiles, old_map_tiles,
+            "Map should change after descend"
+        );
+        // New map should also have stairs.
+        let has_stairs = gs.map.tiles.iter().any(|t| *t == Tile::StairsDown);
+        assert!(has_stairs, "New floor should have stairs down");
+    }
+
+    #[test]
+    fn descend_preserves_equipment() {
+        let mut gs = GameState::with_seed(80, 40, 42);
+        gs.equipment.weapon = Some(ItemKind::ShortSword);
+        gs.equipment.armor = Some(ItemKind::LeatherArmor);
+
+        // Move to stairs.
+        let stairs_pos = gs
+            .map
+            .tiles
+            .iter()
+            .enumerate()
+            .find(|(_, t)| **t == Tile::StairsDown)
+            .map(|(i, _)| (i as i32 % gs.map.width, i as i32 / gs.map.width))
+            .unwrap();
+        gs.entities[0].x = stairs_pos.0;
+        gs.entities[0].y = stairs_pos.1;
+
+        gs.descend();
+        assert_eq!(gs.equipment.weapon, Some(ItemKind::ShortSword));
+        assert_eq!(gs.equipment.armor, Some(ItemKind::LeatherArmor));
+    }
+
+    #[test]
+    fn victory_triggers_past_target_depth() {
+        let mut gs = GameState::with_seed(80, 40, 42);
+        gs.target_depth = 2;
+
+        // Descend twice to reach depth 3 (past target 2).
+        for _ in 0..2 {
+            let stairs_pos = gs
+                .map
+                .tiles
+                .iter()
+                .enumerate()
+                .find(|(_, t)| **t == Tile::StairsDown)
+                .map(|(i, _)| (i as i32 % gs.map.width, i as i32 / gs.map.width))
+                .unwrap();
+            gs.entities[0].x = stairs_pos.0;
+            gs.entities[0].y = stairs_pos.1;
+            gs.descend();
+        }
+
+        assert!(
+            gs.game_won,
+            "Game should be won after descending past target depth"
+        );
+        assert_eq!(gs.depth, 3);
+    }
+
+    #[test]
+    fn depth_scaled_monsters_have_boosted_stats() {
+        let mut gs = GameState::with_seed(80, 40, 42);
+        gs.depth_scaling.monster_hp_per_floor = 2;
+        gs.depth_scaling.monster_atk_per_floor = 1;
+
+        // Move to stairs and descend to depth 2.
+        let stairs_pos = gs
+            .map
+            .tiles
+            .iter()
+            .enumerate()
+            .find(|(_, t)| **t == Tile::StairsDown)
+            .map(|(i, _)| (i as i32 % gs.map.width, i as i32 / gs.map.width))
+            .unwrap();
+        gs.entities[0].x = stairs_pos.0;
+        gs.entities[0].y = stairs_pos.1;
+        gs.descend();
+
+        // Check that monsters on floor 2 have bonus stats.
+        // depth=2, so bonus = (2-1)*scaling = 1*scaling.
+        let base_goblin_hp = data::goblin().hp;
+        let base_goblin_atk = data::goblin().attack;
+        for e in gs.entities.iter().skip(1) {
+            if e.name == "Goblin" {
+                assert_eq!(e.hp, base_goblin_hp + 2, "Goblin HP should be boosted by 2");
+                assert_eq!(
+                    e.attack,
+                    base_goblin_atk + 1,
+                    "Goblin ATK should be boosted by 1"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn floor_seed_is_deterministic() {
+        // Same seed + same depth = same map layout.
+        let mut gs1 = GameState::with_seed(80, 40, 99);
+        let stairs1 = gs1
+            .map
+            .tiles
+            .iter()
+            .enumerate()
+            .find(|(_, t)| **t == Tile::StairsDown)
+            .map(|(i, _)| (i as i32 % gs1.map.width, i as i32 / gs1.map.width))
+            .unwrap();
+        gs1.entities[0].x = stairs1.0;
+        gs1.entities[0].y = stairs1.1;
+        gs1.descend();
+        let tiles1 = gs1.map.tiles.clone();
+
+        let mut gs2 = GameState::with_seed(80, 40, 99);
+        let stairs2 = gs2
+            .map
+            .tiles
+            .iter()
+            .enumerate()
+            .find(|(_, t)| **t == Tile::StairsDown)
+            .map(|(i, _)| (i as i32 % gs2.map.width, i as i32 / gs2.map.width))
+            .unwrap();
+        gs2.entities[0].x = stairs2.0;
+        gs2.entities[0].y = stairs2.1;
+        gs2.descend();
+        let tiles2 = gs2.map.tiles.clone();
+
+        assert_eq!(tiles1, tiles2, "Same seed+depth should produce same map");
+    }
+
+    #[test]
+    fn observe_includes_depth_fields() {
+        let gs = GameState::with_seed(80, 40, 42);
+        let obs = gs.observe();
+        assert_eq!(obs.depth, 1);
+        assert_eq!(obs.target_depth, 5);
+        assert!(!obs.game_won);
+    }
+
+    #[test]
+    fn explored_pct_counts_stairs_tiles() {
+        let mut gs = test_game();
+        // Place stairs at (3, 3) which is already a floor tile.
+        let idx = gs.map.idx(3, 3);
+        gs.map.tiles[idx] = Tile::StairsDown;
+        // Stairs should still count in floor_count and explored_pct.
+        let pct = gs.explored_pct();
+        assert!(pct > 0, "explored_pct should count stairs tiles");
+    }
+
+    #[test]
+    fn look_at_stairs_shows_terrain() {
+        let mut gs = test_game();
+        let idx = gs.map.idx(3, 3);
+        gs.map.tiles[idx] = Tile::StairsDown;
+        gs.visible.insert((3, 3));
+        gs.explored.insert((3, 3));
+        let info = gs.look_at(3, 3);
+        assert_eq!(info.terrain, "Stairs down");
+        assert_eq!(info.glyph, '>');
     }
 }

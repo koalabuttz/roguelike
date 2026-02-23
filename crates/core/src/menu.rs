@@ -1118,6 +1118,7 @@ mod tests {
             player_max_hp: 30,
             explored_pct: 35,
             player_name: None,
+            depth: 1,
         }
     }
 

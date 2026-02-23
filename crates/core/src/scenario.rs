@@ -182,7 +182,7 @@ impl PreparedScenario {
         let mut analytics = analytics::new_analytics(self.gs.seed);
         let mut turns_run = 0;
 
-        while !self.gs.game_over && turns_run < max_turns {
+        while !self.gs.game_over && !self.gs.game_won && turns_run < max_turns {
             let before = analytics::snapshot_entities(&self.gs);
 
             let cmd = if self.gs.has_adjacent_monster() {
@@ -215,7 +215,11 @@ impl PreparedScenario {
         let mut analytics = analytics::new_analytics(self.gs.seed);
         let mut turns_run = 0;
 
-        while !self.gs.game_over && turns_run < max_turns && self.gs.has_adjacent_monster() {
+        while !self.gs.game_over
+            && !self.gs.game_won
+            && turns_run < max_turns
+            && self.gs.has_adjacent_monster()
+        {
             let before = analytics::snapshot_entities(&self.gs);
             let cmd = fight_command(&self.gs);
             let result = self.gs.step(cmd);

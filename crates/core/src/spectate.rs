@@ -47,8 +47,16 @@ pub fn render_frame(state: &GameState) -> String {
         String::new()
     };
     frame.push_str(&format!(
-        "HP {}/{}{} | Turn {} | Kills {} | Explored {}% | Seed {}\n",
-        player.hp, player.max_hp, equip, state.turn_count, kills, explored_pct, state.seed,
+        "HP {}/{}{} | Depth {}/{} | Turn {} | Kills {} | Explored {}% | Seed {}\n",
+        player.hp,
+        player.max_hp,
+        equip,
+        state.depth,
+        state.target_depth,
+        state.turn_count,
+        kills,
+        explored_pct,
+        state.seed,
     ));
 
     // Last 4 messages
@@ -105,6 +113,14 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            depth: 1,
+            target_depth: 5,
+            game_won: false,
+            depth_scaling: Default::default(),
+            max_rooms: 30,
+            room_size_min: 4,
+            room_size_max: 10,
+            max_monsters_per_room: 2,
         }
     }
 

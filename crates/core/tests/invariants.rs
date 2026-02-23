@@ -8,7 +8,6 @@ use proptest::prelude::*;
 
 use roguelike_core::command::GameCommand;
 use roguelike_core::game::GameState;
-use roguelike_core::map::Tile;
 
 /// Generate a random GameCommand: Move in any direction or Wait.
 fn arb_game_command() -> impl Strategy<Value = GameCommand> {
@@ -125,8 +124,8 @@ proptest! {
                 );
                 let tile = state.map.tiles[state.map.idx(px, py)];
                 prop_assert!(
-                    tile == Tile::Floor,
-                    "Player at ({}, {}) is on {:?}, not Floor (seed={}, turn={})",
+                    tile.is_walkable(),
+                    "Player at ({}, {}) is on {:?}, not walkable (seed={}, turn={})",
                     px, py, tile, seed, state.turn_count,
                 );
             }

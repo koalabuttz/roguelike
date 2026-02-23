@@ -7,6 +7,7 @@ use crate::types::{Coord, Pos, Stat};
 pub enum Tile {
     Wall,
     Floor,
+    StairsDown,
 }
 
 impl Tile {
@@ -15,9 +16,14 @@ impl Tile {
     /// Walls are not walkable — callers must check `is_walkable` first.
     pub fn move_cost(&self) -> i32 {
         match self {
-            Tile::Floor => 1,
+            Tile::Floor | Tile::StairsDown => 1,
             Tile::Wall => unreachable!("walls are not walkable"),
         }
+    }
+
+    /// Whether this tile is walkable (not a wall).
+    pub fn is_walkable(self) -> bool {
+        self != Tile::Wall
     }
 }
 
@@ -103,7 +109,7 @@ impl Map {
                         }
                         let nx = x + dx;
                         let ny = y + dy;
-                        if self.in_bounds(nx, ny) && self.tiles[self.idx(nx, ny)] == Tile::Floor {
+                        if self.in_bounds(nx, ny) && self.tiles[self.idx(nx, ny)].is_walkable() {
                             self.structural[idx] = true;
                             break 'neighbors;
                         }
@@ -122,7 +128,7 @@ impl Map {
     }
 
     pub fn is_walkable(&self, x: Coord, y: Coord) -> bool {
-        self.in_bounds(x, y) && self.tiles[self.idx(x, y)] == Tile::Floor
+        self.in_bounds(x, y) && self.tiles[self.idx(x, y)].is_walkable()
     }
 
     /// Count walkable tiles adjacent to (x, y), excluding one direction.
@@ -154,9 +160,9 @@ impl Map {
         count
     }
 
-    /// Count the total number of floor tiles on the map.
+    /// Count the total number of walkable tiles on the map (floor + stairs).
     pub fn floor_count(&self) -> Stat {
-        self.tiles.iter().filter(|t| **t == Tile::Floor).count() as Stat
+        self.tiles.iter().filter(|t| t.is_walkable()).count() as Stat
     }
 
     /// Whether (x, y) is inside any room's interior.
@@ -170,7 +176,7 @@ impl Map {
         let mut count = 0;
         for y in 0..self.height {
             for x in 0..self.width {
-                if self.tiles[self.idx(x, y)] == Tile::Floor
+                if self.tiles[self.idx(x, y)].is_walkable()
                     && !self
                         .rooms
                         .iter()
@@ -214,6 +220,18 @@ impl Map {
                 let idx = self.idx(x, y);
                 self.tiles[idx] = Tile::Floor;
             }
+        }
+    }
+
+    /// Place stairs down (`>`) in the last room's center.
+    ///
+    /// The last room is farthest from the player start (room 0).
+    /// Does nothing if there are no rooms.
+    pub fn place_stairs_down(&mut self) {
+        if let Some(room) = self.rooms.last() {
+            let (cx, cy) = room.center();
+            let idx = self.idx(cx, cy);
+            self.tiles[idx] = Tile::StairsDown;
         }
     }
 
@@ -701,5 +719,50 @@ mod tests {
         let json = serde_json::to_string(&preset).unwrap();
         let loaded: MapPreset = serde_json::from_str(&json).unwrap();
         assert_eq!(preset, loaded);
+    }
+
+    // --- Stairs tests ---
+
+    #[test]
+    fn is_walkable_stairs_down() {
+        let mut m = Map::new(10, 10);
+        let idx = m.idx(5, 5);
+        m.tiles[idx] = Tile::StairsDown;
+        assert!(m.is_walkable(5, 5));
+    }
+
+    #[test]
+    fn place_stairs_down_in_last_room() {
+        let mut m = Map::new(80, 50);
+        let mut rng = StdRng::seed_from_u64(42);
+        m.generate(30, 4, 10, &mut rng);
+        m.place_stairs_down();
+
+        let last_room = m.rooms.last().unwrap();
+        let (cx, cy) = last_room.center();
+        let idx = m.idx(cx, cy);
+        assert_eq!(m.tiles[idx], Tile::StairsDown);
+    }
+
+    #[test]
+    fn floor_count_includes_stairs() {
+        let mut m = Map::new(10, 10);
+        let idx1 = m.idx(3, 3);
+        m.tiles[idx1] = Tile::Floor;
+        let idx2 = m.idx(5, 5);
+        m.tiles[idx2] = Tile::StairsDown;
+        assert_eq!(m.floor_count(), 2);
+    }
+
+    #[test]
+    fn stairs_tile_is_walkable() {
+        assert!(Tile::StairsDown.is_walkable());
+        assert!(Tile::Floor.is_walkable());
+        assert!(!Tile::Wall.is_walkable());
+    }
+
+    #[test]
+    fn stairs_move_cost() {
+        assert_eq!(Tile::StairsDown.move_cost(), 1);
     }
 }

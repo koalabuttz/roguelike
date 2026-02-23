@@ -213,6 +213,7 @@ fn render_map<W: Write>(w: &mut W, state: &GameState, pal: ColorPalette) -> std:
                 let (ch, fg) = match tile {
                     Tile::Floor => ('.', palette_color(GameColor::DarkGrey, pal)),
                     Tile::Wall => ('#', palette_color(GameColor::White, pal)),
+                    Tile::StairsDown => ('>', palette_color(GameColor::Cyan, pal)),
                 };
                 queue!(
                     w,
@@ -238,6 +239,7 @@ fn render_map<W: Write>(w: &mut W, state: &GameState, pal: ColorPalette) -> std:
                 let ch = match tile {
                     Tile::Floor => '.',
                     Tile::Wall => '#',
+                    Tile::StairsDown => '>',
                 };
                 let dim = match pal {
                     ColorPalette::HighContrast => palette_color(GameColor::Grey, pal),
@@ -382,13 +384,16 @@ fn render_status_bar<W: Write>(
         ""
     };
 
+    let depth_segment = format!(" | Depth {}/{}", state.depth, state.target_depth);
+
     let status = format!(
-        " HP [{}{}] {}/{}{}{}{}{}",
+        " HP [{}{}] {}/{}{}{}{}{}{}",
         bar_filled,
         bar_empty,
         player.hp,
         player.max_hp,
         equip_segment,
+        depth_segment,
         coord_segment,
         explored_segment,
         hint_segment
@@ -449,7 +454,28 @@ fn render_message_log<W: Write>(
         )?;
     }
 
-    if state.game_over {
+    if state.game_won {
+        let msg = "Victory! You conquered the dungeon! Press any key to exit.".to_string();
+        let x = (screen_width as usize).saturating_sub(msg.len()) / 2;
+        let y = screen_height / 2;
+        queue!(
+            w,
+            cursor::MoveTo(x as u16, y as u16),
+            SetForegroundColor(palette_color(GameColor::Yellow, pal)),
+            SetBackgroundColor(palette_color(GameColor::Black, pal)),
+            style::Print(&msg)
+        )?;
+
+        let seed_msg = format!("Seed: {}", state.seed_code());
+        let sx = (screen_width as usize).saturating_sub(seed_msg.len()) / 2;
+        queue!(
+            w,
+            cursor::MoveTo(sx as u16, (y + 1) as u16),
+            SetForegroundColor(palette_color(GameColor::Grey, pal)),
+            SetBackgroundColor(palette_color(GameColor::Black, pal)),
+            style::Print(seed_msg)
+        )?;
+    } else if state.game_over {
         let msg = if settings.player_name.is_empty() {
             "You have been slain... Press any key to exit.".to_string()
         } else {

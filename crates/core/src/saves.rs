@@ -15,6 +15,8 @@ pub struct SlotMetadata {
     pub explored_pct: Stat,
     #[serde(default)]
     pub player_name: Option<String>,
+    #[serde(default)]
+    pub depth: Stat,
 }
 
 #[cfg(test)]
@@ -29,6 +31,7 @@ mod tests {
             player_max_hp: 30,
             explored_pct: 35,
             player_name: Some("David".to_string()),
+            depth: 1,
         };
         let json = serde_json::to_string(&original).unwrap();
         let loaded: SlotMetadata = serde_json::from_str(&json).unwrap();
@@ -47,6 +50,7 @@ mod tests {
             player_max_hp: 20,
             explored_pct: 50,
             player_name: None,
+            depth: 1,
         };
         let json = serde_json::to_string(&original).unwrap();
         let loaded: SlotMetadata = serde_json::from_str(&json).unwrap();

@@ -120,6 +120,7 @@ pub fn translate_key(key: KeyEvent, settings: &Settings) -> Option<GameCommand> 
 
     match key.code {
         KeyCode::Char('o') => Some(GameCommand::AutoExplore),
+        KeyCode::Char('>') => Some(GameCommand::Descend),
         KeyCode::Char('x') | KeyCode::Tab => Some(GameCommand::Look),
         KeyCode::Char('?') => Some(GameCommand::Help),
         KeyCode::Char('.') | KeyCode::Char('5') => Some(GameCommand::Wait),

@@ -14,6 +14,8 @@ pub struct GameData {
     pub config: GameConfig,
     #[serde(default)]
     pub wandering: WanderingConfig,
+    #[serde(default)]
+    pub depth_scaling: DepthScaling,
     pub monsters: Vec<MonsterDef>,
 }
 
@@ -42,6 +44,18 @@ pub struct MonsterDef {
     pub sight_radius: Coord,
 }
 
+fn default_target_depth() -> Stat {
+    5
+}
+
+fn default_hp_per_floor() -> Stat {
+    1
+}
+
+fn default_atk_per_floor() -> Stat {
+    1
+}
+
 /// Game-wide tuning knobs — change these to rebalance without touching logic.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct GameConfig {
@@ -53,6 +67,26 @@ pub struct GameConfig {
     pub ui_bottom_rows: Stat,
     pub max_autorun_steps: Stat,
     pub regen_interval: Stat,
+    #[serde(default = "default_target_depth")]
+    pub target_depth: Stat,
+}
+
+/// Per-floor monster stat scaling for multi-level dungeons.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct DepthScaling {
+    #[serde(default = "default_hp_per_floor")]
+    pub monster_hp_per_floor: Stat,
+    #[serde(default = "default_atk_per_floor")]
+    pub monster_atk_per_floor: Stat,
+}
+
+impl Default for DepthScaling {
+    fn default() -> Self {
+        Self {
+            monster_hp_per_floor: default_hp_per_floor(),
+            monster_atk_per_floor: default_atk_per_floor(),
+        }
+    }
 }
 
 fn default_spawn_interval() -> Stat {
@@ -342,6 +376,26 @@ mod data_files {
             ));
         }
 
+        // --- Depth / scaling validation ---
+        if data.config.target_depth <= 0 {
+            warnings.push(format!(
+                "target_depth must be > 0 (got {})",
+                data.config.target_depth
+            ));
+        }
+        if data.depth_scaling.monster_hp_per_floor < 0 {
+            warnings.push(format!(
+                "depth_scaling.monster_hp_per_floor must be >= 0 (got {})",
+                data.depth_scaling.monster_hp_per_floor
+            ));
+        }
+        if data.depth_scaling.monster_atk_per_floor < 0 {
+            warnings.push(format!(
+                "depth_scaling.monster_atk_per_floor must be >= 0 (got {})",
+                data.depth_scaling.monster_atk_per_floor
+            ));
+        }
+
         // --- Wandering validation ---
         let w = &data.wandering;
         if w.spawn_interval <= 0 {
@@ -487,6 +541,7 @@ mod data_files {
         diff_config!(ui_bottom_rows);
         diff_config!(max_autorun_steps);
         diff_config!(regen_interval);
+        diff_config!(target_depth);
 
         // Wandering config changes.
         macro_rules! diff_wandering {

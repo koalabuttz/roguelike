@@ -266,8 +266,8 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                 render::render(renderer.writer(), state, cols, rows, &settings)?;
                 dev.render_overlay(renderer.writer(), state, settings.color_palette)?;
 
-                if state.game_over {
-                    // Game-over: any input returns to title.
+                if state.game_over || state.game_won {
+                    // Game-over or victory: any input returns to title.
                     let _ = input.wait_for_key()?;
                     saves.delete_autosave();
                     game_state = None;

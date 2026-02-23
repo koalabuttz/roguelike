@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::map::{Map, Tile};
+use crate::map::Map;
 use crate::types::{Coord, Pos};
 
 /// Octant multipliers for recursive shadowcasting.
@@ -88,7 +88,7 @@ pub fn can_see(map: &Map, ox: Coord, oy: Coord, tx: Coord, ty: Coord, radius: Co
 }
 
 fn is_blocking(map: &Map, x: Coord, y: Coord) -> bool {
-    !map.in_bounds(x, y) || map.tiles[map.idx(x, y)] == Tile::Wall
+    !map.in_bounds(x, y) || !map.tiles[map.idx(x, y)].is_walkable()
 }
 
 /// Generic shadowcasting with a callback.

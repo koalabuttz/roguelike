@@ -191,7 +191,7 @@ impl RoguelikeMcpServer {
     }
 
     #[tool(
-        description = "Take an action in the game. Valid actions: 'move_north', 'move_south', 'move_east', 'move_west', 'move_northeast', 'move_northwest', 'move_southeast', 'move_southwest', 'wait'. Moving into a monster attacks it. Returns the resulting game state after the action and any monster turns. Also supports autorun: 'autorun_north', 'autorun_south', 'autorun_east', 'autorun_west', 'autorun_northeast', 'autorun_northwest', 'autorun_southeast', 'autorun_southwest'. Autorun keeps moving in that direction until hitting a wall, spotting a new monster, taking damage, or reaching a corridor junction/room entrance. Use autorun to traverse long corridors efficiently. Also supports 'auto_fight' to resolve combat with an adjacent monster in one call — fights the weakest adjacent monster to the death. Response includes game stats: kills, rooms_found, explored."
+        description = "Take an action in the game. Valid actions: 'move_north', 'move_south', 'move_east', 'move_west', 'move_northeast', 'move_northwest', 'move_southeast', 'move_southwest', 'wait', 'descend'. Moving into a monster attacks it. Returns the resulting game state after the action and any monster turns. Use 'descend' when standing on stairs ('>') to go deeper. Also supports autorun: 'autorun_north', 'autorun_south', 'autorun_east', 'autorun_west', 'autorun_northeast', 'autorun_northwest', 'autorun_southeast', 'autorun_southwest'. Autorun keeps moving in that direction until hitting a wall, spotting a new monster, taking damage, or reaching a corridor junction/room entrance. Use autorun to traverse long corridors efficiently. Also supports 'auto_fight' to resolve combat with an adjacent monster in one call — fights the weakest adjacent monster to the death. Response includes game stats: kills, rooms_found, explored."
     )]
     pub async fn act(
         &self,
@@ -202,7 +202,7 @@ impl RoguelikeMcpServer {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
 
-        if session.state.game_over {
+        if session.state.game_over || session.state.game_won {
             return Err(McpError::invalid_request(
                 "Game is over. Call new_game to start a new game.",
                 None,
@@ -235,7 +235,7 @@ impl RoguelikeMcpServer {
                 format!(
                     "Unknown action '{}'. Valid actions: move_north, move_south, \
                      move_east, move_west, move_northeast, move_northwest, \
-                     move_southeast, move_southwest, wait, \
+                     move_southeast, move_southwest, wait, descend, \
                      autorun_north, autorun_south, autorun_east, autorun_west, \
                      autorun_northeast, autorun_northwest, autorun_southeast, \
                      autorun_southwest, auto_fight",
@@ -362,7 +362,7 @@ impl RoguelikeMcpServer {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
 
-        if session.state.game_over {
+        if session.state.game_over || session.state.game_won {
             return Err(McpError::invalid_request(
                 "Game is over. Call new_game to start a new game.",
                 None,
@@ -398,7 +398,7 @@ impl RoguelikeMcpServer {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
 
-        if session.state.game_over {
+        if session.state.game_over || session.state.game_won {
             return Err(McpError::invalid_request(
                 "Game is over. Call new_game to start a new game.",
                 None,
@@ -535,6 +535,7 @@ impl RoguelikeMcpServer {
              - '!' = potion (walk over to use)\n\
              - '/' = weapon (walk over to equip if better)\n\
              - '[' = armor (walk over to equip if better)\n\
+             - '>' = stairs down (stand on it and use 'descend' to go deeper)\n\
              \n\
              ## Field of View\n\
              You can only see tiles within radius {fov}. Monsters beyond your FOV\n\
@@ -556,6 +557,13 @@ impl RoguelikeMcpServer {
              - Short Sword (/) — +3 ATK. Auto-equips if better than current weapon.\n\
              - Leather Armor ([) — +2 DEF. Auto-equips if better than current armor.\n\
              Equipment bonuses are shown in observations as atk/def fields.\n\
+             \n\
+             ## Dungeon Depth & Win Condition\n\
+             The dungeon has {target_depth} floors. Find the stairs down ('>') on each \
+             floor and use 'descend' to go deeper. Descending past floor {target_depth} \
+             wins the game. Monsters get stronger on deeper floors (+HP and +ATK per \
+             floor). Previous floors are discarded — you cannot go back up. Explore \
+             each floor for items and potions before descending.\n\
              \n\
              ## Strategy Tips\n\
              - Fight in corridors to face one monster at a time.\n\
@@ -612,6 +620,7 @@ impl RoguelikeMcpServer {
             pdef = player.defense,
             monsters = monster_lines,
             regen = cfg.regen_interval,
+            target_depth = cfg.target_depth,
         );
         Ok(CallToolResult::success(vec![Content::text(rules)]))
     }
@@ -659,6 +668,7 @@ pub fn parse_action(action: &str) -> Option<GameCommand> {
         "autorun_southeast" => Some(GameCommand::Autorun { dx: 1, dy: 1 }),
         "autorun_southwest" => Some(GameCommand::Autorun { dx: -1, dy: 1 }),
         "wait" => Some(GameCommand::Wait),
+        "descend" => Some(GameCommand::Descend),
         _ => None,
     }
 }
@@ -1097,6 +1107,14 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            depth: 1,
+            target_depth: 5,
+            game_won: false,
+            depth_scaling: Default::default(),
+            max_rooms: 30,
+            room_size_min: 4,
+            room_size_max: 10,
+            max_monsters_per_room: 2,
         };
         state.update_fov();
 

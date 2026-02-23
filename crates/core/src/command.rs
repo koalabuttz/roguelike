@@ -19,6 +19,7 @@ pub enum GameCommand {
         dy: Coord,
     },
     AutoExplore,
+    Descend,
     Look,
     Wait,
     Quit,

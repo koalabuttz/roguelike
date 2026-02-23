@@ -309,6 +309,14 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            depth: 1,
+            target_depth: 5,
+            game_won: false,
+            depth_scaling: Default::default(),
+            max_rooms: 30,
+            room_size_min: 4,
+            room_size_max: 10,
+            max_monsters_per_room: 2,
         }
     }
 
@@ -357,6 +365,14 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            depth: 1,
+            target_depth: 5,
+            game_won: false,
+            depth_scaling: Default::default(),
+            max_rooms: 30,
+            room_size_min: 4,
+            room_size_max: 10,
+            max_monsters_per_room: 2,
         }
     }
 
@@ -471,6 +487,14 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            depth: 1,
+            target_depth: 5,
+            game_won: false,
+            depth_scaling: Default::default(),
+            max_rooms: 30,
+            room_size_min: 4,
+            room_size_max: 10,
+            max_monsters_per_room: 2,
         };
 
         let graph = build_exploration_graph(&gs);
@@ -518,6 +542,14 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            depth: 1,
+            target_depth: 5,
+            game_won: false,
+            depth_scaling: Default::default(),
+            max_rooms: 30,
+            room_size_min: 4,
+            room_size_max: 10,
+            max_monsters_per_room: 2,
         };
 
         let graph = build_exploration_graph(&gs);

@@ -23,6 +23,10 @@ __pycache__/
 # Chainlink issue tracker (per-developer state)
 .chainlink/issues.db
 .chainlink/.cache/
+**/.chainlink/
+
+# Proptest regressions (auto-generated)
+*.proptest-regressions
 
 # OS artifacts
 Thumbs.db

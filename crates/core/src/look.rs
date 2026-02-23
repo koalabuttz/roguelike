@@ -109,7 +109,7 @@ pub fn format_look_description(info: &TileInfo) -> String {
         return format!("{} {} (remembered)", coords, info.terrain);
     }
 
-    match &info.entity {
+    let base = match &info.entity {
         Some(ent) if ent.alive => {
             format!(
                 "{} {} - {} ({}) HP:{}/{}",
@@ -122,6 +122,13 @@ pub fn format_look_description(info: &TileInfo) -> String {
         None => {
             format!("{} {}", coords, info.terrain)
         }
+    };
+
+    if info.items.is_empty() {
+        base
+    } else {
+        let names: Vec<&str> = info.items.iter().map(|i| i.name.as_str()).collect();
+        format!("{} [{}]", base, names.join(", "))
     }
 }
 
@@ -167,6 +174,8 @@ mod tests {
             idle_count: 0,
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
+            ground_items: Vec::new(),
+            equipment: Default::default(),
         }
     }
 
@@ -231,6 +240,7 @@ mod tests {
                 max_hp: 6,
                 alive: true,
             }),
+            items: Vec::new(),
             visible: true,
             explored: true,
             glyph: 'g',
@@ -256,6 +266,7 @@ mod tests {
                 max_hp: 12,
                 alive: false,
             }),
+            items: Vec::new(),
             visible: true,
             explored: true,
             glyph: '%',
@@ -270,11 +281,66 @@ mod tests {
             y: 3,
             terrain: "Floor".into(),
             entity: None,
+            items: Vec::new(),
             visible: true,
             explored: true,
             glyph: '.',
         };
         assert_eq!(format_look_description(&info), "(3,3) Floor");
+    }
+
+    #[test]
+    fn format_description_floor_with_item() {
+        let info = TileInfo {
+            x: 4,
+            y: 4,
+            terrain: "Floor".into(),
+            entity: None,
+            items: vec![crate::game::ItemInfo {
+                name: "Health Potion".into(),
+                glyph: '!',
+                x: 4,
+                y: 4,
+            }],
+            visible: true,
+            explored: true,
+            glyph: '!',
+        };
+        assert_eq!(
+            format_look_description(&info),
+            "(4,4) Floor [Health Potion]"
+        );
+    }
+
+    #[test]
+    fn format_description_monster_with_item() {
+        let info = TileInfo {
+            x: 6,
+            y: 5,
+            terrain: "Floor".into(),
+            entity: Some(crate::game::EntityInfo {
+                name: "Goblin".into(),
+                glyph: 'g',
+                x: 6,
+                y: 5,
+                hp: 6,
+                max_hp: 6,
+                alive: true,
+            }),
+            items: vec![crate::game::ItemInfo {
+                name: "Short Sword".into(),
+                glyph: '/',
+                x: 6,
+                y: 5,
+            }],
+            visible: true,
+            explored: true,
+            glyph: 'g',
+        };
+        assert_eq!(
+            format_look_description(&info),
+            "(6,5) Floor - Goblin (g) HP:6/6 [Short Sword]"
+        );
     }
 
     #[test]
@@ -284,6 +350,7 @@ mod tests {
             y: 10,
             terrain: "Floor".into(),
             entity: None,
+            items: Vec::new(),
             visible: false,
             explored: true,
             glyph: '.',
@@ -298,6 +365,7 @@ mod tests {
             y: 15,
             terrain: "Unknown".into(),
             entity: None,
+            items: Vec::new(),
             visible: false,
             explored: false,
             glyph: ' ',

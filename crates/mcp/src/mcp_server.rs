@@ -532,6 +532,9 @@ impl RoguelikeMcpServer {
              - '@' = you (the player)\n\
              - Lowercase letters = monsters (g=goblin, o=orc)\n\
              - Uppercase letters = dangerous monsters (T=troll)\n\
+             - '!' = potion (walk over to use)\n\
+             - '/' = weapon (walk over to equip if better)\n\
+             - '[' = armor (walk over to equip if better)\n\
              \n\
              ## Field of View\n\
              You can only see tiles within radius {fov}. Monsters beyond your FOV\n\
@@ -547,9 +550,17 @@ impl RoguelikeMcpServer {
              ## Monsters\n\
 {monsters}\
              \n\
+             ## Items\n\
+             Items spawn on the ground in rooms. Walk over them to pick up:\n\
+             - Health Potion (!) — heals 10 HP. Stays on ground if you are at full HP.\n\
+             - Short Sword (/) — +3 ATK. Auto-equips if better than current weapon.\n\
+             - Leather Armor ([) — +2 DEF. Auto-equips if better than current armor.\n\
+             Equipment bonuses are shown in observations as atk/def fields.\n\
+             \n\
              ## Strategy Tips\n\
              - Fight in corridors to face one monster at a time.\n\
              - You regenerate 1 HP every {regen} turns. Retreat and move to recover.\n\
+             - Remember where health potions are — save them for when you need them.\n\
              \n\
              ## Available Tools\n\
              - **act** — move, wait, autorun, or auto_fight (see below)\n\
@@ -1084,6 +1095,8 @@ mod tests {
             idle_count: 0,
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
+            ground_items: Vec::new(),
+            equipment: Default::default(),
         };
         state.update_fov();
 

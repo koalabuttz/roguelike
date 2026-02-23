@@ -2,6 +2,7 @@ use rand::Rng;
 
 use crate::data::MonsterDef;
 use crate::entity::Entity;
+use crate::item::{self, Item, ItemKind};
 use crate::map::Map;
 use crate::types::Stat;
 
@@ -61,10 +62,54 @@ pub fn spawn_monsters(
     monsters
 }
 
+/// Pick a random item kind from the weighted spawn table.
+///
+/// Returns `None` if the table is empty or all weights are zero.
+pub fn pick_item(table: &[(ItemKind, u32)], rng: &mut impl Rng) -> Option<ItemKind> {
+    let total_weight: u32 = table.iter().map(|(_, w)| w).sum();
+    if total_weight == 0 {
+        return None;
+    }
+
+    let mut roll = rng.gen_range(0..total_weight);
+    for &(kind, weight) in table {
+        if roll < weight {
+            return Some(kind);
+        }
+        roll -= weight;
+    }
+    None
+}
+
+/// Spawn items in each room (except room 0, where the player starts).
+/// Uses the weighted spawn table to pick item types.
+pub fn spawn_items(map: &Map, max_per_room: Stat, rng: &mut impl Rng) -> Vec<Item> {
+    let mut items = Vec::new();
+    let table = item::spawn_table();
+    if table.is_empty() {
+        return items;
+    }
+
+    for room in map.rooms.iter().skip(1) {
+        let count = rng.gen_range(0..=max_per_room);
+        for _ in 0..count {
+            let x = rng.gen_range(room.x1 + 1..room.x2);
+            let y = rng.gen_range(room.y1 + 1..room.y2);
+
+            if let Some(kind) = pick_item(&table, rng) {
+                items.push(Item { x, y, kind });
+            }
+        }
+    }
+
+    items
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::data;
+    use crate::item::ItemKind;
     use crate::map::Rect;
     use rand::{SeedableRng, rngs::StdRng};
 
@@ -132,6 +177,63 @@ mod tests {
                     room.y2,
                 );
             }
+        }
+    }
+
+    // --- Item spawn tests ---
+
+    #[test]
+    fn item_spawn_skips_room_zero() {
+        let rooms = vec![Rect::new(1, 1, 8, 8)];
+        let m = map_with_rooms(rooms);
+        let mut rng = StdRng::seed_from_u64(42);
+        let items = spawn_items(&m, 5, &mut rng);
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn pick_item_empty_table_returns_none() {
+        let mut rng = StdRng::seed_from_u64(42);
+        assert!(pick_item(&[], &mut rng).is_none());
+    }
+
+    #[test]
+    fn spawned_items_are_in_room() {
+        let rooms = vec![Rect::new(1, 1, 8, 8), Rect::new(20, 20, 28, 28)];
+        let m = map_with_rooms(rooms);
+        for seed in 0..10 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let items = spawn_items(&m, 3, &mut rng);
+            for it in &items {
+                let room = &m.rooms[1];
+                assert!(
+                    it.x > room.x1 && it.x < room.x2,
+                    "item x={} not in room x range {}..{}",
+                    it.x,
+                    room.x1 + 1,
+                    room.x2,
+                );
+                assert!(
+                    it.y > room.y1 && it.y < room.y2,
+                    "item y={} not in room y range {}..{}",
+                    it.y,
+                    room.y1 + 1,
+                    room.y2,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pick_item_returns_valid_kind() {
+        let table = item::spawn_table();
+        let mut rng = StdRng::seed_from_u64(42);
+        for _ in 0..50 {
+            let kind = pick_item(&table, &mut rng).unwrap();
+            assert!(matches!(
+                kind,
+                ItemKind::HealthPotion | ItemKind::ShortSword | ItemKind::LeatherArmor
+            ));
         }
     }
 }

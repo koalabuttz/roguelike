@@ -10,6 +10,7 @@ use crate::command::GameCommand;
 use crate::data;
 use crate::entity::{Entity, EntityKind};
 use crate::fov;
+use crate::item::{self, Equipment, Item};
 use crate::map;
 use crate::message_log::MessageLog;
 use crate::pathfinding;
@@ -67,6 +68,10 @@ pub struct GameObservation {
     pub player_hp: Stat,
     #[serde(rename = "max_hp")]
     pub player_max_hp: Stat,
+    #[serde(rename = "atk")]
+    pub player_atk: Stat,
+    #[serde(rename = "def")]
+    pub player_def: Stat,
     #[serde(rename = "x")]
     pub player_x: Coord,
     #[serde(rename = "y")]
@@ -75,10 +80,18 @@ pub struct GameObservation {
     pub map_ascii: Vec<String>,
     #[serde(rename = "entities")]
     pub visible_entities: Vec<EntityInfo>,
+    #[serde(rename = "items")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub visible_items: Vec<ItemInfo>,
     #[serde(rename = "messages")]
     pub recent_messages: Vec<String>,
     pub game_over: bool,
     pub turn_count: Stat,
+    // --- equipment ---
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weapon: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub armor: Option<String>,
     // --- game stats ---
     pub kills: Stat,
     pub rooms_found: Stat,
@@ -253,6 +266,15 @@ impl AutorunStepper {
     }
 }
 
+/// Info about a visible item on the ground.
+#[derive(Debug, Serialize)]
+pub struct ItemInfo {
+    pub name: String,
+    pub glyph: char,
+    pub x: Coord,
+    pub y: Coord,
+}
+
 /// Info about a tile at a given position, returned by `look_at()`.
 #[derive(Debug, Serialize)]
 pub struct TileInfo {
@@ -260,6 +282,8 @@ pub struct TileInfo {
     pub y: Coord,
     pub terrain: String,
     pub entity: Option<EntityInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<ItemInfo>,
     pub visible: bool,
     pub explored: bool,
     pub glyph: char,
@@ -332,6 +356,12 @@ pub struct GameState {
     /// Monster spawn table for wandering spawns (rebuilt on load).
     #[serde(skip)]
     pub wandering_spawn_table: Vec<data::MonsterDef>,
+    /// Items lying on the ground.
+    #[serde(default)]
+    pub ground_items: Vec<Item>,
+    /// Player's equipped items.
+    #[serde(default)]
+    pub equipment: Equipment,
 }
 
 impl GameState {
@@ -364,10 +394,13 @@ impl GameState {
         game_data: &data::GameData,
     ) -> Self {
         let cfg = &game_data.config;
+        // Derive independent RNG streams from the master seed.
+        // Order matters: map (1st), spawn (2nd), wandering (3rd), items (4th).
         let mut master = StdRng::seed_from_u64(seed);
         let mut map_rng = StdRng::from_rng(&mut master).unwrap();
         let mut spawn_rng = StdRng::from_rng(&mut master).unwrap();
         let wandering_seed = StdRng::from_rng(&mut master).unwrap().next_u64();
+        let mut item_rng = StdRng::from_rng(&mut master).unwrap();
 
         let mut map = map::Map::new(width, height);
         let (px, py) = map.from_preset(preset, &mut map_rng);
@@ -381,6 +414,8 @@ impl GameState {
             &mut spawn_rng,
         );
         entities.extend(monsters);
+
+        let ground_items = spawn::spawn_items(&map, item::MAX_ITEMS_PER_ROOM, &mut item_rng);
 
         let visible = fov::compute_fov(&map, px, py, cfg.fov_radius);
         let explored = visible.clone();
@@ -407,6 +442,8 @@ impl GameState {
             idle_count: 0,
             wandering_spawned: 0,
             wandering_spawn_table: game_data.monsters.clone(),
+            ground_items,
+            equipment: Equipment::default(),
         }
     }
 
@@ -428,11 +465,12 @@ impl GameState {
         let cfg = &game_data.config;
 
         // Derive independent RNG streams from the master seed.
-        // Order matters: map (1st), spawn (2nd), wandering (3rd).
+        // Order matters: map (1st), spawn (2nd), wandering (3rd), items (4th).
         let mut master = StdRng::seed_from_u64(seed);
         let mut map_rng = StdRng::from_rng(&mut master).unwrap();
         let mut spawn_rng = StdRng::from_rng(&mut master).unwrap();
         let wandering_seed = StdRng::from_rng(&mut master).unwrap().next_u64();
+        let mut item_rng = StdRng::from_rng(&mut master).unwrap();
 
         let mut map = map::Map::new(width, height);
         let (px, py) = map.generate(
@@ -451,6 +489,8 @@ impl GameState {
             &mut spawn_rng,
         );
         entities.extend(monsters);
+
+        let ground_items = spawn::spawn_items(&map, item::MAX_ITEMS_PER_ROOM, &mut item_rng);
 
         let visible = fov::compute_fov(&map, px, py, cfg.fov_radius);
         let explored = visible.clone();
@@ -477,6 +517,8 @@ impl GameState {
             idle_count: 0,
             wandering_spawned: 0,
             wandering_spawn_table: game_data.monsters.clone(),
+            ground_items,
+            equipment: Equipment::default(),
         }
     }
 
@@ -533,17 +575,89 @@ impl GameState {
         if let Some(target_idx) = self.entity_at(new_x, new_y)
             && target_idx != 0
         {
+            // Apply equipment bonuses temporarily for combat.
+            let atk_bonus = self.equipment.attack_bonus();
+            let def_bonus = self.equipment.defense_bonus();
+            self.entities[0].attack += atk_bonus;
+            self.entities[0].defense += def_bonus;
             combat::melee_attack(&mut self.entities, 0, target_idx, &mut self.log);
+            self.entities[0].attack -= atk_bonus;
+            self.entities[0].defense -= def_bonus;
             return true;
         }
 
         if self.map.is_walkable(new_x, new_y) {
             self.entities[0].x = new_x;
             self.entities[0].y = new_y;
+            self.try_pickup_items(new_x, new_y);
             return true;
         }
 
         false
+    }
+
+    /// Attempt to pick up items at the player's position.
+    ///
+    /// Consumables apply immediately (potions heal if HP < max, else stay).
+    /// Equipment auto-equips if strictly better than current.
+    fn try_pickup_items(&mut self, x: Coord, y: Coord) {
+        // Process items in reverse so removal by index is safe.
+        let mut i = self.ground_items.len();
+        while i > 0 {
+            i -= 1;
+            if self.ground_items[i].x != x || self.ground_items[i].y != y {
+                continue;
+            }
+            let kind = self.ground_items[i].kind;
+
+            if item::is_consumable(kind) {
+                let heal = item::item_heal_amount(kind);
+                let player = &self.entities[0];
+                if heal > 0 && player.hp >= player.max_hp {
+                    // At full HP — leave potion on the ground.
+                    continue;
+                }
+                self.ground_items.remove(i);
+                if heal > 0 {
+                    let player = &mut self.entities[0];
+                    let healed = heal.min(player.max_hp - player.hp);
+                    player.hp += healed;
+                    self.log.add(format!(
+                        "You drink the {}. (+{} HP)",
+                        item::item_name(kind),
+                        healed
+                    ));
+                }
+            } else if item::is_weapon(kind) {
+                if item::is_better_weapon(kind, self.equipment.weapon) {
+                    self.ground_items.remove(i);
+                    self.equipment.weapon = Some(kind);
+                    self.log.add(format!(
+                        "You equip the {}. (+{} ATK)",
+                        item::item_name(kind),
+                        item::item_attack_bonus(kind)
+                    ));
+                }
+            } else if item::is_armor(kind) && item::is_better_armor(kind, self.equipment.armor) {
+                self.ground_items.remove(i);
+                self.equipment.armor = Some(kind);
+                self.log.add(format!(
+                    "You equip the {}. (+{} DEF)",
+                    item::item_name(kind),
+                    item::item_defense_bonus(kind)
+                ));
+            }
+        }
+    }
+
+    /// Player's effective attack (base + equipment).
+    pub fn effective_attack(&self) -> Stat {
+        self.entities[0].attack + self.equipment.attack_bonus()
+    }
+
+    /// Player's effective defense (base + equipment).
+    pub fn effective_defense(&self) -> Stat {
+        self.entities[0].defense + self.equipment.defense_bonus()
     }
 
     /// Dispatch a game command. Returns `true` if the player took an action
@@ -938,7 +1052,7 @@ impl GameState {
             for x in 0..self.map.width {
                 if self.visible.contains(&(x, y)) {
                     has_content = true;
-                    // Check for entities (alive first, then dead — matching render order)
+                    // Check for entities/items (alive first, then dead, then items)
                     if let Some(glyph) = self.glyph_at(x, y) {
                         line.push(glyph);
                     } else {
@@ -973,6 +1087,19 @@ impl GameState {
             })
             .collect();
 
+        // Visible items on ground
+        let visible_items: Vec<ItemInfo> = self
+            .ground_items
+            .iter()
+            .filter(|it| self.visible.contains(&(it.x, it.y)))
+            .map(|it| ItemInfo {
+                name: item::item_name(it.kind).to_string(),
+                glyph: item::item_glyph(it.kind),
+                x: it.x,
+                y: it.y,
+            })
+            .collect();
+
         // --- game stats ---
         let kills = self.kill_count();
         let rooms_found = self
@@ -986,13 +1113,21 @@ impl GameState {
         GameObservation {
             player_hp: player.hp,
             player_max_hp: player.max_hp,
+            player_atk: self.effective_attack(),
+            player_def: self.effective_defense(),
             player_x: player.x,
             player_y: player.y,
             map_ascii: map_lines,
             visible_entities,
+            visible_items,
             recent_messages: self.log.recent(10).to_vec(),
             game_over: self.game_over,
             turn_count: self.turn_count,
+            weapon: self
+                .equipment
+                .weapon
+                .map(|k| item::item_name(k).to_string()),
+            armor: self.equipment.armor.map(|k| item::item_name(k).to_string()),
             kills,
             rooms_found,
             explored_pct,
@@ -1122,6 +1257,7 @@ impl GameState {
                 y,
                 terrain: "Out of bounds".into(),
                 entity: None,
+                items: Vec::new(),
                 visible: false,
                 explored: false,
                 glyph: ' ',
@@ -1135,6 +1271,7 @@ impl GameState {
                 y,
                 terrain: "Unknown".into(),
                 entity: None,
+                items: Vec::new(),
                 visible: false,
                 explored: false,
                 glyph: ' ',
@@ -1204,11 +1341,28 @@ impl GameState {
             }
         };
 
+        // Items on this tile (only when visible).
+        let items = if visible {
+            self.ground_items
+                .iter()
+                .filter(|it| it.x == x && it.y == y)
+                .map(|it| ItemInfo {
+                    name: item::item_name(it.kind).to_string(),
+                    glyph: item::item_glyph(it.kind),
+                    x: it.x,
+                    y: it.y,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         TileInfo {
             x,
             y,
             terrain,
             entity,
+            items,
             visible,
             explored,
             glyph,
@@ -1234,6 +1388,10 @@ impl GameState {
         {
             return Some('%');
         }
+        // Item on ground
+        if let Some(it) = self.ground_items.iter().find(|it| it.x == x && it.y == y) {
+            return Some(item::item_glyph(it.kind));
+        }
         None
     }
 }
@@ -1242,6 +1400,7 @@ impl GameState {
 mod tests {
     use super::*;
     use crate::entity::{Entity, EntityKind};
+    use crate::item::ItemKind;
     use crate::map::{Map, Tile};
 
     /// Build a minimal GameState with a custom open map (no random generation).
@@ -1278,6 +1437,8 @@ mod tests {
             idle_count: 0,
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
+            ground_items: Vec::new(),
+            equipment: Default::default(),
         }
     }
 
@@ -1583,6 +1744,8 @@ mod tests {
             idle_count: 0,
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
+            ground_items: Vec::new(),
+            equipment: Default::default(),
         }
     }
 
@@ -1660,6 +1823,8 @@ mod tests {
             idle_count: 0,
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
+            ground_items: Vec::new(),
+            equipment: Default::default(),
         };
 
         let result = gs.autorun(1, 0);
@@ -1711,6 +1876,8 @@ mod tests {
             idle_count: 0,
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
+            ground_items: Vec::new(),
+            equipment: Default::default(),
         };
 
         let result = gs.autorun(1, 0);
@@ -1751,6 +1918,8 @@ mod tests {
             idle_count: 0,
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
+            ground_items: Vec::new(),
+            equipment: Default::default(),
         };
 
         let result = gs.autorun(1, 0);
@@ -1818,6 +1987,8 @@ mod tests {
             idle_count: 0,
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
+            ground_items: Vec::new(),
+            equipment: Default::default(),
         };
 
         let result = gs.autorun(1, 0);
@@ -1862,6 +2033,8 @@ mod tests {
             idle_count: 0,
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
+            ground_items: Vec::new(),
+            equipment: Default::default(),
         };
 
         let result = gs.autorun(1, 0);
@@ -2403,6 +2576,240 @@ mod tests {
             }
         }
         assert!(gs.start_auto_explore().is_err());
+    }
+
+    // --- item pickup & equipment tests ---
+
+    #[test]
+    fn pickup_health_potion_when_injured() {
+        let mut gs = test_game();
+        gs.entities[0].hp = 20; // injured (max 30)
+        gs.ground_items.push(Item {
+            x: 6,
+            y: 5,
+            kind: ItemKind::HealthPotion,
+        });
+        gs.update_fov();
+        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        // Potion heals 10 HP → 30 (clamped to max)
+        assert_eq!(gs.entities[0].hp, 30);
+        assert!(gs.ground_items.is_empty());
+        assert!(gs.log.recent(5).iter().any(|m| m.contains("Health Potion")));
+    }
+
+    #[test]
+    fn potion_stays_on_ground_at_full_hp() {
+        let mut gs = test_game();
+        assert_eq!(gs.entities[0].hp, gs.entities[0].max_hp);
+        gs.ground_items.push(Item {
+            x: 6,
+            y: 5,
+            kind: ItemKind::HealthPotion,
+        });
+        gs.update_fov();
+        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        // Potion should remain on the ground
+        assert_eq!(gs.ground_items.len(), 1);
+        assert_eq!(gs.entities[0].hp, gs.entities[0].max_hp);
+    }
+
+    #[test]
+    fn pickup_weapon_auto_equips() {
+        let mut gs = test_game();
+        assert!(gs.equipment.weapon.is_none());
+        gs.ground_items.push(Item {
+            x: 6,
+            y: 5,
+            kind: ItemKind::ShortSword,
+        });
+        gs.update_fov();
+        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        assert_eq!(gs.equipment.weapon, Some(ItemKind::ShortSword));
+        assert!(gs.ground_items.is_empty());
+        assert!(gs.log.recent(5).iter().any(|m| m.contains("Short Sword")));
+    }
+
+    #[test]
+    fn pickup_armor_auto_equips() {
+        let mut gs = test_game();
+        assert!(gs.equipment.armor.is_none());
+        gs.ground_items.push(Item {
+            x: 6,
+            y: 5,
+            kind: ItemKind::LeatherArmor,
+        });
+        gs.update_fov();
+        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        assert_eq!(gs.equipment.armor, Some(ItemKind::LeatherArmor));
+        assert!(gs.ground_items.is_empty());
+    }
+
+    #[test]
+    fn same_weapon_not_picked_up() {
+        let mut gs = test_game();
+        gs.equipment.weapon = Some(ItemKind::ShortSword);
+        gs.ground_items.push(Item {
+            x: 6,
+            y: 5,
+            kind: ItemKind::ShortSword,
+        });
+        gs.update_fov();
+        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        // Same weapon is not strictly better, so stays on ground
+        assert_eq!(gs.ground_items.len(), 1);
+    }
+
+    #[test]
+    fn same_armor_not_picked_up() {
+        let mut gs = test_game();
+        gs.equipment.armor = Some(ItemKind::LeatherArmor);
+        gs.ground_items.push(Item {
+            x: 6,
+            y: 5,
+            kind: ItemKind::LeatherArmor,
+        });
+        gs.update_fov();
+        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        assert_eq!(gs.ground_items.len(), 1);
+    }
+
+    #[test]
+    fn effective_attack_includes_weapon() {
+        let mut gs = test_game();
+        let base_atk = gs.entities[0].attack;
+        assert_eq!(gs.effective_attack(), base_atk);
+        gs.equipment.weapon = Some(ItemKind::ShortSword);
+        assert_eq!(gs.effective_attack(), base_atk + 3);
+    }
+
+    #[test]
+    fn effective_defense_includes_armor() {
+        let mut gs = test_game();
+        let base_def = gs.entities[0].defense;
+        assert_eq!(gs.effective_defense(), base_def);
+        gs.equipment.armor = Some(ItemKind::LeatherArmor);
+        assert_eq!(gs.effective_defense(), base_def + 2);
+    }
+
+    #[test]
+    fn glyph_at_shows_item_on_floor() {
+        let mut gs = test_game();
+        gs.ground_items.push(Item {
+            x: 3,
+            y: 3,
+            kind: ItemKind::HealthPotion,
+        });
+        gs.update_fov();
+        assert_eq!(gs.glyph_at(3, 3), Some('!'));
+    }
+
+    #[test]
+    fn entity_glyph_hides_item_beneath() {
+        let mut gs = test_game();
+        // Place item under player
+        gs.ground_items.push(Item {
+            x: 5,
+            y: 5,
+            kind: ItemKind::ShortSword,
+        });
+        gs.update_fov();
+        // Player glyph takes priority
+        assert_eq!(gs.glyph_at(5, 5), Some('@'));
+    }
+
+    #[test]
+    fn look_at_shows_item() {
+        let mut gs = test_game();
+        gs.ground_items.push(Item {
+            x: 3,
+            y: 3,
+            kind: ItemKind::HealthPotion,
+        });
+        gs.update_fov();
+        let info = gs.look_at(3, 3);
+        assert_eq!(info.items.len(), 1);
+        assert_eq!(info.items[0].name, "Health Potion");
+    }
+
+    #[test]
+    fn look_at_hides_items_outside_fov() {
+        let mut gs = test_game();
+        gs.ground_items.push(Item {
+            x: 3,
+            y: 3,
+            kind: ItemKind::HealthPotion,
+        });
+        gs.update_fov();
+        gs.visible.remove(&(3, 3));
+        let info = gs.look_at(3, 3);
+        assert!(info.items.is_empty());
+    }
+
+    #[test]
+    fn observe_includes_visible_items() {
+        let mut gs = test_game();
+        gs.ground_items.push(Item {
+            x: 3,
+            y: 3,
+            kind: ItemKind::HealthPotion,
+        });
+        gs.update_fov();
+        let obs = gs.observe();
+        assert!(obs.visible_items.iter().any(|i| i.name == "Health Potion"));
+    }
+
+    #[test]
+    fn observe_includes_equipment() {
+        let mut gs = test_game();
+        gs.equipment.weapon = Some(ItemKind::ShortSword);
+        gs.equipment.armor = Some(ItemKind::LeatherArmor);
+        gs.update_fov();
+        let obs = gs.observe();
+        assert_eq!(obs.weapon, Some("Short Sword".to_string()));
+        assert_eq!(obs.armor, Some("Leather Armor".to_string()));
+        assert_eq!(obs.player_atk, gs.effective_attack());
+        assert_eq!(obs.player_def, gs.effective_defense());
+    }
+
+    #[test]
+    fn seeded_game_spawns_items_deterministically() {
+        let gs1 = GameState::with_seed(80, 40, 12345);
+        let gs2 = GameState::with_seed(80, 40, 12345);
+        assert_eq!(gs1.ground_items.len(), gs2.ground_items.len());
+        for (a, b) in gs1.ground_items.iter().zip(gs2.ground_items.iter()) {
+            assert_eq!(a.x, b.x);
+            assert_eq!(a.y, b.y);
+            assert_eq!(a.kind, b.kind);
+        }
+    }
+
+    #[test]
+    fn save_load_preserves_items_and_equipment() {
+        let mut gs = GameState::with_seed(80, 40, 42);
+        gs.equipment.weapon = Some(ItemKind::ShortSword);
+        let json = gs.save_to_json().unwrap();
+        let loaded = GameState::load_from_json(&json).unwrap();
+        assert_eq!(gs.ground_items.len(), loaded.ground_items.len());
+        for (a, b) in gs.ground_items.iter().zip(loaded.ground_items.iter()) {
+            assert_eq!(a.x, b.x);
+            assert_eq!(a.y, b.y);
+            assert_eq!(a.kind, b.kind);
+        }
+        assert_eq!(loaded.equipment.weapon, Some(ItemKind::ShortSword));
+    }
+
+    #[test]
+    fn combat_uses_equipment_bonuses() {
+        let mut gs = test_game();
+        gs.equipment.weapon = Some(ItemKind::ShortSword);
+        gs.equipment.armor = Some(ItemKind::LeatherArmor);
+        let goblin = Entity::from_template(data::goblin(), 6, 5);
+        gs.entities.push(goblin);
+        gs.update_fov();
+        // Attack the goblin
+        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        // Player ATK 5+3=8, Goblin DEF 0 → 8 dmg, kills in 1 hit (HP 6)
+        assert!(!gs.entities[1].alive);
     }
 
     // --- seeded RNG tests ---

@@ -85,6 +85,8 @@ mod tests {
             idle_count: 0,
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
+            ground_items: Vec::new(),
+            equipment: Default::default(),
         }
     }
 

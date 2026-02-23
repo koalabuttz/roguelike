@@ -7,6 +7,7 @@ use crossterm::{
 };
 
 use roguelike_core::game::GameState;
+use roguelike_core::item;
 use roguelike_core::map::Tile;
 use roguelike_core::platform::Renderer;
 use roguelike_core::settings::{ColorPalette, Settings};
@@ -179,6 +180,7 @@ pub fn render<W: Write>(
 ) -> std::io::Result<()> {
     let pal = settings.color_palette;
     render_map(w, state, pal)?;
+    render_items(w, state, pal)?;
     render_entities(w, state, settings.show_corpses, pal)?;
     render_status_bar(w, state, screen_width, screen_height, settings)?;
     render_message_log(w, state, screen_width, screen_height, settings)?;
@@ -257,6 +259,21 @@ fn render_map<W: Write>(w: &mut W, state: &GameState, pal: ColorPalette) -> std:
                     style::Print(' ')
                 )?;
             }
+        }
+    }
+    Ok(())
+}
+
+fn render_items<W: Write>(w: &mut W, state: &GameState, pal: ColorPalette) -> std::io::Result<()> {
+    for it in &state.ground_items {
+        if state.visible.contains(&(it.x, it.y)) {
+            queue!(
+                w,
+                cursor::MoveTo(it.x as u16, it.y as u16),
+                SetForegroundColor(palette_color(item::item_color(it.kind), pal)),
+                SetBackgroundColor(palette_color(GameColor::Black, pal)),
+                style::Print(item::item_glyph(it.kind))
+            )?;
         }
     }
     Ok(())
@@ -345,6 +362,20 @@ fn render_status_bar<W: Write>(
         String::new()
     };
 
+    let equip_segment = {
+        let atk_str = if state.equipment.weapon.is_some() {
+            format!("{}+{}", player.attack, state.equipment.attack_bonus())
+        } else {
+            format!("{}", player.attack)
+        };
+        let def_str = if state.equipment.armor.is_some() {
+            format!("{}+{}", player.defense, state.equipment.defense_bonus())
+        } else {
+            format!("{}", player.defense)
+        };
+        format!(" | ATK:{} DEF:{}", atk_str, def_str)
+    };
+
     let hint_segment = if settings.show_keybind_hints {
         " | hjkl/arrows: move | .: wait | Ctrl+P: log | q: quit"
     } else {
@@ -352,11 +383,12 @@ fn render_status_bar<W: Write>(
     };
 
     let status = format!(
-        " HP [{}{}] {}/{}{}{}{}",
+        " HP [{}{}] {}/{}{}{}{}{}",
         bar_filled,
         bar_empty,
         player.hp,
         player.max_hp,
+        equip_segment,
         coord_segment,
         explored_segment,
         hint_segment

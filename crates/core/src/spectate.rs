@@ -37,9 +37,18 @@ pub fn render_frame(state: &GameState) -> String {
     }
 
     // Status line
+    let equip = if state.equipment.weapon.is_some() || state.equipment.armor.is_some() {
+        format!(
+            " | ATK {} DEF {}",
+            state.effective_attack(),
+            state.effective_defense()
+        )
+    } else {
+        String::new()
+    };
     frame.push_str(&format!(
-        "HP {}/{} | Turn {} | Kills {} | Explored {}% | Seed {}\n",
-        player.hp, player.max_hp, state.turn_count, kills, explored_pct, state.seed,
+        "HP {}/{}{} | Turn {} | Kills {} | Explored {}% | Seed {}\n",
+        player.hp, player.max_hp, equip, state.turn_count, kills, explored_pct, state.seed,
     ));
 
     // Last 4 messages
@@ -94,6 +103,8 @@ mod tests {
             idle_count: 0,
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
+            ground_items: Vec::new(),
+            equipment: Default::default(),
         }
     }
 

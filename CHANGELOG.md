@@ -1,0 +1,23 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+
+## [Unreleased]
+
+### Added
+- Add item system to roguelike (#2)
+
+### Fixed
+
+### Changed
+- Add comprehensive tests for item system (#11)
+- Update spectate frame output for items (#10)
+- Update MCP server observations and rules for items (#9)
+- Update TUI rendering for items and equipment display (#8)
+- Update look mode to show items on tiles (#7)
+- Update combat to use effective stats from equipment (#6)
+- Integrate items into GameState (pickup, equipment, effective stats) (#5)
+- Add item spawning to spawn.rs (#4)
+- Create item.rs module with ItemKind, Item, Equipment structs and pure functions (#3)

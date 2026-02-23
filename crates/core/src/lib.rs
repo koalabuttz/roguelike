@@ -12,6 +12,7 @@ pub mod fov;
 pub mod game;
 #[cfg(feature = "data-files")]
 pub mod help;
+pub mod item;
 pub mod look;
 pub mod map;
 pub mod menu;

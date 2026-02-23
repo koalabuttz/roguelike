@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use crate::rules::balance;
+use crate::rules::{balance, items as rules_items};
 use crate::types::{Coord, GameColor, Stat};
+
+// Re-export ItemKind from rules so all existing `item::ItemKind` paths work.
+pub use crate::rules::items::ItemKind;
 
 /// Maximum number of items on the ground the engine supports.
 ///
@@ -10,22 +13,6 @@ pub const MAX_GROUND_ITEMS: usize = 256;
 
 /// Maximum items spawned per room during map generation.
 pub const MAX_ITEMS_PER_ROOM: Stat = balance::MAX_ITEMS_PER_ROOM as Stat;
-
-/// All item spawn weights for the weighted spawn table.
-const ALL_KINDS: [ItemKind; 3] = [
-    ItemKind::HealthPotion,
-    ItemKind::ShortSword,
-    ItemKind::LeatherArmor,
-];
-
-/// The type of item. Each variant maps to a `u8` discriminant, making it
-/// portable to constrained platforms (C64, GBA).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ItemKind {
-    HealthPotion,
-    ShortSword,
-    LeatherArmor,
-}
 
 /// An item on the ground at a specific position.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -46,109 +33,77 @@ pub struct Equipment {
 }
 
 // ---------------------------------------------------------------------------
-// Pure functions — tier-portable, will lift into rules/ module later
+// Standard-tier wrappers — delegate to rules::items, return Stat
 // ---------------------------------------------------------------------------
 
 /// Display glyph for an item kind.
 pub fn item_glyph(kind: ItemKind) -> char {
-    match kind {
-        ItemKind::HealthPotion => '!',
-        ItemKind::ShortSword => '/',
-        ItemKind::LeatherArmor => '[',
-    }
+    rules_items::glyph(kind)
 }
 
 /// Display color for an item kind.
 pub fn item_color(kind: ItemKind) -> GameColor {
-    match kind {
-        ItemKind::HealthPotion => GameColor::Red,
-        ItemKind::ShortSword => GameColor::Cyan,
-        ItemKind::LeatherArmor => GameColor::Yellow,
-    }
+    rules_items::color(kind)
 }
 
 /// Human-readable name for an item kind.
 pub fn item_name(kind: ItemKind) -> &'static str {
-    match kind {
-        ItemKind::HealthPotion => "Health Potion",
-        ItemKind::ShortSword => "Short Sword",
-        ItemKind::LeatherArmor => "Leather Armor",
-    }
+    rules_items::name(kind)
 }
 
 /// Spawn weight for the weighted item spawn table.
 /// Higher weight = more common. Set to 0 to disable spawning.
 pub fn item_spawn_weight(kind: ItemKind) -> u32 {
-    match kind {
-        ItemKind::HealthPotion => balance::HEALTH_POTION_SPAWN_WEIGHT as u32,
-        ItemKind::ShortSword => balance::SHORT_SWORD_SPAWN_WEIGHT as u32,
-        ItemKind::LeatherArmor => balance::LEATHER_ARMOR_SPAWN_WEIGHT as u32,
-    }
+    rules_items::spawn_weight(kind) as u32
 }
 
 /// HP restored when a health potion is consumed. Returns 0 for non-consumables.
 pub fn item_heal_amount(kind: ItemKind) -> Stat {
-    match kind {
-        ItemKind::HealthPotion => balance::HEALTH_POTION_HEAL as Stat,
-        _ => 0,
-    }
+    rules_items::heal_amount(kind) as Stat
 }
 
 /// Attack bonus granted by equipping this item. Returns 0 for non-weapons.
 pub fn item_attack_bonus(kind: ItemKind) -> Stat {
-    match kind {
-        ItemKind::ShortSword => balance::SHORT_SWORD_ATK_BONUS as Stat,
-        _ => 0,
-    }
+    rules_items::attack_bonus(kind) as Stat
 }
 
 /// Defense bonus granted by equipping this item. Returns 0 for non-armor.
 pub fn item_defense_bonus(kind: ItemKind) -> Stat {
-    match kind {
-        ItemKind::LeatherArmor => balance::LEATHER_ARMOR_DEF_BONUS as Stat,
-        _ => 0,
-    }
+    rules_items::defense_bonus(kind) as Stat
 }
 
 /// Whether this item is a consumable (used immediately on pickup).
 pub fn is_consumable(kind: ItemKind) -> bool {
-    matches!(kind, ItemKind::HealthPotion)
+    rules_items::is_consumable(kind)
 }
 
 /// Whether this item is a weapon (occupies weapon slot).
 pub fn is_weapon(kind: ItemKind) -> bool {
-    matches!(kind, ItemKind::ShortSword)
+    rules_items::is_weapon(kind)
 }
 
 /// Whether this item is armor (occupies armor slot).
 pub fn is_armor(kind: ItemKind) -> bool {
-    matches!(kind, ItemKind::LeatherArmor)
+    rules_items::is_armor(kind)
 }
 
 /// Returns true if `new` is strictly better than `current` for the weapon slot.
 pub fn is_better_weapon(new: ItemKind, current: Option<ItemKind>) -> bool {
-    match current {
-        None => item_attack_bonus(new) > 0,
-        Some(cur) => item_attack_bonus(new) > item_attack_bonus(cur),
-    }
+    rules_items::is_better_weapon(new, current)
 }
 
 /// Returns true if `new` is strictly better than `current` for the armor slot.
 pub fn is_better_armor(new: ItemKind, current: Option<ItemKind>) -> bool {
-    match current {
-        None => item_defense_bonus(new) > 0,
-        Some(cur) => item_defense_bonus(new) > item_defense_bonus(cur),
-    }
+    rules_items::is_better_armor(new, current)
 }
 
 /// All item kinds with positive spawn weight, for the spawn table.
+/// Built from the fixed-size `rules::items::SPAWN_TABLE`.
 pub fn spawn_table() -> Vec<(ItemKind, u32)> {
-    ALL_KINDS
+    rules_items::SPAWN_TABLE
         .iter()
-        .filter_map(|&kind| {
-            let w = item_spawn_weight(kind);
-            if w > 0 { Some((kind, w)) } else { None }
-        })
+        .filter(|(_, w)| *w > 0)
+        .map(|&(kind, w)| (kind, w as u32))
         .collect()
 }
 

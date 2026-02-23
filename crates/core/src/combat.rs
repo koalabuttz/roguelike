@@ -1,5 +1,6 @@
 use crate::entity::Entity;
 use crate::message_log::MessageLog;
+use crate::rules::damage as rules_damage;
 use crate::types::Stat;
 
 /// Resolve a melee attack between two entities by index.
@@ -17,7 +18,10 @@ pub fn melee_attack(
     def: Stat,
     log: &mut MessageLog,
 ) -> bool {
-    let damage = (atk - def).max(0);
+    let damage = rules_damage::damage(
+        rules_damage::narrow(atk),
+        rules_damage::narrow(def),
+    ) as Stat;
 
     if damage > 0 {
         entities[defender].hp -= damage;

@@ -711,12 +711,20 @@ impl GameState {
 
     /// Player's effective attack (base + equipment).
     pub fn effective_attack(&self) -> Stat {
-        self.entities[0].attack + self.equipment.attack_bonus()
+        use crate::rules::damage::{effective_attack as eff_atk, narrow};
+        eff_atk(
+            narrow(self.entities[0].attack),
+            narrow(self.equipment.attack_bonus()),
+        ) as Stat
     }
 
     /// Player's effective defense (base + equipment).
     pub fn effective_defense(&self) -> Stat {
-        self.entities[0].defense + self.equipment.defense_bonus()
+        use crate::rules::damage::{effective_defense as eff_def, narrow};
+        eff_def(
+            narrow(self.entities[0].defense),
+            narrow(self.equipment.defense_bonus()),
+        ) as Stat
     }
 
     /// Attempt to descend stairs. Returns `true` if successful (turn consumed).

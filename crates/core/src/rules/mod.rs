@@ -5,4 +5,5 @@
 //! platforms — from C64 to PC.
 
 pub mod balance;
+pub mod damage;
 pub mod items;

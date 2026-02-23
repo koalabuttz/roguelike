@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add stairs and multi-level dungeons (#17)
+- Replace XP/leveling with item-based progression in docs (#19)
 - Regenerate golden replay files for item system changes (#13)
 - Add item system to roguelike (#2)
 
@@ -14,6 +16,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix equipment stats not applied during monster attacks (#12)
 
 ### Changed
+- Extract rules/damage.rs — pure damage formula (#22)
+- Extract rules/items.rs — pure item definitions and lookups (#23)
+- Extract rules/balance.rs — shared balance constants (#21)
 - Add comprehensive tests for item system (#11)
 - Update spectate frame output for items (#10)
 - Update MCP server observations and rules for items (#9)

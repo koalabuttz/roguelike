@@ -9,15 +9,14 @@
 //! natural width. The standard-tier `Entity` struct uses signed `Stat` (`i32`)
 //! for combat math; callers widen `u8 → Stat` via lossless `as` casts.
 
-use serde::{Deserialize, Serialize};
-
 use super::balance;
 use crate::types::GameColor;
 
 /// Monster AI behavior. Shared by all tiers — the C64 maps discriminants to
 /// `u8` constants, the standard tier uses enum variants directly.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AiBehavior {
     None = 0,   // Player — no automatic AI
     Chase = 1,  // Greedy chase toward player
@@ -27,7 +26,8 @@ pub enum AiBehavior {
 /// The type of monster. Each variant is a `u8` discriminant — no 16-bit bloat
 /// on constrained platforms (C64, GBA).
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MonsterKind {
     Goblin = 0,
     Orc = 1,

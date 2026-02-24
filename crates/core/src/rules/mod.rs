@@ -6,5 +6,6 @@
 
 pub mod balance;
 pub mod damage;
+pub mod direction;
 pub mod items;
 pub mod monster_table;

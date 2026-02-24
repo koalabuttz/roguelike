@@ -5,14 +5,15 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["dev-tools", "data-files"]
+default = ["dev-tools", "data-files", "serde"]
 dev-tools = []
 data-files = ["toml"]
+serde = ["dep:serde", "dep:serde_json"]
 
 [dependencies]
 rand = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 
 [dev-dependencies]

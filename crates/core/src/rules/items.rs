@@ -11,15 +11,14 @@
 //! (`i32`) via lossless `as` casts for compatibility with the standard-tier
 //! engine, which uses signed `Stat` to support debuffs in combat math.
 
-use serde::{Deserialize, Serialize};
-
 use super::balance;
 use crate::types::GameColor;
 
 /// The type of item. Each variant is a `u8` discriminant — no 16-bit bloat
 /// on constrained platforms (C64, GBA).
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ItemKind {
     HealthPotion = 0,
     ShortSword = 1,

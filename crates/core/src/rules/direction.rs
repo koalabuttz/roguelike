@@ -20,8 +20,11 @@ pub enum Direction {
     SouthWest = 7,
 }
 
+/// Number of Direction variants — matches `ALL_DIRECTIONS.len()`.
+pub const DIRECTION_COUNT: usize = 8;
+
 /// All eight directions, for iteration and property-testing.
-pub const ALL_DIRECTIONS: [Direction; 8] = [
+pub const ALL_DIRECTIONS: [Direction; DIRECTION_COUNT] = [
     Direction::North,
     Direction::South,
     Direction::East,

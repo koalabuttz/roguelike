@@ -1,5 +1,5 @@
 // Re-export from canonical location so existing `use command::{Direction, ...}` paths work.
-pub use crate::rules::direction::{ALL_DIRECTIONS, Direction};
+pub use crate::rules::direction::{ALL_DIRECTIONS, DIRECTION_COUNT, Direction};
 
 /// A platform-independent game command.
 ///

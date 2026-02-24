@@ -317,8 +317,8 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                             let lines = help::help_lines(&settings, &game_data);
                             run_message_history(&lines, renderer, input)?;
                         }
-                        GameCommand::Autorun { dx, dy } => {
-                            let stepper = state.start_autorun(dx, dy);
+                        GameCommand::Autorun(dir) => {
+                            let stepper = state.start_autorun(dir);
                             animate_stepper(
                                 renderer.writer(),
                                 state,

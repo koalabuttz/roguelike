@@ -690,6 +690,7 @@ pub struct BatchRunStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::Direction;
     use crate::fov;
     use crate::game::GameState;
     use crate::map::{Map, Tile};
@@ -927,8 +928,8 @@ mod tests {
             recording: true,
             ..DevSession::default()
         };
-        gs.step(GameCommand::Move { dx: 1, dy: 0 });
-        after_step(&mut gs, &mut session, GameCommand::Move { dx: 1, dy: 0 });
+        gs.step(GameCommand::Move(Direction::East));
+        after_step(&mut gs, &mut session, GameCommand::Move(Direction::East));
         gs.step(GameCommand::Wait);
         after_step(&mut gs, &mut session, GameCommand::Wait);
         assert_eq!(session.command_log.len(), 2);
@@ -941,8 +942,8 @@ mod tests {
             recording: true,
             ..DevSession::default()
         };
-        gs.step(GameCommand::Move { dx: 1, dy: 0 });
-        after_step(&mut gs, &mut session, GameCommand::Move { dx: 1, dy: 0 });
+        gs.step(GameCommand::Move(Direction::East));
+        after_step(&mut gs, &mut session, GameCommand::Move(Direction::East));
         let replay = Replay::from_session(&gs, &session, None);
         let json = serde_json::to_string_pretty(&replay).unwrap();
         let loaded: Replay = serde_json::from_str(&json).unwrap();
@@ -1024,8 +1025,8 @@ mod tests {
             ..DevSession::default()
         };
         for _ in 0..3 {
-            gs.step(GameCommand::Move { dx: 1, dy: 0 });
-            after_step(&mut gs, &mut session, GameCommand::Move { dx: 1, dy: 0 });
+            gs.step(GameCommand::Move(Direction::East));
+            after_step(&mut gs, &mut session, GameCommand::Move(Direction::East));
         }
         let golden = golden_from_session("test", "test golden", &gs, &session, None);
         assert!(golden.verify().is_ok());

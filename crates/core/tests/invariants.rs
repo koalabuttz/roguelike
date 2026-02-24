@@ -6,15 +6,13 @@
 
 use proptest::prelude::*;
 
-use roguelike_core::command::GameCommand;
+use roguelike_core::command::{ALL_DIRECTIONS, GameCommand};
 use roguelike_core::game::GameState;
 
 /// Generate a random GameCommand: Move in any direction or Wait.
 fn arb_game_command() -> impl Strategy<Value = GameCommand> {
     prop_oneof![
-        8 => (-1..=1i32, -1..=1i32)
-            .prop_filter("not zero move", |(dx, dy)| *dx != 0 || *dy != 0)
-            .prop_map(|(dx, dy)| GameCommand::Move { dx, dy }),
+        8 => (0..ALL_DIRECTIONS.len()).prop_map(|i| GameCommand::Move(ALL_DIRECTIONS[i])),
         2 => Just(GameCommand::Wait),
     ]
 }

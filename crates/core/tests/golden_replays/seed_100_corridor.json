@@ -7,466 +7,235 @@
     "height": 40,
     "commands": [
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       "Wait",
       "Wait",

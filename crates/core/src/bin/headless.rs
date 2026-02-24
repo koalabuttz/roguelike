@@ -409,10 +409,7 @@ fn run_single_game_tracked(
         } else if path_idx < path.len() {
             let (nx, ny) = path[path_idx];
             path_idx += 1;
-            GameCommand::Move {
-                dx: nx - gs.entities[0].x,
-                dy: ny - gs.entities[0].y,
-            }
+            GameCommand::move_or_wait(nx - gs.entities[0].x, ny - gs.entities[0].y)
         } else {
             path.clear();
             path_idx = 0;
@@ -422,10 +419,7 @@ fn run_single_game_tracked(
             if !path.is_empty() {
                 let (nx, ny) = path[0];
                 path_idx = 1;
-                GameCommand::Move {
-                    dx: nx - gs.entities[0].x,
-                    dy: ny - gs.entities[0].y,
-                }
+                GameCommand::move_or_wait(nx - gs.entities[0].x, ny - gs.entities[0].y)
             } else {
                 GameCommand::Wait
             }
@@ -488,10 +482,7 @@ fn run_single_game(
             // Follow current exploration path.
             let (nx, ny) = path[path_idx];
             path_idx += 1;
-            GameCommand::Move {
-                dx: nx - gs.entities[0].x,
-                dy: ny - gs.entities[0].y,
-            }
+            GameCommand::move_or_wait(nx - gs.entities[0].x, ny - gs.entities[0].y)
         } else {
             // Compute new path to nearest frontier.
             path.clear();
@@ -502,10 +493,7 @@ fn run_single_game(
             if !path.is_empty() {
                 let (nx, ny) = path[0];
                 path_idx = 1;
-                GameCommand::Move {
-                    dx: nx - gs.entities[0].x,
-                    dy: ny - gs.entities[0].y,
-                }
+                GameCommand::move_or_wait(nx - gs.entities[0].x, ny - gs.entities[0].y)
             } else {
                 GameCommand::Wait
             }
@@ -565,10 +553,7 @@ fn run_and_save_golden(
         } else if path_idx < path.len() {
             let (nx, ny) = path[path_idx];
             path_idx += 1;
-            GameCommand::Move {
-                dx: nx - gs.entities[0].x,
-                dy: ny - gs.entities[0].y,
-            }
+            GameCommand::move_or_wait(nx - gs.entities[0].x, ny - gs.entities[0].y)
         } else {
             path.clear();
             path_idx = 0;
@@ -578,10 +563,7 @@ fn run_and_save_golden(
             if !path.is_empty() {
                 let (nx, ny) = path[0];
                 path_idx = 1;
-                GameCommand::Move {
-                    dx: nx - gs.entities[0].x,
-                    dy: ny - gs.entities[0].y,
-                }
+                GameCommand::move_or_wait(nx - gs.entities[0].x, ny - gs.entities[0].y)
             } else {
                 GameCommand::Wait
             }
@@ -786,10 +768,7 @@ fn fight_command(gs: &GameState) -> GameCommand {
         .enumerate()
         .filter(|(i, e)| *i != 0 && e.alive && (e.x - px).abs() <= 1 && (e.y - py).abs() <= 1)
         .min_by_key(|(_, e)| e.hp)
-        .map(|(_, e)| GameCommand::Move {
-            dx: (e.x - px).signum(),
-            dy: (e.y - py).signum(),
-        })
+        .map(|(_, e)| GameCommand::move_or_wait(e.x - px, e.y - py))
         .unwrap_or(GameCommand::Wait)
 }
 

@@ -7,286 +7,145 @@
     "height": 40,
     "commands": [
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": -1
-        }
+        "Move": "NorthEast"
       },
       {
-        "Move": {
-          "dx": 0,
-          "dy": -1
-        }
+        "Move": "North"
       },
       {
-        "Move": {
-          "dx": 0,
-          "dy": -1
-        }
+        "Move": "North"
       },
       {
-        "Move": {
-          "dx": 0,
-          "dy": -1
-        }
+        "Move": "North"
       },
       {
-        "Move": {
-          "dx": 0,
-          "dy": -1
-        }
+        "Move": "North"
       },
       {
-        "Move": {
-          "dx": 0,
-          "dy": -1
-        }
+        "Move": "North"
       },
       {
-        "Move": {
-          "dx": 0,
-          "dy": -1
-        }
+        "Move": "North"
       },
       {
-        "Move": {
-          "dx": 0,
-          "dy": -1
-        }
+        "Move": "North"
       },
       {
-        "Move": {
-          "dx": 0,
-          "dy": -1
-        }
+        "Move": "North"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": -1
-        }
+        "Move": "NorthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": -1
-        }
+        "Move": "NorthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": -1
-        }
+        "Move": "NorthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": -1
-        }
+        "Move": "NorthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": -1
-        }
+        "Move": "NorthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": -1
-        }
+        "Move": "NorthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 1
-        }
+        "Move": "SouthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 1
-        }
+        "Move": "SouthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": -1
-        }
+        "Move": "NorthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 1
-        }
+        "Move": "SouthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": -1
-        }
+        "Move": "NorthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": -1
-        }
+        "Move": "NorthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 1
-        }
+        "Move": "SouthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": -1
-        }
+        "Move": "NorthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 1
-        }
+        "Move": "SouthEast"
       },
       {
-        "Move": {
-          "dx": -1,
-          "dy": -1
-        }
+        "Move": "NorthWest"
       },
       {
-        "Move": {
-          "dx": -1,
-          "dy": 1
-        }
+        "Move": "SouthWest"
       },
       {
-        "Move": {
-          "dx": 0,
-          "dy": 1
-        }
+        "Move": "South"
       },
       {
-        "Move": {
-          "dx": 0,
-          "dy": 1
-        }
+        "Move": "South"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 1
-        }
+        "Move": "SouthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 1
-        }
+        "Move": "SouthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": -1
-        }
+        "Move": "NorthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": -1
-        }
+        "Move": "NorthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": -1
-        }
+        "Move": "NorthEast"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       },
       {
-        "Move": {
-          "dx": 1,
-          "dy": 0
-        }
+        "Move": "East"
       }
     ],
     "preset": "labyrinth"

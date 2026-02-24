@@ -245,9 +245,8 @@ mod raw_hid {
 mod inner {
     use super::*;
     use gilrs::{Axis, Button, EventType, Gilrs};
-    use roguelike_core::command::GameCommand;
+    use roguelike_core::command::{Direction, GameCommand};
     use roguelike_core::look::LookCommand;
-    use roguelike_core::types::Coord;
     use std::time::Duration;
 
     // D-pad index constants.
@@ -288,7 +287,7 @@ mod inner {
     // -- Free helper functions (avoid borrow conflicts with `&mut self`) --
 
     /// Compute composite D-pad direction from currently held buttons.
-    fn dpad_direction(held: &[bool; 4]) -> Option<(Coord, Coord)> {
+    fn dpad_direction(held: &[bool; 4]) -> Option<Direction> {
         let dx = match (held[DPAD_LEFT], held[DPAD_RIGHT]) {
             (true, false) => -1,
             (false, true) => 1,
@@ -299,11 +298,7 @@ mod inner {
             (false, true) => 1,
             _ => 0,
         };
-        if dx == 0 && dy == 0 {
-            None
-        } else {
-            Some((dx, dy))
-        }
+        Direction::from_offset(dx, dy)
     }
 
     /// Update held-state tracking from a gilrs event.
@@ -330,7 +325,7 @@ mod inner {
     }
 
     /// Check gilrs analog stick for a new direction past the deadzone.
-    fn check_gilrs_stick(gilrs: &Gilrs, stick_engaged: &mut bool) -> Option<(Coord, Coord)> {
+    fn check_gilrs_stick(gilrs: &Gilrs, stick_engaged: &mut bool) -> Option<Direction> {
         let gp_id = gilrs.gamepads().next().map(|(id, _)| id)?;
         let gp = gilrs.gamepad(gp_id);
         let sx = gp
@@ -345,7 +340,7 @@ mod inner {
     }
 
     /// Shared stick edge-trigger logic (works for both gilrs and raw HID).
-    fn check_stick_common(sx: f32, sy: f32, stick_engaged: &mut bool) -> Option<(Coord, Coord)> {
+    fn check_stick_common(sx: f32, sy: f32, stick_engaged: &mut bool) -> Option<Direction> {
         let magnitude = (sx * sx + sy * sy).sqrt();
         if magnitude < 0.3 {
             *stick_engaged = false;
@@ -398,7 +393,7 @@ mod inner {
     fn check_hid_stick(
         report: &super::raw_hid::HidInputReport,
         stick_engaged: &mut bool,
-    ) -> Option<(Coord, Coord)> {
+    ) -> Option<Direction> {
         let sx = (report.left_stick_x as f32 - 128.0) / 128.0;
         // Negate Y: HID 0x00=up → -1.0, but gilrs/check_stick_common expects
         // positive Y = up, so invert.
@@ -642,11 +637,11 @@ mod inner {
                             | Button::DPadDown
                             | Button::DPadLeft
                             | Button::DPadRight => {
-                                if let Some((dx, dy)) = dpad_direction(&self.dpad_held) {
+                                if let Some(dir) = dpad_direction(&self.dpad_held) {
                                     return Some(if self.lb_held {
-                                        GameCommand::Autorun { dx, dy }
+                                        GameCommand::Autorun(dir)
                                     } else {
-                                        GameCommand::Move { dx, dy }
+                                        GameCommand::Move(dir)
                                     });
                                 }
                             }
@@ -657,13 +652,11 @@ mod inner {
                             _ => {}
                         },
                         EventType::AxisChanged(Axis::LeftStickX | Axis::LeftStickY, _, _) => {
-                            if let Some((dx, dy)) =
-                                check_gilrs_stick(gilrs, &mut self.stick_engaged)
-                            {
+                            if let Some(dir) = check_gilrs_stick(gilrs, &mut self.stick_engaged) {
                                 return Some(if self.lb_held {
-                                    GameCommand::Autorun { dx, dy }
+                                    GameCommand::Autorun(dir)
                                 } else {
-                                    GameCommand::Move { dx, dy }
+                                    GameCommand::Move(dir)
                                 });
                             }
                         }
@@ -689,20 +682,20 @@ mod inner {
                     }
 
                     if hid_dpad_newly_pressed(&report, &prev)
-                        && let Some((dx, dy)) = dpad_direction(&self.dpad_held)
+                        && let Some(dir) = dpad_direction(&self.dpad_held)
                     {
                         return Some(if self.lb_held {
-                            GameCommand::Autorun { dx, dy }
+                            GameCommand::Autorun(dir)
                         } else {
-                            GameCommand::Move { dx, dy }
+                            GameCommand::Move(dir)
                         });
                     }
 
-                    if let Some((dx, dy)) = check_hid_stick(&report, &mut self.stick_engaged) {
+                    if let Some(dir) = check_hid_stick(&report, &mut self.stick_engaged) {
                         return Some(if self.lb_held {
-                            GameCommand::Autorun { dx, dy }
+                            GameCommand::Autorun(dir)
                         } else {
-                            GameCommand::Move { dx, dy }
+                            GameCommand::Move(dir)
                         });
                     }
 
@@ -733,8 +726,9 @@ mod inner {
                     }
                     if let EventType::AxisChanged(Axis::LeftStickX | Axis::LeftStickY, _, _) =
                         ev.event
-                        && let Some((_, dy)) = check_gilrs_stick(gilrs, &mut self.stick_engaged)
+                        && let Some(dir) = check_gilrs_stick(gilrs, &mut self.stick_engaged)
                     {
+                        let (_, dy) = dir.to_offset();
                         if dy < 0 {
                             return Some(MenuCommand::Up);
                         }
@@ -790,7 +784,8 @@ mod inner {
                             | Button::DPadDown
                             | Button::DPadLeft
                             | Button::DPadRight => {
-                                if let Some((dx, dy)) = dpad_direction(&self.dpad_held) {
+                                if let Some(dir) = dpad_direction(&self.dpad_held) {
+                                    let (dx, dy) = dir.to_offset();
                                     return Some(LookCommand::Move { dx, dy });
                                 }
                             }
@@ -800,9 +795,8 @@ mod inner {
                             _ => {}
                         },
                         EventType::AxisChanged(Axis::LeftStickX | Axis::LeftStickY, _, _) => {
-                            if let Some((dx, dy)) =
-                                check_gilrs_stick(gilrs, &mut self.stick_engaged)
-                            {
+                            if let Some(dir) = check_gilrs_stick(gilrs, &mut self.stick_engaged) {
+                                let (dx, dy) = dir.to_offset();
                                 return Some(LookCommand::Move { dx, dy });
                             }
                         }
@@ -869,8 +863,9 @@ mod inner {
                     }
                     if let EventType::AxisChanged(Axis::LeftStickX | Axis::LeftStickY, _, _) =
                         ev.event
-                        && let Some((_, dy)) = check_gilrs_stick(gilrs, &mut self.stick_engaged)
+                        && let Some(dir) = check_gilrs_stick(gilrs, &mut self.stick_engaged)
                     {
+                        let (_, dy) = dir.to_offset();
                         if dy < 0 {
                             return Some(HistoryCommand::Menu(MenuCommand::Up));
                         }
@@ -916,7 +911,7 @@ mod inner {
     ///
     /// Uses `atan2` with π/8 sector boundaries. gilrs convention: positive Y is
     /// up, but our screen Y axis points down, so we negate `sy`.
-    pub fn analog_to_direction(sx: f32, sy: f32) -> (Coord, Coord) {
+    pub fn analog_to_direction(sx: f32, sy: f32) -> Direction {
         let angle = (-sy).atan2(sx); // negate Y for screen coords
         // Divide the circle into 8 sectors of π/4 each, centered on each
         // cardinal/diagonal direction.
@@ -924,15 +919,15 @@ mod inner {
             / std::f32::consts::FRAC_PI_4) as i32
             % 8;
         match sector {
-            0 => (-1, 0),  // Left (π)
-            1 => (-1, -1), // Up-Left
-            2 => (0, -1),  // Up
-            3 => (1, -1),  // Up-Right
-            4 => (1, 0),   // Right (0)
-            5 => (1, 1),   // Down-Right
-            6 => (0, 1),   // Down
-            7 => (-1, 1),  // Down-Left
-            _ => (0, 0),
+            0 => Direction::West,
+            1 => Direction::NorthWest,
+            2 => Direction::North,
+            3 => Direction::NorthEast,
+            4 => Direction::East,
+            5 => Direction::SouthEast,
+            6 => Direction::South,
+            7 => Direction::SouthWest,
+            _ => Direction::East, // unreachable: sector is mod 8
         }
     }
 
@@ -1055,55 +1050,56 @@ mod tests {
     #[cfg(feature = "gamepad")]
     mod analog_tests {
         use super::super::inner::analog_to_direction;
+        use roguelike_core::command::Direction;
 
         #[test]
         fn right() {
-            assert_eq!(analog_to_direction(1.0, 0.0), (1, 0));
+            assert_eq!(analog_to_direction(1.0, 0.0), Direction::East);
         }
 
         #[test]
         fn left() {
-            assert_eq!(analog_to_direction(-1.0, 0.0), (-1, 0));
+            assert_eq!(analog_to_direction(-1.0, 0.0), Direction::West);
         }
 
         #[test]
         fn up() {
-            // gilrs: positive Y = up, our function negates it → screen up (-1)
-            assert_eq!(analog_to_direction(0.0, 1.0), (0, -1));
+            // gilrs: positive Y = up, our function negates it → screen up
+            assert_eq!(analog_to_direction(0.0, 1.0), Direction::North);
         }
 
         #[test]
         fn down() {
-            assert_eq!(analog_to_direction(0.0, -1.0), (0, 1));
+            assert_eq!(analog_to_direction(0.0, -1.0), Direction::South);
         }
 
         #[test]
         fn up_right() {
-            assert_eq!(analog_to_direction(0.7, 0.7), (1, -1));
+            assert_eq!(analog_to_direction(0.7, 0.7), Direction::NorthEast);
         }
 
         #[test]
         fn up_left() {
-            assert_eq!(analog_to_direction(-0.7, 0.7), (-1, -1));
+            assert_eq!(analog_to_direction(-0.7, 0.7), Direction::NorthWest);
         }
 
         #[test]
         fn down_right() {
-            assert_eq!(analog_to_direction(0.7, -0.7), (1, 1));
+            assert_eq!(analog_to_direction(0.7, -0.7), Direction::SouthEast);
         }
 
         #[test]
         fn down_left() {
-            assert_eq!(analog_to_direction(-0.7, -0.7), (-1, 1));
+            assert_eq!(analog_to_direction(-0.7, -0.7), Direction::SouthWest);
         }
 
         #[test]
         fn near_axis_snaps_to_cardinal() {
             // Slightly off-axis should still snap to cardinal direction.
-            assert_eq!(analog_to_direction(1.0, 0.1), (1, 0));
-            assert_eq!(analog_to_direction(1.0, -0.1), (1, 0));
-            assert_eq!(analog_to_direction(0.1, 1.0), (0, -1));
-            assert_eq!(analog_to_direction(-0.1, 1.0), (0, -1));
+            assert_eq!(analog_to_direction(1.0, 0.1), Direction::East);
+            assert_eq!(analog_to_direction(1.0, -0.1), Direction::East);
+            assert_eq!(analog_to_direction(0.1, 1.0), Direction::North);
+            assert_eq!(analog_to_direction(-0.1, 1.0), Direction::North);
         }
     }
 

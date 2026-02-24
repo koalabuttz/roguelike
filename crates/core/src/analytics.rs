@@ -526,7 +526,10 @@ mod tests {
     use crate::fov;
     use crate::map::{Map, Tile};
     use crate::message_log::MessageLog;
-    use crate::{command::GameCommand, data};
+    use crate::{
+        command::{Direction, GameCommand},
+        data,
+    };
 
     fn test_game() -> GameState {
         let mut m = Map::new(20, 20);
@@ -598,7 +601,7 @@ mod tests {
         let before = snapshot_entities(&gs);
 
         // Player attacks goblin (step also runs monster turn, so both take damage).
-        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        gs.step(GameCommand::Move(Direction::East));
 
         let mut analytics = new_analytics(42);
         diff_combat(&before, &gs, 1, &mut analytics);
@@ -645,7 +648,7 @@ mod tests {
             .push(Entity::from_template(data::goblin(), 6, 5));
 
         let before = snapshot_entities(&gs);
-        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        gs.step(GameCommand::Move(Direction::East));
 
         let mut analytics = new_analytics(42);
         diff_combat(&before, &gs, 1, &mut analytics);

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ai;
 use crate::combat;
-use crate::command::GameCommand;
+use crate::command::{Direction, GameCommand};
 use crate::data;
 use crate::entity::{Entity, EntityKind};
 use crate::fov;
@@ -136,7 +136,7 @@ pub struct AutoExploreResult {
 /// Determines how the stepper decides the next direction each step.
 pub enum StepperMode {
     /// Move in a fixed direction each step (autorun behavior).
-    Directional { dx: Coord, dy: Coord },
+    Directional(Direction),
     /// Follow a precomputed A* path, stepping through each waypoint.
     FollowPath { path: Vec<Pos>, index: usize },
 }
@@ -175,9 +175,9 @@ impl AutorunStepper {
             return self.finish(state, AutorunStopReason::MonsterSpotted);
         }
 
-        // Compute dx, dy from mode.
-        let (dx, dy) = match &self.mode {
-            StepperMode::Directional { dx, dy } => (*dx, *dy),
+        // Compute direction from mode.
+        let dir = match &self.mode {
+            StepperMode::Directional(dir) => *dir,
             StepperMode::FollowPath { path, index } => {
                 if *index >= path.len() {
                     return self.finish(state, AutorunStopReason::PathComplete);
@@ -185,7 +185,10 @@ impl AutorunStepper {
                 let (nx, ny) = path[*index];
                 let cx = state.entities[0].x;
                 let cy = state.entities[0].y;
-                (nx - cx, ny - cy)
+                match Direction::from_offset(nx - cx, ny - cy) {
+                    Some(d) => d,
+                    None => return self.finish(state, AutorunStopReason::PathComplete),
+                }
             }
         };
 
@@ -193,7 +196,7 @@ impl AutorunStepper {
         let hp_before = state.entities[0].hp;
         let visible_monsters_before = state.visible_monster_ids();
 
-        let result = state.step(GameCommand::Move { dx, dy });
+        let result = state.step(GameCommand::Move(dir));
         self.all_messages.extend(result.new_messages);
 
         // Check 3: wall hit.
@@ -230,7 +233,8 @@ impl AutorunStepper {
 
         // Mode-specific post-step logic.
         match &self.mode {
-            StepperMode::Directional { dx, dy } => {
+            StepperMode::Directional(dir) => {
+                let (dx, dy) = dir.to_offset();
                 let px = state.entities[0].x;
                 let py = state.entities[0].y;
                 if !state.map.is_walkable(px + dx, py + dy) {
@@ -827,11 +831,14 @@ impl GameState {
     /// (i.e. a turn was consumed), `false` otherwise.
     pub fn handle_command(&mut self, cmd: GameCommand) -> bool {
         match cmd {
-            GameCommand::Move { dx, dy } => self.player_move_or_attack(dx, dy),
+            GameCommand::Move(dir) => {
+                let (dx, dy) = dir.to_offset();
+                self.player_move_or_attack(dx, dy)
+            }
             GameCommand::Wait => true,
             GameCommand::Descend => self.descend(),
             // Autorun, AutoExplore, Look, Help are handled at a higher level (main loop / MCP).
-            GameCommand::Autorun { .. }
+            GameCommand::Autorun(_)
             | GameCommand::AutoExplore
             | GameCommand::Look
             | GameCommand::Help
@@ -1055,9 +1062,9 @@ impl GameState {
     }
 
     /// Create a stepper for directional autorun.
-    pub fn start_autorun(&self, dx: Coord, dy: Coord) -> AutorunStepper {
+    pub fn start_autorun(&self, dir: Direction) -> AutorunStepper {
         AutorunStepper {
-            mode: StepperMode::Directional { dx, dy },
+            mode: StepperMode::Directional(dir),
             steps_taken: 0,
             max_steps: self.max_autorun_steps,
             all_messages: Vec::new(),
@@ -1108,8 +1115,8 @@ impl GameState {
     /// Run in a direction until something interesting happens.
     ///
     /// Convenience wrapper around the stepper — runs to completion in one call.
-    pub fn autorun(&mut self, dx: Coord, dy: Coord) -> AutorunResult {
-        let stepper = self.start_autorun(dx, dy);
+    pub fn autorun(&mut self, dir: Direction) -> AutorunResult {
+        let stepper = self.start_autorun(dir);
         stepper.run_to_completion(self)
     }
 
@@ -1176,15 +1183,13 @@ impl GameState {
             // Recompute direction to target each round (safe if target moves)
             let tx = self.entities[target_idx].x;
             let ty = self.entities[target_idx].y;
-            let dx = (tx - self.entities[0].x).signum();
-            let dy = (ty - self.entities[0].y).signum();
-
             // Target moved out of melee range — stop
             if (tx - self.entities[0].x).abs() > 1 || (ty - self.entities[0].y).abs() > 1 {
                 break;
             }
 
-            let result = self.step(GameCommand::Move { dx, dy });
+            let cmd = GameCommand::move_or_wait(tx - self.entities[0].x, ty - self.entities[0].y);
+            let result = self.step(cmd);
             rounds += 1;
 
             if result.game_over {
@@ -1712,7 +1717,7 @@ mod tests {
     #[test]
     fn handle_command_move_moves_player() {
         let mut gs = test_game();
-        let acted = gs.handle_command(GameCommand::Move { dx: 1, dy: 0 });
+        let acted = gs.handle_command(GameCommand::Move(Direction::East));
         assert!(acted);
         assert_eq!(gs.entities[0].x, 6);
         assert_eq!(gs.entities[0].y, 5);
@@ -1740,7 +1745,7 @@ mod tests {
     #[test]
     fn step_move_advances_turn() {
         let mut gs = test_game();
-        let result = gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        let result = gs.step(GameCommand::Move(Direction::East));
         assert!(result.action_taken);
         assert!(!result.game_over);
         assert_eq!(gs.entities[0].x, 6);
@@ -1751,7 +1756,7 @@ mod tests {
         let mut gs = test_game();
         gs.entities[0].x = 1;
         gs.entities[0].y = 1;
-        let result = gs.step(GameCommand::Move { dx: -1, dy: 0 });
+        let result = gs.step(GameCommand::Move(Direction::West));
         assert!(!result.action_taken);
         assert_eq!(gs.entities[0].x, 1);
     }
@@ -1965,7 +1970,7 @@ mod tests {
         let mut gs = corridor_game();
         // Player at (5,5), corridor ends at x=18. Running east should reach x=18
         // and stop because the tile ahead (x=19) is a wall.
-        let result = gs.autorun(1, 0);
+        let result = gs.autorun(Direction::East);
         assert_eq!(result.stop_reason, AutorunStopReason::WallReached);
         assert_eq!(gs.entities[0].x, 18);
         assert_eq!(result.steps_taken, 13);
@@ -1978,7 +1983,7 @@ mod tests {
         // After moving east a few tiles, the goblin enters FOV.
         let monster = Entity::from_template(data::goblin(), 14, 5);
         gs.entities.push(monster);
-        let result = gs.autorun(1, 0);
+        let result = gs.autorun(Direction::East);
         assert_eq!(result.stop_reason, AutorunStopReason::MonsterSpotted);
         assert!(gs.entities[0].x < 14); // stopped before reaching monster
     }
@@ -1991,7 +1996,7 @@ mod tests {
         let monster = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(monster);
         gs.update_fov();
-        let result = gs.autorun(1, 0);
+        let result = gs.autorun(Direction::East);
         assert_eq!(result.stop_reason, AutorunStopReason::MonsterSpotted);
         assert_eq!(result.steps_taken, 0);
         assert_eq!(gs.entities[0].x, 5); // didn't move
@@ -2046,7 +2051,7 @@ mod tests {
             max_monsters_per_room: 2,
         };
 
-        let result = gs.autorun(1, 0);
+        let result = gs.autorun(Direction::East);
         // Forward is always clear through the junction — runs to the wall.
         assert_eq!(result.stop_reason, AutorunStopReason::WallReached);
         assert_eq!(gs.entities[0].x, 18);
@@ -2107,7 +2112,7 @@ mod tests {
             max_monsters_per_room: 2,
         };
 
-        let result = gs.autorun(1, 0);
+        let result = gs.autorun(Direction::East);
         // Wall ahead at (11,5) with north and south alternatives → decision point.
         assert_eq!(result.stop_reason, AutorunStopReason::CorridorBranches);
         assert_eq!(gs.entities[0].x, 10);
@@ -2157,7 +2162,7 @@ mod tests {
             max_monsters_per_room: 2,
         };
 
-        let result = gs.autorun(1, 0);
+        let result = gs.autorun(Direction::East);
         assert_eq!(result.stop_reason, AutorunStopReason::MaxSteps);
         assert_eq!(result.steps_taken, data::config().max_autorun_steps);
     }
@@ -2166,7 +2171,7 @@ mod tests {
     fn autorun_zero_steps_into_wall() {
         let mut gs = corridor_game();
         // Player at (5,5), run north into wall
-        let result = gs.autorun(0, -1);
+        let result = gs.autorun(Direction::North);
         assert_eq!(result.stop_reason, AutorunStopReason::WallReached);
         assert_eq!(result.steps_taken, 0);
         assert_eq!(gs.entities[0].x, 5);
@@ -2180,7 +2185,7 @@ mod tests {
         // With alternatives along the wall, this is a decision point.
         let mut gs = test_game();
         gs.map.rooms.push(crate::map::Rect::new(0, 0, 11, 11));
-        let result = gs.autorun(1, 0);
+        let result = gs.autorun(Direction::East);
         assert_eq!(result.stop_reason, AutorunStopReason::CorridorBranches);
         assert_eq!(gs.entities[0].x, 10);
         assert!(result.steps_taken > 1);
@@ -2234,7 +2239,7 @@ mod tests {
             max_monsters_per_room: 2,
         };
 
-        let result = gs.autorun(1, 0);
+        let result = gs.autorun(Direction::East);
         // Crosses room boundary freely, runs corridor to dead end at x=20.
         assert_eq!(result.stop_reason, AutorunStopReason::WallReached);
         assert_eq!(gs.entities[0].x, 20);
@@ -2288,7 +2293,7 @@ mod tests {
             max_monsters_per_room: 2,
         };
 
-        let result = gs.autorun(1, 0);
+        let result = gs.autorun(Direction::East);
         // Crosses corridor into room, reaches far wall at x=20.
         // Wall ahead with floor tiles north/south → decision point.
         assert_eq!(result.stop_reason, AutorunStopReason::CorridorBranches);
@@ -2358,7 +2363,7 @@ mod tests {
         let initial_explored = gs.explored.len();
         // Move east a few times to explore new tiles
         for _ in 0..3 {
-            gs.step(GameCommand::Move { dx: 1, dy: 0 });
+            gs.step(GameCommand::Move(Direction::East));
         }
         assert!(gs.explored.len() > initial_explored);
         let map = gs.explored_map();
@@ -2669,7 +2674,7 @@ mod tests {
     fn autorun_counts_new_tiles_revealed() {
         let mut gs = corridor_game();
         // Running east from (5,5) in a corridor reveals new tiles.
-        let result = gs.autorun(1, 0);
+        let result = gs.autorun(Direction::East);
         assert!(result.new_tiles_revealed > 0);
     }
 
@@ -2677,7 +2682,7 @@ mod tests {
     fn autorun_into_wall_reveals_zero_tiles() {
         let mut gs = corridor_game();
         // Running north into a wall from (5,5) — no movement, no new tiles.
-        let result = gs.autorun(0, -1);
+        let result = gs.autorun(Direction::North);
         assert_eq!(result.new_tiles_revealed, 0);
         assert_eq!(result.steps_taken, 0);
     }
@@ -2738,8 +2743,8 @@ mod tests {
         // Verify stepper produces identical results to convenience method.
         let mut gs1 = corridor_game();
         let mut gs2 = corridor_game();
-        let result_convenience = gs1.autorun(1, 0);
-        let stepper = gs2.start_autorun(1, 0);
+        let result_convenience = gs1.autorun(Direction::East);
+        let stepper = gs2.start_autorun(Direction::East);
         let result_stepper = stepper.run_to_completion(&mut gs2);
         assert_eq!(result_convenience.steps_taken, result_stepper.steps_taken);
         assert_eq!(result_convenience.stop_reason, result_stepper.stop_reason);
@@ -2768,7 +2773,7 @@ mod tests {
     #[test]
     fn stepper_yields_continue_then_done() {
         let mut gs = corridor_game();
-        let mut stepper = gs.start_autorun(1, 0);
+        let mut stepper = gs.start_autorun(Direction::East);
         // First step should be Continue (corridor is long).
         assert!(matches!(stepper.next_step(&mut gs), StepOutcome::Continue));
         // Run to completion.
@@ -2789,7 +2794,7 @@ mod tests {
         let monster = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(monster);
         gs.update_fov();
-        let mut stepper = gs.start_autorun(1, 0);
+        let mut stepper = gs.start_autorun(Direction::East);
         match stepper.next_step(&mut gs) {
             StepOutcome::Done(result) => {
                 assert_eq!(result.stop_reason, AutorunStopReason::MonsterSpotted);
@@ -2841,7 +2846,7 @@ mod tests {
             kind: ItemKind::HealthPotion,
         });
         gs.update_fov();
-        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        gs.step(GameCommand::Move(Direction::East));
         // Potion heals 10 HP → 30 (clamped to max)
         assert_eq!(gs.entities[0].hp, 30);
         assert!(gs.ground_items.is_empty());
@@ -2858,7 +2863,7 @@ mod tests {
             kind: ItemKind::HealthPotion,
         });
         gs.update_fov();
-        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        gs.step(GameCommand::Move(Direction::East));
         // Potion should remain on the ground
         assert_eq!(gs.ground_items.len(), 1);
         assert_eq!(gs.entities[0].hp, gs.entities[0].max_hp);
@@ -2874,7 +2879,7 @@ mod tests {
             kind: ItemKind::ShortSword,
         });
         gs.update_fov();
-        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        gs.step(GameCommand::Move(Direction::East));
         assert_eq!(gs.equipment.weapon, Some(ItemKind::ShortSword));
         assert!(gs.ground_items.is_empty());
         assert!(gs.log.recent(5).iter().any(|m| m.contains("Short Sword")));
@@ -2890,7 +2895,7 @@ mod tests {
             kind: ItemKind::LeatherArmor,
         });
         gs.update_fov();
-        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        gs.step(GameCommand::Move(Direction::East));
         assert_eq!(gs.equipment.armor, Some(ItemKind::LeatherArmor));
         assert!(gs.ground_items.is_empty());
     }
@@ -2905,7 +2910,7 @@ mod tests {
             kind: ItemKind::ShortSword,
         });
         gs.update_fov();
-        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        gs.step(GameCommand::Move(Direction::East));
         // Same weapon is not strictly better, so stays on ground
         assert_eq!(gs.ground_items.len(), 1);
     }
@@ -2920,7 +2925,7 @@ mod tests {
             kind: ItemKind::LeatherArmor,
         });
         gs.update_fov();
-        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        gs.step(GameCommand::Move(Direction::East));
         assert_eq!(gs.ground_items.len(), 1);
     }
 
@@ -3058,7 +3063,7 @@ mod tests {
         gs.entities.push(goblin);
         gs.update_fov();
         // Attack the goblin
-        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        gs.step(GameCommand::Move(Direction::East));
         // Player ATK 5+3=8, Goblin DEF 0 → 8 dmg, kills in 1 hit (HP 6)
         assert!(!gs.entities[1].alive);
     }
@@ -3149,7 +3154,7 @@ mod tests {
         let mut gs = GameState::with_seed(80, 40, 42);
         // Play 5 turns
         for _ in 0..5 {
-            gs.step(GameCommand::Move { dx: 1, dy: 0 });
+            gs.step(GameCommand::Move(Direction::East));
         }
         let px = gs.entities[0].x;
         let py = gs.entities[0].y;
@@ -3176,7 +3181,7 @@ mod tests {
         let mut gs = test_game();
         // Play a few turns to change state.
         for _ in 0..3 {
-            gs.step(GameCommand::Move { dx: 1, dy: 0 });
+            gs.step(GameCommand::Move(Direction::East));
         }
         let obs = gs.observe();
         let meta = gs.extract_metadata();
@@ -3192,7 +3197,7 @@ mod tests {
     fn step_sets_dirty_on_action() {
         let mut gs = test_game();
         assert!(!gs.dirty);
-        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        gs.step(GameCommand::Move(Direction::East));
         assert!(gs.dirty);
     }
 
@@ -3201,14 +3206,14 @@ mod tests {
         let mut gs = test_game();
         gs.entities[0].x = 1;
         gs.entities[0].y = 1;
-        gs.step(GameCommand::Move { dx: -1, dy: 0 });
+        gs.step(GameCommand::Move(Direction::West));
         assert!(!gs.dirty);
     }
 
     #[test]
     fn save_to_json_does_not_clear_dirty() {
         let mut gs = test_game();
-        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        gs.step(GameCommand::Move(Direction::East));
         assert!(gs.dirty);
         let _ = gs.save_to_json();
         assert!(gs.dirty);
@@ -3217,7 +3222,7 @@ mod tests {
     #[test]
     fn dirty_not_serialized() {
         let mut gs = test_game();
-        gs.step(GameCommand::Move { dx: 1, dy: 0 });
+        gs.step(GameCommand::Move(Direction::East));
         assert!(gs.dirty);
         let json = gs.save_to_json().unwrap();
         let loaded = GameState::load_from_json(&json).unwrap();

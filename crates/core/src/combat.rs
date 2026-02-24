@@ -18,10 +18,7 @@ pub fn melee_attack(
     def: Stat,
     log: &mut MessageLog,
 ) -> bool {
-    let damage = rules_damage::damage(
-        rules_damage::narrow(atk),
-        rules_damage::narrow(def),
-    ) as Stat;
+    let damage = rules_damage::damage(rules_damage::narrow(atk), rules_damage::narrow(def)) as Stat;
 
     if damage > 0 {
         entities[defender].hp -= damage;

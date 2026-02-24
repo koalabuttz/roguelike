@@ -1,12 +1,11 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use roguelike_core::command::GameCommand;
+use roguelike_core::command::{Direction, GameCommand};
 use roguelike_core::look::LookCommand;
 use roguelike_core::platform::MenuCommand;
 use roguelike_core::settings::{LeftHandLayout, Settings};
-use roguelike_core::types::Coord;
 
-/// Resolve a key to a direction `(dx, dy)` and whether it triggers autorun.
+/// Resolve a key to a `Direction` and whether it triggers autorun.
 ///
 /// Each input method uses its own autorun convention:
 /// - Arrow keys: Shift = autorun
@@ -19,26 +18,28 @@ pub fn resolve_direction(
     vi_keys: bool,
     numpad: bool,
     left_hand: LeftHandLayout,
-) -> Option<(Coord, Coord, bool)> {
+) -> Option<(Direction, bool)> {
+    use Direction::*;
+
     // Left-hand layouts (checked first — overrides vi/numpad for these keys).
     if left_hand != LeftHandLayout::Off {
         let result = match code {
-            KeyCode::Char('q') => Some((-1, -1, false)),
-            KeyCode::Char('Q') => Some((-1, -1, true)),
-            KeyCode::Char('w') => Some((0, -1, false)),
-            KeyCode::Char('W') => Some((0, -1, true)),
-            KeyCode::Char('e') => Some((1, -1, false)),
-            KeyCode::Char('E') => Some((1, -1, true)),
-            KeyCode::Char('a') => Some((-1, 0, false)),
-            KeyCode::Char('A') => Some((-1, 0, true)),
-            KeyCode::Char('d') => Some((1, 0, false)),
-            KeyCode::Char('D') => Some((1, 0, true)),
-            KeyCode::Char('z') => Some((-1, 1, false)),
-            KeyCode::Char('Z') => Some((-1, 1, true)),
-            KeyCode::Char('x') => Some((0, 1, false)),
-            KeyCode::Char('X') => Some((0, 1, true)),
-            KeyCode::Char('c') => Some((1, 1, false)),
-            KeyCode::Char('C') => Some((1, 1, true)),
+            KeyCode::Char('q') => Some((NorthWest, false)),
+            KeyCode::Char('Q') => Some((NorthWest, true)),
+            KeyCode::Char('w') => Some((North, false)),
+            KeyCode::Char('W') => Some((North, true)),
+            KeyCode::Char('e') => Some((NorthEast, false)),
+            KeyCode::Char('E') => Some((NorthEast, true)),
+            KeyCode::Char('a') => Some((West, false)),
+            KeyCode::Char('A') => Some((West, true)),
+            KeyCode::Char('d') => Some((East, false)),
+            KeyCode::Char('D') => Some((East, true)),
+            KeyCode::Char('z') => Some((SouthWest, false)),
+            KeyCode::Char('Z') => Some((SouthWest, true)),
+            KeyCode::Char('x') => Some((South, false)),
+            KeyCode::Char('X') => Some((South, true)),
+            KeyCode::Char('c') => Some((SouthEast, false)),
+            KeyCode::Char('C') => Some((SouthEast, true)),
             _ => None,
         };
         if result.is_some() {
@@ -48,38 +49,38 @@ pub fn resolve_direction(
 
     match code {
         // Arrow keys: shift = autorun (always available)
-        KeyCode::Up => Some((0, -1, shift)),
-        KeyCode::Down => Some((0, 1, shift)),
-        KeyCode::Left => Some((-1, 0, shift)),
-        KeyCode::Right => Some((1, 0, shift)),
+        KeyCode::Up => Some((North, shift)),
+        KeyCode::Down => Some((South, shift)),
+        KeyCode::Left => Some((West, shift)),
+        KeyCode::Right => Some((East, shift)),
 
         // Vi keys: uppercase = autorun
-        KeyCode::Char('k') if vi_keys => Some((0, -1, false)),
-        KeyCode::Char('K') if vi_keys => Some((0, -1, true)),
-        KeyCode::Char('j') if vi_keys => Some((0, 1, false)),
-        KeyCode::Char('J') if vi_keys => Some((0, 1, true)),
-        KeyCode::Char('h') if vi_keys => Some((-1, 0, false)),
-        KeyCode::Char('H') if vi_keys => Some((-1, 0, true)),
-        KeyCode::Char('l') if vi_keys => Some((1, 0, false)),
-        KeyCode::Char('L') if vi_keys => Some((1, 0, true)),
-        KeyCode::Char('y') if vi_keys => Some((-1, -1, false)),
-        KeyCode::Char('Y') if vi_keys => Some((-1, -1, true)),
-        KeyCode::Char('u') if vi_keys => Some((1, -1, false)),
-        KeyCode::Char('U') if vi_keys => Some((1, -1, true)),
-        KeyCode::Char('b') if vi_keys => Some((-1, 1, false)),
-        KeyCode::Char('B') if vi_keys => Some((-1, 1, true)),
-        KeyCode::Char('n') if vi_keys => Some((1, 1, false)),
-        KeyCode::Char('N') if vi_keys => Some((1, 1, true)),
+        KeyCode::Char('k') if vi_keys => Some((North, false)),
+        KeyCode::Char('K') if vi_keys => Some((North, true)),
+        KeyCode::Char('j') if vi_keys => Some((South, false)),
+        KeyCode::Char('J') if vi_keys => Some((South, true)),
+        KeyCode::Char('h') if vi_keys => Some((West, false)),
+        KeyCode::Char('H') if vi_keys => Some((West, true)),
+        KeyCode::Char('l') if vi_keys => Some((East, false)),
+        KeyCode::Char('L') if vi_keys => Some((East, true)),
+        KeyCode::Char('y') if vi_keys => Some((NorthWest, false)),
+        KeyCode::Char('Y') if vi_keys => Some((NorthWest, true)),
+        KeyCode::Char('u') if vi_keys => Some((NorthEast, false)),
+        KeyCode::Char('U') if vi_keys => Some((NorthEast, true)),
+        KeyCode::Char('b') if vi_keys => Some((SouthWest, false)),
+        KeyCode::Char('B') if vi_keys => Some((SouthWest, true)),
+        KeyCode::Char('n') if vi_keys => Some((SouthEast, false)),
+        KeyCode::Char('N') if vi_keys => Some((SouthEast, true)),
 
         // Numpad: shift = autorun
-        KeyCode::Char('8') if numpad => Some((0, -1, shift)),
-        KeyCode::Char('2') if numpad => Some((0, 1, shift)),
-        KeyCode::Char('4') if numpad => Some((-1, 0, shift)),
-        KeyCode::Char('6') if numpad => Some((1, 0, shift)),
-        KeyCode::Char('7') if numpad => Some((-1, -1, shift)),
-        KeyCode::Char('9') if numpad => Some((1, -1, shift)),
-        KeyCode::Char('1') if numpad => Some((-1, 1, shift)),
-        KeyCode::Char('3') if numpad => Some((1, 1, shift)),
+        KeyCode::Char('8') if numpad => Some((North, shift)),
+        KeyCode::Char('2') if numpad => Some((South, shift)),
+        KeyCode::Char('4') if numpad => Some((West, shift)),
+        KeyCode::Char('6') if numpad => Some((East, shift)),
+        KeyCode::Char('7') if numpad => Some((NorthWest, shift)),
+        KeyCode::Char('9') if numpad => Some((NorthEast, shift)),
+        KeyCode::Char('1') if numpad => Some((SouthWest, shift)),
+        KeyCode::Char('3') if numpad => Some((SouthEast, shift)),
 
         _ => None,
     }
@@ -97,7 +98,7 @@ pub fn translate_key(key: KeyEvent, settings: &Settings) -> Option<GameCommand> 
 
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
 
-    if let Some((dx, dy, autorun)) = resolve_direction(
+    if let Some((dir, autorun)) = resolve_direction(
         key.code,
         shift,
         settings.vi_keys,
@@ -105,9 +106,9 @@ pub fn translate_key(key: KeyEvent, settings: &Settings) -> Option<GameCommand> 
         settings.left_hand_layout,
     ) {
         return Some(if autorun {
-            GameCommand::Autorun { dx, dy }
+            GameCommand::Autorun(dir)
         } else {
-            GameCommand::Move { dx, dy }
+            GameCommand::Move(dir)
         });
     }
 
@@ -151,13 +152,14 @@ pub fn translate_look_key(key: KeyEvent, settings: &Settings) -> Option<LookComm
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
 
     // Directional keys move the cursor (autorun flag is ignored).
-    if let Some((dx, dy, _)) = resolve_direction(
+    if let Some((dir, _)) = resolve_direction(
         key.code,
         shift,
         settings.vi_keys,
         settings.numpad,
         settings.left_hand_layout,
     ) {
+        let (dx, dy) = dir.to_offset();
         return Some(LookCommand::Move { dx, dy });
     }
 
@@ -216,19 +218,19 @@ mod tests {
         let s = settings(true, true);
         assert_eq!(
             translate_key(press(KeyCode::Up), &s),
-            Some(GameCommand::Move { dx: 0, dy: -1 })
+            Some(GameCommand::Move(Direction::North))
         );
         assert_eq!(
             translate_key(press(KeyCode::Down), &s),
-            Some(GameCommand::Move { dx: 0, dy: 1 })
+            Some(GameCommand::Move(Direction::South))
         );
         assert_eq!(
             translate_key(press(KeyCode::Left), &s),
-            Some(GameCommand::Move { dx: -1, dy: 0 })
+            Some(GameCommand::Move(Direction::West))
         );
         assert_eq!(
             translate_key(press(KeyCode::Right), &s),
-            Some(GameCommand::Move { dx: 1, dy: 0 })
+            Some(GameCommand::Move(Direction::East))
         );
     }
 
@@ -237,19 +239,19 @@ mod tests {
         let s = settings(true, true);
         assert_eq!(
             translate_key(press(KeyCode::Char('k')), &s),
-            Some(GameCommand::Move { dx: 0, dy: -1 })
+            Some(GameCommand::Move(Direction::North))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('j')), &s),
-            Some(GameCommand::Move { dx: 0, dy: 1 })
+            Some(GameCommand::Move(Direction::South))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('h')), &s),
-            Some(GameCommand::Move { dx: -1, dy: 0 })
+            Some(GameCommand::Move(Direction::West))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('l')), &s),
-            Some(GameCommand::Move { dx: 1, dy: 0 })
+            Some(GameCommand::Move(Direction::East))
         );
     }
 
@@ -258,19 +260,19 @@ mod tests {
         let s = settings(true, true);
         assert_eq!(
             translate_key(press(KeyCode::Char('y')), &s),
-            Some(GameCommand::Move { dx: -1, dy: -1 })
+            Some(GameCommand::Move(Direction::NorthWest))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('u')), &s),
-            Some(GameCommand::Move { dx: 1, dy: -1 })
+            Some(GameCommand::Move(Direction::NorthEast))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('b')), &s),
-            Some(GameCommand::Move { dx: -1, dy: 1 })
+            Some(GameCommand::Move(Direction::SouthWest))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('n')), &s),
-            Some(GameCommand::Move { dx: 1, dy: 1 })
+            Some(GameCommand::Move(Direction::SouthEast))
         );
     }
 
@@ -279,35 +281,35 @@ mod tests {
         let s = settings(true, true);
         assert_eq!(
             translate_key(press(KeyCode::Char('8')), &s),
-            Some(GameCommand::Move { dx: 0, dy: -1 })
+            Some(GameCommand::Move(Direction::North))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('2')), &s),
-            Some(GameCommand::Move { dx: 0, dy: 1 })
+            Some(GameCommand::Move(Direction::South))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('4')), &s),
-            Some(GameCommand::Move { dx: -1, dy: 0 })
+            Some(GameCommand::Move(Direction::West))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('6')), &s),
-            Some(GameCommand::Move { dx: 1, dy: 0 })
+            Some(GameCommand::Move(Direction::East))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('7')), &s),
-            Some(GameCommand::Move { dx: -1, dy: -1 })
+            Some(GameCommand::Move(Direction::NorthWest))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('9')), &s),
-            Some(GameCommand::Move { dx: 1, dy: -1 })
+            Some(GameCommand::Move(Direction::NorthEast))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('1')), &s),
-            Some(GameCommand::Move { dx: -1, dy: 1 })
+            Some(GameCommand::Move(Direction::SouthWest))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('3')), &s),
-            Some(GameCommand::Move { dx: 1, dy: 1 })
+            Some(GameCommand::Move(Direction::SouthEast))
         );
     }
 
@@ -316,35 +318,35 @@ mod tests {
         let s = settings(true, true);
         assert_eq!(
             translate_key(press_with(KeyCode::Char('8'), KeyModifiers::SHIFT), &s),
-            Some(GameCommand::Autorun { dx: 0, dy: -1 })
+            Some(GameCommand::Autorun(Direction::North))
         );
         assert_eq!(
             translate_key(press_with(KeyCode::Char('2'), KeyModifiers::SHIFT), &s),
-            Some(GameCommand::Autorun { dx: 0, dy: 1 })
+            Some(GameCommand::Autorun(Direction::South))
         );
         assert_eq!(
             translate_key(press_with(KeyCode::Char('4'), KeyModifiers::SHIFT), &s),
-            Some(GameCommand::Autorun { dx: -1, dy: 0 })
+            Some(GameCommand::Autorun(Direction::West))
         );
         assert_eq!(
             translate_key(press_with(KeyCode::Char('6'), KeyModifiers::SHIFT), &s),
-            Some(GameCommand::Autorun { dx: 1, dy: 0 })
+            Some(GameCommand::Autorun(Direction::East))
         );
         assert_eq!(
             translate_key(press_with(KeyCode::Char('7'), KeyModifiers::SHIFT), &s),
-            Some(GameCommand::Autorun { dx: -1, dy: -1 })
+            Some(GameCommand::Autorun(Direction::NorthWest))
         );
         assert_eq!(
             translate_key(press_with(KeyCode::Char('9'), KeyModifiers::SHIFT), &s),
-            Some(GameCommand::Autorun { dx: 1, dy: -1 })
+            Some(GameCommand::Autorun(Direction::NorthEast))
         );
         assert_eq!(
             translate_key(press_with(KeyCode::Char('1'), KeyModifiers::SHIFT), &s),
-            Some(GameCommand::Autorun { dx: -1, dy: 1 })
+            Some(GameCommand::Autorun(Direction::SouthWest))
         );
         assert_eq!(
             translate_key(press_with(KeyCode::Char('3'), KeyModifiers::SHIFT), &s),
-            Some(GameCommand::Autorun { dx: 1, dy: 1 })
+            Some(GameCommand::Autorun(Direction::SouthEast))
         );
     }
 
@@ -433,19 +435,19 @@ mod tests {
         let s = settings(true, true);
         assert_eq!(
             translate_key(press(KeyCode::Char('K')), &s),
-            Some(GameCommand::Autorun { dx: 0, dy: -1 })
+            Some(GameCommand::Autorun(Direction::North))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('J')), &s),
-            Some(GameCommand::Autorun { dx: 0, dy: 1 })
+            Some(GameCommand::Autorun(Direction::South))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('H')), &s),
-            Some(GameCommand::Autorun { dx: -1, dy: 0 })
+            Some(GameCommand::Autorun(Direction::West))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('L')), &s),
-            Some(GameCommand::Autorun { dx: 1, dy: 0 })
+            Some(GameCommand::Autorun(Direction::East))
         );
     }
 
@@ -454,19 +456,19 @@ mod tests {
         let s = settings(true, true);
         assert_eq!(
             translate_key(press(KeyCode::Char('Y')), &s),
-            Some(GameCommand::Autorun { dx: -1, dy: -1 })
+            Some(GameCommand::Autorun(Direction::NorthWest))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('U')), &s),
-            Some(GameCommand::Autorun { dx: 1, dy: -1 })
+            Some(GameCommand::Autorun(Direction::NorthEast))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('B')), &s),
-            Some(GameCommand::Autorun { dx: -1, dy: 1 })
+            Some(GameCommand::Autorun(Direction::SouthWest))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('N')), &s),
-            Some(GameCommand::Autorun { dx: 1, dy: 1 })
+            Some(GameCommand::Autorun(Direction::SouthEast))
         );
     }
 
@@ -484,19 +486,19 @@ mod tests {
         let s = settings(true, true);
         assert_eq!(
             translate_key(press_with(KeyCode::Up, KeyModifiers::SHIFT), &s),
-            Some(GameCommand::Autorun { dx: 0, dy: -1 })
+            Some(GameCommand::Autorun(Direction::North))
         );
         assert_eq!(
             translate_key(press_with(KeyCode::Down, KeyModifiers::SHIFT), &s),
-            Some(GameCommand::Autorun { dx: 0, dy: 1 })
+            Some(GameCommand::Autorun(Direction::South))
         );
         assert_eq!(
             translate_key(press_with(KeyCode::Left, KeyModifiers::SHIFT), &s),
-            Some(GameCommand::Autorun { dx: -1, dy: 0 })
+            Some(GameCommand::Autorun(Direction::West))
         );
         assert_eq!(
             translate_key(press_with(KeyCode::Right, KeyModifiers::SHIFT), &s),
-            Some(GameCommand::Autorun { dx: 1, dy: 0 })
+            Some(GameCommand::Autorun(Direction::East))
         );
     }
 
@@ -614,11 +616,11 @@ mod tests {
         let s = settings(false, false);
         assert_eq!(
             translate_key(press(KeyCode::Up), &s),
-            Some(GameCommand::Move { dx: 0, dy: -1 })
+            Some(GameCommand::Move(Direction::North))
         );
         assert_eq!(
             translate_key(press(KeyCode::Down), &s),
-            Some(GameCommand::Move { dx: 0, dy: 1 })
+            Some(GameCommand::Move(Direction::South))
         );
     }
 
@@ -651,35 +653,35 @@ mod tests {
         let s = settings_left_hand(LeftHandLayout::Qweasdzxc);
         assert_eq!(
             translate_key(press(KeyCode::Char('q')), &s),
-            Some(GameCommand::Move { dx: -1, dy: -1 })
+            Some(GameCommand::Move(Direction::NorthWest))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('w')), &s),
-            Some(GameCommand::Move { dx: 0, dy: -1 })
+            Some(GameCommand::Move(Direction::North))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('e')), &s),
-            Some(GameCommand::Move { dx: 1, dy: -1 })
+            Some(GameCommand::Move(Direction::NorthEast))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('a')), &s),
-            Some(GameCommand::Move { dx: -1, dy: 0 })
+            Some(GameCommand::Move(Direction::West))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('d')), &s),
-            Some(GameCommand::Move { dx: 1, dy: 0 })
+            Some(GameCommand::Move(Direction::East))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('z')), &s),
-            Some(GameCommand::Move { dx: -1, dy: 1 })
+            Some(GameCommand::Move(Direction::SouthWest))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('x')), &s),
-            Some(GameCommand::Move { dx: 0, dy: 1 })
+            Some(GameCommand::Move(Direction::South))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('c')), &s),
-            Some(GameCommand::Move { dx: 1, dy: 1 })
+            Some(GameCommand::Move(Direction::SouthEast))
         );
     }
 
@@ -697,19 +699,19 @@ mod tests {
         let s = settings_left_hand(LeftHandLayout::Qweasdzxc);
         assert_eq!(
             translate_key(press(KeyCode::Char('Q')), &s),
-            Some(GameCommand::Autorun { dx: -1, dy: -1 })
+            Some(GameCommand::Autorun(Direction::NorthWest))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('W')), &s),
-            Some(GameCommand::Autorun { dx: 0, dy: -1 })
+            Some(GameCommand::Autorun(Direction::North))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('D')), &s),
-            Some(GameCommand::Autorun { dx: 1, dy: 0 })
+            Some(GameCommand::Autorun(Direction::East))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('X')), &s),
-            Some(GameCommand::Autorun { dx: 0, dy: 1 })
+            Some(GameCommand::Autorun(Direction::South))
         );
     }
 
@@ -719,7 +721,7 @@ mod tests {
         let s = settings_left_hand(LeftHandLayout::Qweasdzxc);
         assert_eq!(
             translate_key(press(KeyCode::Char('q')), &s),
-            Some(GameCommand::Move { dx: -1, dy: -1 })
+            Some(GameCommand::Move(Direction::NorthWest))
         );
         // Esc still quits.
         assert_eq!(
@@ -734,7 +736,7 @@ mod tests {
         let s = settings_left_hand(LeftHandLayout::Qweasdzxc);
         assert_eq!(
             translate_key(press(KeyCode::Char('x')), &s),
-            Some(GameCommand::Move { dx: 0, dy: 1 })
+            Some(GameCommand::Move(Direction::South))
         );
         // Tab still works for look.
         assert_eq!(
@@ -748,19 +750,19 @@ mod tests {
         let s = settings_left_hand(LeftHandLayout::Weasdzxcr);
         assert_eq!(
             translate_key(press(KeyCode::Char('w')), &s),
-            Some(GameCommand::Move { dx: 0, dy: -1 })
+            Some(GameCommand::Move(Direction::North))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('a')), &s),
-            Some(GameCommand::Move { dx: -1, dy: 0 })
+            Some(GameCommand::Move(Direction::West))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('d')), &s),
-            Some(GameCommand::Move { dx: 1, dy: 0 })
+            Some(GameCommand::Move(Direction::East))
         );
         assert_eq!(
             translate_key(press(KeyCode::Char('x')), &s),
-            Some(GameCommand::Move { dx: 0, dy: 1 })
+            Some(GameCommand::Move(Direction::South))
         );
     }
 

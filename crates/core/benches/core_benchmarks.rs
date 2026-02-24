@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
-use roguelike_core::command::GameCommand;
+use roguelike_core::command::{Direction, GameCommand};
 use roguelike_core::exploration_graph;
 use roguelike_core::fov;
 use roguelike_core::game::GameState;
@@ -34,7 +34,7 @@ fn bench_step_move(c: &mut Criterion) {
                 gs
             },
             |mut gs| {
-                gs.step(GameCommand::Move { dx: 1, dy: 0 });
+                gs.step(GameCommand::Move(Direction::East));
             },
             criterion::BatchSize::SmallInput,
         );

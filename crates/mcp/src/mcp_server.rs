@@ -246,8 +246,8 @@ impl RoguelikeMcpServer {
         })?;
 
         // Autorun: loop internally and return final state with metadata.
-        if let GameCommand::Autorun { dx, dy } = cmd {
-            let autorun_result = session.state.autorun(dx, dy);
+        if let GameCommand::Autorun(dir) = cmd {
+            let autorun_result = session.state.autorun(dir);
             self.spectator.write_frame(&session.state);
             let observation = session.state.observe();
             let frontiers = session.state.frontier_tiles();
@@ -650,23 +650,24 @@ impl ServerHandler for RoguelikeMcpServer {
 
 /// Parse a named action string into a GameCommand.
 pub fn parse_action(action: &str) -> Option<GameCommand> {
+    use roguelike_core::command::Direction::*;
     match action {
-        "move_north" => Some(GameCommand::Move { dx: 0, dy: -1 }),
-        "move_south" => Some(GameCommand::Move { dx: 0, dy: 1 }),
-        "move_east" => Some(GameCommand::Move { dx: 1, dy: 0 }),
-        "move_west" => Some(GameCommand::Move { dx: -1, dy: 0 }),
-        "move_northeast" => Some(GameCommand::Move { dx: 1, dy: -1 }),
-        "move_northwest" => Some(GameCommand::Move { dx: -1, dy: -1 }),
-        "move_southeast" => Some(GameCommand::Move { dx: 1, dy: 1 }),
-        "move_southwest" => Some(GameCommand::Move { dx: -1, dy: 1 }),
-        "autorun_north" => Some(GameCommand::Autorun { dx: 0, dy: -1 }),
-        "autorun_south" => Some(GameCommand::Autorun { dx: 0, dy: 1 }),
-        "autorun_east" => Some(GameCommand::Autorun { dx: 1, dy: 0 }),
-        "autorun_west" => Some(GameCommand::Autorun { dx: -1, dy: 0 }),
-        "autorun_northeast" => Some(GameCommand::Autorun { dx: 1, dy: -1 }),
-        "autorun_northwest" => Some(GameCommand::Autorun { dx: -1, dy: -1 }),
-        "autorun_southeast" => Some(GameCommand::Autorun { dx: 1, dy: 1 }),
-        "autorun_southwest" => Some(GameCommand::Autorun { dx: -1, dy: 1 }),
+        "move_north" => Some(GameCommand::Move(North)),
+        "move_south" => Some(GameCommand::Move(South)),
+        "move_east" => Some(GameCommand::Move(East)),
+        "move_west" => Some(GameCommand::Move(West)),
+        "move_northeast" => Some(GameCommand::Move(NorthEast)),
+        "move_northwest" => Some(GameCommand::Move(NorthWest)),
+        "move_southeast" => Some(GameCommand::Move(SouthEast)),
+        "move_southwest" => Some(GameCommand::Move(SouthWest)),
+        "autorun_north" => Some(GameCommand::Autorun(North)),
+        "autorun_south" => Some(GameCommand::Autorun(South)),
+        "autorun_east" => Some(GameCommand::Autorun(East)),
+        "autorun_west" => Some(GameCommand::Autorun(West)),
+        "autorun_northeast" => Some(GameCommand::Autorun(NorthEast)),
+        "autorun_northwest" => Some(GameCommand::Autorun(NorthWest)),
+        "autorun_southeast" => Some(GameCommand::Autorun(SouthEast)),
+        "autorun_southwest" => Some(GameCommand::Autorun(SouthWest)),
         "wait" => Some(GameCommand::Wait),
         "descend" => Some(GameCommand::Descend),
         _ => None,
@@ -936,40 +937,41 @@ fn inject_frontier_exits(value: &mut serde_json::Value, frontier_tiles: &[Pos]) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use roguelike_core::command::Direction;
 
     #[test]
     fn parse_all_valid_actions() {
         assert_eq!(
             parse_action("move_north"),
-            Some(GameCommand::Move { dx: 0, dy: -1 })
+            Some(GameCommand::Move(Direction::North))
         );
         assert_eq!(
             parse_action("move_south"),
-            Some(GameCommand::Move { dx: 0, dy: 1 })
+            Some(GameCommand::Move(Direction::South))
         );
         assert_eq!(
             parse_action("move_east"),
-            Some(GameCommand::Move { dx: 1, dy: 0 })
+            Some(GameCommand::Move(Direction::East))
         );
         assert_eq!(
             parse_action("move_west"),
-            Some(GameCommand::Move { dx: -1, dy: 0 })
+            Some(GameCommand::Move(Direction::West))
         );
         assert_eq!(
             parse_action("move_northeast"),
-            Some(GameCommand::Move { dx: 1, dy: -1 })
+            Some(GameCommand::Move(Direction::NorthEast))
         );
         assert_eq!(
             parse_action("move_northwest"),
-            Some(GameCommand::Move { dx: -1, dy: -1 })
+            Some(GameCommand::Move(Direction::NorthWest))
         );
         assert_eq!(
             parse_action("move_southeast"),
-            Some(GameCommand::Move { dx: 1, dy: 1 })
+            Some(GameCommand::Move(Direction::SouthEast))
         );
         assert_eq!(
             parse_action("move_southwest"),
-            Some(GameCommand::Move { dx: -1, dy: 1 })
+            Some(GameCommand::Move(Direction::SouthWest))
         );
         assert_eq!(parse_action("wait"), Some(GameCommand::Wait));
     }
@@ -1007,35 +1009,35 @@ mod tests {
     fn parse_all_autorun_actions() {
         assert_eq!(
             parse_action("autorun_north"),
-            Some(GameCommand::Autorun { dx: 0, dy: -1 })
+            Some(GameCommand::Autorun(Direction::North))
         );
         assert_eq!(
             parse_action("autorun_south"),
-            Some(GameCommand::Autorun { dx: 0, dy: 1 })
+            Some(GameCommand::Autorun(Direction::South))
         );
         assert_eq!(
             parse_action("autorun_east"),
-            Some(GameCommand::Autorun { dx: 1, dy: 0 })
+            Some(GameCommand::Autorun(Direction::East))
         );
         assert_eq!(
             parse_action("autorun_west"),
-            Some(GameCommand::Autorun { dx: -1, dy: 0 })
+            Some(GameCommand::Autorun(Direction::West))
         );
         assert_eq!(
             parse_action("autorun_northeast"),
-            Some(GameCommand::Autorun { dx: 1, dy: -1 })
+            Some(GameCommand::Autorun(Direction::NorthEast))
         );
         assert_eq!(
             parse_action("autorun_northwest"),
-            Some(GameCommand::Autorun { dx: -1, dy: -1 })
+            Some(GameCommand::Autorun(Direction::NorthWest))
         );
         assert_eq!(
             parse_action("autorun_southeast"),
-            Some(GameCommand::Autorun { dx: 1, dy: 1 })
+            Some(GameCommand::Autorun(Direction::SouthEast))
         );
         assert_eq!(
             parse_action("autorun_southwest"),
-            Some(GameCommand::Autorun { dx: -1, dy: 1 })
+            Some(GameCommand::Autorun(Direction::SouthWest))
         );
     }
 
@@ -1058,7 +1060,7 @@ mod tests {
                 dir
             );
             assert!(
-                matches!(parse_action(dir), Some(GameCommand::Autorun { .. })),
+                matches!(parse_action(dir), Some(GameCommand::Autorun(..))),
                 "Expected Autorun command for '{}'",
                 dir
             );

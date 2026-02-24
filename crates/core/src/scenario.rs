@@ -250,10 +250,7 @@ fn fight_command(gs: &GameState) -> GameCommand {
         .enumerate()
         .filter(|(i, e)| *i != 0 && e.alive && (e.x - px).abs() <= 1 && (e.y - py).abs() <= 1)
         .min_by_key(|(_, e)| e.hp)
-        .map(|(_, e)| GameCommand::Move {
-            dx: (e.x - px).signum(),
-            dy: (e.y - py).signum(),
-        })
+        .map(|(_, e)| GameCommand::move_or_wait(e.x - px, e.y - py))
         .unwrap_or(GameCommand::Wait)
 }
 

@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix equipment stats not applied during monster attacks (#12)
 
 ### Changed
+- Extract rules/monster_table.rs — MonsterKind enum and stat lookups (#24)
 - Extract rules/damage.rs — pure damage formula (#22)
 - Extract rules/items.rs — pure item definitions and lookups (#23)
 - Extract rules/balance.rs — shared balance constants (#21)

@@ -390,7 +390,7 @@ the `std` feature. The C64 uses `default-features = false` and only accesses
 | **Monster table** | All | **Rules** | `core/rules/monster_table.rs` | `MonsterKind` enum, stat lookup by kind |
 | **GameEvent messages** | All | **Rules** | `core/rules/message.rs` | `GameEvent` enum — structured, `Copy`, `no_std` |
 | **Seed codes** | All | **Rules** | `core/rules/seed_code.rs` | `no_std` `encode_to_buf()`/`decode_from_bytes()` + `std` String wrappers; tier detected by numeric value |
-| **Direction** | All | **Rules** | `core/command.rs` | `Direction` enum in `GameCommand::Move(Direction)` — `no_std` |
+| **Direction** | All | **Rules** | `core/rules/direction.rs` | `Direction` enum in `GameCommand::Move(Direction)` — `no_std` |
 | **GameStep trait** | std | **Cross-tier** | `core/game_step.rs` | `#[cfg(feature = "std")]` — uniform interface for FrameSink/MCP/TUI |
 | **Entity system** | Per-tier | Per-tier | `core/tier_*/entity.rs` | micro: 16-entry fixed array; compact: stubs; standard: `Vec<Entity>` |
 | **AI** | Per-tier | Per-tier | `core/tier_*/ai.rs`, `core/ai.rs` | Chase, wander, mood logic — same algorithms, tier-appropriate types |

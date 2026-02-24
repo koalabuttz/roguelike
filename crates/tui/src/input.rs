@@ -159,8 +159,7 @@ pub fn translate_look_key(key: KeyEvent, settings: &Settings) -> Option<LookComm
         settings.numpad,
         settings.left_hand_layout,
     ) {
-        let (dx, dy) = dir.to_offset();
-        return Some(LookCommand::Move { dx, dy });
+        return Some(LookCommand::Move(dir));
     }
 
     match key.code {
@@ -783,19 +782,19 @@ mod tests {
         let s = settings(true, true);
         assert_eq!(
             translate_look_key(press(KeyCode::Up), &s),
-            Some(LookCommand::Move { dx: 0, dy: -1 })
+            Some(LookCommand::Move(Direction::North))
         );
         assert_eq!(
             translate_look_key(press(KeyCode::Right), &s),
-            Some(LookCommand::Move { dx: 1, dy: 0 })
+            Some(LookCommand::Move(Direction::East))
         );
         assert_eq!(
             translate_look_key(press(KeyCode::Char('h')), &s),
-            Some(LookCommand::Move { dx: -1, dy: 0 })
+            Some(LookCommand::Move(Direction::West))
         );
         assert_eq!(
             translate_look_key(press(KeyCode::Char('7')), &s),
-            Some(LookCommand::Move { dx: -1, dy: -1 })
+            Some(LookCommand::Move(Direction::NorthWest))
         );
     }
 
@@ -804,11 +803,11 @@ mod tests {
         let s = settings(true, true);
         assert_eq!(
             translate_look_key(press_with(KeyCode::Up, KeyModifiers::SHIFT), &s),
-            Some(LookCommand::Move { dx: 0, dy: -1 })
+            Some(LookCommand::Move(Direction::North))
         );
         assert_eq!(
             translate_look_key(press(KeyCode::Char('H')), &s),
-            Some(LookCommand::Move { dx: -1, dy: 0 })
+            Some(LookCommand::Move(Direction::West))
         );
     }
 
@@ -845,7 +844,7 @@ mod tests {
         // 'x' should move south in look mode with left-hand, not close.
         assert_eq!(
             translate_look_key(press(KeyCode::Char('x')), &s),
-            Some(LookCommand::Move { dx: 0, dy: 1 })
+            Some(LookCommand::Move(Direction::South))
         );
         // Tab closes look mode.
         assert_eq!(

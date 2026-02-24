@@ -785,8 +785,7 @@ mod inner {
                             | Button::DPadLeft
                             | Button::DPadRight => {
                                 if let Some(dir) = dpad_direction(&self.dpad_held) {
-                                    let (dx, dy) = dir.to_offset();
-                                    return Some(LookCommand::Move { dx, dy });
+                                    return Some(LookCommand::Move(dir));
                                 }
                             }
                             Button::East | Button::Start => {
@@ -796,8 +795,7 @@ mod inner {
                         },
                         EventType::AxisChanged(Axis::LeftStickX | Axis::LeftStickY, _, _) => {
                             if let Some(dir) = check_gilrs_stick(gilrs, &mut self.stick_engaged) {
-                                let (dx, dy) = dir.to_offset();
-                                return Some(LookCommand::Move { dx, dy });
+                                return Some(LookCommand::Move(dir));
                             }
                         }
                         _ => {}
@@ -822,13 +820,13 @@ mod inner {
                     }
 
                     if hid_dpad_newly_pressed(&report, &prev)
-                        && let Some((dx, dy)) = dpad_direction(&self.dpad_held)
+                        && let Some(dir) = dpad_direction(&self.dpad_held)
                     {
-                        return Some(LookCommand::Move { dx, dy });
+                        return Some(LookCommand::Move(dir));
                     }
 
-                    if let Some((dx, dy)) = check_hid_stick(&report, &mut self.stick_engaged) {
-                        return Some(LookCommand::Move { dx, dy });
+                    if let Some(dir) = check_hid_stick(&report, &mut self.stick_engaged) {
+                        return Some(LookCommand::Move(dir));
                     }
 
                     None

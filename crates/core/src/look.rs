@@ -1,3 +1,4 @@
+use crate::command::Direction;
 use crate::game::{GameState, LookOptions, TileInfo};
 use crate::platform::Renderer;
 use crate::types::{Coord, GameColor};
@@ -14,8 +15,8 @@ pub enum LookAction {
 /// A command within look mode (separate from GameCommand — no autorun/attack).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LookCommand {
-    /// Move the cursor by (dx, dy).
-    Move { dx: Coord, dy: Coord },
+    /// Move the cursor in a direction.
+    Move(Direction),
     /// Close look mode.
     Close,
 }
@@ -39,7 +40,8 @@ impl LookCursor {
     /// Handle a look-mode command. Returns whether to continue or close.
     pub fn handle_input(&mut self, cmd: LookCommand, state: &GameState) -> LookAction {
         match cmd {
-            LookCommand::Move { dx, dy } => {
+            LookCommand::Move(dir) => {
+                let (dx, dy) = dir.to_offset();
                 let nx = self.cursor_x + dx;
                 let ny = self.cursor_y + dy;
                 // Clamp to map bounds.
@@ -198,7 +200,7 @@ mod tests {
     fn cursor_moves() {
         let gs = test_game();
         let mut cursor = LookCursor::new(5, 5);
-        let action = cursor.handle_input(LookCommand::Move { dx: 1, dy: 0 }, &gs);
+        let action = cursor.handle_input(LookCommand::Move(Direction::East), &gs);
         assert_eq!(action, LookAction::Continue);
         assert_eq!(cursor.cursor_x, 6);
         assert_eq!(cursor.cursor_y, 5);
@@ -208,7 +210,7 @@ mod tests {
     fn cursor_clamps_to_map_bounds() {
         let gs = test_game();
         let mut cursor = LookCursor::new(0, 0);
-        let action = cursor.handle_input(LookCommand::Move { dx: -1, dy: 0 }, &gs);
+        let action = cursor.handle_input(LookCommand::Move(Direction::West), &gs);
         assert_eq!(action, LookAction::Continue);
         // Should not move out of bounds.
         assert_eq!(cursor.cursor_x, 0);

@@ -57,8 +57,23 @@ impl Direction {
 
     /// Convert a signum'd `(dx, dy)` offset back to a Direction.
     /// Returns `None` for `(0, 0)` or non-unit offsets.
-    pub fn from_offset(dx: i32, dy: i32) -> Option<Direction> {
-        match (dx.signum(), dy.signum()) {
+    pub const fn from_offset(dx: i32, dy: i32) -> Option<Direction> {
+        // Manual sign extraction instead of signum() for const compatibility.
+        let sx = if dx > 0 {
+            1
+        } else if dx < 0 {
+            -1
+        } else {
+            0
+        };
+        let sy = if dy > 0 {
+            1
+        } else if dy < 0 {
+            -1
+        } else {
+            0
+        };
+        match (sx, sy) {
             (0, -1) => Some(Direction::North),
             (0, 1) => Some(Direction::South),
             (1, 0) => Some(Direction::East),

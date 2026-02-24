@@ -41,6 +41,20 @@ impl Direction {
         }
     }
 
+    /// Return the opposite direction (180° reversal).
+    pub const fn opposite(self) -> Direction {
+        match self {
+            Direction::North => Direction::South,
+            Direction::South => Direction::North,
+            Direction::East => Direction::West,
+            Direction::West => Direction::East,
+            Direction::NorthEast => Direction::SouthWest,
+            Direction::NorthWest => Direction::SouthEast,
+            Direction::SouthEast => Direction::NorthWest,
+            Direction::SouthWest => Direction::NorthEast,
+        }
+    }
+
     /// Convert a signum'd `(dx, dy)` offset back to a Direction.
     /// Returns `None` for `(0, 0)` or non-unit offsets.
     pub fn from_offset(dx: i32, dy: i32) -> Option<Direction> {
@@ -132,6 +146,22 @@ mod tests {
     #[test]
     fn move_or_wait_returns_wait_for_zero() {
         assert_eq!(GameCommand::move_or_wait(0, 0), GameCommand::Wait);
+    }
+
+    #[test]
+    fn opposite_is_involution() {
+        for &dir in &ALL_DIRECTIONS {
+            assert_eq!(dir.opposite().opposite(), dir);
+        }
+    }
+
+    #[test]
+    fn opposite_reverses_offset() {
+        for &dir in &ALL_DIRECTIONS {
+            let (dx, dy) = dir.to_offset();
+            let (ox, oy) = dir.opposite().to_offset();
+            assert_eq!((dx + ox, dy + oy), (0, 0));
+        }
     }
 
     #[test]

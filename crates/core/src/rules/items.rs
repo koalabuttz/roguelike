@@ -131,6 +131,8 @@ pub const SPAWN_TABLE: [(ItemKind, u8); KIND_COUNT] = [
 
 // Compile-time guard: each spawn table entry must be exactly 2 bytes.
 // If ItemKind grows beyond u8 or padding is inserted, this fails.
+// Compile-time guarantee: enum fits in a single byte on all tiers.
+const _: () = assert!(size_of::<ItemKind>() == 1);
 const _: () = assert!(size_of::<(ItemKind, u8)>() == 2);
 
 // ---------------------------------------------------------------------------

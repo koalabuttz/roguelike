@@ -64,22 +64,7 @@ impl Direction {
     /// Convert a signum'd `(dx, dy)` offset back to a Direction.
     /// Returns `None` for `(0, 0)` or non-unit offsets.
     pub const fn from_offset(dx: i32, dy: i32) -> Option<Direction> {
-        // Manual sign extraction instead of signum() for const compatibility.
-        let sx = if dx > 0 {
-            1
-        } else if dx < 0 {
-            -1
-        } else {
-            0
-        };
-        let sy = if dy > 0 {
-            1
-        } else if dy < 0 {
-            -1
-        } else {
-            0
-        };
-        match (sx, sy) {
+        match (dx.signum(), dy.signum()) {
             (0, -1) => Some(Direction::North),
             (0, 1) => Some(Direction::South),
             (1, 0) => Some(Direction::East),
@@ -92,6 +77,9 @@ impl Direction {
         }
     }
 }
+
+// Compile-time guarantee: enum fits in a single byte on all tiers.
+const _: () = assert!(size_of::<Direction>() == 1);
 
 #[cfg(test)]
 mod tests {

@@ -186,6 +186,10 @@ const fn str_eq(a: &str, b: &str) -> bool {
     true
 }
 
+// Compile-time guarantee: enums fit in a single byte on all tiers.
+const _: () = assert!(size_of::<MonsterKind>() == 1);
+const _: () = assert!(size_of::<AiBehavior>() == 1);
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -102,6 +102,9 @@ pub const MICRO_MAP_WIDTH: u8 = 64;
 pub const MICRO_MAP_HEIGHT: u8 = 48;
 pub const MICRO_MAX_ROOMS: u8 = 12;
 pub const MICRO_MAX_ENTITIES: u8 = 16;
+pub const MICRO_ROOM_SIZE_MIN: u8 = 3;
+pub const MICRO_ROOM_SIZE_MAX: u8 = 7;
+pub const MICRO_FOV_RADIUS: u8 = 6;
 
 // Tier compact (GBA)
 // Note: these exceed u8 range, so use u16

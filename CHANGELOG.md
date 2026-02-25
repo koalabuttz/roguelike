@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
-- Move GameColor to rules/ with repr(u8) C64 color indices (#32)
+- Create tier_micro module — port C64 POC into core (#28)
 - Move GameColor to rules/ with repr(u8) C64 color indices (#32)
 - Add stairs and multi-level dungeons (#17)
 - Replace XP/leveling with item-based progression in docs (#19)
@@ -15,9 +15,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add item system to roguelike (#2)
 
 ### Fixed
+- Wandering spawn table lost on save/load (#18)
 - Fix equipment stats not applied during monster attacks (#12)
 
 ### Changed
+- Create tier_micro module — port C64 POC into core (#28)
+- Create tier_compact stubs (#29)
+- Extract rules/seed_code.rs — no_std seed encode/decode (#27)
 - Extract rules/message.rs — GameEvent structured message enum (#25)
 - Add Direction enum to GameCommand (#26)
 - Extract rules/monster_table.rs — MonsterKind enum and stat lookups (#24)

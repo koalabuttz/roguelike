@@ -1,5 +1,6 @@
 pub mod rules;
 pub mod tier_compact;
+pub mod tier_micro;
 
 pub mod ai;
 #[cfg(feature = "dev-tools")]

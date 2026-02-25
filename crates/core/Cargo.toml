@@ -6,13 +6,13 @@ license.workspace = true
 
 [features]
 default = ["dev-tools", "data-files", "serde", "std"]
-std = []
-dev-tools = []
-data-files = ["toml"]
+std = ["dep:rand", "serde"]
 serde = ["dep:serde", "dep:serde_json"]
+data-files = ["dep:toml", "std"]
+dev-tools = ["std"]
 
 [dependencies]
-rand = { workspace = true }
+rand = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
@@ -27,6 +27,19 @@ name = "headless"
 path = "src/bin/headless.rs"
 required-features = ["dev-tools"]
 
+[[test]]
+name = "golden_replays"
+required-features = ["dev-tools"]
+
+[[test]]
+name = "scenarios"
+required-features = ["dev-tools"]
+
+[[test]]
+name = "invariants"
+required-features = ["std"]
+
 [[bench]]
 name = "core_benchmarks"
 harness = false
+required-features = ["std"]

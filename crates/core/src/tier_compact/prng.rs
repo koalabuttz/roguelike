@@ -109,8 +109,14 @@ mod tests {
     fn different_seeds_diverge() {
         let mut a = LfsrRng32::new(1);
         let mut b = LfsrRng32::new(2);
-        let vals_a: Vec<u32> = (0..10).map(|_| a.next_u32()).collect();
-        let vals_b: Vec<u32> = (0..10).map(|_| b.next_u32()).collect();
+        let mut vals_a = [0u32; 10];
+        let mut vals_b = [0u32; 10];
+        for v in &mut vals_a {
+            *v = a.next_u32();
+        }
+        for v in &mut vals_b {
+            *v = b.next_u32();
+        }
         assert_ne!(vals_a, vals_b);
     }
 

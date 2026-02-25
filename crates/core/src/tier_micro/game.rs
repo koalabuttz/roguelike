@@ -12,16 +12,9 @@ use super::msglog::MicroMessageLog;
 use super::prng::LfsrRng16;
 use super::spawn;
 use super::types::*;
+use crate::command::GameCommand;
 use crate::rules::balance;
-use crate::rules::direction::Direction;
 use crate::rules::message::GameEvent;
-
-/// Commands the micro tier understands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MicroCommand {
-    Move(Direction),
-    Wait,
-}
 
 /// Result of a single step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +32,9 @@ pub struct MicroGameState {
     pub turn_count: u16,
     pub kills: u8,
     pub game_over: bool,
+    /// Counts down each turn; triggers regen at zero and resets.
+    /// Avoids modulo on 6502 where division is expensive.
+    regen_counter: u8,
 }
 
 impl MicroGameState {
@@ -67,11 +63,15 @@ impl MicroGameState {
             turn_count: 0,
             kills: 0,
             game_over: false,
+            regen_counter: balance::REGEN_INTERVAL,
         }
     }
 
     /// Execute one player command + monster turns + regen.
-    pub fn step(&mut self, cmd: MicroCommand) -> MicroStepResult {
+    ///
+    /// Accepts the full `GameCommand` enum. Variants the micro tier doesn't
+    /// support (Autorun, AutoExplore, Look, etc.) are silently ignored.
+    pub fn step(&mut self, cmd: GameCommand) -> MicroStepResult {
         if self.game_over {
             return MicroStepResult {
                 action_taken: false,
@@ -80,11 +80,13 @@ impl MicroGameState {
         }
 
         let action_taken = match cmd {
-            MicroCommand::Wait => true,
-            MicroCommand::Move(dir) => {
+            GameCommand::Wait => true,
+            GameCommand::Move(dir) => {
                 let (dx, dy) = dir.to_offset();
                 self.player_move_or_attack(dx as i8, dy as i8)
             }
+            // Unsupported variants — no action taken
+            _ => false,
         };
 
         if action_taken {
@@ -140,15 +142,15 @@ impl MicroGameState {
         if self.game_over {
             return;
         }
-        let pi = PLAYER_IDX as usize;
-        let hp = self.entities.hp[pi];
-        let max_hp = self.entities.max_hp[pi];
-        if hp < max_hp
-            && self
-                .turn_count
-                .is_multiple_of(balance::REGEN_INTERVAL as u16)
-        {
-            self.entities.hp[pi] = hp + 1;
+        self.regen_counter -= 1;
+        if self.regen_counter == 0 {
+            self.regen_counter = balance::REGEN_INTERVAL;
+            let pi = PLAYER_IDX as usize;
+            let hp = self.entities.hp[pi];
+            let max_hp = self.entities.max_hp[pi];
+            if hp < max_hp {
+                self.entities.hp[pi] = hp + 1;
+            }
         }
     }
 }
@@ -156,6 +158,7 @@ impl MicroGameState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::Direction;
 
     #[test]
     fn new_game_is_playable() {
@@ -189,7 +192,7 @@ mod tests {
             let nx = (px as i8 + dx as i8) as u8;
             let ny = (py as i8 + dy as i8) as u8;
             if g.map.is_walkable(nx, ny) && g.entities.monster_at(nx, ny) == NO_ENTITY {
-                let result = g.step(MicroCommand::Move(dir));
+                let result = g.step(GameCommand::Move(dir));
                 assert!(result.action_taken);
                 assert_ne!((g.entities.x[0], g.entities.y[0]), (px, py));
                 moved = true;
@@ -205,7 +208,7 @@ mod tests {
     #[test]
     fn wait_passes_turn() {
         let mut g = MicroGameState::new(42);
-        let result = g.step(MicroCommand::Wait);
+        let result = g.step(GameCommand::Wait);
         assert!(result.action_taken);
         assert_eq!(g.turn_count, 1);
     }
@@ -214,7 +217,7 @@ mod tests {
     fn game_over_blocks_step() {
         let mut g = MicroGameState::new(42);
         g.game_over = true;
-        let result = g.step(MicroCommand::Wait);
+        let result = g.step(GameCommand::Wait);
         assert!(!result.action_taken);
         assert!(result.game_over);
     }
@@ -230,8 +233,8 @@ mod tests {
 
         // Run same commands
         for _ in 0..10 {
-            a.step(MicroCommand::Wait);
-            b.step(MicroCommand::Wait);
+            a.step(GameCommand::Wait);
+            b.step(GameCommand::Wait);
         }
 
         assert_eq!(a.turn_count, b.turn_count);
@@ -253,7 +256,7 @@ mod tests {
             if g.game_over {
                 break;
             }
-            g.step(MicroCommand::Wait);
+            g.step(GameCommand::Wait);
         }
 
         if !g.game_over {

@@ -5,4 +5,4 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-roguelike-core = { path = "../core", default-features = false }
+roguelike-core = { path = "../core", default-features = false, features = ["std"] }

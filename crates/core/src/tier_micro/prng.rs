@@ -131,4 +131,27 @@ mod tests {
         let mut rng = LfsrRng16::new(1);
         assert_eq!(rng.range_u8(7, 7), 7);
     }
+
+    #[test]
+    fn full_cycle_is_maximal_length() {
+        // A maximal-length 16-bit LFSR visits all 2^16-1 = 65535 non-zero
+        // states before returning to the initial state.
+        let mut rng = LfsrRng16::new(1);
+        let initial = rng.state();
+        for i in 0u32..65_535 {
+            rng.next_u8();
+            if i < 65_534 {
+                assert_ne!(
+                    rng.state(),
+                    initial,
+                    "returned to initial state after only {i} steps"
+                );
+            }
+        }
+        assert_eq!(
+            rng.state(),
+            initial,
+            "should return to initial state after 65535 steps"
+        );
+    }
 }

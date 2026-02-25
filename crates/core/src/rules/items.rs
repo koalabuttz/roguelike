@@ -12,7 +12,7 @@
 //! engine, which uses signed `Stat` to support debuffs in combat math.
 
 use super::balance;
-use crate::types::GameColor;
+use super::color::GameColor;
 
 /// The type of item. Each variant is a `u8` discriminant — no 16-bit bloat
 /// on constrained platforms (C64, GBA).

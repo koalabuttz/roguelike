@@ -5,6 +5,7 @@
 //! platforms — from C64 to PC.
 
 pub mod balance;
+pub mod color;
 pub mod damage;
 pub mod direction;
 pub mod items;

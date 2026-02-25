@@ -10,7 +10,7 @@
 //! for combat math; callers widen `u8 → Stat` via lossless `as` casts.
 
 use super::balance;
-use crate::types::GameColor;
+use super::color::GameColor;
 
 /// Monster AI behavior. Shared by all tiers — the C64 maps discriminants to
 /// `u8` constants, the standard tier uses enum variants directly.

@@ -1,13 +1,13 @@
 use crate::game::GameObservation;
-use crate::game_step::GameStep;
 
 /// Trait for delivering rendered frames to external viewers.
 ///
 /// Implementations decide *how* to deliver (file write, network, no-op, etc.).
 /// The game loop calls `write_frame` after each turn without caring about the
-/// transport. Accepts `&dyn GameStep` so any capability tier can be spectated.
+/// transport. Accepts a pre-computed `GameObservation` so callers can reuse
+/// the same observation for both the response and the frame sink.
 pub trait FrameSink {
-    fn write_frame(&self, state: &dyn GameStep);
+    fn write_frame(&self, obs: &GameObservation);
 }
 
 /// A no-op sink that discards every frame.
@@ -16,7 +16,7 @@ pub trait FrameSink {
 pub struct NullFrameSink;
 
 impl FrameSink for NullFrameSink {
-    fn write_frame(&self, _state: &dyn GameStep) {}
+    fn write_frame(&self, _obs: &GameObservation) {}
 }
 
 /// Render a plain-text ASCII frame from a game observation.
@@ -111,6 +111,7 @@ mod tests {
     fn null_frame_sink_is_noop() {
         let sink = NullFrameSink;
         let gs = test_game();
-        sink.write_frame(&gs); // should not panic
+        let obs = gs.observe();
+        sink.write_frame(&obs); // should not panic
     }
 }

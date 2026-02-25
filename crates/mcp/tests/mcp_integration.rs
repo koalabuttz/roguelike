@@ -9,7 +9,8 @@ use roguelike_mcp::mcp_server::{
     ActParams, LookAtParams, NewGameParams, PathfindParams, RoguelikeMcpServer,
 };
 
-const SEED: u64 = 42;
+/// Standard-tier seed (> 0xFFFF). Seeds <= 0xFFFF create micro-tier games.
+const SEED: u64 = 0x1_0042;
 
 /// Start a game with a fixed seed and default 80x40 map.
 async fn start_game(server: &RoguelikeMcpServer) -> serde_json::Value {
@@ -210,7 +211,7 @@ async fn act_auto_fight_returns_fight_metadata() {
     // Use a seed loop to find one where a monster is adjacent after some moves.
     // We try different seeds because monster placement varies.
     let mut found_fight = false;
-    for seed in 1..100u64 {
+    for seed in SEED..(SEED + 100) {
         start_game_with_seed(&server, seed).await;
 
         // Auto-explore to get near monsters, then try auto_fight.
@@ -447,7 +448,7 @@ async fn act_after_game_over_returns_error() {
 
     // Find a seed where the player dies quickly by actively exploring into monsters.
     let mut found_game_over = false;
-    for seed in 1..50u64 {
+    for seed in SEED..(SEED + 50) {
         start_game_with_seed(&server, seed).await;
 
         // Actively explore to find and fight monsters.
@@ -495,13 +496,13 @@ async fn act_after_game_over_returns_error() {
 async fn new_game_resets_session() {
     let server = RoguelikeMcpServer::new();
 
-    // Start game with seed 1.
-    let json1 = start_game_with_seed(&server, 1).await;
+    // Start game with one seed.
+    let json1 = start_game_with_seed(&server, SEED).await;
     // Take some actions.
     let _ = do_act(&server, "wait").await;
 
     // Start a completely new game with different seed.
-    let json2 = start_game_with_seed(&server, 99999).await;
+    let json2 = start_game_with_seed(&server, SEED + 1000).await;
 
     // The seeds should differ.
     assert_ne!(json1["seed"], json2["seed"]);
@@ -513,17 +514,17 @@ async fn new_game_resets_session() {
 async fn save_persists_across_new_game() {
     let server = RoguelikeMcpServer::new();
 
-    // Start and save game 1.
-    start_game_with_seed(&server, 1).await;
+    // Start and save a game.
+    start_game_with_seed(&server, SEED).await;
     let obs1 = extract_json(&server.observe().await.unwrap());
     server.save_game().await.expect("save should succeed");
 
     // Start a completely different game.
-    start_game_with_seed(&server, 99999).await;
+    start_game_with_seed(&server, SEED + 1000).await;
 
-    // Load should restore game 1.
+    // Load should restore the original game.
     let loaded = extract_json(&server.load_game().await.unwrap());
-    assert_eq!(loaded["seed"].as_u64().unwrap(), 1);
+    assert_eq!(loaded["seed"].as_u64().unwrap(), SEED);
     assert_eq!(loaded["x"], obs1["x"]);
     assert_eq!(loaded["y"], obs1["y"]);
 }

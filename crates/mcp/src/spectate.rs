@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use roguelike_core::game_step::GameStep;
+use roguelike_core::game::GameObservation;
 use roguelike_core::spectate::{FrameSink, render_frame};
 
 /// Writes plain-text ASCII frames to a file for external viewers.
@@ -34,10 +34,9 @@ impl FrameSink for FileFrameSink {
     ///
     /// Does nothing if spectating is disabled. Errors are silently ignored
     /// (spectating is best-effort and must never break the MCP server).
-    fn write_frame(&self, state: &dyn GameStep) {
+    fn write_frame(&self, obs: &GameObservation) {
         if let Some(ref path) = self.path {
-            let obs = state.observe();
-            let frame = render_frame(&obs);
+            let frame = render_frame(obs);
             let tmp_path = path.with_extension("tmp");
             if std::fs::write(&tmp_path, &frame).is_ok() {
                 let _ = std::fs::rename(&tmp_path, path);
@@ -63,17 +62,19 @@ mod tests {
     fn spectator_writer_disabled() {
         let writer = FileFrameSink { path: None };
         let gs = test_game();
-        writer.write_frame(&gs); // should not panic
+        let obs = gs.observe();
+        writer.write_frame(&obs); // should not panic
     }
 
     #[test]
     fn spectator_writer_writes_file() {
         let gs = test_game();
+        let obs = gs.observe();
         let path = std::env::temp_dir().join("roguelike-spectate-test.txt");
         let writer = FileFrameSink {
             path: Some(path.clone()),
         };
-        writer.write_frame(&gs);
+        writer.write_frame(&obs);
         let contents = std::fs::read_to_string(&path).unwrap();
         assert!(contents.contains('@'));
         assert!(contents.contains("HP 30/30"));

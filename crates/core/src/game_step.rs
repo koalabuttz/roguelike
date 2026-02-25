@@ -5,6 +5,8 @@
 //! implements directly; lower tiers use adapter wrappers that widen
 //! coordinates and translate result types.
 
+use std::any::Any;
+
 use crate::command::GameCommand;
 use crate::game::{EntityInfo, GameObservation, GameState, StepResult, TileInfo};
 use crate::message_log::format_event;
@@ -20,7 +22,7 @@ use crate::tier_micro::types::{MAP_HEIGHT, MAP_WIDTH, PLAYER_IDX};
 /// All coordinates use `i32` (widened from `u8`/`i16` for lower tiers).
 /// Return types are the standard-tier structs from `game.rs`, which
 /// adapters populate from their tier's internal representation.
-pub trait GameStep {
+pub trait GameStep: Send {
     /// Execute one player command + monster turns.
     fn step(&mut self, cmd: GameCommand) -> StepResult;
 
@@ -41,6 +43,12 @@ pub trait GameStep {
 
     /// Current turn count.
     fn turn_count(&self) -> u32;
+
+    /// Downcast to `&dyn Any` for tier-specific operations.
+    fn as_any(&self) -> &dyn Any;
+
+    /// Downcast to `&mut dyn Any` for tier-specific operations.
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 // ── Standard tier ────────────────────────────────────────────────────
@@ -74,6 +82,14 @@ impl GameStep for GameState {
 
     fn turn_count(&self) -> u32 {
         self.turn_count as u32
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
@@ -269,6 +285,14 @@ impl GameStep for MicroGameStateAdapter {
 
     fn turn_count(&self) -> u32 {
         self.game.turn_count as u32
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 

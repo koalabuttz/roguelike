@@ -330,7 +330,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                 input,
                             )?;
                             dev.after_step(state, cmd);
-                            frame_sink.write_frame(state);
+                            frame_sink.write_frame(&state.observe());
                             if state.dirty
                                 && let Ok(json) = state.save_to_json()
                             {
@@ -351,7 +351,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                     input,
                                 )?;
                                 dev.after_step(state, cmd);
-                                frame_sink.write_frame(state);
+                                frame_sink.write_frame(&state.observe());
                                 if state.dirty
                                     && let Ok(json) = state.save_to_json()
                                 {
@@ -366,7 +366,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                         _ => {
                             state.step(cmd);
                             dev.after_step(state, cmd);
-                            frame_sink.write_frame(state);
+                            frame_sink.write_frame(&state.observe());
                             if state.dirty
                                 && (state.turn_count as u32)
                                     .is_multiple_of(settings.autosave_frequency)

@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix equipment stats not applied during monster attacks (#12)
 
 ### Changed
+- Define GameStep cross-tier trait (#31)
+- Gate standard-tier code behind std feature (#30)
+- Remove MicroCommand, accept GameCommand in tier_micro (#34)
 - Create tier_micro module — port C64 POC into core (#28)
 - Create tier_compact stubs (#29)
 - Extract rules/seed_code.rs — no_std seed encode/decode (#27)

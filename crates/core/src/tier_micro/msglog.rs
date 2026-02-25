@@ -37,7 +37,7 @@ impl MicroMessageLog {
     pub fn add(&mut self, event: GameEvent) {
         self.events[self.head as usize] = Some(event);
         self.head = (self.head + 1) % MSG_COUNT as u8;
-        self.total = self.total.saturating_add(1);
+        self.total = self.total.wrapping_add(1);
     }
 
     /// Get a recent event. `n=0` is the newest, `n=1` is second newest, etc.

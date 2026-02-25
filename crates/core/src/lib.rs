@@ -21,6 +21,8 @@ pub mod fov;
 #[cfg(feature = "std")]
 pub mod game;
 #[cfg(feature = "std")]
+pub mod game_step;
+#[cfg(feature = "std")]
 pub mod item;
 #[cfg(feature = "std")]
 pub mod look;

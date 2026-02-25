@@ -1,12 +1,13 @@
-use crate::game::GameState;
+use crate::game::GameObservation;
+use crate::game_step::GameStep;
 
 /// Trait for delivering rendered frames to external viewers.
 ///
 /// Implementations decide *how* to deliver (file write, network, no-op, etc.).
 /// The game loop calls `write_frame` after each turn without caring about the
-/// transport.
+/// transport. Accepts `&dyn GameStep` so any capability tier can be spectated.
 pub trait FrameSink {
-    fn write_frame(&self, state: &GameState);
+    fn write_frame(&self, state: &dyn GameStep);
 }
 
 /// A no-op sink that discards every frame.
@@ -15,52 +16,45 @@ pub trait FrameSink {
 pub struct NullFrameSink;
 
 impl FrameSink for NullFrameSink {
-    fn write_frame(&self, _state: &GameState) {}
+    fn write_frame(&self, _state: &dyn GameStep) {}
 }
 
-/// Render a plain-text ASCII frame from the game state.
+/// Render a plain-text ASCII frame from a game observation.
 ///
-/// Shows the full explored map (with entities in FOV, frontiers as `~`),
-/// a status line, and the last 4 log messages.
-pub fn render_frame(state: &GameState) -> String {
-    let map_lines = state.explored_map();
-    let player = &state.entities[0];
-    let kills = state.kill_count();
-    let explored_pct = state.explored_pct();
-
+/// Shows the visible map, a status line, and the last 4 log messages.
+/// Works with any tier's observation via `GameStep::observe()`.
+pub fn render_frame(obs: &GameObservation) -> String {
     let mut frame = String::new();
 
     // Map
-    for line in &map_lines {
+    for line in &obs.map_ascii {
         frame.push_str(line);
         frame.push('\n');
     }
 
     // Status line
-    let equip = if state.equipment.weapon.is_some() || state.equipment.armor.is_some() {
-        format!(
-            " | ATK {} DEF {}",
-            state.effective_attack(),
-            state.effective_defense()
-        )
+    let equip = if obs.weapon.is_some() || obs.armor.is_some() {
+        format!(" | ATK {} DEF {}", obs.player_atk, obs.player_def)
     } else {
         String::new()
     };
     frame.push_str(&format!(
         "HP {}/{}{} | Depth {}/{} | Turn {} | Kills {} | Explored {}% | Seed {}\n",
-        player.hp,
-        player.max_hp,
+        obs.player_hp,
+        obs.player_max_hp,
         equip,
-        state.depth,
-        state.target_depth,
-        state.turn_count,
-        kills,
-        explored_pct,
-        state.seed,
+        obs.depth,
+        obs.target_depth,
+        obs.turn_count,
+        obs.kills,
+        obs.explored_pct,
+        obs.seed,
     ));
 
     // Last 4 messages
-    let messages = state.log.recent(4);
+    let end = obs.recent_messages.len();
+    let start = end.saturating_sub(4);
+    let messages = &obs.recent_messages[start..end];
     if !messages.is_empty() {
         for msg in messages {
             frame.push_str(msg);
@@ -74,67 +68,29 @@ pub fn render_frame(state: &GameState) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity::Entity;
-    use crate::fov;
-    use crate::map::{Map, Tile};
-    use crate::message_log::MessageLog;
+    use crate::data;
+    use crate::game::GameState;
 
     fn test_game() -> GameState {
-        let mut m = Map::new(20, 20);
-        for y in 1..=10 {
-            for x in 1..=10 {
-                let idx = m.idx(x, y);
-                m.tiles[idx] = Tile::Floor;
-            }
-        }
-
-        let player = Entity::player(5, 5);
-        let visible = fov::compute_fov(&m, 5, 5, 8);
-        let explored = visible.clone();
-
-        GameState {
-            map: m,
-            entities: vec![player],
-            fov_radius: 8,
-            visible,
-            explored,
-            log: MessageLog::new(),
-            game_over: false,
-            turn_count: 0,
-            seed: 42,
-            preset: None,
-            dirty: false,
-            regen_interval: crate::data::config().regen_interval,
-            max_autorun_steps: crate::data::config().max_autorun_steps,
-            wandering_seed: 0,
-            wandering_config: Default::default(),
-            idle_count: 0,
-            wandering_spawned: 0,
-            wandering_spawn_table: Vec::new(),
-            ground_items: Vec::new(),
-            equipment: Default::default(),
-            depth: 1,
-            target_depth: 5,
-            game_won: false,
-            depth_scaling: Default::default(),
-            max_rooms: 30,
-            room_size_min: 4,
-            room_size_max: 10,
-            max_monsters_per_room: 2,
-        }
+        let gd = data::load_game_data();
+        let mut state = GameState::with_data(20, 20, 42, &gd);
+        state.update_fov();
+        state
     }
 
     #[test]
     fn render_frame_contains_player() {
         let gs = test_game();
-        let frame = render_frame(&gs);
+        let obs = gs.observe();
+        let frame = render_frame(&obs);
         assert!(frame.contains('@'), "Frame should contain player glyph");
     }
 
     #[test]
     fn render_frame_contains_hp_line() {
         let gs = test_game();
-        let frame = render_frame(&gs);
+        let obs = gs.observe();
+        let frame = render_frame(&obs);
         assert!(frame.contains("HP 30/30"), "Frame should contain HP status");
         assert!(frame.contains("Seed 42"), "Frame should contain seed");
     }
@@ -143,7 +99,8 @@ mod tests {
     fn render_frame_contains_messages() {
         let mut gs = test_game();
         gs.log.add("Test combat message");
-        let frame = render_frame(&gs);
+        let obs = gs.observe();
+        let frame = render_frame(&obs);
         assert!(
             frame.contains("Test combat message"),
             "Frame should contain log messages"

@@ -19,6 +19,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix equipment stats not applied during monster attacks (#12)
 
 ### Changed
+- Refactor FrameSink to accept dyn GameStep instead of GameState (#35)
+- Prepare roguelike-core for capability tier hierarchy (#20)
 - Define GameStep cross-tier trait (#31)
 - Gate standard-tier code behind std feature (#30)
 - Remove MicroCommand, accept GameCommand in tier_micro (#34)

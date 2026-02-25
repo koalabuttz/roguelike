@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use roguelike_core::game::GameState;
+use roguelike_core::game_step::GameStep;
 use roguelike_core::spectate::{FrameSink, render_frame};
 
 /// Writes plain-text ASCII frames to a file for external viewers.
@@ -34,9 +34,10 @@ impl FrameSink for FileFrameSink {
     ///
     /// Does nothing if spectating is disabled. Errors are silently ignored
     /// (spectating is best-effort and must never break the MCP server).
-    fn write_frame(&self, state: &GameState) {
+    fn write_frame(&self, state: &dyn GameStep) {
         if let Some(ref path) = self.path {
-            let frame = render_frame(state);
+            let obs = state.observe();
+            let frame = render_frame(&obs);
             let tmp_path = path.with_extension("tmp");
             if std::fs::write(&tmp_path, &frame).is_ok() {
                 let _ = std::fs::rename(&tmp_path, path);
@@ -48,60 +49,19 @@ impl FrameSink for FileFrameSink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use roguelike_core::entity::Entity;
-    use roguelike_core::fov;
-    use roguelike_core::map::{Map, Tile};
-    use roguelike_core::message_log::MessageLog;
+    use roguelike_core::data;
+    use roguelike_core::game::GameState;
 
     fn test_game() -> GameState {
-        let mut m = Map::new(20, 20);
-        for y in 1..=10 {
-            for x in 1..=10 {
-                let idx = m.idx(x, y);
-                m.tiles[idx] = Tile::Floor;
-            }
-        }
-
-        let player = Entity::player(5, 5);
-        let visible = fov::compute_fov(&m, 5, 5, 8);
-        let explored = visible.clone();
-
-        GameState {
-            map: m,
-            entities: vec![player],
-            fov_radius: 8,
-            visible,
-            explored,
-            log: MessageLog::new(),
-            game_over: false,
-            turn_count: 0,
-            seed: 42,
-            preset: None,
-            dirty: false,
-            regen_interval: roguelike_core::data::config().regen_interval,
-            max_autorun_steps: roguelike_core::data::config().max_autorun_steps,
-            wandering_seed: 0,
-            wandering_config: Default::default(),
-            idle_count: 0,
-            wandering_spawned: 0,
-            wandering_spawn_table: Vec::new(),
-            ground_items: Vec::new(),
-            equipment: Default::default(),
-            depth: 1,
-            target_depth: 5,
-            game_won: false,
-            depth_scaling: Default::default(),
-            max_rooms: 30,
-            room_size_min: 4,
-            room_size_max: 10,
-            max_monsters_per_room: 2,
-        }
+        let gd = data::load_game_data();
+        let mut state = GameState::with_data(20, 20, 42, &gd);
+        state.update_fov();
+        state
     }
 
     #[test]
     fn spectator_writer_disabled() {
         let writer = FileFrameSink { path: None };
-        // write_frame should be a no-op when disabled
         let gs = test_game();
         writer.write_frame(&gs); // should not panic
     }

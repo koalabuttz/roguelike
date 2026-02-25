@@ -5,6 +5,7 @@ use crate::entity::{AiBehavior, Entity};
 use crate::fov;
 use crate::map::Map;
 use crate::message_log::MessageLog;
+use crate::rules::message::GameEvent;
 use crate::types::{Coord, Stat};
 
 /// Check whether a monster is aware of the player.
@@ -55,7 +56,9 @@ pub fn run_monster_turns(
             AiBehavior::Wander => {
                 if aware {
                     entities[i].ai = AiBehavior::Chase;
-                    log.add(format!("The {} notices you!", entities[i].name));
+                    log.add_event(GameEvent::EntityNotice {
+                        who: entities[i].combatant(),
+                    });
                     chase_ai(entities, i, px, py, map, log, player_def);
                 } else {
                     wander_ai(entities, i, map, rng);

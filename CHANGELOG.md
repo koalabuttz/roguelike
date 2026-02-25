@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Move GameColor to rules/ with repr(u8) C64 color indices (#32)
+- Move GameColor to rules/ with repr(u8) C64 color indices (#32)
 - Add stairs and multi-level dungeons (#17)
 - Replace XP/leveling with item-based progression in docs (#19)
 - Regenerate golden replay files for item system changes (#13)
@@ -16,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix equipment stats not applied during monster attacks (#12)
 
 ### Changed
+- Extract rules/message.rs — GameEvent structured message enum (#25)
+- Add Direction enum to GameCommand (#26)
 - Extract rules/monster_table.rs — MonsterKind enum and stat lookups (#24)
 - Extract rules/damage.rs — pure damage formula (#22)
 - Extract rules/items.rs — pure item definitions and lookups (#23)

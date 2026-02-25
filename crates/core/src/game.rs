@@ -14,6 +14,7 @@ use crate::item::{self, Equipment, Item};
 use crate::map;
 use crate::message_log::MessageLog;
 use crate::pathfinding;
+use crate::rules::message::{GameEvent, SoundDistance};
 use crate::seed_code::{self, SeedParams};
 use crate::spawn;
 use crate::types::{Coord, Pos, Stat};
@@ -556,7 +557,7 @@ impl GameState {
         let explored = visible.clone();
 
         let mut log = MessageLog::new();
-        log.add("Welcome to the dungeon! Prepare yourself.");
+        log.add_event(GameEvent::Welcome);
 
         GameState {
             map,
@@ -685,30 +686,27 @@ impl GameState {
                     let player = &mut self.entities[0];
                     let healed = heal.min(player.max_hp - player.hp);
                     player.hp += healed;
-                    self.log.add(format!(
-                        "You drink the {}. (+{} HP)",
-                        item::item_name(kind),
-                        healed
-                    ));
+                    self.log.add_event(GameEvent::DrinkPotion {
+                        kind,
+                        healed: healed as u8,
+                    });
                 }
             } else if item::is_weapon(kind) {
                 if item::is_better_weapon(kind, self.equipment.weapon) {
                     self.ground_items.remove(i);
                     self.equipment.weapon = Some(kind);
-                    self.log.add(format!(
-                        "You equip the {}. (+{} ATK)",
-                        item::item_name(kind),
-                        item::item_attack_bonus(kind)
-                    ));
+                    self.log.add_event(GameEvent::EquipWeapon {
+                        kind,
+                        bonus: item::item_attack_bonus(kind) as u8,
+                    });
                 }
             } else if item::is_armor(kind) && item::is_better_armor(kind, self.equipment.armor) {
                 self.ground_items.remove(i);
                 self.equipment.armor = Some(kind);
-                self.log.add(format!(
-                    "You equip the {}. (+{} DEF)",
-                    item::item_name(kind),
-                    item::item_defense_bonus(kind)
-                ));
+                self.log.add_event(GameEvent::EquipArmor {
+                    kind,
+                    bonus: item::item_defense_bonus(kind) as u8,
+                });
             }
         }
     }
@@ -743,7 +741,7 @@ impl GameState {
         let py = self.entities[0].y;
         let idx = self.map.idx(px, py);
         if self.map.tiles[idx] != map::Tile::StairsDown {
-            self.log.add("There are no stairs here.");
+            self.log.add_event(GameEvent::NoStairs);
             return false;
         }
 
@@ -751,10 +749,9 @@ impl GameState {
 
         if self.depth > self.target_depth {
             self.game_won = true;
-            self.log.add(format!(
-                "You ascend from the dungeon victorious! You conquered all {} depths!",
-                self.target_depth
-            ));
+            self.log.add_event(GameEvent::Victory {
+                depth: self.target_depth as u8,
+            });
             return true;
         }
 
@@ -819,10 +816,10 @@ impl GameState {
         self.wandering_spawned = 0;
         self.idle_count = 0;
 
-        self.log.add(format!(
-            "You descend to depth {}/{}...",
-            self.depth, self.target_depth
-        ));
+        self.log.add_event(GameEvent::Descend {
+            depth: self.depth as u8,
+            target: self.target_depth as u8,
+        });
 
         true
     }
@@ -970,12 +967,17 @@ impl GameState {
         let dist = (px - sx).abs() + (py - sy).abs();
         let cfg = &self.wandering_config;
 
-        if dist <= cfg.sound_near {
-            self.log.add("Something is moving very close!");
+        let distance = if dist <= cfg.sound_near {
+            Some(SoundDistance::Near)
         } else if dist <= cfg.sound_medium {
-            self.log.add("You hear footsteps nearby.");
+            Some(SoundDistance::Medium)
         } else if dist <= cfg.sound_far {
-            self.log.add("You hear a faint sound in the distance.");
+            Some(SoundDistance::Far)
+        } else {
+            None
+        };
+        if let Some(distance) = distance {
+            self.log.add_event(GameEvent::SoundCue { distance });
         }
     }
 
@@ -1004,12 +1006,17 @@ impl GameState {
             }
         }
 
-        if closest_dist <= cfg.sound_near {
-            self.log.add("Something is moving very close!");
+        let distance = if closest_dist <= cfg.sound_near {
+            Some(SoundDistance::Near)
         } else if closest_dist <= cfg.sound_medium {
-            self.log.add("You hear footsteps nearby.");
+            Some(SoundDistance::Medium)
         } else if closest_dist <= cfg.sound_far {
-            self.log.add("You hear a faint sound in the distance.");
+            Some(SoundDistance::Far)
+        } else {
+            None
+        };
+        if let Some(distance) = distance {
+            self.log.add_event(GameEvent::SoundCue { distance });
         }
     }
 

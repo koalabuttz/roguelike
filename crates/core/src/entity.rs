@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::data::{MonsterDef, PlayerDef};
+use crate::rules::message::Combatant;
 use crate::rules::monster_table::MonsterKind;
 use crate::types::{Coord, GameColor, Stat};
 
@@ -67,6 +68,15 @@ impl Entity {
     pub fn player(x: Coord, y: Coord) -> Self {
         use crate::data;
         Self::player_from_def(&data::defaults().player, x, y)
+    }
+
+    /// Convert this entity to a `Combatant` for structured game events.
+    pub fn combatant(&self) -> Combatant {
+        match (self.kind, self.monster_kind) {
+            (EntityKind::Player, _) => Combatant::Player,
+            (EntityKind::Monster, Some(kind)) => Combatant::Monster(kind),
+            (EntityKind::Monster, None) => Combatant::UnknownMonster,
+        }
     }
 
     pub fn from_template(template: &MonsterDef, x: Coord, y: Coord) -> Self {

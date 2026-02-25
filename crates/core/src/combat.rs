@@ -1,6 +1,7 @@
 use crate::entity::Entity;
 use crate::message_log::MessageLog;
 use crate::rules::damage as rules_damage;
+use crate::rules::message::GameEvent;
 use crate::types::Stat;
 
 /// Resolve a melee attack between two entities by index.
@@ -19,24 +20,30 @@ pub fn melee_attack(
     log: &mut MessageLog,
 ) -> bool {
     let damage = rules_damage::damage(rules_damage::narrow(atk), rules_damage::narrow(def)) as Stat;
+    let attacker_c = entities[attacker].combatant();
+    let defender_c = entities[defender].combatant();
 
     if damage > 0 {
         entities[defender].hp -= damage;
-        log.add(format!(
-            "{} attacks {} for {} damage.",
-            entities[attacker].name, entities[defender].name, damage
-        ));
+        log.add_event(GameEvent::Attack {
+            attacker: attacker_c,
+            defender: defender_c,
+            damage: damage as u8,
+        });
 
         if entities[defender].hp <= 0 {
             entities[defender].alive = false;
-            log.add(format!("{} is dead!", entities[defender].name));
+            log.add_event(GameEvent::Kill {
+                attacker: attacker_c,
+                victim: defender_c,
+            });
             return true;
         }
     } else {
-        log.add(format!(
-            "{} attacks {} but does no damage.",
-            entities[attacker].name, entities[defender].name
-        ));
+        log.add_event(GameEvent::NoDamage {
+            attacker: attacker_c,
+            defender: defender_c,
+        });
     }
 
     false
@@ -119,12 +126,12 @@ mod tests {
     }
 
     #[test]
-    fn log_messages_include_names() {
+    fn log_messages_include_combatant_names() {
         let mut entities = vec![make_attacker(5), make_defender(10, 2)];
+        // Both test entities lack monster_kind, so both map to Combatant::Player.
         let mut log = MessageLog::new();
         melee_attack(&mut entities, 0, 1, 5, 2, &mut log);
         let msg = &log.recent(1)[0];
-        assert!(msg.contains("Attacker"));
-        assert!(msg.contains("Defender"));
+        assert!(msg.contains("Player"));
     }
 }

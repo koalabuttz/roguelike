@@ -16,10 +16,8 @@
 /// sequential and internal — they do **not** correspond to any hardware
 /// palette (C64 PETSCII, GBA, etc.). Every platform needs its own mapping.
 ///
-/// **Size:** 4 bytes due to the `Rgb` payload, not 1. Constrained platforms
-/// that need single-byte colors should avoid the `Rgb` variant (which is
-/// standard-tier only) and rely on the named variants, whose discriminants
-/// fit in a `u8`.
+/// **Size:** 1 byte on constrained tiers (`no_std`), 4 bytes on standard
+/// tier due to the `Rgb` payload (gated behind `feature = "std"`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
@@ -36,6 +34,10 @@ pub enum GameColor {
     DarkBlue = 9,
     Cyan = 10,
     /// Arbitrary RGB color for dev-tool overlays and accessibility palettes.
-    /// Standard-tier only — constrained platforms never construct this.
+    /// Standard-tier only — gated behind `feature = "std"`.
+    #[cfg(feature = "std")]
     Rgb(u8, u8, u8),
 }
+
+#[cfg(not(feature = "std"))]
+const _: () = assert!(core::mem::size_of::<GameColor>() == 1);

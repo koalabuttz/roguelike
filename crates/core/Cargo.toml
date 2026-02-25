@@ -5,7 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["dev-tools", "data-files", "serde"]
+default = ["dev-tools", "data-files", "serde", "std"]
+std = []
 dev-tools = []
 data-files = ["toml"]
 serde = ["dep:serde", "dep:serde_json"]

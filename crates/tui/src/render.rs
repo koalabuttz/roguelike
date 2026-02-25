@@ -6,7 +6,7 @@ use crossterm::{
     terminal,
 };
 
-use roguelike_core::game::GameState;
+use roguelike_core::game::{GameObservation, GameState};
 use roguelike_core::item;
 use roguelike_core::map::Tile;
 use roguelike_core::platform::Renderer;
@@ -506,6 +506,113 @@ fn render_message_log<W: Write>(
         )?;
     }
 
+    Ok(())
+}
+
+/// Render a `GameObservation` to the terminal — used for non-standard tiers
+/// (e.g. micro) that don't have a `GameState` for the full render pipeline.
+///
+/// Writes the ASCII map, a simple status bar, and recent messages.
+/// No color (micro tier doesn't carry tile metadata for palette mapping).
+pub fn render_observation<W: Write>(
+    w: &mut W,
+    obs: &GameObservation,
+    screen_width: Coord,
+    screen_height: Coord,
+) -> std::io::Result<()> {
+    queue!(
+        w,
+        terminal::Clear(terminal::ClearType::All),
+        cursor::MoveTo(0, 0)
+    )?;
+
+    // Map lines.
+    for (y, line) in obs.map_ascii.iter().enumerate() {
+        queue!(
+            w,
+            cursor::MoveTo(0, y as u16),
+            SetForegroundColor(Color::White),
+            SetBackgroundColor(Color::Black),
+            style::Print(line)
+        )?;
+    }
+
+    // Status bar — 1 row above message log.
+    let msg_lines: Coord = 4;
+    let bar_row = (screen_height - 1 - msg_lines) as u16;
+    let status = format!(
+        " HP {}/{} | ATK:{} DEF:{} | Turn {} | Kills {} | Seed: {}",
+        obs.player_hp,
+        obs.player_max_hp,
+        obs.player_atk,
+        obs.player_def,
+        obs.turn_count,
+        obs.kills,
+        obs.seed_code,
+    );
+    let truncated: String = status
+        .chars()
+        .chain(std::iter::repeat(' '))
+        .take(screen_width as usize)
+        .collect();
+    queue!(
+        w,
+        cursor::MoveTo(0, bar_row),
+        SetForegroundColor(Color::White),
+        SetBackgroundColor(Color::DarkBlue),
+        style::Print(truncated)
+    )?;
+
+    // Recent messages.
+    let log_start = (screen_height - msg_lines) as u16;
+    for i in 0..msg_lines as usize {
+        let row = log_start + i as u16;
+        let msg = obs
+            .recent_messages
+            .get(obs.recent_messages.len().saturating_sub(msg_lines as usize) + i)
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        let line = format!(" {}", msg);
+        let truncated: String = line
+            .chars()
+            .chain(std::iter::repeat(' '))
+            .take(screen_width as usize)
+            .collect();
+        queue!(
+            w,
+            cursor::MoveTo(0, row),
+            SetForegroundColor(Color::Grey),
+            SetBackgroundColor(Color::Black),
+            style::Print(truncated)
+        )?;
+    }
+
+    // Game-over / victory overlay.
+    if obs.game_won {
+        let msg = "Victory! You conquered the dungeon! Press any key to exit.";
+        let x = (screen_width as usize).saturating_sub(msg.len()) / 2;
+        let y = screen_height / 2;
+        queue!(
+            w,
+            cursor::MoveTo(x as u16, y as u16),
+            SetForegroundColor(Color::Yellow),
+            SetBackgroundColor(Color::Black),
+            style::Print(msg)
+        )?;
+    } else if obs.game_over {
+        let msg = "You have been slain... Press any key to exit.";
+        let x = (screen_width as usize).saturating_sub(msg.len()) / 2;
+        let y = screen_height / 2;
+        queue!(
+            w,
+            cursor::MoveTo(x as u16, y as u16),
+            SetForegroundColor(Color::Red),
+            SetBackgroundColor(Color::Black),
+            style::Print(msg)
+        )?;
+    }
+
+    w.flush()?;
     Ok(())
 }
 

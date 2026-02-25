@@ -7,6 +7,7 @@ use crossterm::{cursor, queue, style, terminal};
 use roguelike_core::command::GameCommand;
 use roguelike_core::data::{self, GameData};
 use roguelike_core::game::{self, GameState, LookOptions};
+use roguelike_core::game_step::{self, GameStep};
 use roguelike_core::help;
 use roguelike_core::look::{LookAction, LookCursor};
 use roguelike_core::menu::{self, MenuAction};
@@ -40,6 +41,10 @@ pub enum GameLoopResult {
 ///
 /// All methods have default no-op implementations so `NoDevHooks` (or any
 /// struct that doesn't need dev-tools) can simply `impl DevHooks for T {}`.
+///
+/// Methods accept `&mut dyn GameStep` instead of `&mut GameState` so the
+/// trait works with any capability tier.  Implementations that need
+/// standard-tier state downcast internally via `as_any_mut()`.
 pub trait DevHooks {
     /// Handle a debug key press (F1-F12, overlay cursor movement, etc.).
     /// Returns `true` if the key was consumed and should not be passed
@@ -47,14 +52,14 @@ pub trait DevHooks {
     fn handle_dev_key(
         &mut self,
         _key: KeyEvent,
-        _state: &mut GameState,
+        _state: &mut dyn GameStep,
         _game_data: &mut GameData,
     ) -> bool {
         false
     }
 
     /// Called after each game step (move, wait, etc.) for recording/god-mode.
-    fn after_step(&mut self, _state: &mut GameState, _cmd: GameCommand) {}
+    fn after_step(&mut self, _state: &mut dyn GameStep, _cmd: GameCommand) {}
 
     /// Whether field-of-view is currently disabled (all tiles visible).
     fn fov_disabled(&self) -> bool {
@@ -62,7 +67,7 @@ pub trait DevHooks {
     }
 
     /// Make all tiles visible (called during animations when FOV is disabled).
-    fn apply_fov_override(&self, _state: &mut GameState) {}
+    fn apply_fov_override(&self, _state: &mut dyn GameStep) {}
 
     /// Look-mode options (e.g. whether to reveal monsters outside FOV).
     fn look_options(&self) -> LookOptions {
@@ -73,7 +78,7 @@ pub trait DevHooks {
     fn render_overlay<W2: Write>(
         &self,
         _w: &mut W2,
-        _state: &GameState,
+        _state: &dyn GameStep,
         _pal: settings::ColorPalette,
     ) -> io::Result<()> {
         Ok(())
@@ -83,6 +88,16 @@ pub trait DevHooks {
 /// No-op dev-hooks for release builds and SSH.
 pub struct NoDevHooks;
 impl DevHooks for NoDevHooks {}
+
+/// Try to downcast a `&dyn GameStep` to `&GameState`.
+fn standard_state(game: &dyn GameStep) -> Option<&GameState> {
+    game.as_any().downcast_ref::<GameState>()
+}
+
+/// Try to downcast a `&mut dyn GameStep` to `&mut GameState`.
+fn standard_state_mut(game: &mut dyn GameStep) -> Option<&mut GameState> {
+    game.as_any_mut().downcast_mut::<GameState>()
+}
 
 /// Configuration for the game loop.
 pub struct GameLoopConfig {
@@ -114,7 +129,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
     let mut settings = saves.load_settings();
     let mut game_data = data::load_game_data();
     let map_height = rows - 1 - settings.message_log_lines as i32;
-    let mut game_state: Option<GameState> = None;
+    let mut game_state: Option<Box<dyn GameStep>> = None;
     let mut autosave_buf: Option<String> = None;
     let has_save = saves.has_save_for_title(settings.casual_mode);
     let mut app_state = AppState::Title(menu::title_menu(has_save, settings.casual_mode, platform));
@@ -155,7 +170,8 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                 }
                             }
                         }
-                        game_state = Some(GameState::new_with_data(cols, map_height, &game_data));
+                        game_state =
+                            Some(game_step::create_random_game(cols, map_height, &game_data));
                         autosave_buf = None;
                         app_state = AppState::Playing;
                     }
@@ -169,23 +185,13 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                             Some(code) if !code.is_empty() => match seed_code::decode(&code) {
                                 Ok(params) => {
                                     let h = rows - 1 - settings.message_log_lines as i32;
-                                    let gs = if let Some(preset) = params.preset {
-                                        GameState::with_preset_data(
-                                            params.width,
-                                            params.height.min(h),
-                                            params.seed,
-                                            preset,
-                                            &game_data,
-                                        )
-                                    } else {
-                                        GameState::with_data(
-                                            params.width,
-                                            params.height.min(h),
-                                            params.seed,
-                                            &game_data,
-                                        )
-                                    };
-                                    game_state = Some(gs);
+                                    game_state = Some(game_step::create_game(
+                                        params.seed,
+                                        params.width,
+                                        params.height.min(h),
+                                        params.preset,
+                                        &game_data,
+                                    ));
                                     autosave_buf = None;
                                     app_state = AppState::Playing;
                                 }
@@ -251,22 +257,30 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
             }
 
             AppState::Playing => {
-                let state = game_state.as_mut().expect("no game state while playing");
+                let game = game_state.as_mut().expect("no game state while playing");
 
-                // Flush autosave buffer to disk during input wait.
+                // Flush autosave buffer to disk (standard tier only).
                 if let Some(ref buf) = autosave_buf {
-                    let mut meta = state.extract_metadata();
-                    if !settings.player_name.is_empty() {
-                        meta.player_name = Some(settings.player_name.clone());
+                    if let Some(gs) = standard_state_mut(game.as_mut()) {
+                        let mut meta = gs.extract_metadata();
+                        if !settings.player_name.is_empty() {
+                            meta.player_name = Some(settings.player_name.clone());
+                        }
+                        saves.write_autosave(buf, &meta);
                     }
-                    saves.write_autosave(buf, &meta);
                     autosave_buf = None;
                 }
 
-                render::render(renderer.writer(), state, cols, rows, &settings)?;
-                dev.render_overlay(renderer.writer(), state, settings.color_palette)?;
+                // Render: full pipeline for standard tier, observation
+                // fallback for other tiers.
+                if let Some(gs) = standard_state(game.as_ref()) {
+                    render::render(renderer.writer(), gs, cols, rows, &settings)?;
+                } else {
+                    render::render_observation(renderer.writer(), &game.observe(), cols, rows)?;
+                }
+                dev.render_overlay(renderer.writer(), game.as_ref(), settings.color_palette)?;
 
-                if state.game_over || state.game_won {
+                if game.is_game_over() {
                     // Game-over or victory: any input returns to title.
                     let _ = input.wait_for_key()?;
                     saves.delete_autosave();
@@ -283,7 +297,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                 let cmd = match game_input {
                     GameInput::Key { key, command } => {
                         // Dev-tools key handling (F1-F12, overlay cursor, etc.).
-                        if dev.handle_dev_key(key, state, &mut game_data) {
+                        if dev.handle_dev_key(key, game.as_mut(), &mut game_data) {
                             continue;
                         }
 
@@ -291,7 +305,12 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                         if key.modifiers.contains(KeyModifiers::CONTROL)
                             && key.code == KeyCode::Char('p')
                         {
-                            run_message_history(state.log.all(), renderer, input)?;
+                            if let Some(gs) = standard_state(game.as_ref()) {
+                                run_message_history(gs.log.all(), renderer, input)?;
+                            } else {
+                                let obs = game.observe();
+                                run_message_history(&obs.recent_messages, renderer, input)?;
+                            }
                             continue;
                         }
 
@@ -310,7 +329,13 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                         GameCommand::Look => {
                             let look_opts = dev.look_options();
                             run_look_mode(
-                                state, renderer, cols, rows, &settings, &look_opts, input,
+                                game.as_ref(),
+                                renderer,
+                                cols,
+                                rows,
+                                &settings,
+                                &look_opts,
+                                input,
                             )?;
                         }
                         GameCommand::Help => {
@@ -318,31 +343,12 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                             run_message_history(&lines, renderer, input)?;
                         }
                         GameCommand::Autorun(dir) => {
-                            let stepper = state.start_autorun(dir);
-                            animate_stepper(
-                                renderer.writer(),
-                                state,
-                                stepper,
-                                cols,
-                                rows,
-                                &settings,
-                                dev,
-                                input,
-                            )?;
-                            dev.after_step(state, cmd);
-                            frame_sink.write_frame(&state.observe());
-                            if state.dirty
-                                && let Ok(json) = state.save_to_json()
-                            {
-                                state.dirty = false;
-                                autosave_buf = Some(json);
-                            }
-                        }
-                        GameCommand::AutoExplore => match state.start_auto_explore() {
-                            Ok((stepper, _tx, _ty)) => {
+                            if standard_state(game.as_ref()).is_some() {
+                                let gs = standard_state_mut(game.as_mut()).unwrap();
+                                let stepper = gs.start_autorun(dir);
                                 animate_stepper(
                                     renderer.writer(),
-                                    state,
+                                    gs,
                                     stepper,
                                     cols,
                                     rows,
@@ -350,29 +356,66 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                     dev,
                                     input,
                                 )?;
-                                dev.after_step(state, cmd);
-                                frame_sink.write_frame(&state.observe());
-                                if state.dirty
-                                    && let Ok(json) = state.save_to_json()
+                            } else {
+                                // Micro tier: single move.
+                                game.step(GameCommand::Move(dir));
+                            }
+                            dev.after_step(game.as_mut(), cmd);
+                            frame_sink.write_frame(&game.observe());
+                            if let Some(gs) = standard_state_mut(game.as_mut())
+                                && gs.dirty
+                                && let Ok(json) = gs.save_to_json()
+                            {
+                                gs.dirty = false;
+                                autosave_buf = Some(json);
+                            }
+                        }
+                        GameCommand::AutoExplore => {
+                            // Auto-explore is standard-tier only.
+                            let mut explored = false;
+                            if let Some(gs) = standard_state_mut(game.as_mut()) {
+                                match gs.start_auto_explore() {
+                                    Ok((stepper, _tx, _ty)) => {
+                                        animate_stepper(
+                                            renderer.writer(),
+                                            gs,
+                                            stepper,
+                                            cols,
+                                            rows,
+                                            &settings,
+                                            dev,
+                                            input,
+                                        )?;
+                                        explored = true;
+                                    }
+                                    Err(_) => {
+                                        gs.log.add("No unexplored areas reachable.");
+                                    }
+                                }
+                            }
+                            if explored {
+                                dev.after_step(game.as_mut(), cmd);
+                                frame_sink.write_frame(&game.observe());
+                                if let Some(gs) = standard_state_mut(game.as_mut())
+                                    && gs.dirty
+                                    && let Ok(json) = gs.save_to_json()
                                 {
-                                    state.dirty = false;
+                                    gs.dirty = false;
                                     autosave_buf = Some(json);
                                 }
                             }
-                            Err(_) => {
-                                state.log.add("No unexplored areas reachable.");
-                            }
-                        },
+                        }
                         _ => {
-                            state.step(cmd);
-                            dev.after_step(state, cmd);
-                            frame_sink.write_frame(&state.observe());
-                            if state.dirty
-                                && (state.turn_count as u32)
+                            game.step(cmd);
+                            dev.after_step(game.as_mut(), cmd);
+                            frame_sink.write_frame(&game.observe());
+                            if let Some(gs) = standard_state_mut(game.as_mut())
+                                && gs.dirty
+                                && (gs.turn_count as u32)
                                     .is_multiple_of(settings.autosave_frequency)
-                                && let Ok(json) = state.save_to_json()
+                                && let Ok(json) = gs.save_to_json()
                             {
-                                state.dirty = false;
+                                gs.dirty = false;
                                 autosave_buf = Some(json);
                             }
                         }
@@ -391,20 +434,24 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                         break 'app;
                     }
                     Some(MenuAction::SaveGame) => {
-                        if let Some(ref state) = game_state {
+                        // Saving is standard-tier only.
+                        if let Some(ref game) = game_state
+                            && let Some(gs) = standard_state(game.as_ref())
+                        {
                             let slots = saves.load_all_slot_metadata();
                             let mut slot_menu =
                                 menu::save_slot_menu(&slots, settings.show_explored_pct);
                             match run_menu(&mut slot_menu, renderer, input)? {
                                 Some(MenuAction::SelectSlot(slot)) => {
-                                    let msg =
-                                        saves.save_to_slot(state, slot, &settings.player_name);
+                                    let msg = saves.save_to_slot(gs, slot, &settings.player_name);
                                     let mut new_pause =
                                         menu::pause_menu(settings.casual_mode, platform);
                                     new_pause.selected = 1;
                                     app_state = AppState::Paused(new_pause);
-                                    if let Some(ref mut state) = game_state {
-                                        state.log.add(&msg);
+                                    if let Some(ref mut game) = game_state
+                                        && let Some(gs) = standard_state_mut(game.as_mut())
+                                    {
+                                        gs.log.add(&msg);
                                     }
                                 }
                                 _ => {
@@ -511,7 +558,7 @@ fn run_message_history<W: Write>(
 /// Run look mode: move a cursor around to examine tiles.
 #[allow(clippy::too_many_arguments)]
 fn run_look_mode<W: Write>(
-    state: &game::GameState,
+    game: &dyn GameStep,
     renderer: &mut CrosstermRenderer<W>,
     cols: Coord,
     rows: Coord,
@@ -519,23 +566,47 @@ fn run_look_mode<W: Write>(
     look_opts: &LookOptions,
     input: &mut dyn InputProvider,
 ) -> io::Result<()> {
-    let player = &state.entities[0];
-    let mut cursor = LookCursor::new(player.x, player.y);
+    let (px, py) = game.player_pos();
+    let mut cursor = LookCursor::new(px, py);
 
-    loop {
-        render::render(renderer.writer(), state, cols, rows, settings)?;
-        let info = cursor.current_info_with(state, look_opts);
-        cursor.draw_overlay(renderer, &info, rows, settings.message_log_lines as Coord);
-        renderer.flush();
+    // Standard tier: full render + LookCursor with bounds checking.
+    // Other tiers: observation-based render + manual cursor (no bounds check).
+    if let Some(gs) = standard_state(game) {
+        loop {
+            render::render(renderer.writer(), gs, cols, rows, settings)?;
+            let info = cursor.current_info_with(gs, look_opts);
+            cursor.draw_overlay(renderer, &info, rows, settings.message_log_lines as Coord);
+            renderer.flush();
 
-        match input.wait_for_look_command(settings)? {
-            InputResult::Command(cmd) => {
-                if cursor.handle_input(cmd, state) == LookAction::Close {
-                    return Ok(());
+            match input.wait_for_look_command(settings)? {
+                InputResult::Command(cmd) => {
+                    if cursor.handle_input(cmd, gs) == LookAction::Close {
+                        return Ok(());
+                    }
                 }
+                InputResult::NoCommand => {}
+                InputResult::Disconnected => return Ok(()),
             }
-            InputResult::NoCommand => {}
-            InputResult::Disconnected => return Ok(()),
+        }
+    } else {
+        loop {
+            render::render_observation(renderer.writer(), &game.observe(), cols, rows)?;
+            let info = game.look_at(cursor.cursor_x, cursor.cursor_y);
+            cursor.draw_overlay(renderer, &info, rows, 4);
+            renderer.flush();
+
+            match input.wait_for_look_command(settings)? {
+                InputResult::Command(cmd) => match cmd {
+                    roguelike_core::look::LookCommand::Move(dir) => {
+                        let (dx, dy) = dir.to_offset();
+                        cursor.cursor_x += dx;
+                        cursor.cursor_y += dy;
+                    }
+                    roguelike_core::look::LookCommand::Close => return Ok(()),
+                },
+                InputResult::NoCommand => {}
+                InputResult::Disconnected => return Ok(()),
+            }
         }
     }
 }
@@ -651,7 +722,7 @@ fn text_input_dialog<W: Write>(
 #[allow(clippy::too_many_arguments)]
 fn handle_load_game<W: Write>(
     app_state: &mut AppState,
-    game_state: &mut Option<GameState>,
+    game_state: &mut Option<Box<dyn GameStep>>,
     autosave_buf: &mut Option<String>,
     renderer: &mut CrosstermRenderer<W>,
     input: &mut dyn InputProvider,
@@ -669,12 +740,12 @@ fn handle_load_game<W: Write>(
             menu::load_slot_menu(has_auto, &auto_meta, &slots, settings.show_explored_pct);
         match run_menu(&mut load_menu, renderer, input)? {
             Some(MenuAction::LoadGame) => {
-                // Load autosave.
+                // Load autosave (always standard tier).
                 menu::draw_loading(renderer);
                 match saves.load_autosave() {
                     Ok(mut loaded) => {
                         loaded.log.add("Game loaded.");
-                        *game_state = Some(loaded);
+                        *game_state = Some(Box::new(loaded));
                         *autosave_buf = None;
                         *app_state = AppState::Playing;
                     }
@@ -696,7 +767,7 @@ fn handle_load_game<W: Write>(
                 match saves.load_from_slot(slot) {
                     Ok(mut loaded) => {
                         loaded.log.add("Game loaded.");
-                        *game_state = Some(loaded);
+                        *game_state = Some(Box::new(loaded));
                         *autosave_buf = None;
                         *app_state = AppState::Playing;
                     }
@@ -724,7 +795,7 @@ fn handle_load_game<W: Write>(
         match saves.load_autosave() {
             Ok(mut loaded) => {
                 loaded.log.add("Game loaded.");
-                *game_state = Some(loaded);
+                *game_state = Some(Box::new(loaded));
                 *autosave_buf = None;
                 *app_state = AppState::Playing;
             }
@@ -747,7 +818,7 @@ fn handle_load_game<W: Write>(
 /// Handle a load failure: log the error and return to the appropriate menu.
 fn load_failed(
     app_state: &mut AppState,
-    game_state: &mut Option<GameState>,
+    game_state: &mut Option<Box<dyn GameStep>>,
     saves: &dyn SaveBackend,
     settings: &Settings,
     pause_selected: Option<usize>,
@@ -756,8 +827,10 @@ fn load_failed(
 ) {
     if let Some(selected) = pause_selected {
         // From pause menu — log error and return.
-        if let Some(state) = game_state {
-            state.log.add(msg);
+        if let Some(game) = game_state
+            && let Some(gs) = standard_state_mut(game.as_mut())
+        {
+            gs.log.add(msg);
         }
         let mut new_pause = menu::pause_menu(settings.casual_mode, platform);
         new_pause.selected = selected;

@@ -8,6 +8,7 @@ mod inner {
     use roguelike_core::data::GameData;
     use roguelike_core::dev_tools::{self, DevCommand, DevSession, OverlayLayer};
     use roguelike_core::game::{GameState, LookOptions};
+    use roguelike_core::game_step::GameStep;
     use roguelike_core::settings::ColorPalette;
 
     use roguelike_tui::game_loop::DevHooks;
@@ -30,9 +31,13 @@ mod inner {
         fn handle_dev_key(
             &mut self,
             key: KeyEvent,
-            state: &mut GameState,
+            state: &mut dyn GameStep,
             game_data: &mut GameData,
         ) -> bool {
+            // Dev-tools are standard-tier only.
+            let Some(state) = state.as_any_mut().downcast_mut::<GameState>() else {
+                return false;
+            };
             let session = &mut self.session;
 
             // Overlay cursor mode: arrow keys move cursor, Esc exits.
@@ -127,16 +132,20 @@ mod inner {
             false
         }
 
-        fn after_step(&mut self, state: &mut GameState, cmd: GameCommand) {
-            dev_tools::after_step(state, &mut self.session, cmd);
+        fn after_step(&mut self, state: &mut dyn GameStep, cmd: GameCommand) {
+            if let Some(state) = state.as_any_mut().downcast_mut::<GameState>() {
+                dev_tools::after_step(state, &mut self.session, cmd);
+            }
         }
 
         fn fov_disabled(&self) -> bool {
             self.session.fov_disabled
         }
 
-        fn apply_fov_override(&self, state: &mut GameState) {
-            dev_tools::apply_fov_override(state);
+        fn apply_fov_override(&self, state: &mut dyn GameStep) {
+            if let Some(state) = state.as_any_mut().downcast_mut::<GameState>() {
+                dev_tools::apply_fov_override(state);
+            }
         }
 
         fn look_options(&self) -> LookOptions {
@@ -148,10 +157,12 @@ mod inner {
         fn render_overlay<W2: Write>(
             &self,
             w: &mut W2,
-            state: &GameState,
+            state: &dyn GameStep,
             pal: ColorPalette,
         ) -> io::Result<()> {
-            if self.session.overlay_flags != 0 {
+            if self.session.overlay_flags != 0
+                && let Some(state) = state.as_any().downcast_ref::<GameState>()
+            {
                 let cells = dev_tools::compute_overlay(state, &self.session);
                 render::render_overlay(w, &cells, pal)?;
             }

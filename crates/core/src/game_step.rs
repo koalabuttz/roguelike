@@ -8,7 +8,9 @@
 use std::any::Any;
 
 use crate::command::GameCommand;
+use crate::data::GameData;
 use crate::game::{EntityInfo, GameObservation, GameState, StepResult, TileInfo};
+use crate::map::MapPreset;
 use crate::message_log::format_event;
 use crate::rules::monster_table;
 use crate::seed_code::{self, SeedParams};
@@ -91,6 +93,43 @@ impl GameStep for GameState {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
+}
+
+// ── Factory functions ────────────────────────────────────────────────
+
+/// Create a game for the given seed and parameters.
+///
+/// Routes micro-tier seeds (`<= 0xFFFF`) to [`MicroGameStateAdapter`],
+/// standard-tier seeds to [`GameState`].  Calls `update_fov()` for
+/// standard tier.
+pub fn create_game(
+    seed: u64,
+    width: i32,
+    height: i32,
+    preset: Option<MapPreset>,
+    game_data: &GameData,
+) -> Box<dyn GameStep> {
+    match seed_code::tier_from_seed(seed) {
+        seed_code::Tier::Micro => Box::new(MicroGameStateAdapter::new(seed as u16)),
+        _ => {
+            let mut state = if let Some(p) = preset {
+                GameState::with_preset_data(width, height, seed, p, game_data)
+            } else {
+                GameState::with_data(width, height, seed, game_data)
+            };
+            state.update_fov();
+            Box::new(state)
+        }
+    }
+}
+
+/// Create a standard-tier game with a random seed.
+///
+/// Random seeds are always standard tier (u64 range).
+pub fn create_random_game(width: i32, height: i32, game_data: &GameData) -> Box<dyn GameStep> {
+    let mut state = GameState::new_with_data(width, height, game_data);
+    state.update_fov();
+    Box::new(state)
 }
 
 // ── Micro tier adapter ───────────────────────────────────────────────
@@ -570,5 +609,35 @@ mod tests {
             obs.recent_messages.iter().any(|m| m.contains("Welcome")),
             "should contain welcome message"
         );
+    }
+
+    #[test]
+    fn create_game_standard_tier() {
+        let gd = data::load_game_data();
+        let game = create_game(1_000_000, 40, 30, None, &gd);
+        assert!(!game.is_game_over());
+        // Should downcast to GameState (standard tier).
+        assert!(game.as_any().downcast_ref::<GameState>().is_some());
+    }
+
+    #[test]
+    fn create_game_micro_tier() {
+        let gd = data::load_game_data();
+        let game = create_game(42, 40, 30, None, &gd);
+        assert!(!game.is_game_over());
+        // Should downcast to MicroGameStateAdapter (micro tier).
+        assert!(
+            game.as_any()
+                .downcast_ref::<MicroGameStateAdapter>()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn create_random_game_is_standard() {
+        let gd = data::load_game_data();
+        let game = create_random_game(40, 30, &gd);
+        assert!(!game.is_game_over());
+        assert!(game.as_any().downcast_ref::<GameState>().is_some());
     }
 }

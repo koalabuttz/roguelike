@@ -14,7 +14,7 @@ use roguelike_core::exploration_graph;
 use roguelike_core::game::{
     AutoExploreResult, AutoFightResult, AutorunResult, AutorunStopReason, GameState,
 };
-use roguelike_core::game_step::{GameStep, MicroGameStateAdapter};
+use roguelike_core::game_step::{self, GameStep};
 use roguelike_core::look;
 use roguelike_core::seed_code;
 use roguelike_core::types::{Coord, Pos};
@@ -148,47 +148,43 @@ impl RoguelikeMcpServer {
 
         let gd = &self.game_data;
 
-        // Determine seed and tier, then create the appropriate game.
-        // Seeds <= 0xFFFF create micro-tier games (fixed-size map, no
-        // autorun/pathfinding/save). Larger seeds create standard-tier games.
+        // Resolve parameters, validate standard-tier minimums, then delegate
+        // to the shared factory (which handles tier routing internally).
         let game: Box<dyn GameStep> = if let Some(ref code) = params.seed_code {
             let decoded = seed_code::decode(code)
                 .map_err(|e| McpError::invalid_params(format!("Invalid seed code: {e}"), None))?;
 
-            match seed_code::tier_from_seed(decoded.seed) {
-                seed_code::Tier::Micro => Box::new(MicroGameStateAdapter::new(decoded.seed as u16)),
-                _ => {
-                    if decoded.width < 20 || decoded.height < 15 {
-                        return Err(McpError::invalid_params(
-                            "Map must be at least 20x15 tiles",
-                            None,
-                        ));
-                    }
-                    let mut state = if let Some(preset) = decoded.preset {
-                        GameState::with_preset_data(
-                            decoded.width,
-                            decoded.height,
-                            decoded.seed,
-                            preset,
-                            gd,
-                        )
-                    } else {
-                        GameState::with_data(decoded.width, decoded.height, decoded.seed, gd)
-                    };
-                    state.update_fov();
-                    Box::new(state)
-                }
+            if !matches!(
+                seed_code::tier_from_seed(decoded.seed),
+                seed_code::Tier::Micro
+            ) && (decoded.width < 20 || decoded.height < 15)
+            {
+                return Err(McpError::invalid_params(
+                    "Map must be at least 20x15 tiles",
+                    None,
+                ));
             }
+            game_step::create_game(
+                decoded.seed,
+                decoded.width,
+                decoded.height,
+                decoded.preset,
+                gd,
+            )
         } else {
             let width = params.width.unwrap_or(80);
             let height = params.height.unwrap_or(40);
-            let seed = params.seed;
 
-            // Route micro-tier seeds (seed <= 0xFFFF).
-            if let Some(s) = seed
-                && matches!(seed_code::tier_from_seed(s), seed_code::Tier::Micro)
-            {
-                Box::new(MicroGameStateAdapter::new(s as u16))
+            if let Some(s) = params.seed {
+                if !matches!(seed_code::tier_from_seed(s), seed_code::Tier::Micro)
+                    && (width < 20 || height < 15)
+                {
+                    return Err(McpError::invalid_params(
+                        "Map must be at least 20x15 tiles",
+                        None,
+                    ));
+                }
+                game_step::create_game(s, width, height, None, gd)
             } else {
                 if width < 20 || height < 15 {
                     return Err(McpError::invalid_params(
@@ -196,12 +192,7 @@ impl RoguelikeMcpServer {
                         None,
                     ));
                 }
-                let mut state = match seed {
-                    Some(seed) => GameState::with_data(width, height, seed, gd),
-                    None => GameState::new_with_data(width, height, gd),
-                };
-                state.update_fov();
-                Box::new(state)
+                game_step::create_random_game(width, height, gd)
             }
         };
 

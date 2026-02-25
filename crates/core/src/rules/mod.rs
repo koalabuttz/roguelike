@@ -11,3 +11,4 @@ pub mod direction;
 pub mod items;
 pub mod message;
 pub mod monster_table;
+pub mod seed_code;

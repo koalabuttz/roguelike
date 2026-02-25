@@ -1,5 +1,8 @@
 use crate::map::MapPreset;
+use crate::rules::seed_code as rules_seed;
 use crate::types::Coord;
+
+pub use rules_seed::{SeedDecodeError, Tier, tier_from_seed};
 
 /// All the parameters needed to recreate a game from a seed code.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,38 +15,20 @@ pub struct SeedParams {
 
 const DEFAULT_WIDTH: Coord = 80;
 const DEFAULT_HEIGHT: Coord = 40;
-const BASE36_CHARS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 
-fn encode_base36(mut n: u64) -> String {
-    if n == 0 {
-        return "0".to_string();
-    }
-    let mut digits = Vec::new();
-    while n > 0 {
-        digits.push(BASE36_CHARS[(n % 36) as usize]);
-        n /= 36;
-    }
-    digits.reverse();
-    String::from_utf8(digits).unwrap()
+fn encode_base36(n: u64) -> String {
+    let mut buf = [0u8; rules_seed::MAX_BASE36_LEN];
+    let len = rules_seed::encode_to_buf(n, &mut buf);
+    // SAFETY: encode_to_buf only writes ASCII base36 chars.
+    unsafe { String::from_utf8_unchecked(buf[..len].to_vec()) }
 }
 
 fn decode_base36(s: &str) -> Result<u64, String> {
-    if s.is_empty() {
-        return Err("Empty seed value".to_string());
-    }
-    let mut result: u64 = 0;
-    for ch in s.chars() {
-        let digit = match ch {
-            '0'..='9' => (ch as u64) - ('0' as u64),
-            'a'..='z' => (ch as u64) - ('a' as u64) + 10,
-            _ => return Err(format!("Invalid character in seed: '{ch}'")),
-        };
-        result = result
-            .checked_mul(36)
-            .and_then(|r| r.checked_add(digit))
-            .ok_or_else(|| "Seed value too large".to_string())?;
-    }
-    Ok(result)
+    rules_seed::decode_from_bytes(s.as_bytes()).map_err(|e| match e {
+        SeedDecodeError::Empty => "Empty seed value".to_string(),
+        SeedDecodeError::InvalidChar(b) => format!("Invalid character in seed: '{}'", b as char),
+        SeedDecodeError::Overflow => "Seed value too large".to_string(),
+    })
 }
 
 fn preset_to_char(preset: MapPreset) -> char {

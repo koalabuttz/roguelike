@@ -32,7 +32,7 @@ pub struct PlayerDef {
 }
 
 /// Defines a type of monster — all stats, appearance, AI, and spawn weight.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MonsterDef {
     pub name: String,
     pub glyph: String,

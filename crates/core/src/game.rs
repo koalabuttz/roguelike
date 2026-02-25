@@ -382,8 +382,8 @@ pub struct GameState {
     /// Total wandering monsters spawned this game (for analytics).
     #[serde(default)]
     pub wandering_spawned: Stat,
-    /// Monster spawn table for wandering spawns (rebuilt on load).
-    #[serde(skip)]
+    /// Monster spawn table for wandering spawns.
+    #[serde(default)]
     pub wandering_spawn_table: Vec<data::MonsterDef>,
     /// Items lying on the ground.
     #[serde(default)]
@@ -621,8 +621,9 @@ impl GameState {
         let mut state: Self = serde_json::from_str(json)?;
         state.map.compute_structural_walls();
         state.update_fov();
+        // Old saves lack the wandering_spawn_table field; fall back to defaults.
         #[cfg(feature = "data-files")]
-        {
+        if state.wandering_spawn_table.is_empty() {
             state.wandering_spawn_table = data::defaults().monsters.clone();
         }
         Ok(state)

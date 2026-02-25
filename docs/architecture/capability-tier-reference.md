@@ -43,7 +43,7 @@ roguelike/
           damage.rs   # const fn damage(), effective_attack(), effective_defense()
           items.rs    # item type IDs, stat lookup tables (heal amount, ATK/DEF bonus,
                       #   enchantment limits, permanent consumable bonuses)
-          seed_code.rs # no_std encode_to_buf()/decode_from_bytes() + std String wrappers
+          seed_code.rs # no_std encode_to_buf()/decode_from_bytes(), Tier enum, tier_from_seed()
           monster_table.rs # MonsterKind enum, stat lookup by kind
           message.rs  # GameEvent enum — structured message events (Copy, no_std)
         command.rs    # GameCommand with Direction enum — no Coord dependency, no_std
@@ -389,7 +389,7 @@ the `std` feature. The C64 uses `default-features = false` and only accesses
 | **Mood thresholds** | All | **Rules** | `core/rules/balance.rs` | Mood trigger values, decay rate, flee/enrage thresholds |
 | **Monster table** | All | **Rules** | `core/rules/monster_table.rs` | `MonsterKind` enum, stat lookup by kind |
 | **GameEvent messages** | All | **Rules** | `core/rules/message.rs` | `GameEvent` enum — structured, `Copy`, `no_std` |
-| **Seed codes** | All | **Rules** | `core/rules/seed_code.rs` | `no_std` `encode_to_buf()`/`decode_from_bytes()` + `std` String wrappers; tier detected by numeric value |
+| **Seed codes** | All | **Rules** | `core/rules/seed_code.rs` | `no_std` `encode_to_buf()`/`decode_from_bytes()`, `Tier` enum; `core/seed_code.rs` has std `SeedParams`/format parsing |
 | **Direction** | All | **Rules** | `core/rules/direction.rs` | `Direction` enum in `GameCommand::Move(Direction)` — `no_std` |
 | **GameStep trait** | std | **Cross-tier** | `core/game_step.rs` | `#[cfg(feature = "std")]` — uniform interface for FrameSink/MCP/TUI |
 | **Entity system** | Per-tier | Per-tier | `core/tier_*/entity.rs` | micro: 16-entry fixed array; compact: stubs; standard: `Vec<Entity>` |

@@ -78,8 +78,8 @@ jobs:
             --user "$(id -u):$(id -g)" \
             -e CARGO_HOME=/tmp/cargo \
             -e PATH=/usr/local/rust-mos/bin:/usr/local/bin:/usr/bin:/bin \
-            -v "${{ github.workspace }}/crates/c64:/work" \
-            -w /work \
+            -v "${{ github.workspace }}:/repo" \
+            -w /repo/crates/c64 \
             mrkits/rust-mos:13f2838f9-334fc98-8f3a80f8 \
             cargo build --release
       - name: Rename binary

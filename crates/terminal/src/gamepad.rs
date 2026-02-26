@@ -755,7 +755,8 @@ mod inner {
                         return Some(cmd);
                     }
 
-                    if let Some((_, dy)) = check_hid_stick(&report, &mut self.stick_engaged) {
+                    if let Some(dir) = check_hid_stick(&report, &mut self.stick_engaged) {
+                        let (_, dy) = dir.to_offset();
                         if dy < 0 {
                             return Some(MenuCommand::Up);
                         }
@@ -890,7 +891,8 @@ mod inner {
                         return Some(cmd);
                     }
 
-                    if let Some((_, dy)) = check_hid_stick(&report, &mut self.stick_engaged) {
+                    if let Some(dir) = check_hid_stick(&report, &mut self.stick_engaged) {
+                        let (_, dy) = dir.to_offset();
                         if dy < 0 {
                             return Some(HistoryCommand::Menu(MenuCommand::Up));
                         }

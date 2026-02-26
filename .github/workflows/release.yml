@@ -60,9 +60,42 @@ jobs:
           name: binaries-${{ matrix.os_label }}-${{ matrix.arch_label }}
           path: dist/*
 
+  build-c64:
+    name: Build (C64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build C64 PRG via rust-mos Docker
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e CARGO_HOME=/tmp/cargo \
+            -e PATH=/usr/local/rust-mos/bin:/usr/local/bin:/usr/bin:/bin \
+            -v "${{ github.workspace }}:/repo" \
+            -w /repo/crates/c64 \
+            mrkits/rust-mos:13f2838f9-334fc98-8f3a80f8 \
+            cargo build --release
+      - name: Rename binary
+        run: |
+          mkdir -p dist
+          cp crates/c64/target/mos-c64-none/release/roguelike-c64 dist/roguelike-c64.prg
+      - name: Size check
+        run: |
+          SIZE=$(stat -c%s dist/roguelike-c64.prg)
+          echo "PRG size: $SIZE bytes"
+          if [ "$SIZE" -gt 16384 ]; then
+            echo "::warning::C64 PRG exceeds 16 KB budget ($SIZE bytes)"
+          else
+            echo "OK: Within 16 KB budget"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-c64
+          path: dist/*
+
   release:
     name: Create Release
-    needs: build
+    needs: [build, build-c64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -92,6 +125,7 @@ jobs:
             | `roguelike-ssh-*` | SSH server for multiplayer |
             | `mcp_server-*` | MCP server for LLM play |
             | `headless-*` | Automated playtesting runner |
+            | `roguelike-c64.prg` | Commodore 64 PRG (VICE / real hardware) |
 
             Verify: `sha256sum -c SHA256SUMS.txt`
           files: artifacts/*

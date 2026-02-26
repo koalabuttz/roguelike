@@ -5,7 +5,8 @@
 
 use crate::rules::message::GameEvent;
 
-const MSG_COUNT: usize = 8;
+/// Circular buffer capacity — number of recent events stored.
+pub const MSG_COUNT: usize = 8;
 
 pub struct MicroMessageLog {
     events: [Option<GameEvent>; MSG_COUNT],

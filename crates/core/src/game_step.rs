@@ -203,9 +203,12 @@ impl GameStep for MicroGameStateAdapter {
         let result = self.game.step(cmd);
 
         // Collect new messages by diffing the wrapping total counter.
-        // Cap to 8 (circular buffer capacity) to avoid stale re-reads.
+        // Cap to buffer capacity to avoid stale re-reads.
+        use crate::tier_micro::msglog::MSG_COUNT;
         let new_count = self.game.log.total();
-        let added = new_count.wrapping_sub(msg_count_before).min(8) as u8;
+        let added = new_count
+            .wrapping_sub(msg_count_before)
+            .min(MSG_COUNT as u16) as u8;
         let new_messages: Vec<String> = (0..added)
             .filter_map(|i| self.game.log.recent(added - 1 - i).map(format_event))
             .collect();
@@ -631,8 +634,9 @@ fn build_micro_visible_entities(
 
 fn build_micro_recent_messages(log: &crate::tier_micro::msglog::MicroMessageLog) -> Vec<String> {
     let mut messages = Vec::new();
-    // Collect up to 8 recent messages (oldest first).
-    for i in (0..8u8).rev() {
+    // Collect up to MSG_COUNT recent messages (oldest first).
+    use crate::tier_micro::msglog::MSG_COUNT;
+    for i in (0..MSG_COUNT as u8).rev() {
         if let Some(event) = log.recent(i) {
             messages.push(format_event(event));
         }

@@ -318,8 +318,9 @@ impl RenderSource for MicroGameStateAdapter {
     }
 
     fn recent_messages(&self, n: usize) -> Vec<String> {
+        use roguelike_core::tier_micro::msglog::MSG_COUNT;
         let mut messages = Vec::new();
-        for i in (0..8u8).rev() {
+        for i in (0..MSG_COUNT as u8).rev() {
             if let Some(event) = self.game.log.recent(i) {
                 messages.push(format_event(event));
             }

@@ -539,6 +539,8 @@ pub fn render_observation<W: Write>(
     }
 
     // Status bar — 1 row above message log.
+    // Clamp msg_lines so the status bar never goes above the map.
+    let msg_lines = msg_lines.min(screen_height.saturating_sub(2));
     let bar_row = (screen_height - 1 - msg_lines) as u16;
     let status = format!(
         " HP {}/{} | ATK:{} DEF:{} | Turn {} | Kills {} | Seed: {}",

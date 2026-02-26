@@ -177,14 +177,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                 app_state = AppState::Playing;
                             }
                             Err(msg) => {
-                                let mut err_menu = menu::confirm_menu(&format!("Error: {msg}"));
-                                err_menu.selected = 0;
-                                err_menu.items = vec![menu::MenuItem {
-                                    label: "OK".to_string(),
-                                    action: MenuAction::Back,
-                                    enabled: true,
-                                }];
-                                let _ = run_menu(&mut err_menu, renderer, input)?;
+                                run_error_dialog(&msg, renderer, input)?;
                                 let has_save = saves.has_save_for_title(settings.casual_mode);
                                 app_state = AppState::Title(menu::title_menu(
                                     has_save,
@@ -217,15 +210,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                             app_state = AppState::Playing;
                                         }
                                         Err(msg) => {
-                                            let mut err_menu =
-                                                menu::confirm_menu(&format!("Error: {msg}"));
-                                            err_menu.selected = 0;
-                                            err_menu.items = vec![menu::MenuItem {
-                                                label: "OK".to_string(),
-                                                action: MenuAction::Back,
-                                                enabled: true,
-                                            }];
-                                            let _ = run_menu(&mut err_menu, renderer, input)?;
+                                            run_error_dialog(&msg, renderer, input)?;
                                             let has_save =
                                                 saves.has_save_for_title(settings.casual_mode);
                                             app_state = AppState::Title(menu::title_menu(
@@ -237,14 +222,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                     }
                                 }
                                 Err(msg) => {
-                                    let mut err_menu = menu::confirm_menu(&format!("Error: {msg}"));
-                                    err_menu.selected = 0;
-                                    err_menu.items = vec![menu::MenuItem {
-                                        label: "OK".to_string(),
-                                        action: MenuAction::Back,
-                                        enabled: true,
-                                    }];
-                                    let _ = run_menu(&mut err_menu, renderer, input)?;
+                                    run_error_dialog(&msg, renderer, input)?;
                                     let has_save = saves.has_save_for_title(settings.casual_mode);
                                     app_state = AppState::Title(menu::title_menu(
                                         has_save,
@@ -560,6 +538,23 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
 // ---------------------------------------------------------------------------
 // Sub-loop helpers
 // ---------------------------------------------------------------------------
+
+/// Show a single-button "Error: {msg}" dialog and wait for the user to dismiss it.
+fn run_error_dialog<W: Write>(
+    msg: &str,
+    renderer: &mut CrosstermRenderer<W>,
+    input: &mut dyn InputProvider,
+) -> io::Result<()> {
+    let mut err_menu = menu::confirm_menu(&format!("Error: {msg}"));
+    err_menu.selected = 0;
+    err_menu.items = vec![menu::MenuItem {
+        label: "OK".to_string(),
+        action: MenuAction::Back,
+        enabled: true,
+    }];
+    let _ = run_menu(&mut err_menu, renderer, input)?;
+    Ok(())
+}
 
 /// Run a menu loop. Returns `None` if the input was disconnected.
 fn run_menu<W: Write>(

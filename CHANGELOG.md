@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add item system to roguelike (#2)
 
 ### Fixed
+- Extract run_error_dialog helper to deduplicate factory failure menus (#39)
+- Clamp msg_lines in render_observation to prevent underflow (#38)
 - Wandering spawn table lost on save/load (#18)
 - Fix equipment stats not applied during monster attacks (#12)
 

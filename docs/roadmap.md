@@ -12,10 +12,7 @@ Detailed breakdown of the [roadmap](../README.md#roadmap) with prioritization ba
 
 These items block the most downstream work or are essential for the game to function.
 
-| Item | Blocks | Impact | Effort | Notes |
-|------|--------|--------|--------|-------|
-| Items | ~4 items | High | M-L | Most blocking feature. Unlocks inventory UI, hunger (food is an item), equipment, consumables. [Implementation plan.](design/gameplay-implementation-plan.md#phase-2-items--inventory) |
-| Stairs | ~3 items | High | M | Transforms single-room arena into a multi-level dungeon. Win condition. [Implementation plan.](design/gameplay-implementation-plan.md#phase-3-stairs--multi-level-dungeons) |
+All Tier 1 prerequisites are **complete**. See [Completed](#completed) section.
 
 ## Tier 2: Core Systems
 
@@ -89,9 +86,9 @@ Gameplay branch (current focus):
   Save/load ✓
     → Menus ✓
     → Wandering monsters ✓
-      → Items
-        → Stairs + Hunger
-          → Item-based progression
+      → Items ✓
+        → Stairs ✓
+          → Item-based progression               ← NEXT
             = Complete game loop
 
 Platform/identity branch (deferred until gameplay branch completes):
@@ -115,8 +112,8 @@ Other completed branches:
   A* pathfinding ✓ → MCP pathfind_to ✓, Auto-explore ✓, MCP exploration graph ✓
 ```
 
-The foundation is complete. The **immediate priority is the gameplay branch**:
-Items → Stairs → Item-based progression. This completes the core game loop. See the
+Items and stairs are complete. The **immediate priority is Item-based progression**
+(Phase 4), the final piece of the core game loop. See the
 [gameplay implementation plan](design/gameplay-implementation-plan.md) for
 detailed designs and playtest gates for each phase.
 
@@ -139,6 +136,8 @@ Items that have been implemented, organized by original tier.
 | Save/load | Serde serialization, classic/casual modes, 5 save slots in casual. |
 | Message history | Ctrl+P, scrollable, gamepad LB/RB page up/down. |
 | Code of Conduct | One file. |
+| Items | Items on the ground, inventory, equipment (weapons/armor), consumables (potions, scrolls). Data-driven via `[[items]]` in `game.toml`. MCP support (pickup, use_item, equip actions). |
+| Stairs | Multi-level dungeons, `>` stairs, depth scaling, win condition at target depth. Descend preserves player stats/inventory. |
 
 ### Tier 2
 
@@ -179,6 +178,9 @@ Items that have been implemented, organized by original tier.
 | Parameter sweeps | Sweep across player stats (HP, ATK, DEF) to find balance boundaries; JSON config, structured output. |
 | LLM playtesting | Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; dual backends, parallel execution, token optimization. [Docs.](tooling/llm-playtesting.md) |
 | CI balance check | GitHub Actions workflow runs headless presets on every gameplay change, diffs against cached baseline, posts verdict to workflow summary and PR comments. |
+| Capability tier system | `rules/` module (no_std pure game rules), `tier_micro/` (complete C64 game engine), `tier_compact/` stubs (GBA, deferred), `GameStep` trait (cross-tier interface), `RenderSource` trait (unified rendering), standard-tier code gated behind `std` feature. |
+| C64 thin frontend | C64 crate rewritten as thin frontend over `roguelike-core::tier_micro` + `roguelike-core::rules` (14.9 KB binary). |
+| Viewport scrolling | Player-centered viewport for maps larger than terminal, universal across tiers. |
 
 ### Tier 4
 

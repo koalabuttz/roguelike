@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add Tile::to_kind() and use MICRO_LOG_CAPACITY constant (#44)
 - Unify render() across tiers via RenderSource trait (#41)
 - Rewrite C64 crate as thin frontend over roguelike-core (#42)
 - Add viewport scrolling to render_observation for maps larger than terminal (#40)

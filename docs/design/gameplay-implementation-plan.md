@@ -22,9 +22,9 @@ Four phases, each addressing one playtest finding. Independently shippable. Sequ
 | Phase | Feature | Effort | Addresses | Status |
 |-------|---------|--------|-----------|--------|
 | 1 | [Wandering monsters](#phase-1-wandering-monsters) | S | Problem #2: Regen too generous | **Complete** |
-| 2 | [Items & inventory](#phase-2-items--inventory) | M-L | Problem #3: Combat is solved arithmetic | Next |
-| 3 | [Stairs / multi-level dungeons](#phase-3-stairs--multi-level-dungeons) | M | Problem #1: No win condition | — |
-| 4 | [Item-based progression](#phase-4-item-based-progression) | M | Problem #4: No progression | — |
+| 2 | [Items & inventory](#phase-2-items--inventory) | M-L | Problem #3: Combat is solved arithmetic | **Complete** |
+| 3 | [Stairs / multi-level dungeons](#phase-3-stairs--multi-level-dungeons) | M | Problem #1: No win condition | **Complete** |
+| 4 | [Item-based progression](#phase-4-item-based-progression) | M | Problem #4: No progression | Next |
 
 Phase 4 benefits from Phase 3 (deeper floors drop better gear) but is not strictly blocked by it. Items is ordered before stairs because it blocks ~4 downstream features (the most of any item on the roadmap) and combines with wandering monsters to create a resource economy.
 
@@ -57,11 +57,11 @@ Playtest gate validation is pending — run LLM playtest sessions to measure sur
 
 ---
 
-## Phase 2: Items & Inventory
+## Phase 2: Items & Inventory ✓
 
-**The most blocking feature on the roadmap — unlocks ~4 downstream features.**
+**Complete.** Implemented with `item.rs` (ItemKind, Item, Equipment), data-driven `[[items]]` in `game.toml`, floor items (`HashMap<Pos, Vec<Item>>`), fixed-size inventory, equipment slots (weapon/armor), effective ATK/DEF from equipment, item spawning per room, MCP actions (pickup, use_item, equip), look mode item display, spectate frame item rendering, and comprehensive unit + scenario tests. Golden replays regenerated.
 
-### Design
+### Design (reference)
 
 Items on the ground, a fixed-size inventory, and three item categories: consumables (potions), equipment (weapons/armor), and scrolls. This creates the resource management layer that transforms combat from solved arithmetic into meaningful decisions.
 
@@ -219,11 +219,11 @@ If LLMs play identically with and without items, the item effects need to be str
 
 ---
 
-## Phase 3: Stairs / Multi-Level Dungeons
+## Phase 3: Stairs / Multi-Level Dungeons ✓
 
-**Addresses the #1 playtest complaint: no win condition.**
+**Complete.** Implemented with `StairsDown`/`StairsUp` tile variants, `depth`/`max_depth` on GameState, `descend()` method (derives new seed from `original_seed + depth`), depth-based monster stat scaling, `min_depth` on monster definitions, `target_depth` win condition, `game_won` flag, `Descend` GameCommand, MCP `descend` action, and depth/floor info in observations. Player stats, inventory, and equipment preserved across floors. Golden replays regenerated.
 
-### Design
+### Design (reference)
 
 Add descending stairs (`>`) to each floor. Entering stairs generates a new, harder floor. The game ends when the player dies or reaches a target depth (or plays indefinitely in endless mode).
 
@@ -681,19 +681,17 @@ Part 1: Core Loop Completion
 ──────────────────────────────────────────────
 
 Phase 1: Wandering Monsters (S) ✓
-    Complete. Playtest gate validation pending.
+    Complete.
 
-Phase 2: Items & Inventory (M-L)          ← NEXT
-    Most blocking feature. Creates resource decisions.
-    Combined with Phase 1, transforms the resource economy.
-    Ship → playtest gate → validate.
+Phase 2: Items & Inventory (M-L) ✓
+    Complete. Items on ground, inventory, equipment,
+    consumables, scrolls. Data-driven via game.toml.
 
-Phase 3: Stairs / Multi-Level Dungeons (M)
-    Win condition. More interesting with items (carry loot
-    between floors, depth-gated items).
-    Ship → playtest gate → validate.
+Phase 3: Stairs / Multi-Level Dungeons (M) ✓
+    Complete. Win condition, depth scaling, min_depth
+    on monsters. Player preserves stats/inventory across floors.
 
-Phase 4: Item-Based Progression (M)
+Phase 4: Item-Based Progression (M)          ← NEXT
     Expands item system: enchantment scrolls, permanent
     consumables, depth-gated gear. Benefits from stairs
     (deeper floors = better equipment).

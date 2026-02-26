@@ -41,11 +41,13 @@ roguelike/
                       #   item stats, enchantment caps, depth scaling, wandering spawn
                       #   config, mood thresholds (see gameplay-implementation-plan.md)
           damage.rs   # const fn damage(), effective_attack(), effective_defense()
-          items.rs    # item type IDs, stat lookup tables (heal amount, ATK/DEF bonus,
+          items.rs    # ItemKind enum, stat lookup tables (heal amount, ATK/DEF bonus,
                       #   enchantment limits, permanent consumable bonuses)
           seed_code.rs # no_std encode_to_buf()/decode_from_bytes(), Tier enum, tier_from_seed()
           monster_table.rs # MonsterKind enum, stat lookup by kind
           message.rs  # GameEvent enum — structured message events (Copy, no_std)
+          tiles.rs    # TileKind enum, pure tile display definitions (glyph, color)
+          color.rs    # GameColor enum (#[repr(u8)]), palette management
         command.rs    # GameCommand with Direction enum — no Coord dependency, no_std
         tier_micro/   # u8 types, LFSR-16, Bresenham FOV, fixed arrays — no_std
           mod.rs
@@ -56,13 +58,15 @@ roguelike/
           map.rs      # generate() on fixed-size tile arrays (64×48)
           fov.rs      # Bresenham FOV → bitfield
           ai.rs       # monster AI (micro tier)
-          spawn.rs    # micro-tier spawn: applies SpawnDirectives to fixed arrays
-          message.rs  # GameEvent → PETSCII-friendly string formatting
+          spawn.rs    # micro-tier spawn: weighted monster spawning to fixed arrays
+          msglog.rs   # Circular buffer for GameEvent values (no string formatting)
         tier_compact/ # Stubs only until GBA port begins — no_std
           mod.rs
           types.rs    # Coord = i16, Stat = u8
           prng.rs     # LfsrRng32 — 32-bit Galois LFSR (minimal)
-        game_step.rs  # #[cfg(feature = "std")] trait GameStep — cross-tier interface
+        game_step.rs  # #[cfg(feature = "std")] trait GameStep — cross-tier interface;
+                      #   MicroGameStateAdapter wraps MicroGameState (u8→i32 widening);
+                      #   create_game() factory routes micro seeds to adapter, std seeds to GameState
         # --- tier standard (top-level modules): i32 types, ChaCha, Vec — std ---
         types.rs      # Coord = i32, Stat = i32
         entity.rs     # Vec<Entity> (512-1024 entities)
@@ -76,22 +80,24 @@ roguelike/
 
 ```toml
 # crates/core/Cargo.toml (tier system)
-# Tier micro is always compiled (no feature gate).
+# Tier micro and rules are always compiled (no feature gate).
 # Standard-tier code is gated behind `std`.
 [package]
 name = "roguelike-core"
-version = "0.4.0"
-edition = "2021"
+version = "0.3.0"
+edition = "2024"
 
 [features]
-default = ["std", "data-files"]
-std = ["serde", "serde_json", "rand"]
-data-files = ["std", "toml"]
+default = ["dev-tools", "data-files", "serde", "std"]
+std = ["dep:rand", "serde"]
+serde = ["dep:serde", "dep:serde_json"]
+data-files = ["dep:toml", "std"]
+dev-tools = ["std"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
-rand = { version = "0.8", optional = true }
+rand = { version = "0.9", optional = true }
 toml = { version = "0.8", optional = true }
 ```
 
@@ -203,8 +209,8 @@ abstractions that genuinely improve 6502 code generation — see the
 
 On PC/Vita, `LfsrRng` is used when playing a micro-tier seed (short seed codes
 that are compatible with all platforms). Standard-tier seeds use ChaCha20 via
-`StdRng`. The seed code encodes the tier via its length — seed decode
-determines which tier to instantiate.
+`StdRng`. The seed's numeric value determines the tier (`seed <= 0xFFFF` →
+micro) — seed decode determines which tier to instantiate.
 
 ### 1.3 Tier Micro Map Generation
 
@@ -289,28 +295,34 @@ their own `map::generate()` with wider coordinate types and larger map sizes.
 
 ### 1.4 Platform Usage Patterns
 
-**C64 — uses `tier_micro` directly:**
+**C64 — thin frontend over `tier_micro` + `rules`:**
 
 ```rust
-// c64/src/main.rs
-use roguelike_core::tier_micro::*;
+// c64/src/main.rs (simplified)
+use roguelike_core::tier_micro::game::MicroGameState;
+use roguelike_core::command::GameCommand;
+
+static mut STATE: MaybeUninit<MicroGameState> = MaybeUninit::uninit();
 
 fn main() {
     // Hardware init...
     let seed = get_seed_from_user();
-    let mut state = MicroGameState::new(seed);
+    unsafe { STATE.write(MicroGameState::new(seed)); }
 
     loop {
-        render_viewport(&state);  // C64-specific VIC-II rendering
-        let cmd = read_input();   // C64-specific Kernal/CIA input
-        state.step(cmd);          // Tier micro game logic
+        render_viewport(unsafe { STATE.assume_init_ref() });  // C64-specific VIC-II rendering
+        let cmd = read_input();   // Returns GameCommand/Direction from core
+        unsafe { STATE.assume_init_mut() }.step(cmd);         // Tier micro game logic from core
     }
 }
 ```
 
-With llvm-mos's static stack allocation + LTO, `state` (a local in
-non-recursive `main()`) gets a fixed static address — field access uses
-absolute addressing, the same machine code quality as `static mut`.
+The C64 crate is a thin frontend (~400 lines, 14.9 KB `.PRG`) — all game logic
+comes from `roguelike-core::tier_micro` and `roguelike-core::rules`. Only input
+handling (`input.rs`), rendering (`render.rs` — viewport scrolling,
+GameColor→C64 color mapping, GameEvent→PETSCII formatting), and the main loop
+are C64-specific. With llvm-mos's static stack allocation + LTO, `state` gets a
+fixed static address — field access uses absolute addressing.
 
 **GBA — uses `tier_compact`:**
 
@@ -379,8 +391,8 @@ the `std` feature. The C64 uses `default-features = false` and only accesses
 | **PRNG (ChaCha20)** | standard | Per-tier | `rand` crate (std) | `StdRng` — cryptographic PRNG |
 | **Map generation** | Per-tier | Per-tier | `core/tier_*/map.rs` | `generate()` — tier-appropriate coord types and map sizes |
 | **Damage formula** | All | **Rules** | `core/rules/damage.rs` | `const fn damage(atk: u8, def: u8) -> u8`, `effective_attack()`, `effective_defense()` |
-| **Spawn directives** | All | **Rules** | `core/rules/` | `pick_monster()` returns `SpawnDirective`; each tier applies to its own state |
-| **Spawn mechanics** | Per-tier | Per-tier | `core/tier_*/spawn.rs`, `core/spawn.rs` | Applies `SpawnDirective` to tier-specific entity storage |
+| **Spawn directives** | All | **Rules** (planned) | `core/rules/` | Planned: `pick_monster()` returns `SpawnDirective`; each tier applies to its own state. Currently spawn logic is per-tier. |
+| **Spawn mechanics** | Per-tier | Per-tier | `core/tier_*/spawn.rs`, `core/spawn.rs` | Per-tier spawn implementation |
 | **Balance constants** | All | **Rules** | `core/rules/balance.rs` | All HP/ATK/DEF/sight/spawn_weight/regen values |
 | **Item definitions** | All | **Rules** | `core/rules/items.rs` | Item type IDs, stat lookup tables (heal amount, ATK/DEF bonus, spawn weights) |
 | **Enchantment config** | All | **Rules** | `core/rules/items.rs` | Max enchant level, enchantment stat bonus per level |
@@ -391,7 +403,10 @@ the `std` feature. The C64 uses `default-features = false` and only accesses
 | **GameEvent messages** | All | **Rules** | `core/rules/message.rs` | `GameEvent` enum — structured, `Copy`, `no_std` |
 | **Seed codes** | All | **Rules** | `core/rules/seed_code.rs` | `no_std` `encode_to_buf()`/`decode_from_bytes()`, `Tier` enum; `core/seed_code.rs` has std `SeedParams`/format parsing |
 | **Direction** | All | **Rules** | `core/rules/direction.rs` | `Direction` enum in `GameCommand::Move(Direction)` — `no_std` |
-| **GameStep trait** | std | **Cross-tier** | `core/game_step.rs` | `#[cfg(feature = "std")]` — uniform interface for FrameSink/MCP/TUI |
+| **Tile display** | All | **Rules** | `core/rules/tiles.rs` | `TileKind` enum, pure glyph/color lookups shared across tiers |
+| **Color system** | All | **Rules** | `core/rules/color.rs` | `GameColor` enum (`#[repr(u8)]`), palette management |
+| **GameStep trait** | std | **Cross-tier** | `core/game_step.rs` | `#[cfg(feature = "std")]` — uniform interface for FrameSink/MCP/TUI; `MicroGameStateAdapter` wraps micro tier |
+| **RenderSource trait** | std | **Cross-tier** | `tui/render_source.rs` | Unified rendering: per-tile, entity, item, and status queries; implemented for both GameState and MicroGameStateAdapter |
 | **Entity system** | Per-tier | Per-tier | `core/tier_*/entity.rs` | micro: 16-entry fixed array; compact: stubs; standard: `Vec<Entity>` |
 | **AI** | Per-tier | Per-tier | `core/tier_*/ai.rs`, `core/ai.rs` | Chase, wander, mood logic — same algorithms, tier-appropriate types |
 | **Game state** | Per-tier | Per-tier | `core/tier_*/game.rs` | `MicroGameState` / `CompactGameState` (stub) / `GameState` |
@@ -440,26 +455,21 @@ added later.
 
 ### 1.7 Item Definitions
 
-**Target file:** `crates/core/src/rules/items.rs`
+**File:** `crates/core/src/rules/items.rs`
 
-Core's items module defines item type IDs and stat lookup tables as `const fn`
-functions — shared across all tiers. The C64 and PC use these directly; no
-platform-specific item logic is needed.
+Core's items module defines the `ItemKind` enum and stat lookup tables as
+`const fn` functions — shared across all tiers. The standard tier's `item.rs`
+builds on these for the full item system (inventory, floor items, equipment).
 
-Item type IDs (all `u8` constants): `ITEM_NONE` (`0`), `ITEM_HEALING_POTION`
-(`1`), `ITEM_STRENGTH_POTION` (`2`), `ITEM_SHORT_SWORD` (`3`),
-`ITEM_LONG_SWORD` (`4`), `ITEM_LEATHER_ARMOR` (`5`), `ITEM_SCROLL_MAPPING`
-(`6`).
-
-Lookup functions (all `const fn`):
-- `heal_amount(item_type: u8) -> u8` — healing potion: `10`; others: `0`
-- `atk_bonus(item_type: u8) -> u8` — short sword: `+2`, long sword: `+4`; others: `0`
-- `def_bonus(item_type: u8) -> u8` — leather armor: `+2`; others: `0`
+The `ItemKind` enum and pure lookup functions (glyph, color, stat bonuses)
+are `no_std` compatible. The standard tier adds `Item` struct, `Equipment`,
+and `EquipSlot` types for the full inventory and equipment system
+(`crates/core/src/item.rs`, gated behind `std`).
 
 The `effective_attack()` and `effective_defense()` helpers in
-`roguelike_core::rules::damage` take base stats plus equipment type IDs and
-return the effective values — used by both platforms directly. Item spawn
-weights and `min_depth` thresholds also live in this module.
+`roguelike_core::rules::damage` take base stats plus equipment bonuses and
+return the effective values. Item spawn weights and `min_depth` thresholds
+are data-driven via `[[items]]` entries in `game.toml`.
 
 ### 1.8 Type Sizing by Capability Tier
 

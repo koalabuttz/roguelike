@@ -24,16 +24,26 @@ roguelike/
 │   ├── core/               roguelike-core: game logic, zero platform deps
 │   │   ├── Cargo.toml
 │   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── command.rs  ← GameCommand enum (platform-independent)
-│   │       ├── types.rs    ← Coord, Stat, Pos + GameColor
+│   │       ├── lib.rs      ← #![cfg_attr(not(feature = "std"), no_std)]
+│   │       ├── rules/      ← Pure game rules (no_std, always compiled)
+│   │       │   ├── balance.rs, damage.rs, items.rs, monster_table.rs
+│   │       │   ├── message.rs, direction.rs, seed_code.rs
+│   │       │   └── tiles.rs, color.rs
+│   │       ├── tier_micro/  ← Complete micro-tier game engine (no_std)
+│   │       │   ├── game.rs, map.rs, entity.rs, fov.rs, ai.rs
+│   │       │   ├── combat.rs, spawn.rs, prng.rs, msglog.rs, types.rs
+│   │       ├── tier_compact/ ← GBA tier stubs (types.rs, prng.rs)
+│   │       ├── game_step.rs ← GameStep trait, MicroGameStateAdapter, create_game()
+│   │       ├── command.rs  ← GameCommand enum (Move(Direction), Pickup, etc.)
+│   │       ├── types.rs    ← Coord = i32, Stat = i32, Pos (standard tier)
 │   │       ├── game.rs, map.rs, combat.rs, ai.rs, fov.rs
-│   │       ├── pathfinding.rs, spawn.rs, entity.rs, data.rs
+│   │       ├── item.rs, pathfinding.rs, spawn.rs, entity.rs, data.rs
 │   │       ├── platform.rs ← Renderer, InputSource traits
 │   │       ├── spectate.rs ← FrameSink trait, NullFrameSink, render_frame()
+│   │       ├── exploration_graph.rs ← Graph-based exploration tracking
 │   │       ├── menu.rs, saves.rs, settings.rs
 │   │       ├── dev_tools.rs, analytics.rs, scenario.rs
-│   │       └── message_log.rs
+│   │       └── message_log.rs, message_history.rs
 │   ├── saves/              roguelike-saves: SaveBackend trait (connected platforms)
 │   │   ├── Cargo.toml      depends on core only
 │   │   └── src/
@@ -41,8 +51,9 @@ roguelike/
 │   ├── tui/                roguelike-tui: shared terminal rendering + game loop
 │   │   ├── Cargo.toml      depends on core + saves + crossterm
 │   │   └── src/
-│   │       ├── game_loop.rs (unified game loop for terminal + SSH)
-│   │       ├── render.rs    (CrosstermRenderer, color palette mapping)
+│   │       ├── game_loop.rs (unified game loop, uses dyn GameStep)
+│   │       ├── render.rs    (CrosstermRenderer, uses dyn RenderSource)
+│   │       ├── render_source.rs (RenderSource trait: GameState + MicroGameStateAdapter impls)
 │   │       ├── input.rs     (key-to-command translation)
 │   │       ├── input_provider.rs (InputProvider trait, InputResult, GameInput)
 │   │       └── saves.rs     (re-exports SaveBackend from roguelike-saves)
@@ -75,9 +86,9 @@ roguelike/
 │   │       ├── main.rs
 │   │       ├── mcp_server.rs
 │   │       └── spectate.rs  (file-based spectator, ROGUELIKE_SPECTATE_PATH)
-│   ├── c64/               roguelike-c64: C64 frontend (no_std, depends on core)
+│   ├── c64/               roguelike-c64: C64 frontend (no_std, thin frontend over core)
 │   │   ├── Cargo.toml      depends on core (default-features = false); builds via rust-mos Docker, not a workspace member
-│   │   └── src/             POC: 1,898 lines, 13 KB .PRG; production will be ~1,200 lines (thin frontend)
+│   │   └── src/             Thin frontend: input, render, main (~400 lines, 14.9 KB .PRG). All game logic from core::tier_micro + core::rules.
 │   ├── libudev-sys-dlopen/ Drop-in libudev-sys replacement via dlopen (not a workspace member)
 │   ├── atproto/            (future: AT Protocol identity + PDS save storage)
 │   ├── web/                (future: WASM browser frontend)
@@ -115,7 +126,7 @@ The **saves** crate defines the `SaveBackend` trait for platforms with enough st
 
 The **tui** crate sits between `core`/`saves` and the terminal-based frontends (`terminal`, `ssh`). It provides the shared game loop, crossterm-based rendering, and the `InputProvider` trait. Both `terminal` and `ssh` implement these traits for their respective I/O mechanisms.
 
-The **c64** crate is a Commodore 64 frontend using [rust-mos](https://github.com/mrk-its/rust-mos) — a fork of the Rust compiler backed by the llvm-mos LLVM backend that compiles `no_std` Rust to MOS 6502 machine code. The POC validates the toolchain (1,898 lines, 13 KB `.PRG`, playable on VICE and c64.emu). See [C64 port proposal](../platforms/c64-port-proposal.md).
+The **c64** crate is a Commodore 64 frontend using [rust-mos](https://github.com/mrk-its/rust-mos) — a fork of the Rust compiler backed by the llvm-mos LLVM backend that compiles `no_std` Rust to MOS 6502 machine code. The crate is a thin frontend (~400 lines, 14.9 KB `.PRG`) that depends on `roguelike-core::tier_micro` and `roguelike-core::rules` for all game logic. Only input handling, rendering (viewport scrolling, GameColor→C64 color mapping, GameEvent→PETSCII formatting), and the main loop are C64-specific. See [C64 port proposal](../platforms/c64-port-proposal.md).
 
 The **libudev-sys-dlopen** crate is a `[patch.crates-io]` replacement for `libudev-sys` that loads `libudev.so.1` via dlopen at runtime instead of linking at build time. This means Linux builds no longer require `libudev-dev` to compile — gamepad support loads when available, keyboard input works regardless.
 
@@ -123,7 +134,7 @@ The **libudev-sys-dlopen** crate is a `[patch.crates-io]` replacement for `libud
 
 Only `tui`, `terminal`, and `ssh` import `crossterm`. Only the `mcp` crate imports `rmcp`/`tokio`. The `core` and `saves` crates have zero platform dependencies.
 
-Type aliases in `crates/core/src/types.rs` centralize platform-sensitive sizing (currently `i32`). The planned [capability tier system](capability-tier-reference.md) will define per-tier types (`u8` for micro, `i16` for compact, `i32` for standard).
+Type aliases are per-tier: `types.rs` has `i32` for standard tier, `tier_micro/types.rs` has `u8`, `tier_compact/types.rs` has `i16`. The [capability tier system](capability-tier-reference.md) defines the full per-tier type hierarchy.
 
 ## What Goes Where
 
@@ -180,17 +191,21 @@ Each frontend maps `GameColor` to its platform color type. The terminal crate's 
 
 Feature flags control which standard-library-dependent code is included:
 
-- **`std`** (default) — enables serde derives, TOML loading, A* pathfinding, ChaCha20
-- **`data-files`** (default, requires `std`) — enables `game.toml` loading
+- **`std`** (default) — gates all standard-tier code (shadowcasting FOV, A* pathfinding, Vec-based collections, ChaCha20 via rand). Also enables serde.
+- **`serde`** (default) — serde serialization/deserialization for save/load
+- **`data-files`** (default, requires `std`) — enables `game.toml` loading via TOML parser
+- **`dev-tools`** (default, requires `std`) — debug console, overlays, analytics, headless runner, replay system
 
 ```toml
 [features]
-default = ["std", "data-files"]
-std = ["serde", "serde_json", "rand"]
-data-files = ["std", "toml"]
+default = ["dev-tools", "data-files", "serde", "std"]
+std = ["dep:rand", "serde"]
+serde = ["dep:serde", "dep:serde_json"]
+data-files = ["dep:toml", "std"]
+dev-tools = ["std"]
 ```
 
-The C64 uses `default-features = false`. The planned [capability tier system](capability-tier-reference.md) will add `no_std`-compatible tier modules alongside these flags.
+The C64 uses `default-features = false` and only accesses `tier_micro` and `rules` — both are always compiled and `no_std` compatible. The `rules/`, `tier_micro/`, and `tier_compact/` modules are always available regardless of feature flags.
 
 ## Development Workflow
 
@@ -202,10 +217,16 @@ All development happens on one branch:
 
 ## Planned Work
 
-- **Capability tier hierarchy** — `no_std` support, per-tier types, shared game rules. See [capability tier reference](capability-tier-reference.md).
-- **Cross-platform seed system** — tier inference from seed value, daily seeds, per-tier leaderboards. See [capability tier reference](capability-tier-reference.md#19-seed-system-and-cross-platform-seeds).
+- **Compact tier full implementation** — `tier_compact/` currently has stubs only (types + PRNG). Full game state, mapgen, entity storage deferred until GBA port begins. See [capability tier reference](capability-tier-reference.md).
+- **SpawnDirective structs** — spawn logic is currently per-tier; planned to produce tier-agnostic directives that each tier applies to its own state.
 - **AT Protocol integration** — Bluesky OAuth login, PDS-based portable saves. See [design doc](../design/atproto.md).
 - **WASM frontend** — browser-based play via `web` crate. See [design doc](../design/atproto.md#wasm-frontend).
+
+## Implemented (formerly planned)
+
+- **Capability tier hierarchy** — `no_std` support, per-tier types, shared `rules/` module, `tier_micro/` complete game engine, `GameStep` cross-tier trait, `RenderSource` unified rendering trait. See [capability tier reference](capability-tier-reference.md).
+- **Cross-platform seed system** — tier inference from seed numeric value (`seed <= 0xFFFF` → micro), base36 encode/decode, MCP seed_code param. See [capability tier reference](capability-tier-reference.md#19-seed-system-and-cross-platform-seeds).
+- **C64 thin frontend** — rewritten from standalone POC to thin frontend over `core::tier_micro` + `core::rules` (14.9 KB binary).
 
 ## Architecture History
 
@@ -220,3 +241,9 @@ Key milestones in the cross-platform architecture:
 - `SaveBackend` extracted to `crates/saves` — depends only on `roguelike-core`. See [atproto design doc](../design/atproto.md#prerequisite-extract-savebackend-to-cratessaves).
 - `FrameSink` and `render_frame()` extracted to core — `crates/core/src/spectate.rs`. See [atproto spectating design doc](../design/atproto-spectating.md#phase-0-extract-render_frame-and-define-framesink).
 - C64 POC validated — rust-mos toolchain, 13 KB `.PRG`, playable on VICE and c64.emu. See [C64 port proposal](../platforms/c64-port-proposal.md).
+- Tier micro ported to core — `tier_micro/` module with complete no_std game engine (MicroGameState, Bresenham FOV, LFSR-16, fixed arrays)
+- Rules module extracted — `rules/` with pure game rules (damage, balance, items, monster_table, GameEvent, Direction, seed_code, tiles, color)
+- Standard-tier code gated behind `std` feature — `#![cfg_attr(not(feature = "std"), no_std)]`
+- GameStep cross-tier trait — `game_step.rs` with MicroGameStateAdapter, create_game() factory
+- RenderSource unified rendering trait — `tui/render_source.rs` eliminates duplicate render code paths
+- C64 rewritten as thin frontend — depends on `core::tier_micro` + `core::rules`, 14.9 KB binary

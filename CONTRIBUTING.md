@@ -106,11 +106,11 @@ Place functions based on **what they operate on**, not who calls them:
 - **Player entity** — Always `entities[0]` in the entity list
 - **Tests** — Use `#[cfg(test)] mod tests` blocks at the bottom of each source file
 - **Test coverage** — Add or update tests when adding features or changing behavior
-- **Tier-friendly coding** — A capability tier refactor (micro/compact/standard) is planned for cross-platform support. When adding gameplay features to `core`, minimize eventual refactor cost:
+- **Tier-aware coding** — The capability tier system (micro/compact/standard) is implemented. Pure game rules live in `rules/` (no_std, always compiled), tier micro is in `tier_micro/` (complete no_std game engine for C64). When adding gameplay features to `core`:
   - Prefer **enums over strings** for game concepts (item types, effects, equipment slots) — these map to `u8` discriminants on constrained platforms
-  - Write **pure functions for rules** — if a calculation (damage, enchantment, item effects) doesn't need `&self`, make it a free function that can lift into a shared `rules/` module later
-  - Use **named constants for limits** (inventory size, max items per room) rather than hardcoded literals
-  - Keep **balance data in `game.toml`** — the existing data-driven pattern already separates data from logic
+  - Write **pure functions for rules** in `rules/` — if a calculation (damage, item effects) doesn't need `&self`, put it in `rules/` as a free/const function. See `rules::damage`, `rules::items`, `rules::monster_table` for examples.
+  - Use **named constants for limits** (inventory size, max items per room) rather than hardcoded literals. Per-tier constants live in `rules::balance`.
+  - Keep **balance data in `game.toml`** — constants in `rules::balance` are compiled-in defaults; `game.toml` can override them
 
 ## Testing Systems
 

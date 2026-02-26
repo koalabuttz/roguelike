@@ -17,13 +17,13 @@ Project documentation for the roguelike dungeon crawler.
 |----------|---------|--------|
 | [architecture/cross-platform.md](architecture/cross-platform.md) | Workspace layout, crate responsibilities, development workflow | Current |
 | [architecture/simulation.md](architecture/simulation.md) | Future design for emergent simulation (properties, events, CA) | Future design |
-| [architecture/capability-tier-reference.md](architecture/capability-tier-reference.md) | Cross-platform capability tier hierarchy: per-tier types, algorithms, sharing matrix, seed system, tier divergence | Reference |
+| [architecture/capability-tier-reference.md](architecture/capability-tier-reference.md) | Cross-platform capability tier hierarchy: per-tier types, algorithms, sharing matrix, seed system, tier divergence | Reference (micro tier implemented) |
 
 ### Platforms
 
 | Document | Purpose | Status |
 |----------|---------|--------|
-| [platforms/c64-port-proposal.md](platforms/c64-port-proposal.md) | C64 port proposal: rust-mos toolchain, shared crate design, implementation plan | Proposal — POC validated |
+| [platforms/c64-port-proposal.md](platforms/c64-port-proposal.md) | C64 port proposal: rust-mos toolchain, shared crate design, implementation plan | Implemented — C64 is thin frontend over core |
 | [platforms/c64-platform-guide.md](platforms/c64-platform-guide.md) | C64-specific hardware guidance: module mapping, CIA multiplexing, static stack allocation, cycle budgets, 6502 code style | Reference |
 | [platforms/c64-demo-techniques-for-roguelike.md](platforms/c64-demo-techniques-for-roguelike.md) | VIC-II demo scene techniques evaluated for the roguelike C64 port | Reference |
 | [platforms/c64-display-mode-analysis.md](platforms/c64-display-mode-analysis.md) | VIC-II display mode evaluation: why standard character mode is optimal | Reference |
@@ -35,7 +35,7 @@ Project documentation for the roguelike dungeon crawler.
 
 | Document | Purpose | Status |
 |----------|---------|--------|
-| [design/gameplay-implementation-plan.md](design/gameplay-implementation-plan.md) | Implementation plan for high-leverage gameplay features (6 phases) | Proposed |
+| [design/gameplay-implementation-plan.md](design/gameplay-implementation-plan.md) | Implementation plan for high-leverage gameplay features (6 phases) | In progress (Phases 1-3 complete) |
 | [design/procgen-exploration.md](design/procgen-exploration.md) | Survey of procedural generation techniques with evaluation against project constraints | Exploration |
 | [design/procgen-terrain-and-themed-floors.md](design/procgen-terrain-and-themed-floors.md) | Terrain variety, themed procedural floors, and prefab integration | Exploration |
 | [design/acoustic-propagation.md](design/acoustic-propagation.md) | Sound as a game mechanic: acoustic propagation, SID/PSG integration, spatialized audio | Exploration |

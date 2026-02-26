@@ -527,20 +527,59 @@ pub fn render_observation<W: Write>(
         cursor::MoveTo(0, 0)
     )?;
 
-    // Map lines.
-    for (y, line) in obs.map_ascii.iter().enumerate() {
-        queue!(
-            w,
-            cursor::MoveTo(0, y as u16),
-            SetForegroundColor(Color::White),
-            SetBackgroundColor(Color::Black),
-            style::Print(line)
-        )?;
-    }
-
     // Status bar — 1 row above message log.
     // Clamp msg_lines so the status bar never goes above the map.
     let msg_lines = msg_lines.min(screen_height.saturating_sub(2));
+
+    // Map viewport — center on the player when the map exceeds the screen.
+    let map_rows = (screen_height - 1 - msg_lines) as usize; // rows available for map
+    let map_cols = screen_width as usize;
+    let map_height = obs.map_ascii.len();
+    let map_width = obs.map_ascii.iter().map(|l| l.len()).max().unwrap_or(0);
+
+    // Find the player glyph in the visual map (map_ascii may skip blank rows,
+    // so obs.player_y is NOT a valid index into map_ascii).
+    let (player_map_y, player_map_x) = obs
+        .map_ascii
+        .iter()
+        .enumerate()
+        .find_map(|(y, line)| line.find('@').map(|x| (y, x)))
+        .unwrap_or((0, 0));
+
+    let view_y = if map_height <= map_rows {
+        0
+    } else {
+        let half = map_rows / 2;
+        let ideal = player_map_y.saturating_sub(half);
+        ideal.min(map_height - map_rows)
+    };
+
+    let view_x = if map_width <= map_cols {
+        0
+    } else {
+        let half = map_cols / 2;
+        let ideal = player_map_x.saturating_sub(half);
+        ideal.min(map_width - map_cols)
+    };
+
+    for (screen_y, line) in obs.map_ascii[view_y..][..map_rows.min(map_height)]
+        .iter()
+        .enumerate()
+    {
+        let slice = if view_x < line.len() {
+            let end = (view_x + map_cols).min(line.len());
+            &line[view_x..end]
+        } else {
+            ""
+        };
+        queue!(
+            w,
+            cursor::MoveTo(0, screen_y as u16),
+            SetForegroundColor(Color::White),
+            SetBackgroundColor(Color::Black),
+            style::Print(slice)
+        )?;
+    }
     let bar_row = (screen_height - 1 - msg_lines) as u16;
     let status = format!(
         " HP {}/{} | ATK:{} DEF:{} | Turn {} | Kills {} | Seed: {}",

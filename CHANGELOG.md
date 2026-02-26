@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add viewport scrolling to render_observation for maps larger than terminal (#40)
 - Create tier_micro module — port C64 POC into core (#28)
 - Move GameColor to rules/ with repr(u8) C64 color indices (#32)
 - Add stairs and multi-level dungeons (#17)

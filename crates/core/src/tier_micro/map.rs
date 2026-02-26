@@ -95,6 +95,29 @@ impl MicroMap {
         self.structural[i / 8] & (1 << (i % 8)) != 0
     }
 
+    /// Count walkable 8-neighbors excluding the direction (exclude_dx, exclude_dy).
+    ///
+    /// Used for corridor branch detection during autorun.
+    pub fn open_neighbors_excluding(&self, x: u8, y: u8, exclude_dx: i8, exclude_dy: i8) -> u8 {
+        let mut count: u8 = 0;
+        for ny in -1i8..=1 {
+            for nx in -1i8..=1 {
+                if nx == 0 && ny == 0 {
+                    continue;
+                }
+                if nx == exclude_dx && ny == exclude_dy {
+                    continue;
+                }
+                let tx = (x as i8 + nx) as u8;
+                let ty = (y as i8 + ny) as u8;
+                if self.is_walkable(tx, ty) {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
     pub fn floor_count(&self) -> u16 {
         let mut count: u16 = 0;
         for &t in &self.tiles {
@@ -319,5 +342,29 @@ mod tests {
         assert_eq!(sa, sb);
         assert_eq!(a.room_count, b.room_count);
         assert_eq!(a.tiles, b.tiles);
+    }
+
+    #[test]
+    fn open_neighbors_excluding_in_corridor() {
+        let mut map = MicroMap::new();
+        // Horizontal corridor at y=10: floor at x=5,6,7
+        map.tiles[idx(5, 10)] = TILE_FLOOR;
+        map.tiles[idx(6, 10)] = TILE_FLOOR;
+        map.tiles[idx(7, 10)] = TILE_FLOOR;
+        // At (6,10) heading east, excluding behind (-1,0): only (7,10) ahead.
+        assert_eq!(map.open_neighbors_excluding(6, 10, -1, 0), 1);
+    }
+
+    #[test]
+    fn open_neighbors_excluding_at_junction() {
+        let mut map = MicroMap::new();
+        // T-junction: corridor east-west at y=10, plus branch south.
+        for x in 5..=8 {
+            map.tiles[idx(x, 10)] = TILE_FLOOR;
+        }
+        map.tiles[idx(6, 11)] = TILE_FLOOR;
+        // At (6,10) heading east, excluding behind (-1,0):
+        // forward (7,10) + branch (6,11) = 2+
+        assert!(map.open_neighbors_excluding(6, 10, -1, 0) >= 2);
     }
 }

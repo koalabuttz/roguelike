@@ -7,7 +7,7 @@ use crossterm::{cursor, queue, style, terminal};
 use roguelike_core::command::GameCommand;
 use roguelike_core::data::{self, GameData};
 use roguelike_core::game::{self, GameState, LookOptions};
-use roguelike_core::game_step::{self, GameStep};
+use roguelike_core::game_step::{self, GameStep, MicroGameStateAdapter};
 use roguelike_core::help;
 use roguelike_core::look::{LookAction, LookCursor};
 use roguelike_core::menu::{self, MenuAction};
@@ -170,10 +170,29 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                 }
                             }
                         }
-                        game_state =
-                            Some(game_step::create_random_game(cols, map_height, &game_data));
-                        autosave_buf = None;
-                        app_state = AppState::Playing;
+                        match game_step::create_random_game(cols, map_height, &game_data) {
+                            Ok(g) => {
+                                game_state = Some(g);
+                                autosave_buf = None;
+                                app_state = AppState::Playing;
+                            }
+                            Err(msg) => {
+                                let mut err_menu = menu::confirm_menu(&format!("Error: {msg}"));
+                                err_menu.selected = 0;
+                                err_menu.items = vec![menu::MenuItem {
+                                    label: "OK".to_string(),
+                                    action: MenuAction::Back,
+                                    enabled: true,
+                                }];
+                                let _ = run_menu(&mut err_menu, renderer, input)?;
+                                let has_save = saves.has_save_for_title(settings.casual_mode);
+                                app_state = AppState::Title(menu::title_menu(
+                                    has_save,
+                                    settings.casual_mode,
+                                    platform,
+                                ));
+                            }
+                        }
                     }
                     Some(MenuAction::EnterSeed) => {
                         match text_input_dialog(
@@ -185,15 +204,37 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                             Some(code) if !code.is_empty() => match seed_code::decode(&code) {
                                 Ok(params) => {
                                     let h = rows - 1 - settings.message_log_lines as i32;
-                                    game_state = Some(game_step::create_game(
+                                    match game_step::create_game(
                                         params.seed,
                                         params.width,
                                         params.height.min(h),
                                         params.preset,
                                         &game_data,
-                                    ));
-                                    autosave_buf = None;
-                                    app_state = AppState::Playing;
+                                    ) {
+                                        Ok(g) => {
+                                            game_state = Some(g);
+                                            autosave_buf = None;
+                                            app_state = AppState::Playing;
+                                        }
+                                        Err(msg) => {
+                                            let mut err_menu =
+                                                menu::confirm_menu(&format!("Error: {msg}"));
+                                            err_menu.selected = 0;
+                                            err_menu.items = vec![menu::MenuItem {
+                                                label: "OK".to_string(),
+                                                action: MenuAction::Back,
+                                                enabled: true,
+                                            }];
+                                            let _ = run_menu(&mut err_menu, renderer, input)?;
+                                            let has_save =
+                                                saves.has_save_for_title(settings.casual_mode);
+                                            app_state = AppState::Title(menu::title_menu(
+                                                has_save,
+                                                settings.casual_mode,
+                                                platform,
+                                            ));
+                                        }
+                                    }
                                 }
                                 Err(msg) => {
                                     let mut err_menu = menu::confirm_menu(&format!("Error: {msg}"));
@@ -276,7 +317,13 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                 if let Some(gs) = standard_state(game.as_ref()) {
                     render::render(renderer.writer(), gs, cols, rows, &settings)?;
                 } else {
-                    render::render_observation(renderer.writer(), &game.observe(), cols, rows)?;
+                    render::render_observation(
+                        renderer.writer(),
+                        &game.observe(),
+                        cols,
+                        rows,
+                        settings.message_log_lines as Coord,
+                    )?;
                 }
                 dev.render_overlay(renderer.writer(), game.as_ref(), settings.color_palette)?;
 
@@ -356,8 +403,21 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                     dev,
                                     input,
                                 )?;
+                            } else if let Some(adapter) =
+                                game.as_any_mut().downcast_mut::<MicroGameStateAdapter>()
+                            {
+                                let stepper = adapter.start_autorun(dir);
+                                animate_micro_stepper(
+                                    renderer.writer(),
+                                    adapter,
+                                    stepper,
+                                    cols,
+                                    rows,
+                                    &settings,
+                                    input,
+                                )?;
                             } else {
-                                // Micro tier: single move.
+                                // Unknown tier: single move fallback.
                                 game.step(GameCommand::Move(dir));
                             }
                             dev.after_step(game.as_mut(), cmd);
@@ -590,9 +650,15 @@ fn run_look_mode<W: Write>(
         }
     } else {
         loop {
-            render::render_observation(renderer.writer(), &game.observe(), cols, rows)?;
+            render::render_observation(
+                renderer.writer(),
+                &game.observe(),
+                cols,
+                rows,
+                settings.message_log_lines as Coord,
+            )?;
             let info = game.look_at(cursor.cursor_x, cursor.cursor_y);
-            cursor.draw_overlay(renderer, &info, rows, 4);
+            cursor.draw_overlay(renderer, &info, rows, settings.message_log_lines as Coord);
             renderer.flush();
 
             match input.wait_for_look_command(settings)? {
@@ -630,6 +696,37 @@ fn animate_stepper<W: Write, D: DevHooks>(
                     dev.apply_fov_override(state);
                 }
                 render::render(w, state, cols, rows, settings)?;
+                let timeout = Duration::from_millis(settings.animation_speed_ms as u64);
+                if input.poll_animation_interrupt(timeout)? {
+                    return Ok(());
+                }
+            }
+            game::StepOutcome::Done(_) => return Ok(()),
+        }
+    }
+}
+
+/// Run animated micro-tier autorun with frame pacing.
+#[allow(clippy::too_many_arguments)]
+fn animate_micro_stepper<W: Write>(
+    w: &mut W,
+    adapter: &mut MicroGameStateAdapter,
+    mut stepper: game_step::MicroAutorunStepper,
+    cols: Coord,
+    rows: Coord,
+    settings: &Settings,
+    input: &mut dyn InputProvider,
+) -> io::Result<()> {
+    loop {
+        match stepper.next_step(adapter) {
+            game::StepOutcome::Continue => {
+                render::render_observation(
+                    w,
+                    &GameStep::observe(adapter),
+                    cols,
+                    rows,
+                    settings.message_log_lines as Coord,
+                )?;
                 let timeout = Duration::from_millis(settings.animation_speed_ms as u64);
                 if input.poll_animation_interrupt(timeout)? {
                     return Ok(());

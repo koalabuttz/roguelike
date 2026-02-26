@@ -55,6 +55,8 @@ pub const ROOM_SIZE_MAX: u8 = 10;
 pub const MAX_MONSTERS_PER_ROOM: u8 = 2;
 pub const UI_BOTTOM_ROWS: u8 = 5;
 pub const MAX_AUTORUN_STEPS: u8 = 100;
+pub const MIN_MAP_WIDTH: u8 = 20;
+pub const MIN_MAP_HEIGHT: u8 = 15;
 pub const REGEN_INTERVAL: u8 = 3;
 pub const TARGET_DEPTH: u8 = 5;
 

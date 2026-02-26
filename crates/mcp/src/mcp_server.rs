@@ -148,22 +148,12 @@ impl RoguelikeMcpServer {
 
         let gd = &self.game_data;
 
-        // Resolve parameters, validate standard-tier minimums, then delegate
-        // to the shared factory (which handles tier routing internally).
+        // Resolve parameters and delegate to the shared factory (which
+        // handles tier routing and dimension validation internally).
         let game: Box<dyn GameStep> = if let Some(ref code) = params.seed_code {
             let decoded = seed_code::decode(code)
                 .map_err(|e| McpError::invalid_params(format!("Invalid seed code: {e}"), None))?;
 
-            if !matches!(
-                seed_code::tier_from_seed(decoded.seed),
-                seed_code::Tier::Micro
-            ) && (decoded.width < 20 || decoded.height < 15)
-            {
-                return Err(McpError::invalid_params(
-                    "Map must be at least 20x15 tiles",
-                    None,
-                ));
-            }
             game_step::create_game(
                 decoded.seed,
                 decoded.width,
@@ -171,28 +161,17 @@ impl RoguelikeMcpServer {
                 decoded.preset,
                 gd,
             )
+            .map_err(|e| McpError::invalid_params(e, None))?
         } else {
             let width = params.width.unwrap_or(80);
             let height = params.height.unwrap_or(40);
 
             if let Some(s) = params.seed {
-                if !matches!(seed_code::tier_from_seed(s), seed_code::Tier::Micro)
-                    && (width < 20 || height < 15)
-                {
-                    return Err(McpError::invalid_params(
-                        "Map must be at least 20x15 tiles",
-                        None,
-                    ));
-                }
                 game_step::create_game(s, width, height, None, gd)
+                    .map_err(|e| McpError::invalid_params(e, None))?
             } else {
-                if width < 20 || height < 15 {
-                    return Err(McpError::invalid_params(
-                        "Map must be at least 20x15 tiles",
-                        None,
-                    ));
-                }
                 game_step::create_random_game(width, height, gd)
+                    .map_err(|e| McpError::invalid_params(e, None))?
             }
         };
 
@@ -295,11 +274,25 @@ impl RoguelikeMcpServer {
             )
         })?;
 
-        // Autorun: loop internally and return final state with metadata (standard tier only).
+        // Autorun: loop internally and return final state with metadata.
         if let GameCommand::Autorun(dir) = cmd {
-            let state = require_standard_mut(session.game.as_mut())?;
-            let autorun_result = state.autorun(dir);
-            let frontiers = state.frontier_tiles();
+            let autorun_result = if let Some(state) = standard_state_mut(session.game.as_mut()) {
+                state.autorun(dir)
+            } else if let Some(adapter) = session
+                .game
+                .as_any_mut()
+                .downcast_mut::<game_step::MicroGameStateAdapter>()
+            {
+                adapter.autorun(dir)
+            } else {
+                return Err(McpError::invalid_request(
+                    "Autorun not supported for this game tier",
+                    None,
+                ));
+            };
+            let frontiers: Vec<Pos> = standard_state(session.game.as_ref())
+                .map(|s| s.frontier_tiles())
+                .unwrap_or_default();
             let observation = session.game.observe();
             self.spectator.write_frame(&observation);
             let json = format_response(

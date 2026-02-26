@@ -519,6 +519,7 @@ pub fn render_observation<W: Write>(
     obs: &GameObservation,
     screen_width: Coord,
     screen_height: Coord,
+    msg_lines: Coord,
 ) -> std::io::Result<()> {
     queue!(
         w,
@@ -538,7 +539,6 @@ pub fn render_observation<W: Write>(
     }
 
     // Status bar — 1 row above message log.
-    let msg_lines: Coord = 4;
     let bar_row = (screen_height - 1 - msg_lines) as u16;
     let status = format!(
         " HP {}/{} | ATK:{} DEF:{} | Turn {} | Kills {} | Seed: {}",

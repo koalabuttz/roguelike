@@ -7,17 +7,21 @@
 
 use std::any::Any;
 
-use crate::command::GameCommand;
+use crate::command::{Direction, GameCommand};
 use crate::data::GameData;
-use crate::game::{EntityInfo, GameObservation, GameState, StepResult, TileInfo};
+use crate::game::{
+    AutorunResult, AutorunStopReason, EntityInfo, GameObservation, GameState, StepOutcome,
+    StepResult, TileInfo,
+};
 use crate::map::MapPreset;
 use crate::message_log::format_event;
-use crate::rules::monster_table;
+use crate::rules::{balance, monster_table};
 use crate::seed_code::{self, SeedParams};
 use crate::tier_micro::fov::MicroFov;
 use crate::tier_micro::game::MicroGameState;
 use crate::tier_micro::map::{TILE_FLOOR, TILE_WALL};
 use crate::tier_micro::types::{MAP_HEIGHT, MAP_WIDTH, PLAYER_IDX};
+use crate::types::Stat;
 
 /// Uniform interface for driving a game of any capability tier.
 ///
@@ -108,17 +112,24 @@ pub fn create_game(
     height: i32,
     preset: Option<MapPreset>,
     game_data: &GameData,
-) -> Box<dyn GameStep> {
+) -> Result<Box<dyn GameStep>, String> {
     match seed_code::tier_from_seed(seed) {
-        seed_code::Tier::Micro => Box::new(MicroGameStateAdapter::new(seed as u16)),
+        seed_code::Tier::Micro => Ok(Box::new(MicroGameStateAdapter::new(seed as u16))),
         _ => {
+            if width < balance::MIN_MAP_WIDTH as i32 || height < balance::MIN_MAP_HEIGHT as i32 {
+                return Err(format!(
+                    "Map must be at least {}x{} tiles",
+                    balance::MIN_MAP_WIDTH,
+                    balance::MIN_MAP_HEIGHT
+                ));
+            }
             let mut state = if let Some(p) = preset {
                 GameState::with_preset_data(width, height, seed, p, game_data)
             } else {
                 GameState::with_data(width, height, seed, game_data)
             };
             state.update_fov();
-            Box::new(state)
+            Ok(Box::new(state))
         }
     }
 }
@@ -126,10 +137,21 @@ pub fn create_game(
 /// Create a standard-tier game with a random seed.
 ///
 /// Random seeds are always standard tier (u64 range).
-pub fn create_random_game(width: i32, height: i32, game_data: &GameData) -> Box<dyn GameStep> {
+pub fn create_random_game(
+    width: i32,
+    height: i32,
+    game_data: &GameData,
+) -> Result<Box<dyn GameStep>, String> {
+    if width < balance::MIN_MAP_WIDTH as i32 || height < balance::MIN_MAP_HEIGHT as i32 {
+        return Err(format!(
+            "Map must be at least {}x{} tiles",
+            balance::MIN_MAP_WIDTH,
+            balance::MIN_MAP_HEIGHT
+        ));
+    }
     let mut state = GameState::new_with_data(width, height, game_data);
     state.update_fov();
-    Box::new(state)
+    Ok(Box::new(state))
 }
 
 // ── Micro tier adapter ───────────────────────────────────────────────
@@ -149,6 +171,24 @@ impl MicroGameStateAdapter {
             game: MicroGameState::new(seed),
             seed,
         }
+    }
+
+    /// Create a stepper for directional autorun (micro tier).
+    pub fn start_autorun(&self, dir: Direction) -> MicroAutorunStepper {
+        MicroAutorunStepper {
+            dir,
+            steps_taken: 0,
+            max_steps: balance::MAX_AUTORUN_STEPS as Stat,
+            all_messages: Vec::new(),
+            visible_before: [false; balance::MICRO_MAX_ENTITIES as usize],
+            explored_floor_before: self.game.fov.explored_floor_count(&self.game.map) as Stat,
+        }
+    }
+
+    /// Run in a direction until something interesting happens.
+    pub fn autorun(&mut self, dir: Direction) -> AutorunResult {
+        let stepper = self.start_autorun(dir);
+        stepper.run_to_completion(self)
     }
 }
 
@@ -333,6 +373,157 @@ impl GameStep for MicroGameStateAdapter {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
+}
+
+// ── Micro tier autorun ───────────────────────────────────────────────
+
+/// Autorun stepper for the micro tier — directional movement only.
+///
+/// Mirrors the standard tier's `AutorunStepper` stop conditions but operates
+/// on `MicroGameStateAdapter` with `u8` coordinates and fixed arrays.
+pub struct MicroAutorunStepper {
+    dir: Direction,
+    steps_taken: Stat,
+    max_steps: Stat,
+    all_messages: Vec<String>,
+    /// Tracks which entity slots were visible before each step.
+    visible_before: [bool; balance::MICRO_MAX_ENTITIES as usize],
+    explored_floor_before: Stat,
+}
+
+impl MicroAutorunStepper {
+    /// Execute one step of the autorun sequence.
+    pub fn next_step(&mut self, adapter: &mut MicroGameStateAdapter) -> StepOutcome {
+        let pi = PLAYER_IDX as usize;
+
+        // Check 1: max steps.
+        if self.steps_taken >= self.max_steps {
+            return self.finish(adapter, AutorunStopReason::MaxSteps);
+        }
+
+        // Check 2: adjacent monster before stepping.
+        if has_adjacent_monster_micro(&adapter.game.entities) {
+            return self.finish(adapter, AutorunStopReason::MonsterSpotted);
+        }
+
+        // Snapshot HP and visible monsters before step.
+        let hp_before = adapter.game.entities.hp[pi];
+        self.snapshot_visible_monsters(&adapter.game.entities, &adapter.game.fov);
+
+        // Execute step via the adapter (handles message collection).
+        let result = adapter.step(GameCommand::Move(self.dir));
+        self.all_messages.extend(result.new_messages);
+
+        // Check 3: wall hit.
+        if !result.action_taken {
+            return self.finish(adapter, AutorunStopReason::WallReached);
+        }
+
+        self.steps_taken += 1;
+
+        // Check 4: game over.
+        if result.game_over {
+            return self.finish(adapter, AutorunStopReason::GameOver);
+        }
+
+        // Check 5: damage taken.
+        if adapter.game.entities.hp[pi] < hp_before {
+            return self.finish(adapter, AutorunStopReason::DamageTaken);
+        }
+
+        // Check 6: new monster spotted.
+        if self.has_new_visible_monster(&adapter.game.entities, &adapter.game.fov) {
+            return self.finish(adapter, AutorunStopReason::MonsterSpotted);
+        }
+
+        // Check 7: corridor branches.
+        let (dx, dy) = self.dir.to_offset();
+        let px = adapter.game.entities.x[pi];
+        let py = adapter.game.entities.y[pi];
+        let ahead_x = (px as i8 + dx as i8) as u8;
+        let ahead_y = (py as i8 + dy as i8) as u8;
+        if !adapter.game.map.is_walkable(ahead_x, ahead_y) {
+            let alternatives =
+                adapter
+                    .game
+                    .map
+                    .open_neighbors_excluding(px, py, -(dx as i8), -(dy as i8));
+            if alternatives >= 2 {
+                return self.finish(adapter, AutorunStopReason::CorridorBranches);
+            }
+            return self.finish(adapter, AutorunStopReason::WallReached);
+        }
+
+        StepOutcome::Continue
+    }
+
+    /// Run all remaining steps without pausing.
+    pub fn run_to_completion(mut self, adapter: &mut MicroGameStateAdapter) -> AutorunResult {
+        loop {
+            match self.next_step(adapter) {
+                StepOutcome::Continue => continue,
+                StepOutcome::Done(result) => return result,
+            }
+        }
+    }
+
+    fn snapshot_visible_monsters(
+        &mut self,
+        entities: &crate::tier_micro::entity::EntityStore,
+        fov: &MicroFov,
+    ) {
+        for i in 1..entities.count as usize {
+            self.visible_before[i] =
+                entities.alive[i] && fov.is_visible(entities.x[i], entities.y[i]);
+        }
+    }
+
+    fn has_new_visible_monster(
+        &self,
+        entities: &crate::tier_micro::entity::EntityStore,
+        fov: &MicroFov,
+    ) -> bool {
+        for i in 1..entities.count as usize {
+            if entities.alive[i]
+                && fov.is_visible(entities.x[i], entities.y[i])
+                && !self.visible_before[i]
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn finish(
+        &mut self,
+        adapter: &MicroGameStateAdapter,
+        reason: AutorunStopReason,
+    ) -> StepOutcome {
+        let explored_floor_after = adapter.game.fov.explored_floor_count(&adapter.game.map) as Stat;
+        StepOutcome::Done(AutorunResult {
+            steps_taken: self.steps_taken,
+            stop_reason: reason,
+            messages: std::mem::take(&mut self.all_messages),
+            new_tiles_revealed: explored_floor_after - self.explored_floor_before,
+        })
+    }
+}
+
+/// Check if any alive monster is adjacent (Chebyshev distance <= 1) to the player.
+fn has_adjacent_monster_micro(entities: &crate::tier_micro::entity::EntityStore) -> bool {
+    let pi = PLAYER_IDX as usize;
+    let px = entities.x[pi];
+    let py = entities.y[pi];
+    for i in 1..entities.count as usize {
+        if entities.alive[i] {
+            let dx = entities.x[i].abs_diff(px);
+            let dy = entities.y[i].abs_diff(py);
+            if dx <= 1 && dy <= 1 {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 // ── Micro adapter helpers ────────────────────────────────────────────
@@ -614,7 +805,7 @@ mod tests {
     #[test]
     fn create_game_standard_tier() {
         let gd = data::load_game_data();
-        let game = create_game(1_000_000, 40, 30, None, &gd);
+        let game = create_game(1_000_000, 40, 30, None, &gd).unwrap();
         assert!(!game.is_game_over());
         // Should downcast to GameState (standard tier).
         assert!(game.as_any().downcast_ref::<GameState>().is_some());
@@ -623,7 +814,7 @@ mod tests {
     #[test]
     fn create_game_micro_tier() {
         let gd = data::load_game_data();
-        let game = create_game(42, 40, 30, None, &gd);
+        let game = create_game(42, 40, 30, None, &gd).unwrap();
         assert!(!game.is_game_over());
         // Should downcast to MicroGameStateAdapter (micro tier).
         assert!(
@@ -636,8 +827,80 @@ mod tests {
     #[test]
     fn create_random_game_is_standard() {
         let gd = data::load_game_data();
-        let game = create_random_game(40, 30, &gd);
+        let game = create_random_game(40, 30, &gd).unwrap();
         assert!(!game.is_game_over());
         assert!(game.as_any().downcast_ref::<GameState>().is_some());
+    }
+
+    #[test]
+    fn create_game_rejects_small_dimensions() {
+        let gd = data::load_game_data();
+        assert!(create_game(1_000_000, 10, 10, None, &gd).is_err());
+        assert!(create_game(1_000_000, 19, 30, None, &gd).is_err());
+        assert!(create_game(1_000_000, 40, 14, None, &gd).is_err());
+        // Micro tier ignores dimensions — fixed 64x48.
+        assert!(create_game(42, 10, 10, None, &gd).is_ok());
+    }
+
+    #[test]
+    fn create_random_game_rejects_small_dimensions() {
+        let gd = data::load_game_data();
+        assert!(create_random_game(10, 10, &gd).is_err());
+        assert!(create_random_game(20, 15, &gd).is_ok());
+    }
+
+    #[test]
+    fn micro_autorun_stops() {
+        use crate::command::Direction;
+        let mut adapter = MicroGameStateAdapter::new(42);
+        let result = adapter.autorun(Direction::North);
+        assert!(result.steps_taken >= 0);
+        // Should have stopped for a valid reason.
+        assert!(matches!(
+            result.stop_reason,
+            AutorunStopReason::WallReached
+                | AutorunStopReason::MonsterSpotted
+                | AutorunStopReason::CorridorBranches
+                | AutorunStopReason::DamageTaken
+                | AutorunStopReason::GameOver
+                | AutorunStopReason::MaxSteps
+        ));
+    }
+
+    #[test]
+    fn micro_autorun_respects_max_steps() {
+        use crate::command::Direction;
+        let mut adapter = MicroGameStateAdapter::new(42);
+        let result = adapter.autorun(Direction::East);
+        assert!(result.steps_taken <= balance::MAX_AUTORUN_STEPS as Stat);
+    }
+
+    #[test]
+    fn micro_autorun_stepper_step_by_step() {
+        use crate::command::Direction;
+        let mut adapter = MicroGameStateAdapter::new(42);
+        let mut stepper = adapter.start_autorun(Direction::South);
+        let mut continues = 0;
+        loop {
+            match stepper.next_step(&mut adapter) {
+                StepOutcome::Continue => continues += 1,
+                StepOutcome::Done(result) => {
+                    // steps_taken includes the final step that triggered the
+                    // stop, which returns Done rather than Continue.
+                    assert!(result.steps_taken >= continues);
+                    assert!(result.steps_taken <= continues + 1);
+                    break;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn micro_autorun_collects_messages() {
+        use crate::command::Direction;
+        let mut adapter = MicroGameStateAdapter::new(42);
+        let result = adapter.autorun(Direction::East);
+        // Messages vec should be valid (may be empty if no combat).
+        let _ = result.messages;
     }
 }

@@ -190,6 +190,11 @@ impl MicroGameStateAdapter {
         let stepper = self.start_autorun(dir);
         stepper.run_to_completion(self)
     }
+
+    /// The seed used to create this micro game.
+    pub fn seed(&self) -> u16 {
+        self.seed
+    }
 }
 
 impl GameStep for MicroGameStateAdapter {

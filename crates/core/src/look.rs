@@ -66,17 +66,22 @@ impl LookCursor {
     }
 
     /// Draw the look-mode overlay: cursor glyph and description in status area.
+    ///
+    /// `viewport_offset` shifts world→screen coords (pass `(0, 0)` when there
+    /// is no viewport scrolling).
     pub fn draw_overlay(
         &self,
         renderer: &mut dyn Renderer,
         info: &TileInfo,
         screen_height: Coord,
         message_log_lines: Coord,
+        viewport_offset: (Coord, Coord),
     ) {
-        // Draw cursor at the cursor position.
+        // Draw cursor at the cursor position, offset by viewport.
+        let (vx, vy) = viewport_offset;
         renderer.draw_char(
-            self.cursor_x,
-            self.cursor_y,
+            self.cursor_x - vx,
+            self.cursor_y - vy,
             'X',
             GameColor::Yellow,
             GameColor::DarkBlue,
@@ -391,7 +396,7 @@ mod tests {
         let info = cursor.current_info(&gs);
 
         let mut renderer = MockRenderer::new(80, 24);
-        cursor.draw_overlay(&mut renderer, &info, 24, 4);
+        cursor.draw_overlay(&mut renderer, &info, 24, 4, (0, 0));
 
         // Cursor should be drawn at (5, 5) with 'X'.
         assert!(renderer.chars.iter().any(|(x, y, ch, fg, bg)| {

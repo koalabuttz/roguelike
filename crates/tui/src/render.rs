@@ -6,12 +6,12 @@ use crossterm::{
     terminal,
 };
 
-use roguelike_core::game::{GameObservation, GameState};
-use roguelike_core::item;
-use roguelike_core::map::Tile;
+use roguelike_core::game::GameObservation;
 use roguelike_core::platform::Renderer;
 use roguelike_core::settings::{ColorPalette, Settings};
 use roguelike_core::types::{Coord, GameColor};
+
+use crate::render_source::{RenderSource, TileVisibility};
 
 #[cfg(all(debug_assertions, feature = "dev-tools"))]
 use roguelike_core::dev_tools::OverlayCell;
@@ -171,146 +171,222 @@ impl<W: Write> Renderer for CrosstermRenderer<W> {
     }
 }
 
+/// Viewport offset returned by `render()` for look-mode cursor offsetting.
+pub struct Viewport {
+    pub x: Coord,
+    pub y: Coord,
+}
+
+/// Internal viewport rectangle for sub-function parameters.
+struct ViewportRect {
+    x: usize,
+    y: usize,
+    cols: usize,
+    rows: usize,
+}
+
 pub fn render<W: Write>(
     w: &mut W,
-    state: &GameState,
+    source: &dyn RenderSource,
     screen_width: Coord,
     screen_height: Coord,
     settings: &Settings,
-) -> std::io::Result<()> {
+) -> std::io::Result<Viewport> {
     let pal = settings.color_palette;
-    render_map(w, state, pal)?;
-    render_items(w, state, pal)?;
-    render_entities(w, state, settings.show_corpses, pal)?;
-    render_status_bar(w, state, screen_width, screen_height, settings)?;
-    render_message_log(w, state, screen_width, screen_height, settings)?;
+    let msg_lines = settings.message_log_lines as Coord;
+    let (map_w, map_h) = source.map_size();
+    let (px, py) = source.player_pos();
+
+    // Viewport: center on player when map exceeds screen.
+    let map_rows = (screen_height - 1 - msg_lines).max(0) as usize;
+    let map_cols = screen_width.max(0) as usize;
+
+    let view_y = if (map_h as usize) <= map_rows {
+        0usize
+    } else {
+        let half = map_rows / 2;
+        let ideal = (py as usize).saturating_sub(half);
+        ideal.min((map_h as usize) - map_rows)
+    };
+
+    let view_x = if (map_w as usize) <= map_cols {
+        0usize
+    } else {
+        let half = map_cols / 2;
+        let ideal = (px as usize).saturating_sub(half);
+        ideal.min((map_w as usize) - map_cols)
+    };
+
+    let vp = ViewportRect {
+        x: view_x,
+        y: view_y,
+        cols: map_cols,
+        rows: map_rows,
+    };
+    render_map(w, source, &vp, pal)?;
+    render_items(w, source, &vp, pal)?;
+    render_entities(w, source, &vp, settings.show_corpses, pal)?;
+    render_status_bar(w, source, screen_width, screen_height, settings)?;
+    render_message_log(w, source, screen_width, screen_height, settings)?;
 
     w.flush()?;
-    Ok(())
+    Ok(Viewport {
+        x: view_x as Coord,
+        y: view_y as Coord,
+    })
 }
 
-fn render_map<W: Write>(w: &mut W, state: &GameState, pal: ColorPalette) -> std::io::Result<()> {
-    let map = &state.map;
-    for y in 0..map.height {
-        for x in 0..map.width {
-            let is_visible = state.visible.contains(&(x, y));
-            let is_explored = state.explored.contains(&(x, y));
+fn render_map<W: Write>(
+    w: &mut W,
+    source: &dyn RenderSource,
+    vp: &ViewportRect,
+    pal: ColorPalette,
+) -> std::io::Result<()> {
+    let (map_w, map_h) = source.map_size();
+    let bg = palette_color(GameColor::Black, pal);
 
-            if is_visible {
-                let idx = map.idx(x, y);
-                let tile = map.tiles[idx];
-                // Skip filler walls that aren't adjacent to any floor tile.
-                if tile == Tile::Wall && !map.structural[idx] {
+    for screen_y in 0..vp.rows {
+        let world_y = (vp.y + screen_y) as Coord;
+        if world_y >= map_h {
+            break;
+        }
+        for screen_x in 0..vp.cols {
+            let world_x = (vp.x + screen_x) as Coord;
+            if world_x >= map_w {
+                break;
+            }
+
+            let vis = source.tile_visibility(world_x, world_y);
+            match vis {
+                TileVisibility::Visible => {
+                    let tile = source.tile_at(world_x, world_y);
+                    if tile.glyph == '#' && !tile.structural {
+                        queue!(
+                            w,
+                            cursor::MoveTo(screen_x as u16, screen_y as u16),
+                            SetForegroundColor(bg),
+                            SetBackgroundColor(bg),
+                            style::Print(' ')
+                        )?;
+                    } else {
+                        queue!(
+                            w,
+                            cursor::MoveTo(screen_x as u16, screen_y as u16),
+                            SetForegroundColor(palette_color(tile.fg, pal)),
+                            SetBackgroundColor(bg),
+                            style::Print(tile.glyph)
+                        )?;
+                    }
+                }
+                TileVisibility::Explored => {
+                    let tile = source.tile_at(world_x, world_y);
+                    if tile.glyph == '#' && !tile.structural {
+                        queue!(
+                            w,
+                            cursor::MoveTo(screen_x as u16, screen_y as u16),
+                            SetForegroundColor(bg),
+                            SetBackgroundColor(bg),
+                            style::Print(' ')
+                        )?;
+                    } else {
+                        let dim = match pal {
+                            ColorPalette::HighContrast => palette_color(GameColor::Grey, pal),
+                            _ => palette_color(GameColor::Rgb(40, 40, 50), pal),
+                        };
+                        queue!(
+                            w,
+                            cursor::MoveTo(screen_x as u16, screen_y as u16),
+                            SetForegroundColor(dim),
+                            SetBackgroundColor(bg),
+                            style::Print(tile.glyph)
+                        )?;
+                    }
+                }
+                TileVisibility::Unexplored => {
                     queue!(
                         w,
-                        cursor::MoveTo(x as u16, y as u16),
-                        SetForegroundColor(palette_color(GameColor::Black, pal)),
-                        SetBackgroundColor(palette_color(GameColor::Black, pal)),
+                        cursor::MoveTo(screen_x as u16, screen_y as u16),
+                        SetForegroundColor(bg),
+                        SetBackgroundColor(bg),
                         style::Print(' ')
                     )?;
-                    continue;
                 }
-                let (ch, fg) = match tile {
-                    Tile::Floor => ('.', palette_color(GameColor::DarkGrey, pal)),
-                    Tile::Wall => ('#', palette_color(GameColor::White, pal)),
-                    Tile::StairsDown => ('>', palette_color(GameColor::Cyan, pal)),
-                };
-                queue!(
-                    w,
-                    cursor::MoveTo(x as u16, y as u16),
-                    SetForegroundColor(fg),
-                    SetBackgroundColor(palette_color(GameColor::Black, pal)),
-                    style::Print(ch)
-                )?;
-            } else if is_explored {
-                let idx = map.idx(x, y);
-                let tile = map.tiles[idx];
-                // Skip filler walls in explored area too.
-                if tile == Tile::Wall && !map.structural[idx] {
-                    queue!(
-                        w,
-                        cursor::MoveTo(x as u16, y as u16),
-                        SetForegroundColor(palette_color(GameColor::Black, pal)),
-                        SetBackgroundColor(palette_color(GameColor::Black, pal)),
-                        style::Print(' ')
-                    )?;
-                    continue;
-                }
-                let ch = match tile {
-                    Tile::Floor => '.',
-                    Tile::Wall => '#',
-                    Tile::StairsDown => '>',
-                };
-                let dim = match pal {
-                    ColorPalette::HighContrast => palette_color(GameColor::Grey, pal),
-                    _ => palette_color(GameColor::Rgb(40, 40, 50), pal),
-                };
-                queue!(
-                    w,
-                    cursor::MoveTo(x as u16, y as u16),
-                    SetForegroundColor(dim),
-                    SetBackgroundColor(palette_color(GameColor::Black, pal)),
-                    style::Print(ch)
-                )?;
-            } else {
-                queue!(
-                    w,
-                    cursor::MoveTo(x as u16, y as u16),
-                    SetForegroundColor(palette_color(GameColor::Black, pal)),
-                    SetBackgroundColor(palette_color(GameColor::Black, pal)),
-                    style::Print(' ')
-                )?;
             }
         }
     }
     Ok(())
 }
 
-fn render_items<W: Write>(w: &mut W, state: &GameState, pal: ColorPalette) -> std::io::Result<()> {
-    for it in &state.ground_items {
-        if state.visible.contains(&(it.x, it.y)) {
-            queue!(
+fn render_items<W: Write>(
+    w: &mut W,
+    source: &dyn RenderSource,
+    vp: &ViewportRect,
+    pal: ColorPalette,
+) -> std::io::Result<()> {
+    let bg = palette_color(GameColor::Black, pal);
+    source.for_each_visible_item(&mut |item| {
+        let sx = item.x as usize;
+        let sy = item.y as usize;
+        if sx >= vp.x && sx < vp.x + vp.cols && sy >= vp.y && sy < vp.y + vp.rows {
+            let screen_x = (sx - vp.x) as u16;
+            let screen_y = (sy - vp.y) as u16;
+            let _ = queue!(
                 w,
-                cursor::MoveTo(it.x as u16, it.y as u16),
-                SetForegroundColor(palette_color(item::item_color(it.kind), pal)),
-                SetBackgroundColor(palette_color(GameColor::Black, pal)),
-                style::Print(item::item_glyph(it.kind))
-            )?;
+                cursor::MoveTo(screen_x, screen_y),
+                SetForegroundColor(palette_color(item.fg, pal)),
+                SetBackgroundColor(bg),
+                style::Print(item.glyph)
+            );
         }
-    }
+    });
     Ok(())
 }
 
 fn render_entities<W: Write>(
     w: &mut W,
-    state: &GameState,
+    source: &dyn RenderSource,
+    vp: &ViewportRect,
     show_corpses: bool,
     pal: ColorPalette,
 ) -> std::io::Result<()> {
+    let bg = palette_color(GameColor::Black, pal);
+
+    // Collect entities so we can draw corpses first, then living entities on top.
+    let mut entities = Vec::new();
+    source.for_each_visible_entity(&mut |e| {
+        let sx = e.x as usize;
+        let sy = e.y as usize;
+        if sx >= vp.x && sx < vp.x + vp.cols && sy >= vp.y && sy < vp.y + vp.rows {
+            entities.push(e);
+        }
+    });
+
+    // Corpses first (drawn under living entities).
     if show_corpses {
-        for entity in state.entities.iter() {
-            if !entity.alive && state.visible.contains(&(entity.x, entity.y)) {
-                queue!(
-                    w,
-                    cursor::MoveTo(entity.x as u16, entity.y as u16),
-                    SetForegroundColor(palette_color(GameColor::DarkRed, pal)),
-                    SetBackgroundColor(palette_color(GameColor::Black, pal)),
-                    style::Print('%')
-                )?;
-            }
+        for e in entities.iter().filter(|e| !e.alive) {
+            let screen_x = (e.x as usize - vp.x) as u16;
+            let screen_y = (e.y as usize - vp.y) as u16;
+            queue!(
+                w,
+                cursor::MoveTo(screen_x, screen_y),
+                SetForegroundColor(palette_color(e.fg, pal)),
+                SetBackgroundColor(bg),
+                style::Print(e.glyph)
+            )?;
         }
     }
 
-    for entity in state.entities.iter() {
-        if entity.alive && state.visible.contains(&(entity.x, entity.y)) {
-            queue!(
-                w,
-                cursor::MoveTo(entity.x as u16, entity.y as u16),
-                SetForegroundColor(palette_color(entity.color, pal)),
-                SetBackgroundColor(palette_color(GameColor::Black, pal)),
-                style::Print(entity.glyph)
-            )?;
-        }
+    // Living entities on top.
+    for e in entities.iter().filter(|e| e.alive) {
+        let screen_x = (e.x as usize - vp.x) as u16;
+        let screen_y = (e.y as usize - vp.y) as u16;
+        queue!(
+            w,
+            cursor::MoveTo(screen_x, screen_y),
+            SetForegroundColor(palette_color(e.fg, pal)),
+            SetBackgroundColor(bg),
+            style::Print(e.glyph)
+        )?;
     }
 
     Ok(())
@@ -318,25 +394,25 @@ fn render_entities<W: Write>(
 
 fn render_status_bar<W: Write>(
     w: &mut W,
-    state: &GameState,
+    source: &dyn RenderSource,
     screen_width: Coord,
     screen_height: Coord,
     settings: &Settings,
 ) -> std::io::Result<()> {
-    let player = &state.entities[0];
+    let (hp, max_hp) = source.player_hp();
     let bar_row = (screen_height - 1 - settings.message_log_lines as i32) as u16;
 
     let bar_width = 16;
-    let fill = if player.max_hp > 0 {
-        (bar_width as f32 * player.hp as f32 / player.max_hp as f32).round() as i32
+    let fill = if max_hp > 0 {
+        (bar_width as f32 * hp as f32 / max_hp as f32).round() as i32
     } else {
         0
     };
     let fill = fill.max(0).min(bar_width);
     let empty = bar_width - fill;
 
-    let hp_pct = if player.max_hp > 0 {
-        player.hp as f32 / player.max_hp as f32
+    let hp_pct = if max_hp > 0 {
+        hp as f32 / max_hp as f32
     } else {
         0.0
     };
@@ -352,28 +428,31 @@ fn render_status_bar<W: Write>(
     let bar_filled: String = "\u{2588}".repeat(fill as usize);
     let bar_empty: String = "\u{2591}".repeat(empty as usize);
 
+    let (px, py) = source.player_pos();
     let coord_segment = if settings.show_coordinates {
-        format!(" | ({},{})", player.x, player.y)
+        format!(" | ({},{})", px, py)
     } else {
         String::new()
     };
 
     let explored_segment = if settings.show_explored_pct {
-        format!(" | Explored: {}%", state.explored_pct())
+        format!(" | Explored: {}%", source.explored_pct())
     } else {
         String::new()
     };
 
+    let (base_atk, atk_bonus) = source.player_atk();
+    let (base_def, def_bonus) = source.player_def();
     let equip_segment = {
-        let atk_str = if state.equipment.weapon.is_some() {
-            format!("{}+{}", player.attack, state.equipment.attack_bonus())
+        let atk_str = if atk_bonus > 0 {
+            format!("{}+{}", base_atk, atk_bonus)
         } else {
-            format!("{}", player.attack)
+            format!("{}", base_atk)
         };
-        let def_str = if state.equipment.armor.is_some() {
-            format!("{}+{}", player.defense, state.equipment.defense_bonus())
+        let def_str = if def_bonus > 0 {
+            format!("{}+{}", base_def, def_bonus)
         } else {
-            format!("{}", player.defense)
+            format!("{}", base_def)
         };
         format!(" | ATK:{} DEF:{}", atk_str, def_str)
     };
@@ -384,14 +463,15 @@ fn render_status_bar<W: Write>(
         ""
     };
 
-    let depth_segment = format!(" | Depth {}/{}", state.depth, state.target_depth);
+    let (cur_depth, target_depth) = source.depth();
+    let depth_segment = format!(" | Depth {}/{}", cur_depth, target_depth);
 
     let status = format!(
         " HP [{}{}] {}/{}{}{}{}{}{}",
         bar_filled,
         bar_empty,
-        player.hp,
-        player.max_hp,
+        hp,
+        max_hp,
         equip_segment,
         depth_segment,
         coord_segment,
@@ -417,7 +497,7 @@ fn render_status_bar<W: Write>(
 
 fn render_message_log<W: Write>(
     w: &mut W,
-    state: &GameState,
+    source: &dyn RenderSource,
     screen_width: Coord,
     screen_height: Coord,
     settings: &Settings,
@@ -426,7 +506,7 @@ fn render_message_log<W: Write>(
     let message_log_lines = settings.message_log_lines;
     let n = message_log_lines as usize;
     let log_start_row = (screen_height - message_log_lines as i32) as u16;
-    let messages = state.log.recent(n);
+    let messages = source.recent_messages(n);
 
     for i in 0..message_log_lines as u16 {
         let row = log_start_row + i;
@@ -454,7 +534,7 @@ fn render_message_log<W: Write>(
         )?;
     }
 
-    if state.game_won {
+    if source.game_won() {
         let msg = "Victory! You conquered the dungeon! Press any key to exit.".to_string();
         let x = (screen_width as usize).saturating_sub(msg.len()) / 2;
         let y = screen_height / 2;
@@ -466,7 +546,7 @@ fn render_message_log<W: Write>(
             style::Print(&msg)
         )?;
 
-        let seed_msg = format!("Seed: {}", state.seed_code());
+        let seed_msg = format!("Seed: {}", source.seed_code());
         let sx = (screen_width as usize).saturating_sub(seed_msg.len()) / 2;
         queue!(
             w,
@@ -475,7 +555,7 @@ fn render_message_log<W: Write>(
             SetBackgroundColor(palette_color(GameColor::Black, pal)),
             style::Print(seed_msg)
         )?;
-    } else if state.game_over {
+    } else if source.game_over() {
         let msg = if settings.player_name.is_empty() {
             "You have been slain... Press any key to exit.".to_string()
         } else {
@@ -495,7 +575,7 @@ fn render_message_log<W: Write>(
             style::Print(&msg)
         )?;
 
-        let seed_msg = format!("Seed: {}", state.seed_code());
+        let seed_msg = format!("Seed: {}", source.seed_code());
         let sx = (screen_width as usize).saturating_sub(seed_msg.len()) / 2;
         queue!(
             w,

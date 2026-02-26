@@ -19,7 +19,7 @@ use roguelike_core::spectate::FrameSink;
 use roguelike_core::types::Coord;
 
 use crate::input_provider::{GameInput, HistoryInput, InputProvider, InputResult};
-use crate::render::{self, CrosstermRenderer};
+use crate::render::{self, CrosstermRenderer, Viewport};
 use crate::saves::SaveBackend;
 
 /// Top-level application state machine.
@@ -97,6 +97,35 @@ fn standard_state(game: &dyn GameStep) -> Option<&GameState> {
 /// Try to downcast a `&mut dyn GameStep` to `&mut GameState`.
 fn standard_state_mut(game: &mut dyn GameStep) -> Option<&mut GameState> {
     game.as_any_mut().downcast_mut::<GameState>()
+}
+
+/// Render any game tier through the unified `RenderSource` trait.
+///
+/// Downcasts `&dyn GameStep` to either `GameState` or `MicroGameStateAdapter`
+/// and renders via `render::render(&dyn RenderSource, …)`. Falls back to the
+/// observation-based renderer for unknown tiers.
+fn render_game<W: Write>(
+    w: &mut W,
+    game: &dyn GameStep,
+    cols: Coord,
+    rows: Coord,
+    settings: &Settings,
+) -> io::Result<Viewport> {
+    if let Some(gs) = game.as_any().downcast_ref::<GameState>() {
+        render::render(w, gs, cols, rows, settings)
+    } else if let Some(adapter) = game.as_any().downcast_ref::<MicroGameStateAdapter>() {
+        render::render(w, adapter, cols, rows, settings)
+    } else {
+        // Unknown tier: fall back to observation-based render.
+        render::render_observation(
+            w,
+            &game.observe(),
+            cols,
+            rows,
+            settings.message_log_lines as Coord,
+        )?;
+        Ok(Viewport { x: 0, y: 0 })
+    }
 }
 
 /// Configuration for the game loop.
@@ -290,19 +319,8 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                     autosave_buf = None;
                 }
 
-                // Render: full pipeline for standard tier, observation
-                // fallback for other tiers.
-                if let Some(gs) = standard_state(game.as_ref()) {
-                    render::render(renderer.writer(), gs, cols, rows, &settings)?;
-                } else {
-                    render::render_observation(
-                        renderer.writer(),
-                        &game.observe(),
-                        cols,
-                        rows,
-                        settings.message_log_lines as Coord,
-                    )?;
-                }
+                // Render via unified RenderSource trait.
+                render_game(renderer.writer(), game.as_ref(), cols, rows, &settings)?;
                 dev.render_overlay(renderer.writer(), game.as_ref(), settings.color_palette)?;
 
                 if game.is_game_over() {
@@ -624,13 +642,19 @@ fn run_look_mode<W: Write>(
     let (px, py) = game.player_pos();
     let mut cursor = LookCursor::new(px, py);
 
-    // Standard tier: full render + LookCursor with bounds checking.
-    // Other tiers: observation-based render + manual cursor (no bounds check).
+    // Standard tier: LookCursor with map-bounds checking.
+    // Other tiers: manual cursor movement (no bounds check).
     if let Some(gs) = standard_state(game) {
         loop {
-            render::render(renderer.writer(), gs, cols, rows, settings)?;
+            let vp = render::render(renderer.writer(), gs, cols, rows, settings)?;
             let info = cursor.current_info_with(gs, look_opts);
-            cursor.draw_overlay(renderer, &info, rows, settings.message_log_lines as Coord);
+            cursor.draw_overlay(
+                renderer,
+                &info,
+                rows,
+                settings.message_log_lines as Coord,
+                (vp.x, vp.y),
+            );
             renderer.flush();
 
             match input.wait_for_look_command(settings)? {
@@ -645,15 +669,15 @@ fn run_look_mode<W: Write>(
         }
     } else {
         loop {
-            render::render_observation(
-                renderer.writer(),
-                &game.observe(),
-                cols,
+            let vp = render_game(renderer.writer(), game, cols, rows, settings)?;
+            let info = game.look_at(cursor.cursor_x, cursor.cursor_y);
+            cursor.draw_overlay(
+                renderer,
+                &info,
                 rows,
                 settings.message_log_lines as Coord,
-            )?;
-            let info = game.look_at(cursor.cursor_x, cursor.cursor_y);
-            cursor.draw_overlay(renderer, &info, rows, settings.message_log_lines as Coord);
+                (vp.x, vp.y),
+            );
             renderer.flush();
 
             match input.wait_for_look_command(settings)? {
@@ -690,7 +714,13 @@ fn animate_stepper<W: Write, D: DevHooks>(
                 if dev.fov_disabled() {
                     dev.apply_fov_override(state);
                 }
-                render::render(w, state, cols, rows, settings)?;
+                render::render(
+                    w,
+                    state as &dyn crate::render_source::RenderSource,
+                    cols,
+                    rows,
+                    settings,
+                )?;
                 let timeout = Duration::from_millis(settings.animation_speed_ms as u64);
                 if input.poll_animation_interrupt(timeout)? {
                     return Ok(());
@@ -715,12 +745,12 @@ fn animate_micro_stepper<W: Write>(
     loop {
         match stepper.next_step(adapter) {
             game::StepOutcome::Continue => {
-                render::render_observation(
+                render::render(
                     w,
-                    &GameStep::observe(adapter),
+                    adapter as &dyn crate::render_source::RenderSource,
                     cols,
                     rows,
-                    settings.message_log_lines as Coord,
+                    settings,
                 )?;
                 let timeout = Duration::from_millis(settings.animation_speed_ms as u64);
                 if input.poll_animation_interrupt(timeout)? {

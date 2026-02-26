@@ -5,6 +5,8 @@
 //! The enum is `#[repr(u8)]` so the C64 tier can use discriminant values
 //! directly without enum overhead.
 
+use core::mem::size_of;
+
 /// One of eight movement directions. `#[repr(u8)]` for C64/GBA compatibility.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

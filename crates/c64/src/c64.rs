@@ -4,6 +4,8 @@
 // module. Functions are #[inline(always)] so the compiler can emit direct
 // LDA/STA instructions instead of JSR overhead.
 
+#![allow(dead_code)] // Hardware registers are defined for completeness
+
 use core::ptr::{read_volatile, write_volatile};
 
 // --- Screen memory ---

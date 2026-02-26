@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
 // --- Always compiled (no_std compatible) ---
 pub mod rules;
 pub mod tier_compact;

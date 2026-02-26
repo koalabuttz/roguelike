@@ -5,6 +5,8 @@
 //! heap allocation. The standard tier converts events to `String` via
 //! `format_event()` in `message_log.rs`.
 
+use core::mem::size_of;
+
 use super::items::ItemKind;
 use super::monster_table::MonsterKind;
 

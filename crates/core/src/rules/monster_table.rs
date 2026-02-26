@@ -9,6 +9,8 @@
 //! natural width. The standard-tier `Entity` struct uses signed `Stat` (`i32`)
 //! for combat math; callers widen `u8 → Stat` via lossless `as` casts.
 
+use core::mem::size_of;
+
 use super::balance;
 use super::color::GameColor;
 

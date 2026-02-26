@@ -3,10 +3,12 @@ name = "roguelike-c64"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "Commodore 64 port of the roguelike dungeon crawler (rust-mos proof of concept)"
+description = "Commodore 64 port of the roguelike dungeon crawler"
 
-# No dependencies — pure no_std, no alloc.
-# Hardware access via raw pointers, PRNG is hand-rolled.
+[workspace]  # standalone — not part of the parent workspace
+
+[dependencies]
+roguelike-core = { path = "../core", default-features = false }
 
 [profile.release]
 opt-level = "s"   # optimize for size — every byte matters on C64

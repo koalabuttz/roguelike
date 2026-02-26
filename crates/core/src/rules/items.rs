@@ -11,6 +11,8 @@
 //! (`i32`) via lossless `as` casts for compatibility with the standard-tier
 //! engine, which uses signed `Stat` to support debuffs in combat math.
 
+use core::mem::size_of;
+
 use super::balance;
 use super::color::GameColor;
 

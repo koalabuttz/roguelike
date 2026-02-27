@@ -1,8 +1,8 @@
 # Roguelike
 
-A terminal-based roguelike dungeon crawler written in Rust.
+A cross-platform roguelike dungeon crawler written in Rust — from modern terminals to the Commodore 64.
 
-Explore randomly generated dungeons, fight monsters, and try to survive. Renders directly in the terminal using ASCII characters and ANSI colors — no external game engine required.
+Explore randomly generated multi-level dungeons, find equipment, fight monsters, and descend deeper to survive. A single Rust core scales from PETSCII on the Commodore 64 to ASCII and ANSI colors on modern terminals — no external game engine required.
 
 ## Installation
 

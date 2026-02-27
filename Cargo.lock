@@ -1955,7 +1955,7 @@ dependencies = [
 
 [[package]]
 name = "roguelike-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "criterion",
  "proptest",
@@ -1967,7 +1967,7 @@ dependencies = [
 
 [[package]]
 name = "roguelike-mcp"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "proptest",
  "rmcp",
@@ -1981,14 +1981,14 @@ dependencies = [
 
 [[package]]
 name = "roguelike-saves"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "roguelike-core",
 ]
 
 [[package]]
 name = "roguelike-ssh"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2010,7 +2010,7 @@ dependencies = [
 
 [[package]]
 name = "roguelike-terminal"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "crossterm",
  "gilrs",
@@ -2023,7 +2023,7 @@ dependencies = [
 
 [[package]]
 name = "roguelike-tui"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "crossterm",
  "roguelike-core",

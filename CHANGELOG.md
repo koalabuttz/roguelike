@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-27
+
 ### Added
 - Add Tile::to_kind() and use MICRO_LOG_CAPACITY constant (#44)
 - Unify render() across tiers via RenderSource trait (#41)

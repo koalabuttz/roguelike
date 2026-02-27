@@ -29,6 +29,8 @@ pub struct MicroGameState {
     pub entities: EntityStore,
     pub log: MicroMessageLog,
     pub rng: LfsrRng16,
+    /// Original seed used to create this game (for display/sharing).
+    pub seed: u16,
     pub turn_count: u16,
     pub kills: u8,
     pub game_over: bool,
@@ -38,17 +40,17 @@ pub struct MicroGameState {
 }
 
 impl MicroGameState {
-    /// Create a new game with the given seed.
-    pub fn new(seed: u16) -> Self {
+    /// Create a new game with the given seed and map dimensions.
+    pub fn new(seed: u16, width: u8, height: u8) -> Self {
         let mut rng = LfsrRng16::new(seed);
-        let mut map = MicroMap::new();
+        let mut map = MicroMap::new(width, height);
         let (sx, sy) = map.generate(&mut rng);
 
         let mut entities = EntityStore::new();
         entities.spawn_player(sx, sy);
         spawn::spawn_monsters(&mut entities, &map, &mut rng);
 
-        let mut fov = MicroFov::new();
+        let mut fov = MicroFov::new(width, height);
         fov.compute_fov(sx, sy, &map);
 
         let mut log = MicroMessageLog::new();
@@ -60,11 +62,17 @@ impl MicroGameState {
             entities,
             log,
             rng,
+            seed,
             turn_count: 0,
             kills: 0,
             game_over: false,
             regen_counter: balance::REGEN_INTERVAL,
         }
+    }
+
+    /// Create a new game with C64 default dimensions (64×48).
+    pub fn new_default(seed: u16) -> Self {
+        Self::new(seed, DEFAULT_MAP_WIDTH, DEFAULT_MAP_HEIGHT)
     }
 
     /// Execute one player command + monster turns + regen.
@@ -162,7 +170,7 @@ mod tests {
 
     #[test]
     fn new_game_is_playable() {
-        let g = MicroGameState::new(42);
+        let g = MicroGameState::new_default(42);
         assert!(!g.game_over);
         assert!(g.entities.alive[PLAYER_IDX as usize]);
         assert!(g.entities.hp[PLAYER_IDX as usize] > 0);
@@ -171,7 +179,7 @@ mod tests {
 
     #[test]
     fn move_changes_position() {
-        let mut g = MicroGameState::new(42);
+        let mut g = MicroGameState::new_default(42);
         let px = g.entities.x[0];
         let py = g.entities.y[0];
 
@@ -207,7 +215,7 @@ mod tests {
 
     #[test]
     fn wait_passes_turn() {
-        let mut g = MicroGameState::new(42);
+        let mut g = MicroGameState::new_default(42);
         let result = g.step(GameCommand::Wait);
         assert!(result.action_taken);
         assert_eq!(g.turn_count, 1);
@@ -215,7 +223,7 @@ mod tests {
 
     #[test]
     fn game_over_blocks_step() {
-        let mut g = MicroGameState::new(42);
+        let mut g = MicroGameState::new_default(42);
         g.game_over = true;
         let result = g.step(GameCommand::Wait);
         assert!(!result.action_taken);
@@ -224,12 +232,13 @@ mod tests {
 
     #[test]
     fn deterministic_with_same_seed() {
-        let mut a = MicroGameState::new(1234);
-        let mut b = MicroGameState::new(1234);
+        let mut a = MicroGameState::new_default(1234);
+        let mut b = MicroGameState::new_default(1234);
 
         // Same initial state
         assert_eq!(a.entities.count, b.entities.count);
-        assert_eq!(a.map.tiles, b.map.tiles);
+        let size = (a.map.width as usize) * (a.map.height as usize);
+        assert_eq!(a.map.tiles[..size], b.map.tiles[..size]);
 
         // Run same commands
         for _ in 0..10 {
@@ -245,7 +254,7 @@ mod tests {
 
     #[test]
     fn regen_heals_player() {
-        let mut g = MicroGameState::new(42);
+        let mut g = MicroGameState::new_default(42);
         // Damage the player
         let pi = PLAYER_IDX as usize;
         g.entities.hp[pi] = g.entities.max_hp[pi] - 5;
@@ -265,5 +274,14 @@ mod tests {
                 "player should have regenerated HP"
             );
         }
+    }
+
+    #[test]
+    fn custom_dimensions() {
+        let g = MicroGameState::new(42, 80, 40);
+        assert_eq!(g.map.width, 80);
+        assert_eq!(g.map.height, 40);
+        assert!(!g.game_over);
+        assert!(g.entities.count > 1);
     }
 }

@@ -99,14 +99,20 @@ pub const MAX_ITEMS_PER_ROOM: u8 = 1;
 // Per-tier map dimensions and entity caps
 // ---------------------------------------------------------------------------
 
-// Tier micro (C64)
+// Tier micro — maximum supported dimensions (array sizing)
+pub const MICRO_MAX_MAP_WIDTH: u8 = 80;
+pub const MICRO_MAX_MAP_HEIGHT: u8 = 60;
+
+// Tier micro — C64 default dimensions
 pub const MICRO_MAP_WIDTH: u8 = 64;
 pub const MICRO_MAP_HEIGHT: u8 = 48;
-pub const MICRO_MAX_ROOMS: u8 = 12;
-pub const MICRO_MAX_ENTITIES: u8 = 16;
-pub const MICRO_ROOM_SIZE_MIN: u8 = 3;
-pub const MICRO_ROOM_SIZE_MAX: u8 = 7;
-pub const MICRO_FOV_RADIUS: u8 = 6;
+
+// Tier micro — gameplay constants (match standard tier for parity)
+pub const MICRO_MAX_ROOMS: u8 = MAX_ROOMS;
+pub const MICRO_MAX_ENTITIES: u8 = 64;
+pub const MICRO_ROOM_SIZE_MIN: u8 = ROOM_SIZE_MIN;
+pub const MICRO_ROOM_SIZE_MAX: u8 = ROOM_SIZE_MAX;
+pub const MICRO_FOV_RADIUS: u8 = FOV_RADIUS;
 
 // Tier compact (GBA)
 // Note: these exceed u8 range, so use u16
@@ -163,5 +169,27 @@ mod tests {
         assert!(MICRO_MAP_HEIGHT > 0);
         // 64 * 48 = 3072, fits in a flat [u8] array
         assert!((MICRO_MAP_WIDTH as u16 * MICRO_MAP_HEIGHT as u16) <= u16::MAX);
+    }
+
+    #[test]
+    fn micro_balance_matches_standard() {
+        assert_eq!(MICRO_FOV_RADIUS, FOV_RADIUS);
+        assert_eq!(MICRO_MAX_ROOMS, MAX_ROOMS);
+        assert_eq!(MICRO_ROOM_SIZE_MIN, ROOM_SIZE_MIN);
+        assert_eq!(MICRO_ROOM_SIZE_MAX, ROOM_SIZE_MAX);
+    }
+
+    #[test]
+    fn micro_max_dims_fit_u8() {
+        assert!(MICRO_MAX_MAP_WIDTH > 0);
+        assert!(MICRO_MAX_MAP_HEIGHT > 0);
+        // 80 * 60 = 4800, fits in u16
+        assert!((MICRO_MAX_MAP_WIDTH as u16 * MICRO_MAX_MAP_HEIGHT as u16) <= u16::MAX);
+    }
+
+    #[test]
+    fn micro_defaults_within_max() {
+        assert!(MICRO_MAP_WIDTH <= MICRO_MAX_MAP_WIDTH);
+        assert!(MICRO_MAP_HEIGHT <= MICRO_MAX_MAP_HEIGHT);
     }
 }

@@ -20,6 +20,18 @@ const KEY_UP: u8 = 0x91;
 const KEY_DOWN: u8 = 0x11;
 const KEY_LEFT: u8 = 0x9D;
 const KEY_RIGHT: u8 = 0x1D;
+const KEY_RETURN: u8 = 0x0D;
+const KEY_RUNSTOP: u8 = 0x03;
+const KEY_DELETE: u8 = 0x14;
+
+/// Menu navigation input.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MenuInput {
+    Up,
+    Down,
+    Select,
+    Back,
+}
 
 /// Check keyboard buffer for a keypress. Returns PETSCII code or 0.
 fn read_key() -> u8 {
@@ -45,7 +57,40 @@ fn key_to_cmd(key: u8) -> Option<GameCommand> {
         KEY_C             => Some(GameCommand::Move(Direction::SouthEast)),
         KEY_Z             => Some(GameCommand::Move(Direction::SouthWest)),
         KEY_SPACE         => Some(GameCommand::Wait),
+        KEY_RUNSTOP       => Some(GameCommand::Quit),
         _ => None,
+    }
+}
+
+/// Translate keyboard PETSCII code to menu input.
+fn key_to_menu(key: u8) -> Option<MenuInput> {
+    match key {
+        KEY_W | KEY_UP => Some(MenuInput::Up),
+        KEY_S | KEY_DOWN => Some(MenuInput::Down),
+        KEY_RETURN | KEY_SPACE => Some(MenuInput::Select),
+        KEY_RUNSTOP => Some(MenuInput::Back),
+        _ => None,
+    }
+}
+
+/// Read joystick port 2 for menu navigation.
+/// Returns Up, Down, or Select (fire button).
+fn read_joystick_menu() -> Option<MenuInput> {
+    c64::poke(c64::CIA1_PA, 0xFF);
+    let joy = c64::peek(c64::CIA1_PA as *const u8) ^ 0xFF;
+
+    let up = joy & 0x01 != 0;
+    let down = joy & 0x02 != 0;
+    let fire = joy & 0x10 != 0;
+
+    if fire {
+        Some(MenuInput::Select)
+    } else if up && !down {
+        Some(MenuInput::Up)
+    } else if down && !up {
+        Some(MenuInput::Down)
+    } else {
+        None
     }
 }
 
@@ -101,23 +146,71 @@ pub fn wait_for_input() -> GameCommand {
     }
 }
 
-/// Wait for any keypress or joystick action (for title screen, death screen).
-pub fn wait_any_key() {
-    // Drain any buffered keys
-    c64::poke(c64::KEYBUF_LEN, 0);
-
-    // Wait for joystick release first (debounce)
-    while joy_active() {}
-
+/// Wait for a menu navigation input from keyboard or joystick.
+/// Blocks until a valid input is received.
+pub fn wait_for_menu_input() -> MenuInput {
     loop {
-        if c64::peek(c64::KEYBUF_LEN) > 0 {
-            c64::poke(c64::KEYBUF_LEN, 0);
-            return;
+        let key = read_key();
+        if key != 0 {
+            if let Some(input) = key_to_menu(key) {
+                return input;
+            }
         }
 
-        if joy_active() {
+        if let Some(input) = read_joystick_menu() {
             while joy_active() {}
-            return;
+            return input;
+        }
+    }
+}
+
+/// Read a seed code string via keyboard input.
+///
+/// Renders the input field using the provided callback after each keypress.
+/// Returns `Some(len)` on Enter (confirm), `None` on Run/Stop (cancel).
+/// `buf` receives lowercase ASCII bytes suitable for `decode_micro_from_bytes`.
+pub fn read_seed_input(
+    buf: &mut [u8; 12],
+    mut render_fn: impl FnMut(&[u8], u8),
+) -> Option<u8> {
+    let mut len: u8 = 0;
+    render_fn(&buf[..0], 0);
+
+    loop {
+        let key = read_key();
+        if key == 0 {
+            continue;
+        }
+
+        match key {
+            KEY_RETURN => {
+                if len > 0 {
+                    return Some(len);
+                }
+            }
+            KEY_RUNSTOP => return None,
+            KEY_DELETE => {
+                if len > 0 {
+                    len -= 1;
+                    render_fn(&buf[..len as usize], len);
+                }
+            }
+            _ => {
+                // Map PETSCII to lowercase ASCII for base36 compatibility
+                let ascii = match key {
+                    b'A'..=b'Z' => key - b'A' + b'a', // uppercase → lowercase
+                    b'a'..=b'z' => key,                // already lowercase (shifted mode)
+                    b'0'..=b'9' => key,
+                    b'-' => key,
+                    _ => continue, // ignore non-alphanumeric
+                };
+
+                if (len as usize) < buf.len() {
+                    buf[len as usize] = ascii;
+                    len += 1;
+                    render_fn(&buf[..len as usize], len);
+                }
+            }
         }
     }
 }

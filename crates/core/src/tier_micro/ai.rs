@@ -164,12 +164,11 @@ mod tests {
 
     /// Create a small open arena for AI testing.
     fn arena_map() -> MicroMap {
-        let mut map = MicroMap::new();
+        let mut map = MicroMap::new_default();
         // Carve a 20x20 floor area
         for y in 5..25 {
             for x in 5..25 {
-                map.tiles[(y as usize) * MAP_WIDTH as usize + x as usize] =
-                    super::super::map::TILE_FLOOR;
+                map.tiles[map.idx(x, y)] = super::super::map::TILE_FLOOR;
             }
         }
         map

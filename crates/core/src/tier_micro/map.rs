@@ -2,6 +2,9 @@
 //!
 //! Random room placement with collision checks and L-shaped corridor carving.
 //! Ported from the C64 POC with struct-based storage instead of static muts.
+//!
+//! Arrays are sized for the maximum supported dimensions (80×60). Actual
+//! map dimensions are stored as runtime fields `width` and `height`.
 
 use super::prng::LfsrRng16;
 use super::types::*;
@@ -46,41 +49,46 @@ impl Room {
 }
 
 pub struct MicroMap {
-    pub tiles: [u8; MAP_SIZE],
-    structural: [u8; BITFIELD_SIZE],
+    pub tiles: [u8; MAX_MAP_SIZE],
+    structural: [u8; MAX_BITFIELD_SIZE],
     pub rooms: [Room; MAX_ROOMS],
     pub room_count: u8,
-}
-
-fn idx(x: u8, y: u8) -> usize {
-    (y as usize) * (MAP_WIDTH as usize) + (x as usize)
-}
-
-impl Default for MicroMap {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub width: u8,
+    pub height: u8,
 }
 
 impl MicroMap {
-    pub fn new() -> Self {
+    pub fn new(width: u8, height: u8) -> Self {
+        debug_assert!(width <= MAX_MAP_WIDTH);
+        debug_assert!(height <= MAX_MAP_HEIGHT);
         Self {
-            tiles: [TILE_WALL; MAP_SIZE],
-            structural: [0; BITFIELD_SIZE],
+            tiles: [TILE_WALL; MAX_MAP_SIZE],
+            structural: [0; MAX_BITFIELD_SIZE],
             rooms: [Room::empty(); MAX_ROOMS],
             room_count: 0,
+            width,
+            height,
         }
     }
 
-    pub fn in_bounds(x: u8, y: u8) -> bool {
-        x < MAP_WIDTH && y < MAP_HEIGHT
+    /// Create a map with C64 default dimensions (64×48).
+    pub fn new_default() -> Self {
+        Self::new(DEFAULT_MAP_WIDTH, DEFAULT_MAP_HEIGHT)
+    }
+
+    pub(crate) fn idx(&self, x: u8, y: u8) -> usize {
+        (y as usize) * (self.width as usize) + (x as usize)
+    }
+
+    pub fn in_bounds(&self, x: u8, y: u8) -> bool {
+        x < self.width && y < self.height
     }
 
     pub fn tile_at(&self, x: u8, y: u8) -> u8 {
-        if !Self::in_bounds(x, y) {
+        if !self.in_bounds(x, y) {
             return TILE_WALL;
         }
-        self.tiles[idx(x, y)]
+        self.tiles[self.idx(x, y)]
     }
 
     pub fn is_walkable(&self, x: u8, y: u8) -> bool {
@@ -88,10 +96,10 @@ impl MicroMap {
     }
 
     pub fn is_structural(&self, x: u8, y: u8) -> bool {
-        if !Self::in_bounds(x, y) {
+        if !self.in_bounds(x, y) {
             return false;
         }
-        let i = idx(x, y);
+        let i = self.idx(x, y);
         self.structural[i / 8] & (1 << (i % 8)) != 0
     }
 
@@ -120,17 +128,20 @@ impl MicroMap {
 
     pub fn floor_count(&self) -> u16 {
         let mut count: u16 = 0;
-        for &t in &self.tiles {
-            if t == TILE_FLOOR {
-                count += 1;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if self.tiles[self.idx(x, y)] == TILE_FLOOR {
+                    count += 1;
+                }
             }
         }
         count
     }
 
     fn set_tile(&mut self, x: u8, y: u8, tile: u8) {
-        if Self::in_bounds(x, y) {
-            self.tiles[idx(x, y)] = tile;
+        if self.in_bounds(x, y) {
+            let i = self.idx(x, y);
+            self.tiles[i] = tile;
         }
     }
 
@@ -160,8 +171,8 @@ impl MicroMap {
         for b in self.structural.iter_mut() {
             *b = 0;
         }
-        for y in 0..MAP_HEIGHT {
-            for x in 0..MAP_WIDTH {
+        for y in 0..self.height {
+            for x in 0..self.width {
                 if self.tile_at(x, y) != TILE_WALL {
                     continue;
                 }
@@ -173,7 +184,7 @@ impl MicroMap {
                         }
                         let nx = (x as i8 + dx) as u8;
                         let ny = (y as i8 + dy) as u8;
-                        if Self::in_bounds(nx, ny) && self.tile_at(nx, ny) == TILE_FLOOR {
+                        if self.in_bounds(nx, ny) && self.tile_at(nx, ny) == TILE_FLOOR {
                             found = true;
                             break;
                         }
@@ -183,7 +194,7 @@ impl MicroMap {
                     }
                 }
                 if found {
-                    let i = idx(x, y);
+                    let i = self.idx(x, y);
                     self.structural[i / 8] |= 1 << (i % 8);
                 }
             }
@@ -193,27 +204,30 @@ impl MicroMap {
     /// Generate a dungeon. Returns the player start position.
     pub fn generate(&mut self, rng: &mut LfsrRng16) -> Pos {
         // Reset to all walls
-        for t in self.tiles.iter_mut() {
+        let map_size = (self.width as usize) * (self.height as usize);
+        for t in self.tiles[..map_size].iter_mut() {
             *t = TILE_WALL;
         }
         self.room_count = 0;
 
         let room_min = balance::MICRO_ROOM_SIZE_MIN;
         let room_max = balance::MICRO_ROOM_SIZE_MAX;
-        let max_rooms = MAX_ROOMS as u8;
+        // Scale room attempts with map area, capped at MAX_ROOMS.
+        let area = (self.width as u16) * (self.height as u16);
+        let max_rooms = ((area / 256) as u8).max(6).min(MAX_ROOMS as u8);
 
-        let mut start_x = MAP_WIDTH / 2;
-        let mut start_y = MAP_HEIGHT / 2;
+        let mut start_x = self.width / 2;
+        let mut start_y = self.height / 2;
 
         for _ in 0..max_rooms {
             let w = rng.range_u8(room_min, room_max);
             let h = rng.range_u8(room_min, room_max);
             // Ensure room fits within map with 1-tile border
-            if w + 2 >= MAP_WIDTH || h + 2 >= MAP_HEIGHT {
+            if w + 2 >= self.width || h + 2 >= self.height {
                 continue;
             }
-            let x = rng.range_u8(1, MAP_WIDTH - w - 2);
-            let y = rng.range_u8(1, MAP_HEIGHT - h - 2);
+            let x = rng.range_u8(1, self.width - w - 2);
+            let y = rng.range_u8(1, self.height - h - 2);
 
             let new_room = Room { x, y, w, h };
 
@@ -262,7 +276,7 @@ mod tests {
 
     fn make_map(seed: u16) -> (MicroMap, Pos) {
         let mut rng = LfsrRng16::new(seed);
-        let mut map = MicroMap::new();
+        let mut map = MicroMap::new_default();
         let start = map.generate(&mut rng);
         (map, start)
     }
@@ -295,8 +309,8 @@ mod tests {
     #[test]
     fn structural_walls_adjacent_to_floor() {
         let (map, _) = make_map(42);
-        for y in 0..MAP_HEIGHT {
-            for x in 0..MAP_WIDTH {
+        for y in 0..map.height {
+            for x in 0..map.width {
                 if map.is_structural(x, y) {
                     assert_eq!(map.tile_at(x, y), TILE_WALL);
                     let mut has_floor_neighbor = false;
@@ -307,7 +321,7 @@ mod tests {
                             }
                             let nx = (x as i8 + dx) as u8;
                             let ny = (y as i8 + dy) as u8;
-                            if MicroMap::in_bounds(nx, ny) && map.tile_at(nx, ny) == TILE_FLOOR {
+                            if map.in_bounds(nx, ny) && map.tile_at(nx, ny) == TILE_FLOOR {
                                 has_floor_neighbor = true;
                             }
                         }
@@ -324,7 +338,14 @@ mod tests {
     #[test]
     fn floor_count_matches_tiles() {
         let (map, _) = make_map(42);
-        let manual = map.tiles.iter().filter(|&&t| t == TILE_FLOOR).count() as u16;
+        let mut manual: u16 = 0;
+        for y in 0..map.height {
+            for x in 0..map.width {
+                if map.tiles[map.idx(x, y)] == TILE_FLOOR {
+                    manual += 1;
+                }
+            }
+        }
         assert_eq!(map.floor_count(), manual);
     }
 
@@ -332,7 +353,7 @@ mod tests {
     fn out_of_bounds_is_wall() {
         let (map, _) = make_map(42);
         assert_eq!(map.tile_at(255, 255), TILE_WALL);
-        assert!(!map.is_walkable(MAP_WIDTH, 0));
+        assert!(!map.is_walkable(map.width, 0));
     }
 
     #[test]
@@ -341,30 +362,42 @@ mod tests {
         let (b, sb) = make_map(1234);
         assert_eq!(sa, sb);
         assert_eq!(a.room_count, b.room_count);
-        assert_eq!(a.tiles, b.tiles);
+        let a_size = (a.width as usize) * (a.height as usize);
+        assert_eq!(a.tiles[..a_size], b.tiles[..a_size]);
     }
 
     #[test]
     fn open_neighbors_excluding_in_corridor() {
-        let mut map = MicroMap::new();
+        let mut map = MicroMap::new_default();
         // Horizontal corridor at y=10: floor at x=5,6,7
-        map.tiles[idx(5, 10)] = TILE_FLOOR;
-        map.tiles[idx(6, 10)] = TILE_FLOOR;
-        map.tiles[idx(7, 10)] = TILE_FLOOR;
+        map.tiles[map.idx(5, 10)] = TILE_FLOOR;
+        map.tiles[map.idx(6, 10)] = TILE_FLOOR;
+        map.tiles[map.idx(7, 10)] = TILE_FLOOR;
         // At (6,10) heading east, excluding behind (-1,0): only (7,10) ahead.
         assert_eq!(map.open_neighbors_excluding(6, 10, -1, 0), 1);
     }
 
     #[test]
     fn open_neighbors_excluding_at_junction() {
-        let mut map = MicroMap::new();
+        let mut map = MicroMap::new_default();
         // T-junction: corridor east-west at y=10, plus branch south.
         for x in 5..=8 {
-            map.tiles[idx(x, 10)] = TILE_FLOOR;
+            map.tiles[map.idx(x, 10)] = TILE_FLOOR;
         }
-        map.tiles[idx(6, 11)] = TILE_FLOOR;
+        map.tiles[map.idx(6, 11)] = TILE_FLOOR;
         // At (6,10) heading east, excluding behind (-1,0):
         // forward (7,10) + branch (6,11) = 2+
         assert!(map.open_neighbors_excluding(6, 10, -1, 0) >= 2);
+    }
+
+    #[test]
+    fn custom_dimensions() {
+        let mut rng = LfsrRng16::new(42);
+        let mut map = MicroMap::new(80, 40);
+        let (sx, sy) = map.generate(&mut rng);
+        assert!(map.is_walkable(sx, sy));
+        assert_eq!(map.width, 80);
+        assert_eq!(map.height, 40);
+        assert!(map.room_count > 0);
     }
 }

@@ -12,7 +12,7 @@ use roguelike_core::message_log::format_event;
 use roguelike_core::rules::monster_table;
 use roguelike_core::rules::tiles::{self as tile_rules, TileKind};
 use roguelike_core::seed_code::{self, SeedParams};
-use roguelike_core::tier_micro::types::{MAP_HEIGHT, MAP_WIDTH, PLAYER_IDX};
+use roguelike_core::tier_micro::types::PLAYER_IDX;
 use roguelike_core::types::{Coord, GameColor, Stat};
 
 // ── Data types ──────────────────────────────────────────────────────────
@@ -214,7 +214,7 @@ impl RenderSource for GameState {
 
 impl RenderSource for MicroGameStateAdapter {
     fn map_size(&self) -> (Coord, Coord) {
-        (MAP_WIDTH as Coord, MAP_HEIGHT as Coord)
+        (self.game.map.width as Coord, self.game.map.height as Coord)
     }
 
     fn tile_visibility(&self, x: Coord, y: Coord) -> TileVisibility {
@@ -311,8 +311,8 @@ impl RenderSource for MicroGameStateAdapter {
     fn seed_code(&self) -> String {
         seed_code::encode(&SeedParams {
             seed: self.seed() as u64,
-            width: MAP_WIDTH as i32,
-            height: MAP_HEIGHT as i32,
+            width: self.game.map.width as i32,
+            height: self.game.map.height as i32,
             preset: None,
         })
     }
@@ -352,7 +352,7 @@ mod tests {
     }
 
     fn test_micro_game() -> MicroGameStateAdapter {
-        MicroGameStateAdapter::new(42)
+        MicroGameStateAdapter::new(42, 64, 48)
     }
 
     #[test]

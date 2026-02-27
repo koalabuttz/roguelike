@@ -28,6 +28,8 @@ fn decode_base36(s: &str) -> Result<u64, String> {
         SeedDecodeError::Empty => "Empty seed value".to_string(),
         SeedDecodeError::InvalidChar(b) => format!("Invalid character in seed: '{}'", b as char),
         SeedDecodeError::Overflow => "Seed value too large".to_string(),
+        SeedDecodeError::NotMicroTier => "Seed exceeds micro tier range".to_string(),
+        SeedDecodeError::InvalidDimensions => "Invalid dimensions".to_string(),
     })
 }
 
@@ -54,26 +56,16 @@ fn char_to_preset(ch: char) -> Result<MapPreset, String> {
 
 /// Encode game parameters into a shareable seed code.
 ///
-/// Format: `<base36_seed>[-<W>x<H>][<preset_char>]`
-/// - Default dimensions (80x40) and no preset: just the seed (`r7z3kq`)
-/// - Custom dimensions: `r7z3kq-120x60`
-/// - With preset: `r7z3kq-a`
-/// - Both: `r7z3kq-120x60a`
+/// Format: `<base36_seed>-<W>x<H>[<preset_char>]`
+///
+/// Dimensions are always included for explicitness — codes are
+/// unambiguous across platforms (C64 64×48, terminal 80×40, etc.).
+///
+/// Examples: `16-80x40`, `16-64x48`, `r7z3kq-120x60a`
 pub fn encode(params: &SeedParams) -> String {
     let seed_str = encode_base36(params.seed);
-    let has_custom_dims = params.width != DEFAULT_WIDTH || params.height != DEFAULT_HEIGHT;
-    let has_preset = params.preset.is_some();
 
-    if !has_custom_dims && !has_preset {
-        return seed_str;
-    }
-
-    let mut result = seed_str;
-    result.push('-');
-
-    if has_custom_dims {
-        result.push_str(&format!("{}x{}", params.width, params.height));
-    }
+    let mut result = format!("{}-{}x{}", seed_str, params.width, params.height);
 
     if let Some(preset) = params.preset {
         result.push(preset_to_char(preset));
@@ -158,7 +150,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn encode_default_dims_no_preset() {
+    fn encode_always_includes_dims() {
         let params = SeedParams {
             seed: 12345,
             width: 80,
@@ -166,8 +158,10 @@ mod tests {
             preset: None,
         };
         let code = encode(&params);
-        assert_eq!(code, encode_base36(12345));
-        assert!(!code.contains('-'));
+        assert!(
+            code.contains("-80x40"),
+            "should always include dims: {code}"
+        );
     }
 
     #[test]
@@ -179,7 +173,7 @@ mod tests {
             preset: None,
         };
         let code = encode(&params);
-        assert!(code.contains("-120x60"));
+        assert_eq!(code, "16-120x60");
     }
 
     #[test]
@@ -191,7 +185,7 @@ mod tests {
             preset: Some(MapPreset::Arena),
         };
         let code = encode(&params);
-        assert!(code.ends_with("-a"));
+        assert_eq!(code, "16-80x40a");
     }
 
     #[test]
@@ -203,7 +197,29 @@ mod tests {
             preset: Some(MapPreset::Labyrinth),
         };
         let code = encode(&params);
-        assert!(code.ends_with("-120x60l"));
+        assert_eq!(code, "16-120x60l");
+    }
+
+    #[test]
+    fn encode_micro_c64_dims() {
+        let params = SeedParams {
+            seed: 42,
+            width: 64,
+            height: 48,
+            preset: None,
+        };
+        assert_eq!(encode(&params), "16-64x48");
+    }
+
+    #[test]
+    fn encode_micro_terminal_dims() {
+        let params = SeedParams {
+            seed: 42,
+            width: 80,
+            height: 40,
+            preset: None,
+        };
+        assert_eq!(encode(&params), "16-80x40");
     }
 
     #[test]
@@ -302,6 +318,16 @@ mod tests {
         };
         let code = format!("  {} \n", encode(&params));
         assert_eq!(decode(&code).unwrap(), params);
+    }
+
+    #[test]
+    fn decode_bare_seed_backward_compat() {
+        // Old-style codes without dimensions still work, defaulting to 80x40.
+        let params = decode("16").unwrap();
+        assert_eq!(params.seed, 42);
+        assert_eq!(params.width, 80);
+        assert_eq!(params.height, 40);
+        assert_eq!(params.preset, None);
     }
 
     #[test]

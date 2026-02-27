@@ -20,7 +20,7 @@ use crate::seed_code::{self, SeedParams};
 use crate::tier_micro::fov::MicroFov;
 use crate::tier_micro::game::MicroGameState;
 use crate::tier_micro::map::{TILE_FLOOR, TILE_WALL};
-use crate::tier_micro::types::{MAP_HEIGHT, MAP_WIDTH, PLAYER_IDX};
+use crate::tier_micro::types::PLAYER_IDX;
 use crate::types::Stat;
 
 /// Uniform interface for driving a game of any capability tier.
@@ -114,7 +114,26 @@ pub fn create_game(
     game_data: &GameData,
 ) -> Result<Box<dyn GameStep>, String> {
     match seed_code::tier_from_seed(seed) {
-        seed_code::Tier::Micro => Ok(Box::new(MicroGameStateAdapter::new(seed as u16))),
+        seed_code::Tier::Micro => {
+            // Validate dimensions for micro tier.
+            let w = width as u8;
+            let h = height as u8;
+            if w < balance::MIN_MAP_WIDTH || h < balance::MIN_MAP_HEIGHT {
+                return Err(format!(
+                    "Map must be at least {}x{} tiles",
+                    balance::MIN_MAP_WIDTH,
+                    balance::MIN_MAP_HEIGHT
+                ));
+            }
+            if w > balance::MICRO_MAX_MAP_WIDTH || h > balance::MICRO_MAX_MAP_HEIGHT {
+                return Err(format!(
+                    "Micro-tier map must be at most {}x{} tiles",
+                    balance::MICRO_MAX_MAP_WIDTH,
+                    balance::MICRO_MAX_MAP_HEIGHT
+                ));
+            }
+            Ok(Box::new(MicroGameStateAdapter::new(seed as u16, w, h)))
+        }
         _ => {
             if width < balance::MIN_MAP_WIDTH as i32 || height < balance::MIN_MAP_HEIGHT as i32 {
                 return Err(format!(
@@ -166,9 +185,17 @@ pub struct MicroGameStateAdapter {
 }
 
 impl MicroGameStateAdapter {
-    pub fn new(seed: u16) -> Self {
+    pub fn new(seed: u16, width: u8, height: u8) -> Self {
         Self {
-            game: MicroGameState::new(seed),
+            game: MicroGameState::new(seed, width, height),
+            seed,
+        }
+    }
+
+    /// Create an adapter with C64 default dimensions (64×48).
+    pub fn new_default(seed: u16) -> Self {
+        Self {
+            game: MicroGameState::new_default(seed),
             seed,
         }
     }
@@ -245,11 +272,11 @@ impl GameStep for MicroGameStateAdapter {
             0
         };
 
-        // Seed code.
+        // Seed code — encode with runtime dimensions.
         let seed_code = seed_code::encode(&SeedParams {
             seed: self.seed as u64,
-            width: MAP_WIDTH as i32,
-            height: MAP_HEIGHT as i32,
+            width: map.width as i32,
+            height: map.height as i32,
             preset: None,
         });
 
@@ -280,8 +307,9 @@ impl GameStep for MicroGameStateAdapter {
     }
 
     fn look_at(&self, x: i32, y: i32) -> TileInfo {
+        let map = &self.game.map;
         // Out of bounds or negative → unknown.
-        if x < 0 || y < 0 || x >= MAP_WIDTH as i32 || y >= MAP_HEIGHT as i32 {
+        if x < 0 || y < 0 || x >= map.width as i32 || y >= map.height as i32 {
             return TileInfo {
                 x,
                 y,
@@ -297,7 +325,6 @@ impl GameStep for MicroGameStateAdapter {
         let ux = x as u8;
         let uy = y as u8;
         let fov = &self.game.fov;
-        let map = &self.game.map;
         let entities = &self.game.entities;
 
         let explored = fov.is_explored(ux, uy);
@@ -579,11 +606,11 @@ fn build_micro_map_ascii(
     entities: &crate::tier_micro::entity::EntityStore,
 ) -> Vec<String> {
     let mut lines = Vec::new();
-    for y in 0..MAP_HEIGHT {
-        let mut line = String::with_capacity(MAP_WIDTH as usize);
+    for y in 0..map.height {
+        let mut line = String::with_capacity(map.width as usize);
         let mut has_content = false;
 
-        for x in 0..MAP_WIDTH {
+        for x in 0..map.width {
             if fov.is_visible(x, y) {
                 has_content = true;
                 // Check for alive entity at this position.
@@ -687,7 +714,7 @@ mod tests {
 
     #[test]
     fn trait_object_dispatch_micro() {
-        let mut adapter = MicroGameStateAdapter::new(42);
+        let mut adapter = MicroGameStateAdapter::new(42, 80, 40);
         let game: &mut dyn GameStep = &mut adapter;
 
         let (px, py) = game.player_pos();
@@ -716,7 +743,7 @@ mod tests {
 
     #[test]
     fn micro_adapter_observe_has_map() {
-        let adapter = MicroGameStateAdapter::new(42);
+        let adapter = MicroGameStateAdapter::new(42, 80, 40);
         let obs = adapter.observe();
         assert!(
             !obs.map_ascii.is_empty(),
@@ -732,7 +759,7 @@ mod tests {
 
     #[test]
     fn micro_adapter_observe_has_entities() {
-        let adapter = MicroGameStateAdapter::new(42);
+        let adapter = MicroGameStateAdapter::new(42, 80, 40);
         let obs = adapter.observe();
         // The map should show the player '@' somewhere.
         let has_player = obs.map_ascii.iter().any(|l| l.contains('@'));
@@ -741,7 +768,7 @@ mod tests {
 
     #[test]
     fn micro_adapter_step_translates_result() {
-        let mut adapter = MicroGameStateAdapter::new(42);
+        let mut adapter = MicroGameStateAdapter::new(42, 80, 40);
         let result = adapter.step(GameCommand::Wait);
         assert!(result.action_taken);
         assert!(!result.game_won);
@@ -750,7 +777,7 @@ mod tests {
 
     #[test]
     fn micro_adapter_look_at_player_tile() {
-        let adapter = MicroGameStateAdapter::new(42);
+        let adapter = MicroGameStateAdapter::new(42, 80, 40);
         let (px, py) = adapter.player_pos();
         let tile = adapter.look_at(px, py);
         assert!(tile.visible);
@@ -763,7 +790,7 @@ mod tests {
 
     #[test]
     fn micro_adapter_look_at_out_of_bounds() {
-        let adapter = MicroGameStateAdapter::new(42);
+        let adapter = MicroGameStateAdapter::new(42, 80, 40);
         let tile = adapter.look_at(-1, -1);
         assert!(!tile.visible);
         assert!(!tile.explored);
@@ -772,7 +799,7 @@ mod tests {
 
     #[test]
     fn micro_adapter_seed_code() {
-        let adapter = MicroGameStateAdapter::new(42);
+        let adapter = MicroGameStateAdapter::new(42, 80, 40);
         let obs = adapter.observe();
         assert!(!obs.seed_code.is_empty());
         assert_eq!(obs.seed, 42);
@@ -781,7 +808,7 @@ mod tests {
     #[test]
     fn both_tiers_same_trait_object() {
         let mut standard = test_standard_game();
-        let mut micro = MicroGameStateAdapter::new(42);
+        let mut micro = MicroGameStateAdapter::new(42, 80, 40);
 
         let games: Vec<&mut dyn GameStep> = vec![&mut standard, &mut micro];
 
@@ -802,7 +829,7 @@ mod tests {
 
     #[test]
     fn micro_adapter_messages_after_step() {
-        let adapter = MicroGameStateAdapter::new(42);
+        let adapter = MicroGameStateAdapter::new(42, 80, 40);
         // Welcome message should have been added at construction.
         let obs = adapter.observe();
         assert!(
@@ -823,7 +850,7 @@ mod tests {
     #[test]
     fn create_game_micro_tier() {
         let gd = data::load_game_data();
-        let game = create_game(42, 40, 30, None, &gd).unwrap();
+        let game = create_game(42, 80, 40, None, &gd).unwrap();
         assert!(!game.is_game_over());
         // Should downcast to MicroGameStateAdapter (micro tier).
         assert!(
@@ -847,8 +874,21 @@ mod tests {
         assert!(create_game(1_000_000, 10, 10, None, &gd).is_err());
         assert!(create_game(1_000_000, 19, 30, None, &gd).is_err());
         assert!(create_game(1_000_000, 40, 14, None, &gd).is_err());
-        // Micro tier ignores dimensions — fixed 64x48.
-        assert!(create_game(42, 10, 10, None, &gd).is_ok());
+        // Micro tier also validates dimensions now.
+        assert!(create_game(42, 10, 10, None, &gd).is_err());
+    }
+
+    #[test]
+    fn create_game_micro_validates_dimensions() {
+        let gd = data::load_game_data();
+        // Too small.
+        assert!(create_game(42, 10, 10, None, &gd).is_err());
+        // Too large for micro tier.
+        assert!(create_game(42, 90, 70, None, &gd).is_err());
+        // Valid micro dimensions.
+        assert!(create_game(42, 80, 40, None, &gd).is_ok());
+        assert!(create_game(42, 64, 48, None, &gd).is_ok());
+        assert!(create_game(42, 20, 15, None, &gd).is_ok());
     }
 
     #[test]
@@ -861,7 +901,7 @@ mod tests {
     #[test]
     fn micro_autorun_stops() {
         use crate::command::Direction;
-        let mut adapter = MicroGameStateAdapter::new(42);
+        let mut adapter = MicroGameStateAdapter::new(42, 80, 40);
         let result = adapter.autorun(Direction::North);
         assert!(result.steps_taken >= 0);
         // Should have stopped for a valid reason.
@@ -879,7 +919,7 @@ mod tests {
     #[test]
     fn micro_autorun_respects_max_steps() {
         use crate::command::Direction;
-        let mut adapter = MicroGameStateAdapter::new(42);
+        let mut adapter = MicroGameStateAdapter::new(42, 80, 40);
         let result = adapter.autorun(Direction::East);
         assert!(result.steps_taken <= balance::MAX_AUTORUN_STEPS as Stat);
     }
@@ -887,7 +927,7 @@ mod tests {
     #[test]
     fn micro_autorun_stepper_step_by_step() {
         use crate::command::Direction;
-        let mut adapter = MicroGameStateAdapter::new(42);
+        let mut adapter = MicroGameStateAdapter::new(42, 80, 40);
         let mut stepper = adapter.start_autorun(Direction::South);
         let mut continues = 0;
         loop {
@@ -907,7 +947,7 @@ mod tests {
     #[test]
     fn micro_autorun_collects_messages() {
         use crate::command::Direction;
-        let mut adapter = MicroGameStateAdapter::new(42);
+        let mut adapter = MicroGameStateAdapter::new(42, 80, 40);
         let result = adapter.autorun(Direction::East);
         // Messages vec should be valid (may be empty if no combat).
         let _ = result.messages;

@@ -63,7 +63,7 @@ mod tests {
     #[test]
     fn spawn_monsters_populates_entities() {
         let mut rng = LfsrRng16::new(42);
-        let mut map = MicroMap::new();
+        let mut map = MicroMap::new_default();
         map.generate(&mut rng);
 
         let mut entities = EntityStore::new();
@@ -80,7 +80,7 @@ mod tests {
     #[test]
     fn spawn_monsters_skips_room_zero() {
         let mut rng = LfsrRng16::new(42);
-        let mut map = MicroMap::new();
+        let mut map = MicroMap::new_default();
         let (sx, sy) = map.generate(&mut rng);
 
         let mut entities = EntityStore::new();
@@ -94,7 +94,7 @@ mod tests {
     #[test]
     fn spawn_does_not_exceed_max_entities() {
         let mut rng = LfsrRng16::new(42);
-        let mut map = MicroMap::new();
+        let mut map = MicroMap::new_default();
         map.generate(&mut rng);
 
         let mut entities = EntityStore::new();

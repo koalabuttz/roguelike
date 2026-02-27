@@ -14,9 +14,10 @@ use roguelike_core::rules::color::GameColor;
 use roguelike_core::rules::items;
 use roguelike_core::rules::message::{GameEvent, SoundDistance};
 use roguelike_core::rules::monster_table;
+use roguelike_core::rules::seed_code::{self, MAX_MICRO_SEED_CODE_LEN};
 use roguelike_core::tier_micro::game::MicroGameState;
 use roguelike_core::tier_micro::map::{TILE_FLOOR, TILE_WALL};
-use roguelike_core::tier_micro::types::{MAP_HEIGHT, MAP_WIDTH, PLAYER_IDX};
+use roguelike_core::tier_micro::types::PLAYER_IDX;
 
 // Screen codes for map tiles
 const SC_SPACE: u8 = 0x20;
@@ -33,8 +34,8 @@ const VIEW_H: u8 = 22;
 fn viewport(state: &MicroGameState) -> (u8, u8) {
     let px = state.entities.x[PLAYER_IDX as usize];
     let py = state.entities.y[PLAYER_IDX as usize];
-    let vx = px.saturating_sub(VIEW_W / 2).min(MAP_WIDTH - VIEW_W);
-    let vy = py.saturating_sub(VIEW_H / 2).min(MAP_HEIGHT - VIEW_H);
+    let vx = px.saturating_sub(VIEW_W / 2).min(state.map.width.saturating_sub(VIEW_W));
+    let vy = py.saturating_sub(VIEW_H / 2).min(state.map.height.saturating_sub(VIEW_H));
     (vx, vy)
 }
 
@@ -365,46 +366,75 @@ fn render_messages(state: &MicroGameState) {
 }
 
 // ---------------------------------------------------------------------------
-// Game over and title screens
+// Menu rendering helpers
 // ---------------------------------------------------------------------------
 
-/// Draw a 16-bit value as 4 hex digits.
-fn draw_hex16(x: u8, y: u8, val: u16, color: u8) {
-    let digits = [
-        (val >> 12) as u8 & 0x0F,
-        (val >> 8) as u8 & 0x0F,
-        (val >> 4) as u8 & 0x0F,
-        val as u8 & 0x0F,
-    ];
-    for (i, &d) in digits.iter().enumerate() {
-        let ch = if d < 10 { b'0' + d } else { b'A' + d - 10 };
-        c64::draw_char(x + i as u8, y, c64::to_screen_code(ch), color);
+/// Draw a list of menu items. Selected item gets `>` prefix in yellow,
+/// others get a space prefix in light grey.
+pub fn draw_menu(items: &[&[u8]], selected: u8, x: u8, y: u8) {
+    for (i, item) in items.iter().enumerate() {
+        let row = y + (i as u8) * 2; // 2-row spacing between items
+        let is_selected = i as u8 == selected;
+
+        // Clear the row area (item + prefix)
+        for col in x..(x + 20) {
+            if col < 40 {
+                c64::draw_char(col, row, SC_SPACE, c64::COLOR_BLACK);
+            }
+        }
+
+        if is_selected {
+            c64::draw_char(x, row, c64::to_screen_code(b'>'), c64::COLOR_YELLOW);
+            c64::draw_text(x + 2, row, item, c64::COLOR_YELLOW);
+        } else {
+            c64::draw_text(x + 2, row, item, c64::COLOR_LGREY);
+        }
     }
 }
 
-/// Render the game over screen overlay.
-pub fn render_game_over(state: &MicroGameState) {
-    let bx: u8 = 8;
-    let by: u8 = 8;
-    let bw: u8 = 24;
-    let bh: u8 = 7;
-
-    // Clear box area
+/// Draw a box border. Uses C64 PETSCII box-drawing characters.
+fn draw_box(bx: u8, by: u8, bw: u8, bh: u8, border_color: u8) {
+    // Clear box interior
     for y in by..(by + bh) {
         for x in bx..(bx + bw) {
             c64::draw_char(x, y, SC_SPACE, c64::COLOR_BLACK);
         }
     }
 
-    // Border
+    // Horizontal borders
     for x in bx..(bx + bw) {
-        c64::draw_char(x, by, 0xC0, c64::COLOR_RED);
-        c64::draw_char(x, by + bh - 1, 0xC0, c64::COLOR_RED);
+        c64::draw_char(x, by, 0xC0, border_color);
+        c64::draw_char(x, by + bh - 1, 0xC0, border_color);
     }
+
+    // Vertical borders
     for y in by..(by + bh) {
-        c64::draw_char(bx, y, 0xDD, c64::COLOR_RED);
-        c64::draw_char(bx + bw - 1, y, 0xDD, c64::COLOR_RED);
+        c64::draw_char(bx, y, 0xDD, border_color);
+        c64::draw_char(bx + bw - 1, y, 0xDD, border_color);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Game over, title, pause, and seed input screens
+// ---------------------------------------------------------------------------
+
+/// Draw a seed code (e.g. "16-64x48") at the given screen position.
+fn draw_seed_code(x: u8, y: u8, seed: u16, width: u8, height: u8, color: u8) {
+    let mut buf = [0u8; MAX_MICRO_SEED_CODE_LEN];
+    let len = seed_code::encode_micro_to_buf(seed, width, height, &mut buf);
+    for i in 0..len {
+        c64::draw_char(x + i as u8, y, c64::to_screen_code(buf[i]), color);
+    }
+}
+
+/// Render the game over screen overlay with menu items.
+pub fn render_game_over(state: &MicroGameState, selected: u8) {
+    let bx: u8 = 8;
+    let by: u8 = 7;
+    let bw: u8 = 24;
+    let bh: u8 = 11;
+
+    draw_box(bx, by, bw, bh, c64::COLOR_RED);
 
     c64::draw_text(bx + 5, by + 1, b"YOU HAVE DIED", c64::COLOR_RED);
 
@@ -418,11 +448,15 @@ pub fn render_game_over(state: &MicroGameState) {
     c64::draw_number(bx + 12, by + 4, turn_lo, c64::COLOR_WHITE);
 
     c64::draw_text(bx + 2, by + 5, b"Seed: ", c64::COLOR_GREY);
-    draw_hex16(bx + 8, by + 5, state.rng.state(), c64::COLOR_YELLOW);
+    draw_seed_code(bx + 8, by + 5, state.seed, state.map.width, state.map.height, c64::COLOR_YELLOW);
+
+    // Menu items inside the box
+    let menu_items: [&[u8]; 2] = [b"Play Again", b"Title Screen"];
+    draw_menu(&menu_items, selected, bx + 4, by + 7);
 }
 
-/// Render the title screen.
-pub fn render_title(seed: u16) {
+/// Render the title screen with menu.
+pub fn render_title(selected: u8) {
     c64::clear_screen();
 
     c64::draw_text(8, 3, b"========================", c64::COLOR_YELLOW);
@@ -431,13 +465,87 @@ pub fn render_title(seed: u16) {
     c64::draw_text(8, 6, b"========================", c64::COLOR_YELLOW);
     c64::draw_text(8, 8, b"    C64 + RUST-MOS      ", c64::COLOR_LGREY);
 
-    c64::draw_text(6, 12, b"CONTROLS:", c64::COLOR_CYAN);
-    c64::draw_text(6, 14, b"WASD/ARROWS  MOVE", c64::COLOR_LGREY);
-    c64::draw_text(6, 15, b"QEZC         DIAGONALS", c64::COLOR_LGREY);
-    c64::draw_text(6, 16, b"SPACE        WAIT", c64::COLOR_LGREY);
-    c64::draw_text(6, 17, b"JOYSTICK 2   ALSO WORKS", c64::COLOR_LGREY);
+    // Menu items
+    let menu_items: [&[u8]; 2] = [b"NEW GAME", b"ENTER SEED"];
+    draw_menu(&menu_items, selected, 10, 11);
 
-    c64::draw_text(6, 20, b"PRESS ANY KEY TO BEGIN", c64::COLOR_GREEN);
-    c64::draw_text(6, 22, b"SEED: ", c64::COLOR_GREY);
-    draw_hex16(12, 22, seed, c64::COLOR_YELLOW);
+    // Condensed controls help
+    c64::draw_text(4, 17, b"W/UP MOVE  Q/E DIAG", c64::COLOR_DGREY);
+    c64::draw_text(4, 18, b"S/DN       Z/C", c64::COLOR_DGREY);
+    c64::draw_text(4, 19, b"SPACE WAIT  JOY2 OK", c64::COLOR_DGREY);
+}
+
+/// Render the pause menu overlay on top of the game screen.
+pub fn render_pause(state: &MicroGameState, selected: u8) {
+    // Re-render the game underneath
+    render_all(state);
+
+    let bx: u8 = 8;
+    let by: u8 = 8;
+    let bw: u8 = 24;
+    let bh: u8 = 8;
+
+    draw_box(bx, by, bw, bh, c64::COLOR_CYAN);
+
+    c64::draw_text(bx + 8, by + 1, b"PAUSED", c64::COLOR_CYAN);
+
+    let menu_items: [&[u8]; 2] = [b"Resume", b"New Game"];
+    draw_menu(&menu_items, selected, bx + 4, by + 3);
+}
+
+/// Render the seed code text input dialog.
+pub fn render_seed_input(buf: &[u8], len: u8) {
+    let bx: u8 = 5;
+    let by: u8 = 9;
+    let bw: u8 = 30;
+    let bh: u8 = 7;
+
+    draw_box(bx, by, bw, bh, c64::COLOR_CYAN);
+
+    c64::draw_text(bx + 8, by + 1, b"ENTER SEED CODE", c64::COLOR_CYAN);
+
+    // Input field background
+    let field_x = bx + 3;
+    let field_y = by + 3;
+    let field_w: u8 = 16;
+    for i in 0..field_w {
+        c64::draw_char(field_x + i, field_y, c64::to_screen_code(b'_'), c64::COLOR_DGREY);
+    }
+
+    // Draw typed characters
+    for i in 0..len {
+        let ch = buf[i as usize];
+        // Convert lowercase ASCII to uppercase for PETSCII display
+        let display = if ch >= b'a' && ch <= b'z' {
+            ch - b'a' + b'A'
+        } else {
+            ch
+        };
+        c64::draw_char(field_x + i, field_y, c64::to_screen_code(display), c64::COLOR_WHITE);
+    }
+
+    // Cursor
+    if (len as u8) < field_w {
+        c64::draw_char(field_x + len, field_y, 0xA0, c64::COLOR_YELLOW); // solid block cursor
+    }
+
+    c64::draw_text(bx + 3, by + 5, b"RETURN OK  RUN/STOP BACK", c64::COLOR_DGREY);
+}
+
+/// Render a brief error message overlay for invalid seed codes.
+pub fn render_seed_error(msg: &[u8]) {
+    let bx: u8 = 8;
+    let by: u8 = 10;
+    let bw: u8 = 24;
+    let bh: u8 = 5;
+
+    draw_box(bx, by, bw, bh, c64::COLOR_RED);
+
+    c64::draw_text(bx + 7, by + 1, b"INVALID SEED", c64::COLOR_RED);
+    // Center the error message (truncate if too long)
+    let max_w = (bw - 4) as usize;
+    let msg_len = if msg.len() > max_w { max_w } else { msg.len() };
+    let msg_x = bx + 2 + ((max_w - msg_len) as u8) / 2;
+    c64::draw_text(msg_x, by + 2, &msg[..msg_len], c64::COLOR_LGREY);
+    c64::draw_text(bx + 4, by + 3, b"PRESS ANY KEY", c64::COLOR_DGREY);
 }

@@ -9,6 +9,7 @@ pub mod combat;
 pub mod entity;
 pub mod fov;
 pub mod game;
+pub mod item_store;
 pub mod map;
 pub mod msglog;
 pub mod prng;

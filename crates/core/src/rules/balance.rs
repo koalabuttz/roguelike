@@ -110,6 +110,7 @@ pub const MICRO_MAP_HEIGHT: u8 = 48;
 // Tier micro — gameplay constants (match standard tier for parity)
 pub const MICRO_MAX_ROOMS: u8 = MAX_ROOMS;
 pub const MICRO_MAX_ENTITIES: u8 = 64;
+pub const MICRO_MAX_ITEMS: u8 = 32;
 pub const MICRO_ROOM_SIZE_MIN: u8 = ROOM_SIZE_MIN;
 pub const MICRO_ROOM_SIZE_MAX: u8 = ROOM_SIZE_MAX;
 pub const MICRO_FOV_RADIUS: u8 = FOV_RADIUS;

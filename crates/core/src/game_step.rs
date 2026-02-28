@@ -10,15 +10,17 @@ use std::any::Any;
 use crate::command::{Direction, GameCommand};
 use crate::data::GameData;
 use crate::game::{
-    AutorunResult, AutorunStopReason, EntityInfo, GameObservation, GameState, StepOutcome,
-    StepResult, TileInfo,
+    AutorunResult, AutorunStopReason, EntityInfo, GameObservation, GameState, ItemInfo,
+    StepOutcome, StepResult, TileInfo,
 };
 use crate::map::MapPreset;
 use crate::message_log::format_event;
+use crate::rules::items as rules_items;
 use crate::rules::{balance, monster_table};
 use crate::seed_code::{self, SeedParams};
 use crate::tier_micro::fov::MicroFov;
 use crate::tier_micro::game::MicroGameState;
+use crate::tier_micro::item_store::ItemStore;
 use crate::tier_micro::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_WALL};
 use crate::tier_micro::types::PLAYER_IDX;
 use crate::types::Stat;
@@ -255,10 +257,13 @@ impl GameStep for MicroGameStateAdapter {
         let fov = &self.game.fov;
 
         // Build ASCII map — only rows with visible content.
-        let map_ascii = build_micro_map_ascii(map, fov, entities);
+        let map_ascii = build_micro_map_ascii(map, fov, entities, &self.game.items);
 
         // Visible entities (excluding player).
         let visible_entities = build_micro_visible_entities(entities, fov);
+
+        // Visible items on ground.
+        let visible_items = build_micro_visible_items(&self.game.items, fov);
 
         // Recent messages.
         let recent_messages = build_micro_recent_messages(&self.game.log);
@@ -283,18 +288,26 @@ impl GameStep for MicroGameStateAdapter {
         GameObservation {
             player_hp: entities.hp[pi] as i32,
             player_max_hp: entities.max_hp[pi] as i32,
-            player_atk: entities.atk[pi] as i32,
-            player_def: entities.def[pi] as i32,
+            player_atk: self.game.effective_attack() as i32,
+            player_def: self.game.effective_defense() as i32,
             player_x: entities.x[pi] as i32,
             player_y: entities.y[pi] as i32,
             map_ascii,
             visible_entities,
-            visible_items: Vec::new(),
+            visible_items,
             recent_messages,
             game_over: self.game.game_over,
             turn_count: self.game.turn_count as i32,
-            weapon: None,
-            armor: None,
+            weapon: self
+                .game
+                .equipment
+                .weapon
+                .map(|k| rules_items::name(k).to_string()),
+            armor: self
+                .game
+                .equipment
+                .armor
+                .map(|k| rules_items::name(k).to_string()),
             kills: self.game.kills as i32,
             rooms_found: map.room_count as i32,
             explored_pct,
@@ -356,9 +369,17 @@ impl GameStep for MicroGameStateAdapter {
             None
         };
 
+        let items_at: Vec<ItemInfo> = if visible {
+            build_micro_items_at(&self.game.items, ux, uy)
+        } else {
+            Vec::new()
+        };
+
         let glyph = if visible {
             if let Some(ref ei) = entity {
                 ei.glyph
+            } else if let Some(first) = items_at.first() {
+                first.glyph
             } else {
                 tile_glyph(tile)
             }
@@ -371,7 +392,7 @@ impl GameStep for MicroGameStateAdapter {
             y,
             terrain,
             entity,
-            items: Vec::new(),
+            items: items_at,
             visible,
             explored,
             glyph,
@@ -606,6 +627,7 @@ fn build_micro_map_ascii(
     map: &crate::tier_micro::map::MicroMap,
     fov: &MicroFov,
     entities: &crate::tier_micro::entity::EntityStore,
+    items: &ItemStore,
 ) -> Vec<String> {
     let mut lines = Vec::new();
     for y in 0..map.height {
@@ -615,9 +637,11 @@ fn build_micro_map_ascii(
         for x in 0..map.width {
             if fov.is_visible(x, y) {
                 has_content = true;
-                // Check for alive entity at this position.
+                // Priority: entity > item > tile.
                 if let Some(ei) = entity_info_at(entities, x, y) {
                     line.push(ei.glyph);
+                } else if let Some(glyph) = item_glyph_at(items, x, y) {
+                    line.push(glyph);
                 } else {
                     line.push(tile_glyph(map.tile_at(x, y)));
                 }
@@ -671,6 +695,48 @@ fn build_micro_recent_messages(log: &crate::tier_micro::msglog::MicroMessageLog)
         }
     }
     messages
+}
+
+/// Get the glyph of the first alive item at (x, y), if any.
+fn item_glyph_at(items: &ItemStore, x: u8, y: u8) -> Option<char> {
+    for i in 0..items.count as usize {
+        if items.alive[i] && items.x[i] == x && items.y[i] == y {
+            return Some(rules_items::glyph(items.kind[i]));
+        }
+    }
+    None
+}
+
+/// Build visible items list for observe().
+fn build_micro_visible_items(items: &ItemStore, fov: &MicroFov) -> Vec<ItemInfo> {
+    let mut result = Vec::new();
+    for i in 0..items.count as usize {
+        if items.alive[i] && fov.is_visible(items.x[i], items.y[i]) {
+            result.push(ItemInfo {
+                name: rules_items::name(items.kind[i]).to_string(),
+                glyph: rules_items::glyph(items.kind[i]),
+                x: items.x[i] as i32,
+                y: items.y[i] as i32,
+            });
+        }
+    }
+    result
+}
+
+/// Build item info list at a specific tile for look_at().
+fn build_micro_items_at(items: &ItemStore, x: u8, y: u8) -> Vec<ItemInfo> {
+    let mut result = Vec::new();
+    for i in 0..items.count as usize {
+        if items.alive[i] && items.x[i] == x && items.y[i] == y {
+            result.push(ItemInfo {
+                name: rules_items::name(items.kind[i]).to_string(),
+                glyph: rules_items::glyph(items.kind[i]),
+                x: x as i32,
+                y: y as i32,
+            });
+        }
+    }
+    result
 }
 
 #[cfg(test)]

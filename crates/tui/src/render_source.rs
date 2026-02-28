@@ -9,6 +9,8 @@ use roguelike_core::game_step::MicroGameStateAdapter;
 use roguelike_core::item;
 use roguelike_core::map::Tile;
 use roguelike_core::message_log::format_event;
+use roguelike_core::rules::balance;
+use roguelike_core::rules::items as rules_items;
 use roguelike_core::rules::monster_table;
 use roguelike_core::rules::tiles::{self as tile_rules, TileKind};
 use roguelike_core::seed_code::{self, SeedParams};
@@ -178,11 +180,17 @@ impl RenderSource for GameState {
     }
 
     fn player_atk(&self) -> (Stat, Stat) {
-        (self.entities[0].attack, self.equipment.attack_bonus())
+        (
+            self.entities[0].attack,
+            self.equipment.attack_bonus() as Stat,
+        )
     }
 
     fn player_def(&self) -> (Stat, Stat) {
-        (self.entities[0].defense, self.equipment.defense_bonus())
+        (
+            self.entities[0].defense,
+            self.equipment.defense_bonus() as Stat,
+        )
     }
 
     fn depth(&self) -> (Stat, Stat) {
@@ -268,7 +276,21 @@ impl RenderSource for MicroGameStateAdapter {
         }
     }
 
-    // for_each_visible_item: uses default (no items in micro tier)
+    fn for_each_visible_item(&self, f: &mut dyn FnMut(RenderItem)) {
+        let items = &self.game.items;
+        let fov = &self.game.fov;
+        for i in 0..items.count as usize {
+            if items.alive[i] && fov.is_visible(items.x[i], items.y[i]) {
+                let kind = items.kind[i];
+                f(RenderItem {
+                    x: items.x[i] as Coord,
+                    y: items.y[i] as Coord,
+                    glyph: rules_items::glyph(kind),
+                    fg: rules_items::color(kind),
+                });
+            }
+        }
+    }
 
     fn player_pos(&self) -> (Coord, Coord) {
         let pi = PLAYER_IDX as usize;
@@ -287,15 +309,21 @@ impl RenderSource for MicroGameStateAdapter {
     }
 
     fn player_atk(&self) -> (Stat, Stat) {
-        (self.game.entities.atk[PLAYER_IDX as usize] as Stat, 0)
+        (
+            self.game.entities.atk[PLAYER_IDX as usize] as Stat,
+            self.game.equipment.attack_bonus() as Stat,
+        )
     }
 
     fn player_def(&self) -> (Stat, Stat) {
-        (self.game.entities.def[PLAYER_IDX as usize] as Stat, 0)
+        (
+            self.game.entities.def[PLAYER_IDX as usize] as Stat,
+            self.game.equipment.defense_bonus() as Stat,
+        )
     }
 
     fn depth(&self) -> (Stat, Stat) {
-        (1, 1)
+        (self.game.depth as Stat, balance::TARGET_DEPTH as Stat)
     }
 
     fn explored_pct(&self) -> Stat {
@@ -331,7 +359,7 @@ impl RenderSource for MicroGameStateAdapter {
     }
 
     fn game_won(&self) -> bool {
-        false
+        self.game.game_won
     }
 
     fn game_over(&self) -> bool {
@@ -457,16 +485,20 @@ mod tests {
     }
 
     #[test]
-    fn micro_no_items() {
+    fn micro_has_items() {
         let mg = test_micro_game();
         let mut count = 0;
         mg.for_each_visible_item(&mut |_| count += 1);
-        assert_eq!(count, 0);
+        // Items spawn in rooms other than room 0, so some may or may not
+        // be visible from starting position — just verify it doesn't panic.
+        let _ = count;
     }
 
     #[test]
-    fn micro_depth_is_one() {
+    fn micro_depth() {
         let mg = test_micro_game();
-        assert_eq!(mg.depth(), (1, 1));
+        let (depth, target) = mg.depth();
+        assert_eq!(depth, 1);
+        assert_eq!(target, roguelike_core::rules::balance::TARGET_DEPTH as Stat);
     }
 }

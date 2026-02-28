@@ -7,6 +7,7 @@ use super::ai;
 use super::combat;
 use super::entity::EntityStore;
 use super::fov::MicroFov;
+use super::item_store::ItemStore;
 use super::map::{MicroMap, TILE_STAIRS_DOWN};
 use super::msglog::MicroMessageLog;
 use super::prng::LfsrRng16;
@@ -14,6 +15,8 @@ use super::spawn;
 use super::types::*;
 use crate::command::GameCommand;
 use crate::rules::balance;
+use crate::rules::damage;
+use crate::rules::items::{self as rules_items, Equipment};
 use crate::rules::message::GameEvent;
 
 /// Result of a single step.
@@ -28,6 +31,8 @@ pub struct MicroGameState {
     pub map: MicroMap,
     pub fov: MicroFov,
     pub entities: EntityStore,
+    pub items: ItemStore,
+    pub equipment: Equipment,
     pub log: MicroMessageLog,
     pub rng: LfsrRng16,
     /// Original seed used to create this game (for display/sharing).
@@ -53,6 +58,9 @@ impl MicroGameState {
         entities.spawn_player(sx, sy);
         spawn::spawn_monsters(&mut entities, &map, &mut rng);
 
+        let mut items = ItemStore::new();
+        spawn::spawn_items(&mut items, &map, &mut rng);
+
         let mut fov = MicroFov::new(width, height);
         fov.compute_fov(sx, sy, &map);
 
@@ -63,6 +71,8 @@ impl MicroGameState {
             map,
             fov,
             entities,
+            items,
+            equipment: Equipment::default(),
             log,
             rng,
             seed,
@@ -123,8 +133,14 @@ impl MicroGameState {
             let py = self.entities.y[PLAYER_IDX as usize];
             self.fov.compute_fov(px, py, &self.map);
 
-            let player_died =
-                ai::run_monster_turns(&mut self.entities, &self.map, &mut self.rng, &mut self.log);
+            let player_def = self.effective_defense();
+            let player_died = ai::run_monster_turns(
+                &mut self.entities,
+                &self.map,
+                &mut self.rng,
+                &mut self.log,
+                player_def,
+            );
             if player_died {
                 self.game_over = true;
                 self.log.add(GameEvent::PlayerDeath);
@@ -188,9 +204,11 @@ impl MicroGameState {
         self.entities.atk[pi] = atk;
         self.entities.def[pi] = def;
 
-        // Spawn and scale monsters
+        // Spawn and scale monsters, spawn items
         spawn::spawn_monsters(&mut self.entities, &self.map, &mut self.rng);
         spawn::apply_depth_scaling(&mut self.entities, self.depth);
+        self.items = ItemStore::new();
+        spawn::spawn_items(&mut self.items, &self.map, &mut self.rng);
 
         // Reset FOV
         self.fov = MicroFov::new(w, h);
@@ -215,8 +233,16 @@ impl MicroGameState {
         // Check for monster at target position
         let target = self.entities.monster_at(nx, ny);
         if target != NO_ENTITY {
-            let killed =
-                combat::melee_attack(PLAYER_IDX, target, &mut self.entities, &mut self.log);
+            let atk = self.effective_attack();
+            let def = self.entities.def[target as usize];
+            let killed = combat::melee_attack(
+                PLAYER_IDX,
+                target,
+                atk,
+                def,
+                &mut self.entities,
+                &mut self.log,
+            );
             if killed {
                 self.kills += 1;
             }
@@ -227,10 +253,69 @@ impl MicroGameState {
         if self.map.is_walkable(nx, ny) {
             self.entities.x[PLAYER_IDX as usize] = nx;
             self.entities.y[PLAYER_IDX as usize] = ny;
+            self.try_pickup_items(nx, ny);
             return true;
         }
 
         false
+    }
+
+    /// Player's effective attack (base + weapon bonus).
+    pub fn effective_attack(&self) -> u8 {
+        let base = self.entities.atk[PLAYER_IDX as usize];
+        damage::effective_attack(base, self.equipment.attack_bonus())
+    }
+
+    /// Player's effective defense (base + armor bonus).
+    pub fn effective_defense(&self) -> u8 {
+        let base = self.entities.def[PLAYER_IDX as usize];
+        damage::effective_defense(base, self.equipment.defense_bonus())
+    }
+
+    /// Try to pick up items at position. Mirrors standard tier's auto-pickup.
+    fn try_pickup_items(&mut self, x: u8, y: u8) {
+        let mut i = self.items.count as usize;
+        while i > 0 {
+            i -= 1;
+            if !self.items.alive[i] || self.items.x[i] != x || self.items.y[i] != y {
+                continue;
+            }
+            let kind = self.items.kind[i];
+
+            if rules_items::is_consumable(kind) {
+                let heal = rules_items::heal_amount(kind);
+                let pi = PLAYER_IDX as usize;
+                let hp = self.entities.hp[pi];
+                let max_hp = self.entities.max_hp[pi];
+                if heal > 0 && hp >= max_hp {
+                    continue; // full HP — leave potion on ground
+                }
+                self.items.remove(i as u8);
+                if heal > 0 {
+                    let healed = heal.min(max_hp - hp);
+                    self.entities.hp[pi] = hp + healed;
+                    self.log.add(GameEvent::DrinkPotion { kind, healed });
+                }
+            } else if rules_items::is_weapon(kind)
+                && rules_items::is_better_weapon(kind, self.equipment.weapon)
+            {
+                self.items.remove(i as u8);
+                self.equipment.weapon = Some(kind);
+                self.log.add(GameEvent::EquipWeapon {
+                    kind,
+                    bonus: rules_items::attack_bonus(kind),
+                });
+            } else if rules_items::is_armor(kind)
+                && rules_items::is_better_armor(kind, self.equipment.armor)
+            {
+                self.items.remove(i as u8);
+                self.equipment.armor = Some(kind);
+                self.log.add(GameEvent::EquipArmor {
+                    kind,
+                    bonus: rules_items::defense_bonus(kind),
+                });
+            }
+        }
     }
 
     fn apply_regen(&mut self) {
@@ -254,6 +339,7 @@ impl MicroGameState {
 mod tests {
     use super::*;
     use crate::command::Direction;
+    use crate::rules::items::ItemKind;
 
     #[test]
     fn new_game_is_playable() {
@@ -486,5 +572,151 @@ mod tests {
                 "monster HP should be scaled for depth 2"
             );
         }
+    }
+
+    // ── Item and equipment tests ──────────────────────────────────────
+
+    /// Place an item under the player and step onto it.
+    fn place_item_at_player(g: &mut MicroGameState, kind: ItemKind) {
+        let px = g.entities.x[0];
+        let py = g.entities.y[0];
+        g.items.spawn(px, py, kind);
+    }
+
+    #[test]
+    fn items_spawn_on_new_game() {
+        let g = MicroGameState::new_default(42);
+        assert!(g.items.count > 0, "should have spawned items");
+    }
+
+    #[test]
+    fn potion_heals_when_hurt() {
+        let mut g = MicroGameState::new_default(42);
+        let pi = PLAYER_IDX as usize;
+        g.entities.hp[pi] = g.entities.max_hp[pi] - 5;
+        let hp_before = g.entities.hp[pi];
+
+        place_item_at_player(&mut g, ItemKind::HealthPotion);
+        let px = g.entities.x[0];
+        let py = g.entities.y[0];
+        g.try_pickup_items(px, py);
+
+        assert!(
+            g.entities.hp[pi] > hp_before,
+            "potion should heal the player"
+        );
+    }
+
+    #[test]
+    fn potion_skipped_at_full_hp() {
+        let mut g = MicroGameState::new_default(42);
+        // Clear existing items to avoid interference
+        g.items = ItemStore::new();
+        place_item_at_player(&mut g, ItemKind::HealthPotion);
+        let items_before = g.items.count;
+        let px = g.entities.x[0];
+        let py = g.entities.y[0];
+        g.try_pickup_items(px, py);
+
+        // Item should still be alive (not consumed)
+        assert!(
+            g.items.alive[items_before as usize - 1],
+            "potion should stay on ground at full HP"
+        );
+    }
+
+    #[test]
+    fn weapon_auto_equips() {
+        let mut g = MicroGameState::new_default(42);
+        g.items = ItemStore::new();
+        assert_eq!(g.equipment.weapon, None);
+
+        place_item_at_player(&mut g, ItemKind::ShortSword);
+        let px = g.entities.x[0];
+        let py = g.entities.y[0];
+        g.try_pickup_items(px, py);
+
+        assert_eq!(g.equipment.weapon, Some(ItemKind::ShortSword));
+    }
+
+    #[test]
+    fn armor_auto_equips() {
+        let mut g = MicroGameState::new_default(42);
+        g.items = ItemStore::new();
+        assert_eq!(g.equipment.armor, None);
+
+        place_item_at_player(&mut g, ItemKind::LeatherArmor);
+        let px = g.entities.x[0];
+        let py = g.entities.y[0];
+        g.try_pickup_items(px, py);
+
+        assert_eq!(g.equipment.armor, Some(ItemKind::LeatherArmor));
+    }
+
+    #[test]
+    fn same_weapon_not_picked_up() {
+        let mut g = MicroGameState::new_default(42);
+        g.items = ItemStore::new();
+        g.equipment.weapon = Some(ItemKind::ShortSword);
+
+        place_item_at_player(&mut g, ItemKind::ShortSword);
+        let px = g.entities.x[0];
+        let py = g.entities.y[0];
+        g.try_pickup_items(px, py);
+
+        // Item should still be on ground
+        assert!(g.items.alive[0], "same weapon should not be picked up");
+    }
+
+    #[test]
+    fn effective_attack_with_weapon() {
+        let mut g = MicroGameState::new_default(42);
+        let base = g.entities.atk[PLAYER_IDX as usize];
+        assert_eq!(g.effective_attack(), base);
+
+        g.equipment.weapon = Some(ItemKind::ShortSword);
+        assert_eq!(
+            g.effective_attack(),
+            base + rules_items::attack_bonus(ItemKind::ShortSword)
+        );
+    }
+
+    #[test]
+    fn effective_defense_with_armor() {
+        let mut g = MicroGameState::new_default(42);
+        let base = g.entities.def[PLAYER_IDX as usize];
+        assert_eq!(g.effective_defense(), base);
+
+        g.equipment.armor = Some(ItemKind::LeatherArmor);
+        assert_eq!(
+            g.effective_defense(),
+            base + rules_items::defense_bonus(ItemKind::LeatherArmor)
+        );
+    }
+
+    #[test]
+    fn equipment_persists_across_descent() {
+        let mut g = MicroGameState::new_default(42);
+        g.equipment.weapon = Some(ItemKind::ShortSword);
+        g.equipment.armor = Some(ItemKind::LeatherArmor);
+
+        let last = g.map.rooms[(g.map.room_count - 1) as usize];
+        g.entities.x[0] = last.cx();
+        g.entities.y[0] = last.cy();
+        g.step(GameCommand::Descend);
+
+        assert_eq!(g.equipment.weapon, Some(ItemKind::ShortSword));
+        assert_eq!(g.equipment.armor, Some(ItemKind::LeatherArmor));
+    }
+
+    #[test]
+    fn items_spawn_on_new_floor() {
+        let mut g = MicroGameState::new_default(42);
+        let last = g.map.rooms[(g.map.room_count - 1) as usize];
+        g.entities.x[0] = last.cx();
+        g.entities.y[0] = last.cy();
+        g.step(GameCommand::Descend);
+
+        assert!(g.items.count > 0, "new floor should have items");
     }
 }

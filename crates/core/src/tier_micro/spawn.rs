@@ -1,12 +1,14 @@
-//! Weighted monster spawning for the micro tier.
+//! Weighted monster and item spawning for the micro tier.
 //!
-//! Uses `rules::monster_table` spawn weights and stat lookups.
+//! Uses `rules::monster_table` and `rules::items` spawn weights and stat lookups.
 
 use super::entity::EntityStore;
+use super::item_store::ItemStore;
 use super::map::MicroMap;
 use super::prng::LfsrRng16;
 use super::types::*;
 use crate::rules::balance;
+use crate::rules::items::{self as rules_items, ItemKind, KIND_COUNT as ITEM_KIND_COUNT};
 use crate::rules::monster_table::{self, KIND_COUNT, MonsterKind, SPAWN_KINDS, SPAWN_WEIGHTS};
 
 /// Pick a random monster kind using the rules/ spawn weights.
@@ -44,6 +46,48 @@ pub fn spawn_monsters(entities: &mut EntityStore, map: &MicroMap, rng: &mut Lfsr
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Item spawning
+// ---------------------------------------------------------------------------
+
+/// Pick a random item kind using the rules/ spawn weights.
+pub fn pick_item_kind(rng: &mut LfsrRng16) -> ItemKind {
+    let mut total: u8 = 0;
+    for i in 0..ITEM_KIND_COUNT {
+        total = total.saturating_add(rules_items::SPAWN_TABLE[i].1);
+    }
+    let mut roll = rng.range_u8(0, total - 1);
+    for i in 0..ITEM_KIND_COUNT {
+        let (kind, weight) = rules_items::SPAWN_TABLE[i];
+        if roll < weight {
+            return kind;
+        }
+        roll -= weight;
+    }
+    rules_items::SPAWN_TABLE[0].0
+}
+
+/// Spawn items in rooms (skip room 0 = player start, max 1 per room).
+pub fn spawn_items(items: &mut ItemStore, map: &MicroMap, rng: &mut LfsrRng16) {
+    for ri in 1..map.room_count {
+        let room = map.rooms[ri as usize];
+        let count = rng.range_u8(0, balance::MAX_ITEMS_PER_ROOM);
+        for _ in 0..count {
+            if room.w < 3 || room.h < 3 {
+                continue;
+            }
+            let ix = rng.range_u8(room.x + 1, room.x + room.w - 1);
+            let iy = rng.range_u8(room.y + 1, room.y + room.h - 1);
+            let kind = pick_item_kind(rng);
+            items.spawn(ix, iy, kind);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Depth scaling
+// ---------------------------------------------------------------------------
 
 /// Apply per-floor stat increases to spawned monsters (slots 1..count).
 pub fn apply_depth_scaling(entities: &mut EntityStore, depth: u8) {
@@ -134,6 +178,46 @@ mod tests {
         let base_hp = entities.hp[1];
         apply_depth_scaling(&mut entities, 1);
         assert_eq!(entities.hp[1], base_hp);
+    }
+
+    #[test]
+    fn pick_item_kind_returns_valid_kind() {
+        let mut rng = LfsrRng16::new(42);
+        for _ in 0..100 {
+            let kind = pick_item_kind(&mut rng);
+            match kind {
+                ItemKind::HealthPotion | ItemKind::ShortSword | ItemKind::LeatherArmor => {}
+            }
+        }
+    }
+
+    #[test]
+    fn spawn_items_populates_store() {
+        let mut rng = LfsrRng16::new(42);
+        let mut map = MicroMap::new_default();
+        map.generate(&mut rng);
+
+        let mut items = ItemStore::new();
+        spawn_items(&mut items, &map, &mut rng);
+        assert!(items.count > 0, "should have spawned at least one item");
+    }
+
+    #[test]
+    fn spawn_items_skips_room_zero() {
+        let mut rng = LfsrRng16::new(42);
+        let mut map = MicroMap::new_default();
+        let (sx, sy) = map.generate(&mut rng);
+
+        let mut items = ItemStore::new();
+        spawn_items(&mut items, &map, &mut rng);
+
+        // No item should be at the player start room center
+        use crate::tier_micro::item_store::NO_ITEM;
+        assert_eq!(
+            items.item_at(sx, sy),
+            NO_ITEM,
+            "no item at player start position"
+        );
     }
 
     #[test]

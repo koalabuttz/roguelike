@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::rules::{balance, items as rules_items};
 use crate::types::{Coord, GameColor, Stat};
 
-// Re-export ItemKind from rules so all existing `item::ItemKind` paths work.
-pub use crate::rules::items::ItemKind;
+// Re-export from rules so all existing `item::ItemKind` / `item::Equipment` paths work.
+pub use crate::rules::items::{Equipment, ItemKind};
 
 /// Maximum number of items on the ground the engine supports.
 ///
@@ -20,16 +20,6 @@ pub struct Item {
     pub x: Coord,
     pub y: Coord,
     pub kind: ItemKind,
-}
-
-/// Tracked equipment slots for the player.
-///
-/// Combat reads effective stats (base + equipment bonus) from these slots.
-/// Structured so that adding inventory later is a small diff.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Equipment {
-    pub weapon: Option<ItemKind>,
-    pub armor: Option<ItemKind>,
 }
 
 // ---------------------------------------------------------------------------
@@ -105,18 +95,6 @@ pub fn spawn_table() -> Vec<(ItemKind, u32)> {
         .filter(|(_, w)| *w > 0)
         .map(|&(kind, w)| (kind, w as u32))
         .collect()
-}
-
-impl Equipment {
-    /// Attack bonus from equipped weapon.
-    pub fn attack_bonus(&self) -> Stat {
-        self.weapon.map_or(0, item_attack_bonus)
-    }
-
-    /// Defense bonus from equipped armor.
-    pub fn defense_bonus(&self) -> Stat {
-        self.armor.map_or(0, item_defense_bonus)
-    }
 }
 
 #[cfg(test)]

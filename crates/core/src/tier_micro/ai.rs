@@ -21,11 +21,14 @@ fn signum(v: i8) -> i8 {
 }
 
 /// Run all monster turns. Returns true if the player died.
+///
+/// `player_def` is the player's effective defense (base + armor bonus).
 pub fn run_monster_turns(
     entities: &mut EntityStore,
     map: &MicroMap,
     rng: &mut LfsrRng16,
     log: &mut MicroMessageLog,
+    player_def: u8,
 ) -> bool {
     let px = entities.x[PLAYER_IDX as usize];
     let py = entities.y[PLAYER_IDX as usize];
@@ -50,7 +53,7 @@ pub fn run_monster_turns(
         match behavior {
             AiBehavior::Chase => {
                 if aware {
-                    chase(i, px, py, entities, map, log);
+                    chase(i, px, py, entities, map, log, player_def);
                 }
             }
             AiBehavior::Wander => {
@@ -61,7 +64,7 @@ pub fn run_monster_turns(
                         None => Combatant::UnknownMonster,
                     };
                     log.add(GameEvent::EntityNotice { who });
-                    chase(i, px, py, entities, map, log);
+                    chase(i, px, py, entities, map, log, player_def);
                 } else {
                     wander(i, entities, map, rng);
                 }
@@ -84,6 +87,7 @@ fn chase(
     entities: &mut EntityStore,
     map: &MicroMap,
     log: &mut MicroMessageLog,
+    player_def: u8,
 ) {
     let mx = entities.x[idx as usize];
     let my = entities.y[idx as usize];
@@ -95,7 +99,8 @@ fn chase(
 
     // If adjacent, attack instead of moving
     if dist_x <= 1 && dist_y <= 1 {
-        combat::melee_attack(idx, PLAYER_IDX, entities, log);
+        let atk = entities.atk[idx as usize];
+        combat::melee_attack(idx, PLAYER_IDX, atk, player_def, entities, log);
         return;
     }
 
@@ -181,10 +186,11 @@ mod tests {
         entities.spawn_player(10, 10);
         entities.spawn_monster(MonsterKind::Goblin, 15, 10, AiBehavior::Chase);
         let orig_x = entities.x[1];
+        let player_def = entities.def[PLAYER_IDX as usize];
 
         let mut rng = LfsrRng16::new(42);
         let mut log = MicroMessageLog::new();
-        run_monster_turns(&mut entities, &map, &mut rng, &mut log);
+        run_monster_turns(&mut entities, &map, &mut rng, &mut log, player_def);
 
         // Monster should have moved closer to player
         assert!(entities.x[1] < orig_x, "monster should chase toward player");
@@ -197,10 +203,11 @@ mod tests {
         entities.spawn_player(10, 10);
         entities.spawn_monster(MonsterKind::Goblin, 11, 10, AiBehavior::Chase);
         let hp_before = entities.hp[0];
+        let player_def = entities.def[PLAYER_IDX as usize];
 
         let mut rng = LfsrRng16::new(42);
         let mut log = MicroMessageLog::new();
-        run_monster_turns(&mut entities, &map, &mut rng, &mut log);
+        run_monster_turns(&mut entities, &map, &mut rng, &mut log, player_def);
 
         // Player should have taken damage (Goblin ATK=3, Player DEF=2 → 1 damage)
         assert!(entities.hp[0] < hp_before, "player should take damage");
@@ -213,10 +220,11 @@ mod tests {
         entities.spawn_player(10, 10);
         // Place wandering monster within sight range
         entities.spawn_monster(MonsterKind::Goblin, 13, 10, AiBehavior::Wander);
+        let player_def = entities.def[PLAYER_IDX as usize];
 
         let mut rng = LfsrRng16::new(42);
         let mut log = MicroMessageLog::new();
-        run_monster_turns(&mut entities, &map, &mut rng, &mut log);
+        run_monster_turns(&mut entities, &map, &mut rng, &mut log, player_def);
 
         // Should have switched to Chase
         assert_eq!(entities.ai[1], AiBehavior::Chase);
@@ -229,11 +237,12 @@ mod tests {
         entities.spawn_player(10, 10);
         entities.spawn_monster(MonsterKind::Goblin, 11, 10, AiBehavior::Chase);
         entities.kill(1);
+        let player_def = entities.def[PLAYER_IDX as usize];
 
         let mut rng = LfsrRng16::new(42);
         let mut log = MicroMessageLog::new();
         let hp_before = entities.hp[0];
-        run_monster_turns(&mut entities, &map, &mut rng, &mut log);
+        run_monster_turns(&mut entities, &map, &mut rng, &mut log, player_def);
 
         assert_eq!(entities.hp[0], hp_before, "dead monster should not attack");
     }

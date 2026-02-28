@@ -20,14 +20,17 @@ fn combatant(entities: &EntityStore, idx: u8) -> Combatant {
 }
 
 /// Execute a melee attack. Returns true if the defender was killed.
+///
+/// Callers provide effective ATK/DEF (base + equipment bonuses) so that
+/// equipment logic stays out of the combat module.
 pub fn melee_attack(
     attacker: u8,
     defender: u8,
+    atk: u8,
+    def: u8,
     entities: &mut EntityStore,
     log: &mut MicroMessageLog,
 ) -> bool {
-    let atk = entities.atk[attacker as usize];
-    let def = entities.def[defender as usize];
     let dmg = damage::damage(atk, def);
 
     let a = combatant(entities, attacker);
@@ -74,7 +77,9 @@ mod tests {
     fn positive_damage_reduces_hp() {
         let (mut e, mut log) = setup();
         let hp_before = e.hp[1];
-        melee_attack(0, 1, &mut e, &mut log);
+        let atk = e.atk[0];
+        let def = e.def[1];
+        melee_attack(0, 1, atk, def, &mut e, &mut log);
         // Player ATK=5, Goblin DEF=0 → 5 damage
         assert!(e.hp[1] < hp_before);
     }
@@ -82,10 +87,9 @@ mod tests {
     #[test]
     fn zero_damage_when_defense_exceeds() {
         let (mut e, mut log) = setup();
-        // Give defender high defense
-        e.def[1] = 100;
+        let atk = e.atk[0];
         let hp_before = e.hp[1];
-        melee_attack(0, 1, &mut e, &mut log);
+        melee_attack(0, 1, atk, 100, &mut e, &mut log);
         assert_eq!(e.hp[1], hp_before);
         assert_eq!(
             log.recent(0),
@@ -100,7 +104,9 @@ mod tests {
     fn kill_on_zero_hp() {
         let (mut e, mut log) = setup();
         e.hp[1] = 1;
-        let killed = melee_attack(0, 1, &mut e, &mut log);
+        let atk = e.atk[0];
+        let def = e.def[1];
+        let killed = melee_attack(0, 1, atk, def, &mut e, &mut log);
         assert!(killed);
         assert!(!e.alive[1]);
     }
@@ -108,7 +114,9 @@ mod tests {
     #[test]
     fn game_events_emitted() {
         let (mut e, mut log) = setup();
-        melee_attack(0, 1, &mut e, &mut log);
+        let atk = e.atk[0];
+        let def = e.def[1];
+        melee_attack(0, 1, atk, def, &mut e, &mut log);
         match log.recent(0) {
             Some(GameEvent::Attack {
                 attacker,

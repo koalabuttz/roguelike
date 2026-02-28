@@ -193,6 +193,33 @@ pub fn is_better_armor(new: ItemKind, current: Option<ItemKind>) -> bool {
     is_upgrade(new, current, defense_bonus)
 }
 
+// ---------------------------------------------------------------------------
+// Equipment (shared across all tiers)
+// ---------------------------------------------------------------------------
+
+/// Tracked equipment slots for the player.
+///
+/// Pure data + bonus lookups — no coordinates, no allocation, `no_std`.
+/// Combat reads effective stats (base + equipment bonus) from these slots.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Equipment {
+    pub weapon: Option<ItemKind>,
+    pub armor: Option<ItemKind>,
+}
+
+impl Equipment {
+    /// Attack bonus from equipped weapon (u8 for tier portability).
+    pub fn attack_bonus(&self) -> u8 {
+        self.weapon.map_or(0, attack_bonus)
+    }
+
+    /// Defense bonus from equipped armor (u8 for tier portability).
+    pub fn defense_bonus(&self) -> u8 {
+        self.armor.map_or(0, defense_bonus)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,5 +343,42 @@ mod tests {
         assert_eq!(POTION_HEAL, 10);
         assert_eq!(SWORD_ATK, 3);
         assert_eq!(ARMOR_DEF, 2);
+    }
+
+    #[test]
+    fn equipment_default_no_bonuses() {
+        let eq = Equipment::default();
+        assert_eq!(eq.attack_bonus(), 0);
+        assert_eq!(eq.defense_bonus(), 0);
+    }
+
+    #[test]
+    fn equipment_weapon_bonus() {
+        let eq = Equipment {
+            weapon: Some(ItemKind::ShortSword),
+            armor: None,
+        };
+        assert_eq!(eq.attack_bonus(), 3);
+        assert_eq!(eq.defense_bonus(), 0);
+    }
+
+    #[test]
+    fn equipment_armor_bonus() {
+        let eq = Equipment {
+            weapon: None,
+            armor: Some(ItemKind::LeatherArmor),
+        };
+        assert_eq!(eq.attack_bonus(), 0);
+        assert_eq!(eq.defense_bonus(), 2);
+    }
+
+    #[test]
+    fn equipment_both_slots() {
+        let eq = Equipment {
+            weapon: Some(ItemKind::ShortSword),
+            armor: Some(ItemKind::LeatherArmor),
+        };
+        assert_eq!(eq.attack_bonus(), 3);
+        assert_eq!(eq.defense_bonus(), 2);
     }
 }

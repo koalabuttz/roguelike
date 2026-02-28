@@ -717,7 +717,7 @@ impl GameState {
         use crate::rules::damage::{effective_attack as eff_atk, narrow};
         eff_atk(
             narrow(self.entities[0].attack),
-            narrow(self.equipment.attack_bonus()),
+            self.equipment.attack_bonus(),
         ) as Stat
     }
 
@@ -726,7 +726,7 @@ impl GameState {
         use crate::rules::damage::{effective_defense as eff_def, narrow};
         eff_def(
             narrow(self.entities[0].defense),
-            narrow(self.equipment.defense_bonus()),
+            self.equipment.defense_bonus(),
         ) as Stat
     }
 
@@ -756,8 +756,8 @@ impl GameState {
             return true;
         }
 
-        // Derive new seed from original seed + depth for deterministic floors.
-        let floor_seed = self.seed.wrapping_add(self.depth as u64);
+        // Derive deterministic seed for this floor (XOR-multiply decorrelates adjacent seeds).
+        let floor_seed = self.seed ^ (self.depth as u64).wrapping_mul(0x9E37);
 
         // Derive independent RNG streams (same pattern as with_data).
         let mut master = StdRng::seed_from_u64(floor_seed);

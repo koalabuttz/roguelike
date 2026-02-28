@@ -57,10 +57,11 @@ fn game_color_to_c64(gc: GameColor) -> u8 {
     }
 }
 
-/// Full screen render: map + entities + status + messages.
+/// Full screen render: map + items + entities + status + messages.
 pub fn render_all(state: &MicroGameState) {
     let (vx, vy) = viewport(state);
     render_map(state, vx, vy);
+    render_items(state, vx, vy);
     render_entities(state, vx, vy);
     render_status_bar(state);
     render_messages(state);
@@ -108,6 +109,29 @@ fn render_map(state: &MicroGameState, vx: u8, vy: u8) {
 
             c64::draw_char(sx, sy, sc, color);
         }
+    }
+}
+
+/// Render ground items that are visible and within the viewport.
+fn render_items(state: &MicroGameState, vx: u8, vy: u8) {
+    for i in 0..state.items.count as usize {
+        if !state.items.alive[i] {
+            continue;
+        }
+        let ix = state.items.x[i];
+        let iy = state.items.y[i];
+        if !state.fov.is_visible(ix, iy) {
+            continue;
+        }
+        if ix < vx || ix >= vx + VIEW_W || iy < vy || iy >= vy + VIEW_H {
+            continue;
+        }
+        let sx = ix - vx;
+        let sy = iy - vy;
+        let kind = state.items.kind[i];
+        let glyph = items::glyph(kind) as u8;
+        let color = game_color_to_c64(items::color(kind));
+        c64::draw_char(sx, sy, c64::to_screen_code(glyph), color);
     }
 }
 

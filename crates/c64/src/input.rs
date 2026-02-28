@@ -2,6 +2,7 @@
 //
 // Returns GameCommand values from roguelike-core instead of raw u8 constants.
 // Keyboard input uses direct CIA1 matrix scanning (no KERNAL dependency).
+// Joystick uses edge detection + auto-repeat to filter noise/drift.
 
 use crate::c64;
 use roguelike_core::command::{Direction, GameCommand};
@@ -79,33 +80,33 @@ fn key_to_menu(key: u8) -> Option<MenuInput> {
     }
 }
 
-/// Read joystick port 2 for menu navigation.
-/// Returns Up, Down, or Select (fire button).
-fn read_joystick_menu() -> Option<MenuInput> {
-    let (dir, fire) = read_joystick_raw();
+// ---------------------------------------------------------------------------
+// Joystick — edge detection + auto-repeat
+// ---------------------------------------------------------------------------
 
-    if fire {
-        return Some(MenuInput::Select);
-    }
+/// Frames before held joystick starts repeating (~200ms at 60 Hz).
+const JOY_INITIAL_DELAY: u8 = 12;
+/// Frames between repeats once held (~67ms at 60 Hz).
+const JOY_REPEAT_RATE: u8 = 4;
 
-    match dir {
-        Some(Direction::North) => Some(MenuInput::Up),
-        Some(Direction::South) => Some(MenuInput::Down),
-        _ => None,
-    }
+/// Previous joystick state for edge detection (5 bits: up/down/left/right/fire).
+static mut PREV_JOY: u8 = 0;
+/// Frames remaining before next repeat fires.
+static mut JOY_DELAY: u8 = 0;
+
+/// Read joystick port 2 as a 5-bit bitmask (bits 0-4 = up/down/left/right/fire).
+fn joy_bits() -> u8 {
+    c64::poke(c64::CIA1_PA, 0xFF);
+    (c64::peek(c64::CIA1_PA as *const u8) ^ 0xFF) & 0x1F
 }
 
-/// Read joystick port 2 bits. Returns (direction, fire).
-/// Isolates joystick lines by disabling keyboard column scanning.
-fn read_joystick_raw() -> (Option<Direction>, bool) {
-    c64::poke(c64::CIA1_PA, 0xFF);
-    let joy = c64::peek(c64::CIA1_PA as *const u8) ^ 0xFF;
-
-    let up    = joy & 0x01 != 0;
-    let down  = joy & 0x02 != 0;
-    let left  = joy & 0x04 != 0;
-    let right = joy & 0x08 != 0;
-    let fire  = joy & 0x10 != 0;
+/// Decode 5-bit joystick state into (direction, fire).
+fn decode_joy(bits: u8) -> (Option<Direction>, bool) {
+    let up    = bits & 0x01 != 0;
+    let down  = bits & 0x02 != 0;
+    let left  = bits & 0x04 != 0;
+    let right = bits & 0x08 != 0;
+    let fire  = bits & 0x10 != 0;
 
     let dir = match (up, down, left, right) {
         (true,  false, false, false) => Some(Direction::North),
@@ -122,21 +123,58 @@ fn read_joystick_raw() -> (Option<Direction>, bool) {
     (dir, fire)
 }
 
-/// Read joystick port 2. Returns game command if any direction/fire active.
-fn read_joystick() -> Option<GameCommand> {
-    let (dir, fire) = read_joystick_raw();
+/// Joystick poll with edge detection and auto-repeat. Call once per frame.
+/// Returns the active bits if the joystick should fire this frame.
+fn joy_repeat() -> Option<u8> {
+    let current = joy_bits();
+    let prev = unsafe { PREV_JOY };
 
-    if fire && dir.is_none() {
-        return Some(GameCommand::Wait);
+    if current == 0 {
+        unsafe { PREV_JOY = 0; JOY_DELAY = 0; }
+        return None;
     }
 
-    dir.map(GameCommand::Move)
+    if current != prev {
+        // New direction — act immediately, start repeat countdown
+        unsafe { PREV_JOY = current; JOY_DELAY = JOY_INITIAL_DELAY; }
+        return Some(current);
+    }
+
+    // Same direction held — count down for repeat
+    unsafe {
+        if JOY_DELAY > 0 {
+            JOY_DELAY -= 1;
+            return None;
+        }
+        JOY_DELAY = JOY_REPEAT_RATE;
+    }
+    Some(current)
 }
 
+/// Joystick poll with edge detection only (no repeat). Call once per frame.
+/// Returns the active bits only on a state change.
+fn joy_edge() -> Option<u8> {
+    let current = joy_bits();
+    let prev = unsafe { PREV_JOY };
+    unsafe { PREV_JOY = current; JOY_DELAY = 0; }
+
+    if current != prev && current != 0 {
+        Some(current)
+    } else {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public input functions
+// ---------------------------------------------------------------------------
+
 /// Wait for and return a game command from either keyboard or joystick.
-/// Blocks until a valid command is received.
+/// Blocks until a valid command is received. Polls once per frame.
 pub fn wait_for_input() -> GameCommand {
     loop {
+        c64::wait_next_frame();
+
         let key = read_key();
         if key != 0 {
             if let Some(cmd) = key_to_cmd(key) {
@@ -144,18 +182,25 @@ pub fn wait_for_input() -> GameCommand {
             }
         }
 
-        if let Some(cmd) = read_joystick() {
-            // Debounce: wait for joystick release
-            while joy_active() {}
-            return cmd;
+        if let Some(bits) = joy_repeat() {
+            let (dir, fire) = decode_joy(bits);
+            if fire && dir.is_none() {
+                return GameCommand::Wait;
+            }
+            if let Some(d) = dir {
+                return GameCommand::Move(d);
+            }
         }
     }
 }
 
 /// Wait for a menu navigation input from keyboard or joystick.
-/// Blocks until a valid input is received.
+/// Blocks until a valid input is received. Joystick uses edge-only
+/// (no repeat) to prevent accidental menu scrolling.
 pub fn wait_for_menu_input() -> MenuInput {
     loop {
+        c64::wait_next_frame();
+
         let key = read_key();
         if key != 0 {
             if let Some(input) = key_to_menu(key) {
@@ -163,9 +208,14 @@ pub fn wait_for_menu_input() -> MenuInput {
             }
         }
 
-        if let Some(input) = read_joystick_menu() {
-            while joy_active() {}
-            return input;
+        if let Some(bits) = joy_edge() {
+            let (dir, fire) = decode_joy(bits);
+            if fire { return MenuInput::Select; }
+            match dir {
+                Some(Direction::North) => return MenuInput::Up,
+                Some(Direction::South) => return MenuInput::Down,
+                _ => {}
+            }
         }
     }
 }
@@ -229,9 +279,11 @@ pub enum LookInput {
 }
 
 /// Wait for a look mode input from keyboard or joystick.
-/// Blocks until a valid input is received.
+/// Blocks until a valid input is received. Joystick uses edge + repeat.
 pub fn wait_for_look_input() -> LookInput {
     loop {
+        c64::wait_next_frame();
+
         let key = read_key();
         if key != 0 {
             if let Some(dir) = key_to_direction(key) {
@@ -242,21 +294,10 @@ pub fn wait_for_look_input() -> LookInput {
             }
         }
 
-        let (dir, fire) = read_joystick_raw();
-        if fire {
-            while joy_active() {}
-            return LookInput::Close;
-        }
-        if let Some(d) = dir {
-            while joy_active() {}
-            return LookInput::Move(d);
+        if let Some(bits) = joy_repeat() {
+            let (dir, fire) = decode_joy(bits);
+            if fire { return LookInput::Close; }
+            if let Some(d) = dir { return LookInput::Move(d); }
         }
     }
-}
-
-/// Check if joystick port 2 has any active input.
-fn joy_active() -> bool {
-    c64::poke(c64::CIA1_PA, 0xFF);
-    let joy = c64::peek(c64::CIA1_PA as *const u8) ^ 0xFF;
-    joy & 0x1F != 0
 }

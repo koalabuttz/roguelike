@@ -11,8 +11,9 @@ use super::types::*;
 use crate::rules::balance;
 
 pub const TILE_WALL: u8 = 0;
-pub const TILE_FLOOR: u8 = 1;
-pub const TILE_STAIRS_DOWN: u8 = 2;
+pub const TILE_STRUCTURAL: u8 = 1;
+pub const TILE_FLOOR: u8 = 2;
+pub const TILE_STAIRS_DOWN: u8 = 3;
 
 #[derive(Copy, Clone)]
 pub struct Room {
@@ -55,8 +56,9 @@ impl Room {
 }
 
 pub struct MicroMap {
-    pub tiles: [u8; MAX_MAP_SIZE],
-    structural: [u8; MAX_BITFIELD_SIZE],
+    /// Packed tile array: 4 bits per tile, 2 tiles per byte.
+    /// Even index → lower nibble, odd index → upper nibble.
+    pub tiles: [u8; MAX_PACKED_MAP_SIZE],
     pub rooms: [Room; MAX_ROOMS],
     pub room_count: u8,
     pub width: u8,
@@ -68,8 +70,7 @@ impl MicroMap {
         debug_assert!(width <= MAX_MAP_WIDTH);
         debug_assert!(height <= MAX_MAP_HEIGHT);
         Self {
-            tiles: [TILE_WALL; MAX_MAP_SIZE],
-            structural: [0; MAX_BITFIELD_SIZE],
+            tiles: [0; MAX_PACKED_MAP_SIZE],
             rooms: [Room::empty(); MAX_ROOMS],
             room_count: 0,
             width,
@@ -90,23 +91,26 @@ impl MicroMap {
         x < self.width && y < self.height
     }
 
+    /// Read a 4-bit tile value from the packed array.
     pub fn tile_at(&self, x: u8, y: u8) -> u8 {
         if !self.in_bounds(x, y) {
             return TILE_WALL;
         }
-        self.tiles[self.idx(x, y)]
+        let i = self.idx(x, y);
+        let byte = self.tiles[i / 2];
+        if i & 1 == 0 {
+            byte & 0x0F
+        } else {
+            byte >> 4
+        }
     }
 
     pub fn is_walkable(&self, x: u8, y: u8) -> bool {
-        self.tile_at(x, y) != TILE_WALL
+        self.tile_at(x, y) >= TILE_FLOOR
     }
 
     pub fn is_structural(&self, x: u8, y: u8) -> bool {
-        if !self.in_bounds(x, y) {
-            return false;
-        }
-        let i = self.idx(x, y);
-        self.structural[i / 8] & (1 << (i % 8)) != 0
+        self.tile_at(x, y) == TILE_STRUCTURAL
     }
 
     /// Count walkable 8-neighbors excluding the direction (exclude_dx, exclude_dy).
@@ -136,7 +140,7 @@ impl MicroMap {
         let mut count: u16 = 0;
         for y in 0..self.height {
             for x in 0..self.width {
-                if self.tiles[self.idx(x, y)] != TILE_WALL {
+                if self.tile_at(x, y) >= TILE_FLOOR {
                     count += 1;
                 }
             }
@@ -148,15 +152,20 @@ impl MicroMap {
     pub fn place_stairs_down(&mut self) {
         if self.room_count > 0 {
             let last = self.rooms[(self.room_count - 1) as usize];
-            let i = self.idx(last.cx(), last.cy());
-            self.tiles[i] = TILE_STAIRS_DOWN;
+            self.set_tile(last.cx(), last.cy(), TILE_STAIRS_DOWN);
         }
     }
 
-    fn set_tile(&mut self, x: u8, y: u8, tile: u8) {
+    /// Write a 4-bit tile value into the packed array.
+    pub fn set_tile(&mut self, x: u8, y: u8, tile: u8) {
         if self.in_bounds(x, y) {
             let i = self.idx(x, y);
-            self.tiles[i] = tile;
+            let byte = &mut self.tiles[i / 2];
+            if i & 1 == 0 {
+                *byte = (*byte & 0xF0) | (tile & 0x0F);
+            } else {
+                *byte = (*byte & 0x0F) | ((tile & 0x0F) << 4);
+            }
         }
     }
 
@@ -183,9 +192,6 @@ impl MicroMap {
     }
 
     fn compute_structural_walls(&mut self) {
-        for b in self.structural.iter_mut() {
-            *b = 0;
-        }
         for y in 0..self.height {
             for x in 0..self.width {
                 if self.tile_at(x, y) != TILE_WALL {
@@ -199,7 +205,7 @@ impl MicroMap {
                         }
                         let nx = (x as i8 + dx) as u8;
                         let ny = (y as i8 + dy) as u8;
-                        if self.in_bounds(nx, ny) && self.tile_at(nx, ny) != TILE_WALL {
+                        if self.in_bounds(nx, ny) && self.tile_at(nx, ny) >= TILE_FLOOR {
                             found = true;
                             break;
                         }
@@ -209,8 +215,7 @@ impl MicroMap {
                     }
                 }
                 if found {
-                    let i = self.idx(x, y);
-                    self.structural[i / 8] |= 1 << (i % 8);
+                    self.set_tile(x, y, TILE_STRUCTURAL);
                 }
             }
         }
@@ -218,10 +223,10 @@ impl MicroMap {
 
     /// Generate a dungeon. Returns the player start position.
     pub fn generate(&mut self, rng: &mut LfsrRng16) -> Pos {
-        // Reset to all walls
-        let map_size = (self.width as usize) * (self.height as usize);
-        for t in self.tiles[..map_size].iter_mut() {
-            *t = TILE_WALL;
+        // Reset to all walls (TILE_WALL=0, so zero the packed array)
+        let packed_size = ((self.width as usize) * (self.height as usize)).div_ceil(2);
+        for t in self.tiles[..packed_size].iter_mut() {
+            *t = 0;
         }
         self.room_count = 0;
 
@@ -328,7 +333,7 @@ mod tests {
         for y in 0..map.height {
             for x in 0..map.width {
                 if map.is_structural(x, y) {
-                    assert_eq!(map.tile_at(x, y), TILE_WALL);
+                    assert_eq!(map.tile_at(x, y), TILE_STRUCTURAL);
                     let mut has_floor_neighbor = false;
                     for dy in -1i8..=1 {
                         for dx in -1i8..=1 {
@@ -337,7 +342,7 @@ mod tests {
                             }
                             let nx = (x as i8 + dx) as u8;
                             let ny = (y as i8 + dy) as u8;
-                            if map.in_bounds(nx, ny) && map.tile_at(nx, ny) == TILE_FLOOR {
+                            if map.in_bounds(nx, ny) && map.tile_at(nx, ny) >= TILE_FLOOR {
                                 has_floor_neighbor = true;
                             }
                         }
@@ -357,7 +362,7 @@ mod tests {
         let mut manual: u16 = 0;
         for y in 0..map.height {
             for x in 0..map.width {
-                if map.tiles[map.idx(x, y)] != TILE_WALL {
+                if map.tile_at(x, y) >= TILE_FLOOR {
                     manual += 1;
                 }
             }
@@ -378,17 +383,17 @@ mod tests {
         let (b, sb) = make_map(1234);
         assert_eq!(sa, sb);
         assert_eq!(a.room_count, b.room_count);
-        let a_size = (a.width as usize) * (a.height as usize);
-        assert_eq!(a.tiles[..a_size], b.tiles[..a_size]);
+        let packed_size = ((a.width as usize) * (a.height as usize)).div_ceil(2);
+        assert_eq!(a.tiles[..packed_size], b.tiles[..packed_size]);
     }
 
     #[test]
     fn open_neighbors_excluding_in_corridor() {
         let mut map = MicroMap::new_default();
         // Horizontal corridor at y=10: floor at x=5,6,7
-        map.tiles[map.idx(5, 10)] = TILE_FLOOR;
-        map.tiles[map.idx(6, 10)] = TILE_FLOOR;
-        map.tiles[map.idx(7, 10)] = TILE_FLOOR;
+        map.set_tile(5, 10, TILE_FLOOR);
+        map.set_tile(6, 10, TILE_FLOOR);
+        map.set_tile(7, 10, TILE_FLOOR);
         // At (6,10) heading east, excluding behind (-1,0): only (7,10) ahead.
         assert_eq!(map.open_neighbors_excluding(6, 10, -1, 0), 1);
     }
@@ -398,9 +403,9 @@ mod tests {
         let mut map = MicroMap::new_default();
         // T-junction: corridor east-west at y=10, plus branch south.
         for x in 5..=8 {
-            map.tiles[map.idx(x, 10)] = TILE_FLOOR;
+            map.set_tile(x, 10, TILE_FLOOR);
         }
-        map.tiles[map.idx(6, 11)] = TILE_FLOOR;
+        map.set_tile(6, 11, TILE_FLOOR);
         // At (6,10) heading east, excluding behind (-1,0):
         // forward (7,10) + branch (6,11) = 2+
         assert!(map.open_neighbors_excluding(6, 10, -1, 0) >= 2);
@@ -479,11 +484,11 @@ mod tests {
     #[test]
     fn floor_count_includes_stairs() {
         let (map, _) = make_map(42);
-        // Manual count of all non-wall tiles
+        // Manual count of all walkable tiles (floor + stairs)
         let mut manual: u16 = 0;
         for y in 0..map.height {
             for x in 0..map.width {
-                if map.tiles[map.idx(x, y)] != TILE_WALL {
+                if map.tile_at(x, y) >= TILE_FLOOR {
                     manual += 1;
                 }
             }

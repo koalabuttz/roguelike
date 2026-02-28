@@ -15,7 +15,7 @@ use roguelike_core::rules::items;
 use roguelike_core::rules::message::{GameEvent, SoundDistance};
 use roguelike_core::rules::monster_table;
 use roguelike_core::tier_micro::game::MicroGameState;
-use roguelike_core::tier_micro::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_WALL};
+use roguelike_core::tier_micro::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_STRUCTURAL, TILE_WALL};
 use roguelike_core::tier_micro::types::{NO_ENTITY, PLAYER_IDX};
 
 // Screen codes for map tiles
@@ -66,13 +66,8 @@ fn tile_appearance(state: &MicroGameState, wx: u8, wy: u8) -> (u8, u8) {
         match tile {
             TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
             TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
-            TILE_WALL => {
-                if state.map.is_structural(wx, wy) {
-                    (SC_WALL, c64::COLOR_LGREY)
-                } else {
-                    (SC_SPACE, c64::COLOR_BLACK)
-                }
-            }
+            TILE_STRUCTURAL => (SC_WALL, c64::COLOR_LGREY),
+            TILE_WALL => (SC_SPACE, c64::COLOR_BLACK),
             _ => (SC_SPACE, c64::COLOR_BLACK),
         }
     } else if explored {
@@ -80,13 +75,8 @@ fn tile_appearance(state: &MicroGameState, wx: u8, wy: u8) -> (u8, u8) {
         match tile {
             TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
             TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
-            TILE_WALL => {
-                if state.map.is_structural(wx, wy) {
-                    (SC_WALL, c64::COLOR_BLUE)
-                } else {
-                    (SC_SPACE, c64::COLOR_BLACK)
-                }
-            }
+            TILE_STRUCTURAL => (SC_WALL, c64::COLOR_BLUE),
+            TILE_WALL => (SC_SPACE, c64::COLOR_BLACK),
             _ => (SC_SPACE, c64::COLOR_BLACK),
         }
     } else {
@@ -483,7 +473,8 @@ pub fn render_look_status(state: &MicroGameState, cx: u8, cy: u8) {
         match tile {
             TILE_FLOOR => p = copy_bytes(&mut buf, p, b"Floor"),
             TILE_STAIRS_DOWN => p = copy_bytes(&mut buf, p, b"Stairs"),
-            TILE_WALL => p = copy_bytes(&mut buf, p, b"Wall"),
+            TILE_STRUCTURAL => p = copy_bytes(&mut buf, p, b"Wall"),
+            TILE_WALL => p = copy_bytes(&mut buf, p, b"Void"),
             _ => p = copy_bytes(&mut buf, p, b"???"),
         }
 

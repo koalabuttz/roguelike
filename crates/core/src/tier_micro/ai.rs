@@ -173,7 +173,7 @@ mod tests {
         // Carve a 20x20 floor area
         for y in 5..25 {
             for x in 5..25 {
-                map.tiles[map.idx(x, y)] = super::super::map::TILE_FLOOR;
+                map.set_tile(x, y, super::super::map::TILE_FLOOR);
             }
         }
         map

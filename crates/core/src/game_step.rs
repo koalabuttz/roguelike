@@ -21,7 +21,7 @@ use crate::seed_code::{self, SeedParams};
 use crate::tier_micro::fov::MicroFov;
 use crate::tier_micro::game::MicroGameState;
 use crate::tier_micro::item_store::ItemStore;
-use crate::tier_micro::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_WALL};
+use crate::tier_micro::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_STRUCTURAL, TILE_WALL};
 use crate::tier_micro::types::PLAYER_IDX;
 use crate::types::Stat;
 
@@ -357,8 +357,9 @@ impl GameStep for MicroGameStateAdapter {
         let visible = fov.is_visible(ux, uy);
         let tile = map.tile_at(ux, uy);
         let terrain = match tile {
+            TILE_WALL => "Void".into(),
+            TILE_STRUCTURAL => "Wall".into(),
             TILE_FLOOR => "Floor".into(),
-            TILE_WALL => "Wall".into(),
             TILE_STAIRS_DOWN => "Stairs down".into(),
             _ => "Unknown".into(),
         };
@@ -587,8 +588,9 @@ fn has_adjacent_monster_micro(entities: &crate::tier_micro::entity::EntityStore)
 
 fn tile_glyph(tile: u8) -> char {
     match tile {
+        TILE_WALL => ' ',
+        TILE_STRUCTURAL => '#',
         TILE_FLOOR => '.',
-        TILE_WALL => '#',
         TILE_STAIRS_DOWN => '>',
         _ => ' ',
     }

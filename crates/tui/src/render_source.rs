@@ -243,7 +243,7 @@ impl RenderSource for MicroGameStateAdapter {
             Some(kind) => RenderTile {
                 glyph: tile_rules::glyph(kind),
                 fg: tile_rules::color(kind),
-                structural: self.game.map.is_structural(x as u8, y as u8),
+                structural: kind == TileKind::Structural,
             },
             None => RenderTile {
                 glyph: ' ',

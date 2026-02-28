@@ -602,8 +602,8 @@ mod tests {
 
         // Same initial state
         assert_eq!(a.entities.count, b.entities.count);
-        let size = (a.map.width as usize) * (a.map.height as usize);
-        assert_eq!(a.map.tiles[..size], b.map.tiles[..size]);
+        let packed_size = ((a.map.width as usize) * (a.map.height as usize)).div_ceil(2);
+        assert_eq!(a.map.tiles[..packed_size], b.map.tiles[..packed_size]);
 
         // Run same commands
         for _ in 0..10 {
@@ -716,8 +716,8 @@ mod tests {
             g.step(GameCommand::Descend);
         }
 
-        let size = (a.map.width as usize) * (a.map.height as usize);
-        assert_eq!(a.map.tiles[..size], b.map.tiles[..size]);
+        let packed_size = ((a.map.width as usize) * (a.map.height as usize)).div_ceil(2);
+        assert_eq!(a.map.tiles[..packed_size], b.map.tiles[..packed_size]);
         assert_eq!(a.entities.count, b.entities.count);
         assert_eq!(a.depth, b.depth);
     }
@@ -736,10 +736,10 @@ mod tests {
         assert_eq!(a.depth, 2);
 
         // Game B stays at depth 1 — compare maps
-        let size = (a.map.width as usize) * (a.map.height as usize);
+        let packed_size = ((a.map.width as usize) * (a.map.height as usize)).div_ceil(2);
         assert_ne!(
-            a.map.tiles[..size],
-            b.map.tiles[..size],
+            a.map.tiles[..packed_size],
+            b.map.tiles[..packed_size],
             "seed 100 depth 2 should differ from seed 101 depth 1"
         );
     }

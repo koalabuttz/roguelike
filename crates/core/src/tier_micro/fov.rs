@@ -6,7 +6,7 @@
 //!
 //! The perimeter is computed at runtime from `FOV_RADIUS`, so any radius works.
 
-use super::map::{MicroMap, TILE_WALL};
+use super::map::{MicroMap, TILE_FLOOR};
 use super::types::*;
 use crate::rules::balance;
 
@@ -110,7 +110,7 @@ impl MicroFov {
 
             self.mark_visible(ux, uy);
 
-            if map.tile_at(ux, uy) == TILE_WALL {
+            if map.tile_at(ux, uy) < TILE_FLOOR {
                 break;
             }
 
@@ -203,7 +203,7 @@ pub fn can_see(ox: u8, oy: u8, tx: u8, ty: u8, radius: u8, map: &MicroMap) -> bo
         if !map.in_bounds(ux, uy) {
             return false;
         }
-        if map.tile_at(ux, uy) == TILE_WALL {
+        if map.tile_at(ux, uy) < TILE_FLOOR {
             return x == target_x && y == target_y;
         }
     }
@@ -274,7 +274,7 @@ mod tests {
         let mut map = MicroMap::new_default();
         for y in 5..15 {
             for x in 5..15 {
-                map.tiles[map.idx(x, y)] = super::super::map::TILE_FLOOR;
+                map.set_tile(x, y, TILE_FLOOR);
             }
         }
         assert!(can_see(10, 10, 12, 12, 6, &map));
@@ -286,11 +286,11 @@ mod tests {
         let mut map = MicroMap::new_default();
         for y in 5..15 {
             for x in 5..15 {
-                map.tiles[map.idx(x, y)] = super::super::map::TILE_FLOOR;
+                map.set_tile(x, y, TILE_FLOOR);
             }
         }
         // Place wall between (8,10) and (12,10)
-        map.tiles[map.idx(10, 10)] = TILE_WALL;
+        map.set_tile(10, 10, super::super::map::TILE_WALL);
         assert!(!can_see(8, 10, 12, 10, 6, &map));
     }
 

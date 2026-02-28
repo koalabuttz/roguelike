@@ -41,6 +41,9 @@ pub const PLAYER_IDX: u8 = 0;
 /// Bitfield size in bytes for MAX_MAP_SIZE bits.
 pub const MAX_BITFIELD_SIZE: usize = MAX_MAP_SIZE.div_ceil(8);
 
+/// Packed tile array size (4 bits per tile, 2 tiles per byte).
+pub const MAX_PACKED_MAP_SIZE: usize = MAX_MAP_SIZE.div_ceil(2);
+
 #[cfg(test)]
 mod tests {
     use super::*;

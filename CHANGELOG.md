@@ -22,6 +22,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add item system to roguelike (#2)
 
 ### Fixed
+- Add joystick edge detection with auto-repeat to prevent phantom input (#55)
+- Fix C64 I/O banking - CPU port value C unmaps I/O area causing frozen input (#54)
 - Replace division with right-shift for idle acceleration in micro tier (#50)
 - Fix wandering spawn timing drift, extract depth scaling helper, add ambient sound constant (#49)
 - Fix nightly C64 Docker mount to include roguelike-core (#46)

@@ -15,14 +15,16 @@ use super::color::GameColor;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TileKind {
     Wall = 0,
-    Floor = 1,
-    StairsDown = 2,
+    Structural = 1,
+    Floor = 2,
+    StairsDown = 3,
 }
 
 /// Display glyph for a tile kind.
 pub const fn glyph(kind: TileKind) -> char {
     match kind {
-        TileKind::Wall => '#',
+        TileKind::Wall => ' ',
+        TileKind::Structural => '#',
         TileKind::Floor => '.',
         TileKind::StairsDown => '>',
     }
@@ -31,7 +33,8 @@ pub const fn glyph(kind: TileKind) -> char {
 /// Display color for a tile kind.
 pub const fn color(kind: TileKind) -> GameColor {
     match kind {
-        TileKind::Wall => GameColor::White,
+        TileKind::Wall => GameColor::Black,
+        TileKind::Structural => GameColor::White,
         TileKind::Floor => GameColor::DarkGrey,
         TileKind::StairsDown => GameColor::Cyan,
     }
@@ -43,8 +46,9 @@ pub const fn color(kind: TileKind) -> GameColor {
 pub const fn from_micro(tile: u8) -> Option<TileKind> {
     match tile {
         0 => Some(TileKind::Wall),       // TILE_WALL
-        1 => Some(TileKind::Floor),      // TILE_FLOOR
-        2 => Some(TileKind::StairsDown), // TILE_STAIRS_DOWN
+        1 => Some(TileKind::Structural), // TILE_STRUCTURAL
+        2 => Some(TileKind::Floor),      // TILE_FLOOR
+        3 => Some(TileKind::StairsDown), // TILE_STAIRS_DOWN
         _ => None,
     }
 }
@@ -55,16 +59,17 @@ mod tests {
 
     #[test]
     fn micro_constants_match_discriminants() {
-        // TILE_WALL = 0, TILE_FLOOR = 1, TILE_STAIRS_DOWN = 2 in tier_micro::map.
+        // TILE_WALL=0, TILE_STRUCTURAL=1, TILE_FLOOR=2, TILE_STAIRS_DOWN=3.
         assert_eq!(from_micro(0), Some(TileKind::Wall));
-        assert_eq!(from_micro(1), Some(TileKind::Floor));
-        assert_eq!(from_micro(2), Some(TileKind::StairsDown));
+        assert_eq!(from_micro(1), Some(TileKind::Structural));
+        assert_eq!(from_micro(2), Some(TileKind::Floor));
+        assert_eq!(from_micro(3), Some(TileKind::StairsDown));
         assert_eq!(from_micro(255), None);
     }
 
     #[test]
     fn all_kinds_have_glyph_and_color() {
-        for kind in [TileKind::Wall, TileKind::Floor, TileKind::StairsDown] {
+        for kind in [TileKind::Wall, TileKind::Structural, TileKind::Floor, TileKind::StairsDown] {
             let _ = glyph(kind);
             let _ = color(kind);
         }

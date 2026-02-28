@@ -128,6 +128,17 @@ pub fn wait_vblank() {
     }
 }
 
+/// Wait for the next video frame. Two-phase wait ensures exactly one
+/// frame per call: first exit the current vblank (if in one), then
+/// wait for the next vblank to arrive. Provides ~50 Hz (PAL) or
+/// ~60 Hz (NTSC) timing for input polling and repeat counters.
+pub fn wait_next_frame() {
+    unsafe {
+        while read_volatile(VIC_RASTER) == 251 {}
+        while read_volatile(VIC_RASTER) != 251 {}
+    }
+}
+
 // --- CIA data direction registers ---
 pub const CIA1_DDRA: *mut u8 = 0xDC02 as *mut u8; // Port A direction (keyboard cols)
 pub const CIA1_DDRB: *mut u8 = 0xDC03 as *mut u8; // Port B direction (keyboard rows)
@@ -140,13 +151,6 @@ pub const CIA1_DDRB: *mut u8 = 0xDC03 as *mut u8; // Port B direction (keyboard 
 /// KERNAL can be temporarily re-mapped for disk I/O (save games) by
 /// setting CPU port back to $37.
 pub fn init_hardware() {
-    // Relocate soft stack to RAM under KERNAL ROM ($E000-$FFF7).
-    // CRT init sets rc0:rc1 ($02:$03) = $D000. We move it to $FFF8
-    // so the stack grows down into the freed 8 KB KERNAL region,
-    // leaving the main RAM region entirely for code/data.
-    poke(0x02 as *mut u8, 0xF8); // rc0 (low byte)
-    poke(0x03 as *mut u8, 0xFF); // rc1 (high byte)
-
     // Set up CIA1 data direction registers for keyboard/joystick scanning.
     poke(CIA1_DDRA, 0xFF); // Port A = all output (keyboard columns)
     poke(CIA1_DDRB, 0x00); // Port B = all input  (keyboard rows)
@@ -176,9 +180,22 @@ pub fn init_hardware() {
         write_volatile(0xFFFF as *mut u8, (RTI_ADDR >> 8) as u8);
     }
 
-    // 3. Unmap KERNAL: CPU port $3C = LORAM=0, HIRAM=0, CHAREN=1
-    //    → all ROM off, I/O visible at $D000-$DFFF, RAM at $E000-$FFFF
-    poke(CPU_PORT, 0x3C);
+    // 3. Unmap KERNAL + BASIC, keep I/O: CPU port $35
+    //    LORAM=1, HIRAM=0, CHAREN=1
+    //    → BASIC off (needs both LORAM+HIRAM), KERNAL off (needs HIRAM),
+    //      I/O visible at $D000-$DFFF (needs CHAREN + at least one of LORAM/HIRAM),
+    //      RAM at $E000-$FFFF
+    //    NOTE: $3C (LORAM=0, HIRAM=0) would unmap I/O too — the PLA only
+    //    enables I/O when at least one ROM select bit is set.
+    poke(CPU_PORT, 0x35);
+
+    // 4. Relocate soft stack to freed KERNAL region ($E000-$FFF7).
+    //    MUST happen AFTER KERNAL is unmapped — otherwise reads from the
+    //    stack area would return KERNAL ROM data instead of RAM.
+    //    CRT init sets rc0:rc1 ($02:$03) = $D000. We move it to $FFF8
+    //    so the stack grows down into the 8 KB KERNAL region.
+    poke(0x02 as *mut u8, 0xF8); // rc0 (low byte)
+    poke(0x03 as *mut u8, 0xFF); // rc1 (high byte)
 
     // Black background and border
     poke(VIC_BG, COLOR_BLACK);

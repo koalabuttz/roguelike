@@ -17,7 +17,7 @@ use roguelike_core::rules::monster_table;
 use roguelike_core::rules::seed_code::{self, MAX_MICRO_SEED_CODE_LEN};
 use roguelike_core::tier_micro::game::MicroGameState;
 use roguelike_core::tier_micro::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_WALL};
-use roguelike_core::tier_micro::types::PLAYER_IDX;
+use roguelike_core::tier_micro::types::{NO_ENTITY, PLAYER_IDX};
 
 // Screen codes for map tiles
 const SC_SPACE: u8 = 0x20;
@@ -32,7 +32,7 @@ const VIEW_H: u8 = 22;
 
 /// Compute viewport origin so the player is centered on screen.
 /// Clamps to map edges so we never show out-of-bounds tiles.
-fn viewport(state: &MicroGameState) -> (u8, u8) {
+pub fn viewport_pos(state: &MicroGameState) -> (u8, u8) {
     let px = state.entities.x[PLAYER_IDX as usize];
     let py = state.entities.y[PLAYER_IDX as usize];
     let vx = px.saturating_sub(VIEW_W / 2).min(state.map.width.saturating_sub(VIEW_W));
@@ -59,7 +59,7 @@ fn game_color_to_c64(gc: GameColor) -> u8 {
 
 /// Full screen render: map + items + entities + status + messages.
 pub fn render_all(state: &MicroGameState) {
-    let (vx, vy) = viewport(state);
+    let (vx, vy) = viewport_pos(state);
     render_map(state, vx, vy);
     render_items(state, vx, vy);
     render_entities(state, vx, vy);
@@ -385,6 +385,199 @@ fn render_messages(state: &MicroGameState) {
 }
 
 // ---------------------------------------------------------------------------
+// Look mode rendering
+// ---------------------------------------------------------------------------
+
+/// Compute viewport origin centered on the look cursor instead of the player.
+/// Clamps to map edges identically to `viewport_pos`.
+pub fn look_viewport(state: &MicroGameState, cx: u8, cy: u8) -> (u8, u8) {
+    let vx = cx.saturating_sub(VIEW_W / 2).min(state.map.width.saturating_sub(VIEW_W));
+    let vy = cy.saturating_sub(VIEW_H / 2).min(state.map.height.saturating_sub(VIEW_H));
+    (vx, vy)
+}
+
+/// Full look-mode render: map + entities + cursor + look status bar + messages.
+/// Uses the provided viewport (cursor-centered) rather than player-centered.
+pub fn render_look(state: &MicroGameState, vx: u8, vy: u8, cx: u8, cy: u8) {
+    render_map(state, vx, vy);
+    render_items(state, vx, vy);
+    render_entities(state, vx, vy);
+
+    // Cursor overlay
+    let sx = cx - vx;
+    let sy = cy - vy;
+    c64::draw_char(sx, sy, c64::to_screen_code(b'X'), c64::COLOR_YELLOW);
+
+    // Look status bar (replaces normal status bar)
+    render_look_status(state, cx, cy);
+
+    render_messages(state);
+}
+
+/// Restore a single world tile at (wx, wy) to its normal appearance.
+/// Redraws the terrain, then overlays any item, then any entity — the
+/// same layering as render_map + render_items + render_entities but for
+/// a single cell. Used by look mode to erase the cursor from the old
+/// position without a full-screen redraw.
+pub fn restore_tile(state: &MicroGameState, vx: u8, vy: u8, wx: u8, wy: u8) {
+    let sx = wx - vx;
+    let sy = wy - vy;
+
+    // 1. Terrain layer
+    let visible = state.fov.is_visible(wx, wy);
+    let explored = state.fov.is_explored(wx, wy);
+    let tile = state.map.tile_at(wx, wy);
+
+    let (sc, color) = if visible {
+        match tile {
+            TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
+            TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
+            TILE_WALL => {
+                if state.map.is_structural(wx, wy) {
+                    (SC_WALL, c64::COLOR_LGREY)
+                } else {
+                    (SC_SPACE, c64::COLOR_BLACK)
+                }
+            }
+            _ => (SC_SPACE, c64::COLOR_BLACK),
+        }
+    } else if explored {
+        match tile {
+            TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
+            TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
+            TILE_WALL => {
+                if state.map.is_structural(wx, wy) {
+                    (SC_WALL, c64::COLOR_BLUE)
+                } else {
+                    (SC_SPACE, c64::COLOR_BLACK)
+                }
+            }
+            _ => (SC_SPACE, c64::COLOR_BLACK),
+        }
+    } else {
+        (SC_SPACE, c64::COLOR_BLACK)
+    };
+    c64::draw_char(sx, sy, sc, color);
+
+    // 2. Item layer (only if visible)
+    if visible {
+        for i in 0..state.items.count as usize {
+            if state.items.alive[i] && state.items.x[i] == wx && state.items.y[i] == wy {
+                let kind = state.items.kind[i];
+                let glyph = items::glyph(kind) as u8;
+                let c = game_color_to_c64(items::color(kind));
+                c64::draw_char(sx, sy, c64::to_screen_code(glyph), c);
+                break;
+            }
+        }
+
+        // 3. Entity layer (only if visible — entities occlude items)
+        for i in 0..state.entities.count {
+            let idx = i as usize;
+            if !state.entities.alive[idx] {
+                continue;
+            }
+            if state.entities.x[idx] == wx && state.entities.y[idx] == wy {
+                let (glyph, c) = if i == PLAYER_IDX {
+                    (balance::PLAYER_GLYPH as u8, c64::COLOR_YELLOW)
+                } else {
+                    match state.entities.kind[idx] {
+                        Some(kind) => {
+                            let g = monster_table::glyph(kind) as u8;
+                            (g, game_color_to_c64(monster_table::color(kind)))
+                        }
+                        None => (b'?', c64::COLOR_WHITE),
+                    }
+                };
+                c64::draw_char(sx, sy, c64::to_screen_code(glyph), c);
+                break;
+            }
+        }
+    }
+}
+
+/// Draw the look cursor (yellow 'X') at world position (cx, cy).
+pub fn draw_cursor(vx: u8, vy: u8, cx: u8, cy: u8) {
+    let sx = cx - vx;
+    let sy = cy - vy;
+    c64::draw_char(sx, sy, c64::to_screen_code(b'X'), c64::COLOR_YELLOW);
+}
+
+/// Render the look mode status bar on row 22, replacing the normal status bar.
+/// Shows: [L] (x,y) terrain + entity/item info based on visibility.
+pub fn render_look_status(state: &MicroGameState, cx: u8, cy: u8) {
+    let mut buf = [b' '; 40];
+
+    // "[L] " prefix
+    let mut p = copy_bytes(&mut buf, 0, b"[L] ");
+
+    // "(x,y) " coordinates
+    if p < 40 { buf[p] = b'('; p += 1; }
+    p = copy_num(&mut buf, p, cx);
+    if p < 40 { buf[p] = b','; p += 1; }
+    p = copy_num(&mut buf, p, cy);
+    if p < 40 { buf[p] = b')'; p += 1; }
+    if p < 40 { buf[p] = b' '; p += 1; }
+
+    if !state.fov.is_explored(cx, cy) {
+        p = copy_bytes(&mut buf, p, b"Unexplored");
+    } else {
+        let visible = state.fov.is_visible(cx, cy);
+
+        // Terrain name
+        let tile = state.map.tile_at(cx, cy);
+        match tile {
+            TILE_FLOOR => p = copy_bytes(&mut buf, p, b"Floor"),
+            TILE_STAIRS_DOWN => p = copy_bytes(&mut buf, p, b"Stairs"),
+            TILE_WALL => p = copy_bytes(&mut buf, p, b"Wall"),
+            _ => p = copy_bytes(&mut buf, p, b"???"),
+        }
+
+        if !visible {
+            p = copy_bytes(&mut buf, p, b" (dim)");
+        } else {
+            // Entity info (only when visible)
+            let eidx = state.entities.entity_at(cx, cy);
+            if eidx != NO_ENTITY {
+                let ei = eidx as usize;
+                if p < 40 { buf[p] = b' '; p += 1; }
+                if eidx == PLAYER_IDX {
+                    p = copy_bytes(&mut buf, p, b"Player");
+                } else if let Some(kind) = state.entities.kind[ei] {
+                    p = copy_bytes(&mut buf, p, monster_table::name(kind).as_bytes());
+                }
+                if p < 40 { buf[p] = b' '; p += 1; }
+                p = copy_num(&mut buf, p, state.entities.hp[ei]);
+                if p < 40 { buf[p] = b'/'; p += 1; }
+                p = copy_num(&mut buf, p, state.entities.max_hp[ei]);
+            }
+
+            // First item at this tile (only when visible)
+            for i in 0..state.items.count as usize {
+                if state.items.alive[i] && state.items.x[i] == cx && state.items.y[i] == cy {
+                    if p < 40 { buf[p] = b' '; p += 1; }
+                    if p < 40 { buf[p] = b'['; p += 1; }
+                    p = copy_bytes(&mut buf, p, items::name(state.items.kind[i]).as_bytes());
+                    if p < 40 { buf[p] = b']'; p += 1; }
+                    break; // Only show first item to fit in 40 chars
+                }
+            }
+        }
+    }
+    let _ = p; // suppress unused warning
+
+    // Draw the formatted buffer on the status row
+    for i in 0..40u8 {
+        c64::draw_char(
+            i,
+            STATUS_ROW,
+            c64::to_screen_code(buf[i as usize]),
+            c64::COLOR_CYAN,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Menu rendering helpers
 // ---------------------------------------------------------------------------
 
@@ -514,7 +707,7 @@ pub fn render_title(selected: u8) {
     c64::draw_text(4, 17, b"W/UP MOVE  Q/E DIAG", c64::COLOR_DGREY);
     c64::draw_text(4, 18, b"S/DN       Z/C", c64::COLOR_DGREY);
     c64::draw_text(4, 19, b"SPACE WAIT  RETURN DESCEND", c64::COLOR_DGREY);
-    c64::draw_text(4, 20, b"JOY2 OK", c64::COLOR_DGREY);
+    c64::draw_text(4, 20, b"X LOOK  JOY2 OK", c64::COLOR_DGREY);
 }
 
 /// Render the pause menu overlay on top of the game screen.

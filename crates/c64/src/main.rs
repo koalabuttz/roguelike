@@ -15,11 +15,11 @@ mod input;
 
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
-use input::MenuInput;
-use roguelike_core::command::GameCommand;
+use input::{LookInput, MenuInput};
+use roguelike_core::command::{Direction, GameCommand};
 use roguelike_core::rules::seed_code;
 use roguelike_core::tier_micro::game::MicroGameState;
-use roguelike_core::tier_micro::types::{DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH};
+use roguelike_core::tier_micro::types::{DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, PLAYER_IDX};
 
 /// Panic handler — flash the border red (classic C64 crash indicator).
 #[panic_handler]
@@ -37,6 +37,7 @@ static mut STATE: MaybeUninit<MicroGameState> = MaybeUninit::uninit();
 enum AppState {
     Title,
     Playing,
+    Looking,
     Paused,
     GameOver,
 }
@@ -190,6 +191,77 @@ fn run_end_screen(state: &MicroGameState) -> AppState {
     }
 }
 
+/// (dx, dy) offsets indexed by Direction discriminant. i8 for sign,
+/// applied via u8 checked arithmetic — no widening to i32.
+const DIR_OFFSETS: [(i8, i8); 8] = [
+    ( 0, -1), // North     = 0
+    ( 0,  1), // South     = 1
+    ( 1,  0), // East      = 2
+    (-1,  0), // West      = 3
+    ( 1, -1), // NorthEast = 4
+    (-1, -1), // NorthWest = 5
+    ( 1,  1), // SouthEast = 6
+    (-1,  1), // SouthWest = 7
+];
+
+/// Apply a signed offset to a u8 coordinate, clamping to [0, max).
+fn apply_offset(pos: u8, delta: i8, max: u8) -> u8 {
+    if delta > 0 {
+        if pos + 1 < max { pos + 1 } else { pos }
+    } else if delta < 0 {
+        if pos > 0 { pos - 1 } else { pos }
+    } else {
+        pos
+    }
+}
+
+/// Run look mode: move a cursor around the map to examine tiles.
+/// Viewport follows the cursor. Does not consume game turns.
+/// Uses differential rendering — only redraws the old/new cursor tiles
+/// and the status bar, unless the viewport scrolls.
+fn run_look_mode(state: &MicroGameState) {
+    let pi = PLAYER_IDX as usize;
+    let mut cx = state.entities.x[pi];
+    let mut cy = state.entities.y[pi];
+
+    // Initial full render
+    let mut vx: u8;
+    let mut vy: u8;
+    (vx, vy) = render::look_viewport(state, cx, cy);
+    render::render_look(state, vx, vy, cx, cy);
+
+    loop {
+        match input::wait_for_look_input() {
+            LookInput::Move(dir) => {
+                let (dx, dy) = DIR_OFFSETS[dir as usize];
+                let nx = apply_offset(cx, dx, state.map.width);
+                let ny = apply_offset(cy, dy, state.map.height);
+                if nx == cx && ny == cy {
+                    continue;
+                }
+
+                let (nvx, nvy) = render::look_viewport(state, nx, ny);
+                if nvx != vx || nvy != vy {
+                    // Viewport scrolled — full redraw
+                    vx = nvx;
+                    vy = nvy;
+                    cx = nx;
+                    cy = ny;
+                    render::render_look(state, vx, vy, cx, cy);
+                } else {
+                    // Same viewport — differential update
+                    render::restore_tile(state, vx, vy, cx, cy);
+                    cx = nx;
+                    cy = ny;
+                    render::draw_cursor(vx, vy, cx, cy);
+                    render::render_look_status(state, cx, cy);
+                }
+            }
+            LookInput::Close => return,
+        }
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn main() -> isize {
     c64::init_hardware();
@@ -227,12 +299,23 @@ pub extern "C" fn main() -> isize {
                     continue;
                 }
 
+                if cmd == GameCommand::Look {
+                    app_state = AppState::Looking;
+                    continue;
+                }
+
                 state.step(cmd);
                 render::render_all(state);
 
                 if state.is_terminal() {
                     app_state = AppState::GameOver;
                 }
+            }
+            AppState::Looking => {
+                let state = unsafe { STATE.assume_init_mut() };
+                run_look_mode(state);
+                render::render_all(state);
+                app_state = AppState::Playing;
             }
             AppState::Paused => {
                 let state = unsafe { STATE.assume_init_mut() };

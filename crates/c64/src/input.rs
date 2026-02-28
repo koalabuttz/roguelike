@@ -15,6 +15,7 @@ const KEY_Q: u8 = 0x51;       // NW
 const KEY_E: u8 = 0x45;       // NE
 const KEY_Z: u8 = 0x5A;       // SW
 const KEY_C: u8 = 0x43;       // SE
+const KEY_X: u8 = 0x58;       // Look mode
 const KEY_SPACE: u8 = 0x20;
 const KEY_UP: u8 = 0x91;
 const KEY_DOWN: u8 = 0x11;
@@ -45,17 +46,28 @@ fn read_key() -> u8 {
     }
 }
 
+/// Map PETSCII key code to a Direction. Shared by game and look input.
+fn key_to_direction(key: u8) -> Option<Direction> {
+    match key {
+        KEY_W | KEY_UP    => Some(Direction::North),
+        KEY_S | KEY_DOWN  => Some(Direction::South),
+        KEY_D | KEY_RIGHT => Some(Direction::East),
+        KEY_A | KEY_LEFT  => Some(Direction::West),
+        KEY_E             => Some(Direction::NorthEast),
+        KEY_Q             => Some(Direction::NorthWest),
+        KEY_C             => Some(Direction::SouthEast),
+        KEY_Z             => Some(Direction::SouthWest),
+        _ => None,
+    }
+}
+
 /// Translate keyboard PETSCII code to game command.
 fn key_to_cmd(key: u8) -> Option<GameCommand> {
+    if let Some(dir) = key_to_direction(key) {
+        return Some(GameCommand::Move(dir));
+    }
     match key {
-        KEY_W | KEY_UP    => Some(GameCommand::Move(Direction::North)),
-        KEY_S | KEY_DOWN  => Some(GameCommand::Move(Direction::South)),
-        KEY_D | KEY_RIGHT => Some(GameCommand::Move(Direction::East)),
-        KEY_A | KEY_LEFT  => Some(GameCommand::Move(Direction::West)),
-        KEY_E             => Some(GameCommand::Move(Direction::NorthEast)),
-        KEY_Q             => Some(GameCommand::Move(Direction::NorthWest)),
-        KEY_C             => Some(GameCommand::Move(Direction::SouthEast)),
-        KEY_Z             => Some(GameCommand::Move(Direction::SouthWest)),
+        KEY_X             => Some(GameCommand::Look),
         KEY_SPACE         => Some(GameCommand::Wait),
         KEY_RETURN        => Some(GameCommand::Descend),
         KEY_RUNSTOP       => Some(GameCommand::Quit),
@@ -77,31 +89,24 @@ fn key_to_menu(key: u8) -> Option<MenuInput> {
 /// Read joystick port 2 for menu navigation.
 /// Returns Up, Down, or Select (fire button).
 fn read_joystick_menu() -> Option<MenuInput> {
-    c64::poke(c64::CIA1_PA, 0xFF);
-    let joy = c64::peek(c64::CIA1_PA as *const u8) ^ 0xFF;
-
-    let up = joy & 0x01 != 0;
-    let down = joy & 0x02 != 0;
-    let fire = joy & 0x10 != 0;
+    let (dir, fire) = read_joystick_raw();
 
     if fire {
-        Some(MenuInput::Select)
-    } else if up && !down {
-        Some(MenuInput::Up)
-    } else if down && !up {
-        Some(MenuInput::Down)
-    } else {
-        None
+        return Some(MenuInput::Select);
+    }
+
+    match dir {
+        Some(Direction::North) => Some(MenuInput::Up),
+        Some(Direction::South) => Some(MenuInput::Down),
+        _ => None,
     }
 }
 
-/// Read joystick port 2. Returns game command if any direction/fire active.
-/// Sets keyboard columns HIGH first to avoid ghost readings.
-fn read_joystick() -> Option<GameCommand> {
-    // Disable keyboard column scanning to isolate joystick lines
+/// Read joystick port 2 bits. Returns (direction, fire).
+/// Isolates joystick lines by disabling keyboard column scanning.
+fn read_joystick_raw() -> (Option<Direction>, bool) {
     c64::poke(c64::CIA1_PA, 0xFF);
-    // Read CIA1 Port A — joystick bits are active LOW
-    let joy = c64::peek(c64::CIA1_PA as *const u8) ^ 0xFF; // invert: now 1=active
+    let joy = c64::peek(c64::CIA1_PA as *const u8) ^ 0xFF;
 
     let up    = joy & 0x01 != 0;
     let down  = joy & 0x02 != 0;
@@ -109,23 +114,30 @@ fn read_joystick() -> Option<GameCommand> {
     let right = joy & 0x08 != 0;
     let fire  = joy & 0x10 != 0;
 
-    // Fire with no direction = wait
-    if fire && !up && !down && !left && !right {
+    let dir = match (up, down, left, right) {
+        (true,  false, false, false) => Some(Direction::North),
+        (false, true,  false, false) => Some(Direction::South),
+        (false, false, false, true)  => Some(Direction::East),
+        (false, false, true,  false) => Some(Direction::West),
+        (true,  false, false, true)  => Some(Direction::NorthEast),
+        (true,  false, true,  false) => Some(Direction::NorthWest),
+        (false, true,  false, true)  => Some(Direction::SouthEast),
+        (false, true,  true,  false) => Some(Direction::SouthWest),
+        _ => None,
+    };
+
+    (dir, fire)
+}
+
+/// Read joystick port 2. Returns game command if any direction/fire active.
+fn read_joystick() -> Option<GameCommand> {
+    let (dir, fire) = read_joystick_raw();
+
+    if fire && dir.is_none() {
         return Some(GameCommand::Wait);
     }
 
-    // Diagonal detection from simultaneous directions
-    match (up, down, left, right) {
-        (true,  false, false, false) => Some(GameCommand::Move(Direction::North)),
-        (false, true,  false, false) => Some(GameCommand::Move(Direction::South)),
-        (false, false, false, true)  => Some(GameCommand::Move(Direction::East)),
-        (false, false, true,  false) => Some(GameCommand::Move(Direction::West)),
-        (true,  false, false, true)  => Some(GameCommand::Move(Direction::NorthEast)),
-        (true,  false, true,  false) => Some(GameCommand::Move(Direction::NorthWest)),
-        (false, true,  false, true)  => Some(GameCommand::Move(Direction::SouthEast)),
-        (false, true,  true,  false) => Some(GameCommand::Move(Direction::SouthWest)),
-        _ => None,
-    }
+    dir.map(GameCommand::Move)
 }
 
 /// Wait for and return a game command from either keyboard or joystick.
@@ -212,6 +224,39 @@ pub fn read_seed_input(
                     render_fn(&buf[..len as usize], len);
                 }
             }
+        }
+    }
+}
+
+/// Look mode input.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LookInput {
+    Move(Direction),
+    Close,
+}
+
+/// Wait for a look mode input from keyboard or joystick.
+/// Blocks until a valid input is received.
+pub fn wait_for_look_input() -> LookInput {
+    loop {
+        let key = read_key();
+        if key != 0 {
+            if let Some(dir) = key_to_direction(key) {
+                return LookInput::Move(dir);
+            }
+            if matches!(key, KEY_X | KEY_RUNSTOP | KEY_RETURN) {
+                return LookInput::Close;
+            }
+        }
+
+        let (dir, fire) = read_joystick_raw();
+        if fire {
+            while joy_active() {}
+            return LookInput::Close;
+        }
+        if let Some(d) = dir {
+            while joy_active() {}
+            return LookInput::Move(d);
         }
     }
 }

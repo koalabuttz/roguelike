@@ -16,7 +16,7 @@ mod input;
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 use input::{LookInput, MenuInput};
-use roguelike_core::command::{Direction, GameCommand};
+use roguelike_core::command::GameCommand;
 use roguelike_core::rules::seed_code;
 use roguelike_core::tier_micro::game::MicroGameState;
 use roguelike_core::tier_micro::types::{DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, PLAYER_IDX};
@@ -115,7 +115,7 @@ fn run_seed_input() -> Option<(u16, u8, u8)> {
     match seed_code::decode_micro_from_bytes(&buf[..len as usize]) {
         Ok(params) => Some((params.seed, params.width, params.height)),
         Err(_) => {
-            render::render_seed_error(b"Bad code format");
+            render::render_seed_error();
             input::wait_for_menu_input(); // wait for any key
             None
         }
@@ -267,8 +267,6 @@ pub extern "C" fn main() -> isize {
     c64::init_hardware();
 
     let mut app_state = AppState::Title;
-    // Track current game params for Play Again
-    let mut current_seed: u16 = 0;
     let mut current_width: u8 = DEFAULT_MAP_WIDTH;
     let mut current_height: u8 = DEFAULT_MAP_HEIGHT;
 
@@ -276,7 +274,6 @@ pub extern "C" fn main() -> isize {
         match app_state {
             AppState::Title => {
                 let (seed, w, h) = run_title();
-                current_seed = seed;
                 current_width = w;
                 current_height = h;
                 let state = start_game(seed, w, h);
@@ -336,7 +333,6 @@ pub extern "C" fn main() -> isize {
                     AppState::Playing => {
                         // Play Again — new random seed, same dimensions
                         let seed = read_cia_seed();
-                        current_seed = seed;
                         let state = start_game(seed, current_width, current_height);
                         render::render_all(state);
                         app_state = AppState::Playing;

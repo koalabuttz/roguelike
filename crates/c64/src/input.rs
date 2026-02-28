@@ -1,29 +1,29 @@
-// Input handling — keyboard and joystick.
+// Input handling — keyboard matrix scan and joystick.
 //
 // Returns GameCommand values from roguelike-core instead of raw u8 constants.
-// Hardware reading (Kernal buffer, CIA1 joystick) is unchanged from the POC.
+// Keyboard input uses direct CIA1 matrix scanning (no KERNAL dependency).
 
 use crate::c64;
 use roguelike_core::command::{Direction, GameCommand};
 
-// PETSCII key codes
-const KEY_W: u8 = 0x57;
-const KEY_A: u8 = 0x41;
-const KEY_S: u8 = 0x53;
-const KEY_D: u8 = 0x44;
-const KEY_Q: u8 = 0x51;       // NW
-const KEY_E: u8 = 0x45;       // NE
-const KEY_Z: u8 = 0x5A;       // SW
-const KEY_C: u8 = 0x43;       // SE
-const KEY_X: u8 = 0x58;       // Look mode
-const KEY_SPACE: u8 = 0x20;
-const KEY_UP: u8 = 0x91;
-const KEY_DOWN: u8 = 0x11;
-const KEY_LEFT: u8 = 0x9D;
-const KEY_RIGHT: u8 = 0x1D;
-const KEY_RETURN: u8 = 0x0D;
-const KEY_RUNSTOP: u8 = 0x03;
-const KEY_DELETE: u8 = 0x14;
+// Key codes from c64::scan_keyboard() — uppercase ASCII or PETSCII control codes.
+const KEY_W: u8 = b'W';
+const KEY_A: u8 = b'A';
+const KEY_S: u8 = b'S';
+const KEY_D: u8 = b'D';
+const KEY_Q: u8 = b'Q';
+const KEY_E: u8 = b'E';
+const KEY_Z: u8 = b'Z';
+const KEY_C: u8 = b'C';
+const KEY_X: u8 = b'X';
+const KEY_SPACE: u8 = c64::PETSCII_SPACE;
+const KEY_UP: u8 = c64::PETSCII_UP;
+const KEY_DOWN: u8 = c64::PETSCII_DOWN;
+const KEY_LEFT: u8 = c64::PETSCII_LEFT;
+const KEY_RIGHT: u8 = c64::PETSCII_RIGHT;
+const KEY_RETURN: u8 = c64::PETSCII_RETURN;
+const KEY_RUNSTOP: u8 = c64::PETSCII_STOP;
+const KEY_DELETE: u8 = c64::PETSCII_DELETE;
 
 /// Menu navigation input.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -34,16 +34,9 @@ pub enum MenuInput {
     Back,
 }
 
-/// Check keyboard buffer for a keypress. Returns PETSCII code or 0.
+/// Scan keyboard matrix for a new keypress. Returns key code or 0.
 fn read_key() -> u8 {
-    let count = c64::peek(c64::KEYBUF_LEN);
-    if count > 0 {
-        let key = c64::peek(c64::KEYBUF);
-        c64::poke(c64::KEYBUF_LEN, 0); // consume entire buffer
-        key
-    } else {
-        0
-    }
+    c64::scan_keyboard()
 }
 
 /// Map PETSCII key code to a Direction. Shared by game and look input.

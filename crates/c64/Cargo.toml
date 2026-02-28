@@ -11,5 +11,5 @@ description = "Commodore 64 port of the roguelike dungeon crawler"
 roguelike-core = { path = "../core", default-features = false }
 
 [profile.release]
-opt-level = "s"   # optimize for size — every byte matters on C64
+opt-level = "z"   # optimize aggressively for size — every byte matters on C64
 lto = true        # link-time optimization enables static stack + zero page allocation

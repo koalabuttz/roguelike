@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.4.0] - 2026-02-27
 
 ### Added
+- Unmap KERNAL ROM on C64 for 8KB extra RAM headroom (#52)
 - Add Tile::to_kind() and use MICRO_LOG_CAPACITY constant (#44)
 - Unify render() across tiers via RenderSource trait (#41)
 - Rewrite C64 crate as thin frontend over roguelike-core (#42)

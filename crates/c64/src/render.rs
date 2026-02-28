@@ -14,7 +14,6 @@ use roguelike_core::rules::color::GameColor;
 use roguelike_core::rules::items;
 use roguelike_core::rules::message::{GameEvent, SoundDistance};
 use roguelike_core::rules::monster_table;
-use roguelike_core::rules::seed_code::{self, MAX_MICRO_SEED_CODE_LEN};
 use roguelike_core::tier_micro::game::MicroGameState;
 use roguelike_core::tier_micro::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_WALL};
 use roguelike_core::tier_micro::types::{NO_ENTITY, PLAYER_IDX};
@@ -57,6 +56,44 @@ fn game_color_to_c64(gc: GameColor) -> u8 {
     }
 }
 
+/// Compute the screen code and color for a map tile based on visibility.
+fn tile_appearance(state: &MicroGameState, wx: u8, wy: u8) -> (u8, u8) {
+    let visible = state.fov.is_visible(wx, wy);
+    let explored = state.fov.is_explored(wx, wy);
+
+    if visible {
+        let tile = state.map.tile_at(wx, wy);
+        match tile {
+            TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
+            TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
+            TILE_WALL => {
+                if state.map.is_structural(wx, wy) {
+                    (SC_WALL, c64::COLOR_LGREY)
+                } else {
+                    (SC_SPACE, c64::COLOR_BLACK)
+                }
+            }
+            _ => (SC_SPACE, c64::COLOR_BLACK),
+        }
+    } else if explored {
+        let tile = state.map.tile_at(wx, wy);
+        match tile {
+            TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
+            TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
+            TILE_WALL => {
+                if state.map.is_structural(wx, wy) {
+                    (SC_WALL, c64::COLOR_BLUE)
+                } else {
+                    (SC_SPACE, c64::COLOR_BLACK)
+                }
+            }
+            _ => (SC_SPACE, c64::COLOR_BLACK),
+        }
+    } else {
+        (SC_SPACE, c64::COLOR_BLACK)
+    }
+}
+
 /// Full screen render: map + items + entities + status + messages.
 pub fn render_all(state: &MicroGameState) {
     let (vx, vy) = viewport_pos(state);
@@ -71,42 +108,7 @@ pub fn render_all(state: &MicroGameState) {
 fn render_map(state: &MicroGameState, vx: u8, vy: u8) {
     for sy in 0..VIEW_H {
         for sx in 0..VIEW_W {
-            let wx = sx + vx;
-            let wy = sy + vy;
-            let tile = state.map.tile_at(wx, wy);
-            let visible = state.fov.is_visible(wx, wy);
-            let explored = state.fov.is_explored(wx, wy);
-
-            let (sc, color) = if visible {
-                match tile {
-                    TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
-                    TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
-                    TILE_WALL => {
-                        if state.map.is_structural(wx, wy) {
-                            (SC_WALL, c64::COLOR_LGREY)
-                        } else {
-                            (SC_SPACE, c64::COLOR_BLACK)
-                        }
-                    }
-                    _ => (SC_SPACE, c64::COLOR_BLACK),
-                }
-            } else if explored {
-                match tile {
-                    TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
-                    TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
-                    TILE_WALL => {
-                        if state.map.is_structural(wx, wy) {
-                            (SC_WALL, c64::COLOR_BLUE)
-                        } else {
-                            (SC_SPACE, c64::COLOR_BLACK)
-                        }
-                    }
-                    _ => (SC_SPACE, c64::COLOR_BLACK),
-                }
-            } else {
-                (SC_SPACE, c64::COLOR_BLACK)
-            };
-
+            let (sc, color) = tile_appearance(state, sx + vx, sy + vy);
             c64::draw_char(sx, sy, sc, color);
         }
     }
@@ -301,36 +303,29 @@ fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
             copy_bytes(buf, p, b" is dead!")
         }
         GameEvent::EntityNotice { who } => {
-            let p = copy_bytes(buf, 0, b"The ");
-            let p = copy_bytes(buf, p, who.name().as_bytes());
+            let p = copy_bytes(buf, 0, who.name().as_bytes());
             copy_bytes(buf, p, b" notices you!")
         }
         GameEvent::DrinkPotion { kind: _, healed } => {
-            let p = copy_bytes(buf, 0, b"Drank potion +");
+            let p = copy_bytes(buf, 0, b"+");
             let p = copy_num(buf, p, healed);
             copy_bytes(buf, p, b" HP")
         }
-        GameEvent::EquipWeapon { kind, bonus } => {
+        GameEvent::EquipWeapon { kind, bonus: _ } => {
             let p = copy_bytes(buf, 0, b"Equip ");
-            let p = copy_bytes(buf, p, items::name(kind).as_bytes());
-            let p = copy_bytes(buf, p, b" +");
-            let p = copy_num(buf, p, bonus);
-            copy_bytes(buf, p, b" atk")
+            copy_bytes(buf, p, items::name(kind).as_bytes())
         }
-        GameEvent::EquipArmor { kind, bonus } => {
+        GameEvent::EquipArmor { kind, bonus: _ } => {
             let p = copy_bytes(buf, 0, b"Equip ");
-            let p = copy_bytes(buf, p, items::name(kind).as_bytes());
-            let p = copy_bytes(buf, p, b" +");
-            let p = copy_num(buf, p, bonus);
-            copy_bytes(buf, p, b" def")
+            copy_bytes(buf, p, items::name(kind).as_bytes())
         }
-        GameEvent::NoStairs => copy_bytes(buf, 0, b"No stairs here."),
+        GameEvent::NoStairs => copy_bytes(buf, 0, b"No stairs"),
         GameEvent::Descend { depth, target: _ } => {
-            let p = copy_bytes(buf, 0, b"Descended to depth ");
+            let p = copy_bytes(buf, 0, b"Depth ");
             copy_num(buf, p, depth)
         }
         GameEvent::Victory { depth: _ } => copy_bytes(buf, 0, b"Victory!"),
-        GameEvent::Welcome => copy_bytes(buf, 0, b"Welcome to the dungeon!"),
+        GameEvent::Welcome => copy_bytes(buf, 0, b"Welcome!"),
         GameEvent::SoundCue { distance } => {
             let msg = match distance {
                 SoundDistance::Near => b"You hear something nearby!" as &[u8],
@@ -424,40 +419,9 @@ pub fn restore_tile(state: &MicroGameState, vx: u8, vy: u8, wx: u8, wy: u8) {
     let sy = wy - vy;
 
     // 1. Terrain layer
-    let visible = state.fov.is_visible(wx, wy);
-    let explored = state.fov.is_explored(wx, wy);
-    let tile = state.map.tile_at(wx, wy);
-
-    let (sc, color) = if visible {
-        match tile {
-            TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
-            TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
-            TILE_WALL => {
-                if state.map.is_structural(wx, wy) {
-                    (SC_WALL, c64::COLOR_LGREY)
-                } else {
-                    (SC_SPACE, c64::COLOR_BLACK)
-                }
-            }
-            _ => (SC_SPACE, c64::COLOR_BLACK),
-        }
-    } else if explored {
-        match tile {
-            TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
-            TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
-            TILE_WALL => {
-                if state.map.is_structural(wx, wy) {
-                    (SC_WALL, c64::COLOR_BLUE)
-                } else {
-                    (SC_SPACE, c64::COLOR_BLACK)
-                }
-            }
-            _ => (SC_SPACE, c64::COLOR_BLACK),
-        }
-    } else {
-        (SC_SPACE, c64::COLOR_BLACK)
-    };
+    let (sc, color) = tile_appearance(state, wx, wy);
     c64::draw_char(sx, sy, sc, color);
+    let visible = state.fov.is_visible(wx, wy);
 
     // 2. Item layer (only if visible)
     if visible {
@@ -504,27 +468,17 @@ pub fn draw_cursor(vx: u8, vy: u8, cx: u8, cy: u8) {
 }
 
 /// Render the look mode status bar on row 22, replacing the normal status bar.
-/// Shows: [L] (x,y) terrain + entity/item info based on visibility.
+/// Shows: [L] terrain + entity/item name based on visibility.
 pub fn render_look_status(state: &MicroGameState, cx: u8, cy: u8) {
     let mut buf = [b' '; 40];
 
-    // "[L] " prefix
     let mut p = copy_bytes(&mut buf, 0, b"[L] ");
-
-    // "(x,y) " coordinates
-    if p < 40 { buf[p] = b'('; p += 1; }
-    p = copy_num(&mut buf, p, cx);
-    if p < 40 { buf[p] = b','; p += 1; }
-    p = copy_num(&mut buf, p, cy);
-    if p < 40 { buf[p] = b')'; p += 1; }
-    if p < 40 { buf[p] = b' '; p += 1; }
 
     if !state.fov.is_explored(cx, cy) {
         p = copy_bytes(&mut buf, p, b"Unexplored");
     } else {
         let visible = state.fov.is_visible(cx, cy);
 
-        // Terrain name
         let tile = state.map.tile_at(cx, cy);
         match tile {
             TILE_FLOOR => p = copy_bytes(&mut buf, p, b"Floor"),
@@ -536,37 +490,29 @@ pub fn render_look_status(state: &MicroGameState, cx: u8, cy: u8) {
         if !visible {
             p = copy_bytes(&mut buf, p, b" (dim)");
         } else {
-            // Entity info (only when visible)
             let eidx = state.entities.entity_at(cx, cy);
             if eidx != NO_ENTITY {
-                let ei = eidx as usize;
                 if p < 40 { buf[p] = b' '; p += 1; }
                 if eidx == PLAYER_IDX {
                     p = copy_bytes(&mut buf, p, b"Player");
-                } else if let Some(kind) = state.entities.kind[ei] {
+                } else if let Some(kind) = state.entities.kind[eidx as usize] {
                     p = copy_bytes(&mut buf, p, monster_table::name(kind).as_bytes());
                 }
-                if p < 40 { buf[p] = b' '; p += 1; }
-                p = copy_num(&mut buf, p, state.entities.hp[ei]);
-                if p < 40 { buf[p] = b'/'; p += 1; }
-                p = copy_num(&mut buf, p, state.entities.max_hp[ei]);
             }
 
-            // First item at this tile (only when visible)
             for i in 0..state.items.count as usize {
                 if state.items.alive[i] && state.items.x[i] == cx && state.items.y[i] == cy {
                     if p < 40 { buf[p] = b' '; p += 1; }
                     if p < 40 { buf[p] = b'['; p += 1; }
                     p = copy_bytes(&mut buf, p, items::name(state.items.kind[i]).as_bytes());
                     if p < 40 { buf[p] = b']'; p += 1; }
-                    break; // Only show first item to fit in 40 chars
+                    break;
                 }
             }
         }
     }
-    let _ = p; // suppress unused warning
+    let _ = p;
 
-    // Draw the formatted buffer on the status row
     for i in 0..40u8 {
         c64::draw_char(
             i,
@@ -604,25 +550,12 @@ pub fn draw_menu(items: &[&[u8]], selected: u8, x: u8, y: u8) {
     }
 }
 
-/// Draw a box border. Uses C64 PETSCII box-drawing characters.
-fn draw_box(bx: u8, by: u8, bw: u8, bh: u8, border_color: u8) {
-    // Clear box interior
+/// Clear a rectangular region of the screen.
+fn clear_rect(bx: u8, by: u8, bw: u8, bh: u8) {
     for y in by..(by + bh) {
         for x in bx..(bx + bw) {
             c64::draw_char(x, y, SC_SPACE, c64::COLOR_BLACK);
         }
-    }
-
-    // Horizontal borders
-    for x in bx..(bx + bw) {
-        c64::draw_char(x, by, 0xC0, border_color);
-        c64::draw_char(x, by + bh - 1, 0xC0, border_color);
-    }
-
-    // Vertical borders
-    for y in by..(by + bh) {
-        c64::draw_char(bx, y, 0xDD, border_color);
-        c64::draw_char(bx + bw - 1, y, 0xDD, border_color);
     }
 }
 
@@ -630,99 +563,63 @@ fn draw_box(bx: u8, by: u8, bw: u8, bh: u8, border_color: u8) {
 // Game over, title, pause, and seed input screens
 // ---------------------------------------------------------------------------
 
-/// Draw a seed code (e.g. "16-64x48") at the given screen position.
-fn draw_seed_code(x: u8, y: u8, seed: u16, width: u8, height: u8, color: u8) {
-    let mut buf = [0u8; MAX_MICRO_SEED_CODE_LEN];
-    let len = seed_code::encode_micro_to_buf(seed, width, height, &mut buf);
-    for i in 0..len {
-        c64::draw_char(x + i as u8, y, c64::to_screen_code(buf[i]), color);
-    }
+/// Shared end-of-game screen (death or victory).
+fn render_end_screen(state: &MicroGameState, selected: u8, title: &[u8], title_color: u8) {
+    let bx: u8 = 8;
+    let by: u8 = 7;
+    let bw: u8 = 24;
+    let bh: u8 = 9;
+
+    clear_rect(bx, by, bw, bh);
+    c64::fill_row(by, 0xC0, title_color);
+
+    c64::draw_text(bx + 2, by + 1, title, title_color);
+
+    c64::draw_text(bx + 2, by + 3, b"Kills: ", c64::COLOR_GREY);
+    c64::draw_number(bx + 9, by + 3, state.kills, c64::COLOR_WHITE);
+
+    c64::draw_text(bx + 2, by + 4, b"Turns: ", c64::COLOR_GREY);
+    c64::draw_number_u16(bx + 9, by + 4, state.turn_count, c64::COLOR_WHITE);
+
+    let menu_items: [&[u8]; 2] = [b"Play Again", b"Title Screen"];
+    draw_menu(&menu_items, selected, bx + 4, by + 6);
 }
 
 /// Render the game over screen overlay with menu items.
 pub fn render_game_over(state: &MicroGameState, selected: u8) {
-    let bx: u8 = 8;
-    let by: u8 = 7;
-    let bw: u8 = 24;
-    let bh: u8 = 11;
-
-    draw_box(bx, by, bw, bh, c64::COLOR_RED);
-
-    c64::draw_text(bx + 5, by + 1, b"YOU HAVE DIED", c64::COLOR_RED);
-
-    c64::draw_text(bx + 2, by + 3, b"Kills: ", c64::COLOR_GREY);
-    c64::draw_number(bx + 9, by + 3, state.kills, c64::COLOR_WHITE);
-
-    c64::draw_text(bx + 2, by + 4, b"Turns: ", c64::COLOR_GREY);
-    c64::draw_number_u16(bx + 9, by + 4, state.turn_count, c64::COLOR_WHITE);
-
-    c64::draw_text(bx + 2, by + 5, b"Seed: ", c64::COLOR_GREY);
-    draw_seed_code(bx + 8, by + 5, state.seed, state.map.width, state.map.height, c64::COLOR_YELLOW);
-
-    // Menu items inside the box
-    let menu_items: [&[u8]; 2] = [b"Play Again", b"Title Screen"];
-    draw_menu(&menu_items, selected, bx + 4, by + 7);
+    render_end_screen(state, selected, b"YOU HAVE DIED", c64::COLOR_RED);
 }
 
 /// Render the victory screen overlay with menu items.
 pub fn render_victory(state: &MicroGameState, selected: u8) {
-    let bx: u8 = 8;
-    let by: u8 = 7;
-    let bw: u8 = 24;
-    let bh: u8 = 11;
-
-    draw_box(bx, by, bw, bh, c64::COLOR_GREEN);
-
-    c64::draw_text(bx + 7, by + 1, b"VICTORY!", c64::COLOR_GREEN);
-
-    c64::draw_text(bx + 2, by + 3, b"Kills: ", c64::COLOR_GREY);
-    c64::draw_number(bx + 9, by + 3, state.kills, c64::COLOR_WHITE);
-
-    c64::draw_text(bx + 2, by + 4, b"Turns: ", c64::COLOR_GREY);
-    c64::draw_number_u16(bx + 9, by + 4, state.turn_count, c64::COLOR_WHITE);
-
-    c64::draw_text(bx + 2, by + 5, b"Seed: ", c64::COLOR_GREY);
-    draw_seed_code(bx + 8, by + 5, state.seed, state.map.width, state.map.height, c64::COLOR_YELLOW);
-
-    // Menu items inside the box
-    let menu_items: [&[u8]; 2] = [b"Play Again", b"Title Screen"];
-    draw_menu(&menu_items, selected, bx + 4, by + 7);
+    render_end_screen(state, selected, b"VICTORY!", c64::COLOR_GREEN);
 }
 
 /// Render the title screen with menu.
 pub fn render_title(selected: u8) {
     c64::clear_screen();
 
-    c64::draw_text(8, 3, b"========================", c64::COLOR_YELLOW);
-    c64::draw_text(8, 4, b"   ROGUELIKE DUNGEON    ", c64::COLOR_WHITE);
-    c64::draw_text(8, 5, b"       CRAWLER          ", c64::COLOR_WHITE);
-    c64::draw_text(8, 6, b"========================", c64::COLOR_YELLOW);
-    c64::draw_text(8, 8, b"    C64 + RUST-MOS      ", c64::COLOR_LGREY);
+    c64::draw_text(8, 4, b"ROGUELIKE DUNGEON", c64::COLOR_WHITE);
+    c64::draw_text(8, 5, b"CRAWLER", c64::COLOR_WHITE);
+    c64::draw_text(8, 7, b"C64 + RUST-MOS", c64::COLOR_LGREY);
 
-    // Menu items
     let menu_items: [&[u8]; 2] = [b"NEW GAME", b"ENTER SEED"];
-    draw_menu(&menu_items, selected, 10, 11);
-
-    // Condensed controls help
-    c64::draw_text(4, 17, b"W/UP MOVE  Q/E DIAG", c64::COLOR_DGREY);
-    c64::draw_text(4, 18, b"S/DN       Z/C", c64::COLOR_DGREY);
-    c64::draw_text(4, 19, b"SPACE WAIT  RETURN DESCEND", c64::COLOR_DGREY);
-    c64::draw_text(4, 20, b"X LOOK  JOY2 OK", c64::COLOR_DGREY);
+    draw_menu(&menu_items, selected, 10, 10);
 }
 
 /// Render the pause menu overlay on top of the game screen.
 pub fn render_pause(state: &MicroGameState, selected: u8) {
-    // Re-render the game underneath
     render_all(state);
 
     let bx: u8 = 8;
     let by: u8 = 8;
     let bw: u8 = 24;
-    let bh: u8 = 8;
+    let bh: u8 = 7;
 
-    draw_box(bx, by, bw, bh, c64::COLOR_CYAN);
+    clear_rect(bx, by, bw, bh);
+    c64::fill_row(by, 0xC0, c64::COLOR_CYAN);
 
-    c64::draw_text(bx + 8, by + 1, b"PAUSED", c64::COLOR_CYAN);
+    c64::draw_text(bx + 2, by + 1, b"PAUSED", c64::COLOR_CYAN);
 
     let menu_items: [&[u8]; 2] = [b"Resume", b"New Game"];
     draw_menu(&menu_items, selected, bx + 4, by + 3);
@@ -733,13 +630,13 @@ pub fn render_seed_input(buf: &[u8], len: u8) {
     let bx: u8 = 5;
     let by: u8 = 9;
     let bw: u8 = 30;
-    let bh: u8 = 7;
+    let bh: u8 = 6;
 
-    draw_box(bx, by, bw, bh, c64::COLOR_CYAN);
+    clear_rect(bx, by, bw, bh);
+    c64::fill_row(by, 0xC0, c64::COLOR_CYAN);
 
-    c64::draw_text(bx + 8, by + 1, b"ENTER SEED CODE", c64::COLOR_CYAN);
+    c64::draw_text(bx + 2, by + 1, b"ENTER SEED CODE", c64::COLOR_CYAN);
 
-    // Input field background
     let field_x = bx + 3;
     let field_y = by + 3;
     let field_w: u8 = 16;
@@ -747,10 +644,8 @@ pub fn render_seed_input(buf: &[u8], len: u8) {
         c64::draw_char(field_x + i, field_y, c64::to_screen_code(b'_'), c64::COLOR_DGREY);
     }
 
-    // Draw typed characters
     for i in 0..len {
         let ch = buf[i as usize];
-        // Convert lowercase ASCII to uppercase for PETSCII display
         let display = if ch >= b'a' && ch <= b'z' {
             ch - b'a' + b'A'
         } else {
@@ -759,28 +654,19 @@ pub fn render_seed_input(buf: &[u8], len: u8) {
         c64::draw_char(field_x + i, field_y, c64::to_screen_code(display), c64::COLOR_WHITE);
     }
 
-    // Cursor
     if (len as u8) < field_w {
-        c64::draw_char(field_x + len, field_y, 0xA0, c64::COLOR_YELLOW); // solid block cursor
+        c64::draw_char(field_x + len, field_y, 0xA0, c64::COLOR_YELLOW);
     }
-
-    c64::draw_text(bx + 3, by + 5, b"RETURN OK  RUN/STOP BACK", c64::COLOR_DGREY);
 }
 
 /// Render a brief error message overlay for invalid seed codes.
-pub fn render_seed_error(msg: &[u8]) {
+pub fn render_seed_error() {
     let bx: u8 = 8;
     let by: u8 = 10;
     let bw: u8 = 24;
-    let bh: u8 = 5;
+    let bh: u8 = 3;
 
-    draw_box(bx, by, bw, bh, c64::COLOR_RED);
-
-    c64::draw_text(bx + 7, by + 1, b"INVALID SEED", c64::COLOR_RED);
-    // Center the error message (truncate if too long)
-    let max_w = (bw - 4) as usize;
-    let msg_len = if msg.len() > max_w { max_w } else { msg.len() };
-    let msg_x = bx + 2 + ((max_w - msg_len) as u8) / 2;
-    c64::draw_text(msg_x, by + 2, &msg[..msg_len], c64::COLOR_LGREY);
-    c64::draw_text(bx + 4, by + 3, b"PRESS ANY KEY", c64::COLOR_DGREY);
+    clear_rect(bx, by, bw, bh);
+    c64::draw_text(bx + 2, by, b"INVALID SEED", c64::COLOR_RED);
+    c64::draw_text(bx + 2, by + 2, b"PRESS ANY KEY", c64::COLOR_DGREY);
 }

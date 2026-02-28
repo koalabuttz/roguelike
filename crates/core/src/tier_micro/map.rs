@@ -40,6 +40,11 @@ impl Room {
         self.y + self.h / 2
     }
 
+    /// Check if a point is strictly inside the room (excluding the wall border).
+    pub fn contains_interior(&self, px: u8, py: u8) -> bool {
+        px > self.x && px < self.x + self.w && py > self.y && py < self.y + self.h
+    }
+
     /// Check if two rooms overlap (with 1-tile padding for walls).
     pub fn intersects(&self, other: &Room) -> bool {
         self.x <= other.x + other.w
@@ -447,6 +452,28 @@ mod tests {
             map.is_walkable(last.cx(), last.cy()),
             "stairs tile should be walkable"
         );
+    }
+
+    #[test]
+    fn room_contains_interior() {
+        let room = Room {
+            x: 10,
+            y: 20,
+            w: 6,
+            h: 4,
+        };
+        // Center is interior
+        assert!(room.contains_interior(13, 22));
+        // Just inside edges
+        assert!(room.contains_interior(11, 21));
+        assert!(room.contains_interior(15, 23));
+        // On the border (wall tiles) — not interior
+        assert!(!room.contains_interior(10, 22)); // left wall
+        assert!(!room.contains_interior(16, 22)); // right wall
+        assert!(!room.contains_interior(13, 20)); // top wall
+        assert!(!room.contains_interior(13, 24)); // bottom wall
+        // Outside entirely
+        assert!(!room.contains_interior(5, 5));
     }
 
     #[test]

@@ -80,6 +80,17 @@ pub const WANDERING_SOUND_MEDIUM: u8 = 10;
 pub const WANDERING_SOUND_NEAR: u8 = 5;
 pub const WANDERING_IDLE_THRESHOLD: u8 = 5;
 pub const WANDERING_IDLE_ACCELERATION: u8 = 2;
+/// Right-shift amount equivalent to dividing by `WANDERING_IDLE_ACCELERATION`.
+/// Derived from the acceleration value so the micro tier can use `>>` instead
+/// of division (no __udivsi3 on 6502).
+pub const WANDERING_IDLE_ACCEL_SHIFT: u8 = WANDERING_IDLE_ACCELERATION.trailing_zeros() as u8;
+pub const WANDERING_AMBIENT_SOUND_INTERVAL: u8 = 5;
+
+// Compile-time: acceleration must be a power of 2 so the shift is exact.
+const _: () = assert!(
+    WANDERING_IDLE_ACCELERATION.is_power_of_two(),
+    "WANDERING_IDLE_ACCELERATION must be a power of 2 for 6502 shift optimization"
+);
 
 // ---------------------------------------------------------------------------
 // Item balance

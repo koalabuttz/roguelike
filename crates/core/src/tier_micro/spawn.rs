@@ -89,17 +89,22 @@ pub fn spawn_items(items: &mut ItemStore, map: &MicroMap, rng: &mut LfsrRng16) {
 // Depth scaling
 // ---------------------------------------------------------------------------
 
-/// Apply per-floor stat increases to spawned monsters (slots 1..count).
-pub fn apply_depth_scaling(entities: &mut EntityStore, depth: u8) {
+/// Apply per-floor stat increases to a single entity at `idx`.
+pub fn scale_monster(entities: &mut EntityStore, idx: usize, depth: u8) {
     if depth <= 1 {
         return;
     }
     let hp_bonus = balance::MONSTER_HP_PER_FLOOR.saturating_mul(depth - 1);
     let atk_bonus = balance::MONSTER_ATK_PER_FLOOR.saturating_mul(depth - 1);
+    entities.hp[idx] = entities.hp[idx].saturating_add(hp_bonus);
+    entities.max_hp[idx] = entities.max_hp[idx].saturating_add(hp_bonus);
+    entities.atk[idx] = entities.atk[idx].saturating_add(atk_bonus);
+}
+
+/// Apply per-floor stat increases to spawned monsters (slots 1..count).
+pub fn apply_depth_scaling(entities: &mut EntityStore, depth: u8) {
     for i in 1..entities.count as usize {
-        entities.hp[i] = entities.hp[i].saturating_add(hp_bonus);
-        entities.max_hp[i] = entities.max_hp[i].saturating_add(hp_bonus);
-        entities.atk[i] = entities.atk[i].saturating_add(atk_bonus);
+        scale_monster(entities, i, depth);
     }
 }
 

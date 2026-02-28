@@ -17,7 +17,8 @@ use crate::command::GameCommand;
 use crate::rules::balance;
 use crate::rules::damage;
 use crate::rules::items::{self as rules_items, Equipment};
-use crate::rules::message::GameEvent;
+use crate::rules::message::{GameEvent, SoundDistance};
+use crate::rules::monster_table::AiBehavior;
 
 /// Result of a single step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,9 +43,18 @@ pub struct MicroGameState {
     pub depth: u8,
     pub game_over: bool,
     pub game_won: bool,
+    /// Consecutive Wait commands (resets on any non-wait action).
+    pub idle_count: u8,
+    /// Total wandering monsters spawned this game (for analytics).
+    pub wandering_spawned: u8,
     /// Counts down each turn; triggers regen at zero and resets.
     /// Avoids modulo on 6502 where division is expensive.
     regen_counter: u8,
+    /// Counts down each turn; triggers wandering spawn check at zero.
+    /// Uses the same decrement pattern as regen_counter to avoid modulo.
+    wandering_counter: u8,
+    /// Counts down each turn; triggers ambient sound check at zero.
+    ambient_sound_counter: u8,
 }
 
 impl MicroGameState {
@@ -81,7 +91,11 @@ impl MicroGameState {
             depth: 1,
             game_over: false,
             game_won: false,
+            idle_count: 0,
+            wandering_spawned: 0,
             regen_counter: balance::REGEN_INTERVAL,
+            wandering_counter: balance::WANDERING_GRACE_PERIOD - 1,
+            ambient_sound_counter: balance::WANDERING_AMBIENT_SOUND_INTERVAL - 1,
         }
     }
 
@@ -118,6 +132,7 @@ impl MicroGameState {
             };
         }
 
+        let is_wait = matches!(cmd, GameCommand::Wait);
         let action_taken = match cmd {
             GameCommand::Wait => true,
             GameCommand::Move(dir) => {
@@ -129,6 +144,12 @@ impl MicroGameState {
         };
 
         if action_taken {
+            if is_wait {
+                self.idle_count = self.idle_count.saturating_add(1);
+            } else {
+                self.idle_count = 0;
+            }
+
             let px = self.entities.x[PLAYER_IDX as usize];
             let py = self.entities.y[PLAYER_IDX as usize];
             self.fov.compute_fov(px, py, &self.map);
@@ -147,6 +168,10 @@ impl MicroGameState {
             }
 
             self.turn_count += 1;
+            if !self.game_won {
+                self.try_spawn_wandering();
+                self.emit_ambient_sound_cues();
+            }
             self.apply_regen();
         }
 
@@ -213,6 +238,12 @@ impl MicroGameState {
         // Reset FOV
         self.fov = MicroFov::new(w, h);
         self.fov.compute_fov(sx, sy, &self.map);
+
+        // Reset wandering state for new floor.
+        self.idle_count = 0;
+        self.wandering_spawned = 0;
+        self.wandering_counter = balance::WANDERING_GRACE_PERIOD - 1;
+        self.ambient_sound_counter = balance::WANDERING_AMBIENT_SOUND_INTERVAL - 1;
 
         // Reset message log for new floor
         self.log.reset();
@@ -331,6 +362,167 @@ impl MicroGameState {
             if hp < max_hp {
                 self.entities.hp[pi] = hp + 1;
             }
+        }
+    }
+
+    /// Attempt to spawn a wandering monster offscreen if conditions are met.
+    ///
+    /// Mirrors the standard tier's `try_spawn_wandering`: grace period, spawn
+    /// interval (with idle acceleration), random chance, wandering cap, entity
+    /// budget. Spawns in a random room the player isn't in, outside FOV.
+    ///
+    /// Uses a countdown counter (like `regen_counter`) to avoid modulo on 6502.
+    /// The counter starts at `WANDERING_GRACE_PERIOD`, counts down each turn,
+    /// then reloads at the spawn interval (halved when idle).
+    fn try_spawn_wandering(&mut self) {
+        if self.wandering_counter > 0 {
+            self.wandering_counter -= 1;
+            return;
+        }
+
+        // Reload counter: base interval, halved if idle.
+        // Uses a right-shift instead of division — safe for 6502 as long as
+        // WANDERING_IDLE_ACCELERATION is a power of 2 (enforced at compile time).
+        let base = balance::WANDERING_SPAWN_INTERVAL;
+        let interval = if self.idle_count >= balance::WANDERING_IDLE_THRESHOLD {
+            (base >> balance::WANDERING_IDLE_ACCEL_SHIFT).max(1)
+        } else {
+            base
+        };
+        self.wandering_counter = interval - 1;
+
+        if self.rng.range_u8(0, 99) >= balance::WANDERING_SPAWN_CHANCE {
+            return;
+        }
+
+        if self.entities.count as usize >= MAX_ENTITIES {
+            return;
+        }
+
+        // Cap alive wandering monsters.
+        let mut wander_alive: u8 = 0;
+        for i in 1..self.entities.count as usize {
+            if self.entities.alive[i] && self.entities.ai[i] == AiBehavior::Wander {
+                wander_alive += 1;
+            }
+        }
+        if wander_alive >= balance::WANDERING_MAX_ACTIVE {
+            return;
+        }
+
+        if let Some((sx, sy)) = self.pick_offscreen_spawn_pos() {
+            let kind = spawn::pick_monster_kind(&mut self.rng);
+            if self
+                .entities
+                .spawn_monster(kind, sx, sy, AiBehavior::Wander)
+            {
+                let idx = (self.entities.count - 1) as usize;
+                spawn::scale_monster(&mut self.entities, idx, self.depth);
+                self.wandering_spawned += 1;
+                self.emit_spawn_sound_cue(sx, sy);
+            }
+        }
+    }
+
+    /// Pick a random floor tile in a room the player isn't in,
+    /// outside the player's FOV and not occupied by another entity.
+    fn pick_offscreen_spawn_pos(&mut self) -> Option<(u8, u8)> {
+        if self.map.room_count == 0 {
+            return None;
+        }
+
+        let px = self.entities.x[PLAYER_IDX as usize];
+        let py = self.entities.y[PLAYER_IDX as usize];
+
+        for _ in 0..10 {
+            let room_idx = self.rng.range_u8(0, self.map.room_count - 1) as usize;
+            let room = self.map.rooms[room_idx];
+
+            // Skip rooms the player is standing in.
+            if room.contains_interior(px, py) {
+                continue;
+            }
+
+            // Pick a random floor tile inside the room interior.
+            if room.w < 3 || room.h < 3 {
+                continue;
+            }
+            let sx = self.rng.range_u8(room.x + 1, room.x + room.w - 1);
+            let sy = self.rng.range_u8(room.y + 1, room.y + room.h - 1);
+
+            if !self.map.is_walkable(sx, sy) {
+                continue;
+            }
+            if self.fov.is_visible(sx, sy) {
+                continue;
+            }
+            if self.entities.entity_at(sx, sy) != NO_ENTITY {
+                continue;
+            }
+            return Some((sx, sy));
+        }
+        None
+    }
+
+    /// Emit a distance-based sound cue when a wandering monster spawns.
+    fn emit_spawn_sound_cue(&mut self, sx: u8, sy: u8) {
+        let px = self.entities.x[PLAYER_IDX as usize];
+        let py = self.entities.y[PLAYER_IDX as usize];
+        let dist = px.abs_diff(sx) + py.abs_diff(sy);
+
+        let distance = if dist <= balance::WANDERING_SOUND_NEAR {
+            Some(SoundDistance::Near)
+        } else if dist <= balance::WANDERING_SOUND_MEDIUM {
+            Some(SoundDistance::Medium)
+        } else if dist <= balance::WANDERING_SOUND_FAR {
+            Some(SoundDistance::Far)
+        } else {
+            None
+        };
+        if let Some(distance) = distance {
+            self.log.add(GameEvent::SoundCue { distance });
+        }
+    }
+
+    /// Emit ambient sound cues for nearby wandering monsters.
+    ///
+    /// Uses a countdown counter to avoid modulo. Bails early if a Near
+    /// monster is found — no need to scan the rest.
+    fn emit_ambient_sound_cues(&mut self) {
+        if self.ambient_sound_counter > 0 {
+            self.ambient_sound_counter -= 1;
+            return;
+        }
+        self.ambient_sound_counter = balance::WANDERING_AMBIENT_SOUND_INTERVAL - 1;
+
+        let px = self.entities.x[PLAYER_IDX as usize];
+        let py = self.entities.y[PLAYER_IDX as usize];
+
+        let mut closest_dist: u8 = u8::MAX;
+        for i in 1..self.entities.count as usize {
+            if self.entities.alive[i] && self.entities.ai[i] == AiBehavior::Wander {
+                let dist = px.abs_diff(self.entities.x[i]) + py.abs_diff(self.entities.y[i]);
+                if dist < closest_dist {
+                    closest_dist = dist;
+                    // Near is the tightest threshold — can't improve, bail.
+                    if closest_dist <= balance::WANDERING_SOUND_NEAR {
+                        break;
+                    }
+                }
+            }
+        }
+
+        let distance = if closest_dist <= balance::WANDERING_SOUND_NEAR {
+            Some(SoundDistance::Near)
+        } else if closest_dist <= balance::WANDERING_SOUND_MEDIUM {
+            Some(SoundDistance::Medium)
+        } else if closest_dist <= balance::WANDERING_SOUND_FAR {
+            Some(SoundDistance::Far)
+        } else {
+            None
+        };
+        if let Some(distance) = distance {
+            self.log.add(GameEvent::SoundCue { distance });
         }
     }
 }
@@ -718,5 +910,148 @@ mod tests {
         g.step(GameCommand::Descend);
 
         assert!(g.items.count > 0, "new floor should have items");
+    }
+
+    // ── Wandering monster tests ──────────────────────────────────────
+
+    /// Helper: run Wait commands until a wandering monster spawns or limit is hit.
+    /// Returns the count of alive entities with AiBehavior::Wander.
+    fn count_wanderers(g: &MicroGameState) -> u8 {
+        let mut count = 0u8;
+        for i in 1..g.entities.count as usize {
+            if g.entities.alive[i] && g.entities.ai[i] == AiBehavior::Wander {
+                count += 1;
+            }
+        }
+        count
+    }
+
+    #[test]
+    fn no_wandering_before_grace_period() {
+        let mut g = MicroGameState::new_default(42);
+        let initial_count = g.entities.count;
+
+        // Run turns up to (but not including) the grace period.
+        for _ in 0..balance::WANDERING_GRACE_PERIOD {
+            if g.game_over {
+                break;
+            }
+            g.step(GameCommand::Wait);
+        }
+
+        // No wandering spawns should have occurred — entity count should only
+        // decrease (monster kills) or stay the same, never increase beyond
+        // what initial room-based spawning created.
+        assert!(
+            count_wanderers(&g) == 0,
+            "no wanderers should spawn before grace period"
+        );
+        assert!(
+            g.wandering_spawned == 0,
+            "wandering_spawned counter should be 0"
+        );
+        // Entity count can't have grown (only killed, never spawned).
+        assert!(
+            g.entities.count <= initial_count,
+            "entity count should not grow before grace period"
+        );
+    }
+
+    #[test]
+    fn wandering_spawns_after_grace_period() {
+        let mut g = MicroGameState::new_default(42);
+        // Kill all initial monsters to make room and avoid interference.
+        for i in 1..g.entities.count {
+            g.entities.kill(i);
+        }
+
+        // Run well past grace period — enough turns for spawns to happen.
+        let target_turns = (balance::WANDERING_GRACE_PERIOD as u16) * 4;
+        for _ in 0..target_turns {
+            if g.game_over {
+                break;
+            }
+            g.step(GameCommand::Wait);
+        }
+
+        assert!(
+            g.wandering_spawned > 0,
+            "at least one wandering monster should have spawned after {} turns",
+            target_turns
+        );
+    }
+
+    #[test]
+    fn wandering_cap_respected() {
+        let mut g = MicroGameState::new_default(42);
+        // Kill all initial monsters.
+        for i in 1..g.entities.count {
+            g.entities.kill(i);
+        }
+
+        // Run a large number of turns.
+        for _ in 0..500 {
+            if g.game_over {
+                break;
+            }
+            g.step(GameCommand::Wait);
+        }
+
+        let wanderers = count_wanderers(&g);
+        assert!(
+            wanderers <= balance::WANDERING_MAX_ACTIVE,
+            "wanderer count {} exceeds cap {}",
+            wanderers,
+            balance::WANDERING_MAX_ACTIVE
+        );
+    }
+
+    #[test]
+    fn idle_count_tracks_waits() {
+        let mut g = MicroGameState::new_default(42);
+        assert_eq!(g.idle_count, 0);
+
+        g.step(GameCommand::Wait);
+        assert_eq!(g.idle_count, 1);
+        g.step(GameCommand::Wait);
+        assert_eq!(g.idle_count, 2);
+
+        // Move resets idle count (find a walkable direction).
+        let dirs = [
+            Direction::North,
+            Direction::South,
+            Direction::East,
+            Direction::West,
+        ];
+        for dir in dirs {
+            let (dx, dy) = dir.to_offset();
+            let px = g.entities.x[0];
+            let py = g.entities.y[0];
+            let nx = (px as i8 + dx as i8) as u8;
+            let ny = (py as i8 + dy as i8) as u8;
+            if g.map.is_walkable(nx, ny) && g.entities.monster_at(nx, ny) == NO_ENTITY {
+                g.step(GameCommand::Move(dir));
+                break;
+            }
+        }
+        assert_eq!(g.idle_count, 0, "move should reset idle count");
+    }
+
+    #[test]
+    fn wandering_state_resets_on_descent() {
+        let mut g = MicroGameState::new_default(42);
+        g.idle_count = 10;
+        g.wandering_spawned = 3;
+
+        let last = g.map.rooms[(g.map.room_count - 1) as usize];
+        g.entities.x[0] = last.cx();
+        g.entities.y[0] = last.cy();
+        g.step(GameCommand::Descend);
+
+        assert_eq!(g.idle_count, 0, "idle_count should reset on descent");
+        assert_eq!(
+            g.wandering_spawned, 0,
+            "wandering_spawned should reset on descent"
+        );
     }
 }

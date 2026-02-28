@@ -21,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add item system to roguelike (#2)
 
 ### Fixed
+- Replace division with right-shift for idle acceleration in micro tier (#50)
+- Fix wandering spawn timing drift, extract depth scaling helper, add ambient sound constant (#49)
 - Fix nightly C64 Docker mount to include roguelike-core (#46)
 - Fix raw-usb feature build: update check_hid_stick call sites for Direction return type (#45)
 - Extract run_error_dialog helper to deduplicate factory failure menus (#39)

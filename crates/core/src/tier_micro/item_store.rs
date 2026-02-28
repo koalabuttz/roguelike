@@ -35,17 +35,31 @@ impl ItemStore {
     }
 
     /// Place an item on the ground. Returns false if the store is full.
+    ///
+    /// Reuses dead slots before appending, so removing and re-spawning
+    /// items within a floor won't exhaust the store prematurely.
     pub fn spawn(&mut self, ix: u8, iy: u8, item_kind: ItemKind) -> bool {
-        if self.count as usize >= MAX_ITEMS {
-            return false;
+        // Scan for a dead slot to reuse.
+        for i in 0..self.count as usize {
+            if !self.alive[i] {
+                self.x[i] = ix;
+                self.y[i] = iy;
+                self.kind[i] = item_kind;
+                self.alive[i] = true;
+                return true;
+            }
         }
-        let i = self.count as usize;
-        self.x[i] = ix;
-        self.y[i] = iy;
-        self.kind[i] = item_kind;
-        self.alive[i] = true;
-        self.count += 1;
-        true
+        // No dead slots — append if there's room.
+        if (self.count as usize) < MAX_ITEMS {
+            let i = self.count as usize;
+            self.x[i] = ix;
+            self.y[i] = iy;
+            self.kind[i] = item_kind;
+            self.alive[i] = true;
+            self.count += 1;
+            return true;
+        }
+        false
     }
 
     /// Find the first alive item at position. Returns slot index or NO_ITEM.
@@ -115,5 +129,21 @@ mod tests {
     fn item_at_empty_returns_no_item() {
         let items = ItemStore::new();
         assert_eq!(items.item_at(0, 0), NO_ITEM);
+    }
+
+    #[test]
+    fn spawn_reuses_dead_slots() {
+        let mut items = ItemStore::new();
+        items.spawn(1, 1, ItemKind::HealthPotion);
+        items.spawn(2, 2, ItemKind::ShortSword);
+        let count_before = items.count;
+
+        // Kill slot 0, then spawn a new item — should reuse slot 0.
+        items.remove(0);
+        assert!(items.spawn(9, 9, ItemKind::LeatherArmor));
+        assert_eq!(items.count, count_before, "count should not grow");
+        assert!(items.alive[0]);
+        assert_eq!(items.kind[0], ItemKind::LeatherArmor);
+        assert_eq!(items.x[0], 9);
     }
 }

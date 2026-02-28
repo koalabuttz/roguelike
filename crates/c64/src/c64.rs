@@ -172,3 +172,23 @@ pub fn draw_number(x: u8, y: u8, mut val: u8, color: u8) -> u8 {
     }
     len
 }
+
+/// Draw a decimal number (0-65535) at position. Returns number of digits written.
+pub fn draw_number_u16(x: u8, y: u8, mut val: u16, color: u8) -> u8 {
+    let mut buf = [0u8; 5];
+    let mut len: u8 = 0;
+    if val == 0 {
+        draw_char(x, y, to_screen_code(b'0'), color);
+        return 1;
+    }
+    while val > 0 {
+        buf[len as usize] = b'0' + (val % 10) as u8;
+        val /= 10;
+        len += 1;
+    }
+    for i in 0..len {
+        let ch = buf[(len - 1 - i) as usize];
+        draw_char(x + i, y, to_screen_code(ch), color);
+    }
+    len
+}

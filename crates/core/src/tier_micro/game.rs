@@ -7,7 +7,7 @@ use super::ai;
 use super::combat;
 use super::entity::EntityStore;
 use super::fov::MicroFov;
-use super::map::MicroMap;
+use super::map::{MicroMap, TILE_STAIRS_DOWN};
 use super::msglog::MicroMessageLog;
 use super::prng::LfsrRng16;
 use super::spawn;
@@ -21,6 +21,7 @@ use crate::rules::message::GameEvent;
 pub struct MicroStepResult {
     pub action_taken: bool,
     pub game_over: bool,
+    pub game_won: bool,
 }
 
 pub struct MicroGameState {
@@ -33,7 +34,9 @@ pub struct MicroGameState {
     pub seed: u16,
     pub turn_count: u16,
     pub kills: u8,
+    pub depth: u8,
     pub game_over: bool,
+    pub game_won: bool,
     /// Counts down each turn; triggers regen at zero and resets.
     /// Avoids modulo on 6502 where division is expensive.
     regen_counter: u8,
@@ -65,9 +68,16 @@ impl MicroGameState {
             seed,
             turn_count: 0,
             kills: 0,
+            depth: 1,
             game_over: false,
+            game_won: false,
             regen_counter: balance::REGEN_INTERVAL,
         }
+    }
+
+    /// Returns true if the game has reached a terminal state (death or victory).
+    pub fn is_terminal(&self) -> bool {
+        self.game_over || self.game_won
     }
 
     /// Create a new game with C64 default dimensions (64×48).
@@ -80,10 +90,21 @@ impl MicroGameState {
     /// Accepts the full `GameCommand` enum. Variants the micro tier doesn't
     /// support (Autorun, AutoExplore, Look, etc.) are silently ignored.
     pub fn step(&mut self, cmd: GameCommand) -> MicroStepResult {
-        if self.game_over {
+        if self.is_terminal() {
             return MicroStepResult {
                 action_taken: false,
-                game_over: true,
+                game_over: self.game_over,
+                game_won: self.game_won,
+            };
+        }
+
+        // Descent is handled separately — it rebuilds the level and FOV.
+        if matches!(cmd, GameCommand::Descend) {
+            let descended = self.descend();
+            return MicroStepResult {
+                action_taken: descended,
+                game_over: self.game_over,
+                game_won: self.game_won,
             };
         }
 
@@ -116,7 +137,73 @@ impl MicroGameState {
         MicroStepResult {
             action_taken,
             game_over: self.game_over,
+            game_won: self.game_won,
         }
+    }
+
+    /// Descend to the next dungeon level. Returns true if descent succeeded.
+    fn descend(&mut self) -> bool {
+        let pi = PLAYER_IDX as usize;
+        let px = self.entities.x[pi];
+        let py = self.entities.y[pi];
+
+        // Must be standing on stairs
+        if self.map.tile_at(px, py) != TILE_STAIRS_DOWN {
+            self.log.add(GameEvent::NoStairs);
+            return false;
+        }
+
+        // Victory condition: descending from the final floor
+        if self.depth >= balance::TARGET_DEPTH {
+            self.game_won = true;
+            self.log.add(GameEvent::Victory {
+                depth: balance::TARGET_DEPTH,
+            });
+            return true;
+        }
+
+        self.depth += 1;
+
+        // Derive deterministic seed for this floor
+        let floor_seed = self.seed ^ (self.depth as u16).wrapping_mul(0x9E37);
+        self.rng = LfsrRng16::new(floor_seed);
+
+        // Save player stats
+        let hp = self.entities.hp[pi];
+        let max_hp = self.entities.max_hp[pi];
+        let atk = self.entities.atk[pi];
+        let def = self.entities.def[pi];
+
+        // Generate new map
+        let w = self.map.width;
+        let h = self.map.height;
+        self.map = MicroMap::new(w, h);
+        let (sx, sy) = self.map.generate(&mut self.rng);
+
+        // Reset entities — player keeps stats
+        self.entities = EntityStore::new();
+        self.entities.spawn_player(sx, sy);
+        self.entities.hp[pi] = hp;
+        self.entities.max_hp[pi] = max_hp;
+        self.entities.atk[pi] = atk;
+        self.entities.def[pi] = def;
+
+        // Spawn and scale monsters
+        spawn::spawn_monsters(&mut self.entities, &self.map, &mut self.rng);
+        spawn::apply_depth_scaling(&mut self.entities, self.depth);
+
+        // Reset FOV
+        self.fov = MicroFov::new(w, h);
+        self.fov.compute_fov(sx, sy, &self.map);
+
+        // Reset message log for new floor
+        self.log.reset();
+        self.log.add(GameEvent::Descend {
+            depth: self.depth,
+            target: balance::TARGET_DEPTH,
+        });
+
+        true
     }
 
     fn player_move_or_attack(&mut self, dx: i8, dy: i8) -> bool {
@@ -283,5 +370,121 @@ mod tests {
         assert_eq!(g.map.height, 40);
         assert!(!g.game_over);
         assert!(g.entities.count > 1);
+    }
+
+    #[test]
+    fn descend_on_stairs_succeeds() {
+        let mut g = MicroGameState::new_default(42);
+        // Teleport player to stairs (last room center)
+        let last = g.map.rooms[(g.map.room_count - 1) as usize];
+        g.entities.x[0] = last.cx();
+        g.entities.y[0] = last.cy();
+
+        let result = g.step(GameCommand::Descend);
+        assert!(result.action_taken);
+        assert_eq!(g.depth, 2);
+        assert!(!result.game_won);
+    }
+
+    #[test]
+    fn descend_not_on_stairs_fails() {
+        let mut g = MicroGameState::new_default(42);
+        // Player starts on floor in room 0, not on stairs
+        let result = g.step(GameCommand::Descend);
+        assert!(!result.action_taken);
+        assert_eq!(g.depth, 1);
+        // Should have logged NoStairs
+        assert_eq!(g.log.recent(0), Some(GameEvent::NoStairs));
+    }
+
+    #[test]
+    fn victory_after_target_depth() {
+        let mut g = MicroGameState::new_default(42);
+        for _ in 0..balance::TARGET_DEPTH {
+            // Teleport to stairs and descend
+            let last = g.map.rooms[(g.map.room_count - 1) as usize];
+            g.entities.x[0] = last.cx();
+            g.entities.y[0] = last.cy();
+            g.step(GameCommand::Descend);
+        }
+        assert!(g.game_won);
+        assert_eq!(g.depth, balance::TARGET_DEPTH);
+    }
+
+    #[test]
+    fn player_hp_carries_over() {
+        let mut g = MicroGameState::new_default(42);
+        g.entities.hp[0] = 15; // damage player
+        let last = g.map.rooms[(g.map.room_count - 1) as usize];
+        g.entities.x[0] = last.cx();
+        g.entities.y[0] = last.cy();
+
+        g.step(GameCommand::Descend);
+        assert_eq!(g.entities.hp[0], 15, "HP should carry over");
+        assert_eq!(g.entities.max_hp[0], balance::PLAYER_HP);
+    }
+
+    #[test]
+    fn deterministic_floor_generation() {
+        // Two games with same seed should produce identical level 2
+        let mut a = MicroGameState::new_default(100);
+        let mut b = MicroGameState::new_default(100);
+
+        // Descend both to level 2
+        for g in [&mut a, &mut b] {
+            let last = g.map.rooms[(g.map.room_count - 1) as usize];
+            g.entities.x[0] = last.cx();
+            g.entities.y[0] = last.cy();
+            g.step(GameCommand::Descend);
+        }
+
+        let size = (a.map.width as usize) * (a.map.height as usize);
+        assert_eq!(a.map.tiles[..size], b.map.tiles[..size]);
+        assert_eq!(a.entities.count, b.entities.count);
+        assert_eq!(a.depth, b.depth);
+    }
+
+    #[test]
+    fn floor_seeds_decorrelated() {
+        // Seed N at depth 2 must NOT produce the same map as seed N+1 at depth 1
+        let mut a = MicroGameState::new_default(100);
+        let b = MicroGameState::new_default(101);
+
+        // Descend game A to depth 2
+        let last = a.map.rooms[(a.map.room_count - 1) as usize];
+        a.entities.x[0] = last.cx();
+        a.entities.y[0] = last.cy();
+        a.step(GameCommand::Descend);
+        assert_eq!(a.depth, 2);
+
+        // Game B stays at depth 1 — compare maps
+        let size = (a.map.width as usize) * (a.map.height as usize);
+        assert_ne!(
+            a.map.tiles[..size],
+            b.map.tiles[..size],
+            "seed 100 depth 2 should differ from seed 101 depth 1"
+        );
+    }
+
+    #[test]
+    fn monsters_scaled_on_deeper_floors() {
+        let mut g = MicroGameState::new_default(42);
+        let last = g.map.rooms[(g.map.room_count - 1) as usize];
+        g.entities.x[0] = last.cx();
+        g.entities.y[0] = last.cy();
+
+        g.step(GameCommand::Descend);
+        assert_eq!(g.depth, 2);
+
+        // Check that at least one monster has scaled stats
+        if g.entities.count > 1 {
+            let kind = g.entities.kind[1].unwrap();
+            let base_hp = crate::rules::monster_table::max_hp(kind);
+            assert_eq!(
+                g.entities.hp[1],
+                base_hp + balance::MONSTER_HP_PER_FLOOR,
+                "monster HP should be scaled for depth 2"
+            );
+        }
     }
 }

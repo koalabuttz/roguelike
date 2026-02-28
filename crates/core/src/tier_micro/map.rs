@@ -12,6 +12,7 @@ use crate::rules::balance;
 
 pub const TILE_WALL: u8 = 0;
 pub const TILE_FLOOR: u8 = 1;
+pub const TILE_STAIRS_DOWN: u8 = 2;
 
 #[derive(Copy, Clone)]
 pub struct Room {
@@ -92,7 +93,7 @@ impl MicroMap {
     }
 
     pub fn is_walkable(&self, x: u8, y: u8) -> bool {
-        self.tile_at(x, y) == TILE_FLOOR
+        self.tile_at(x, y) != TILE_WALL
     }
 
     pub fn is_structural(&self, x: u8, y: u8) -> bool {
@@ -130,12 +131,21 @@ impl MicroMap {
         let mut count: u16 = 0;
         for y in 0..self.height {
             for x in 0..self.width {
-                if self.tiles[self.idx(x, y)] == TILE_FLOOR {
+                if self.tiles[self.idx(x, y)] != TILE_WALL {
                     count += 1;
                 }
             }
         }
         count
+    }
+
+    /// Place stairs down at the center of the last room.
+    pub fn place_stairs_down(&mut self) {
+        if self.room_count > 0 {
+            let last = self.rooms[(self.room_count - 1) as usize];
+            let i = self.idx(last.cx(), last.cy());
+            self.tiles[i] = TILE_STAIRS_DOWN;
+        }
     }
 
     fn set_tile(&mut self, x: u8, y: u8, tile: u8) {
@@ -184,7 +194,7 @@ impl MicroMap {
                         }
                         let nx = (x as i8 + dx) as u8;
                         let ny = (y as i8 + dy) as u8;
-                        if self.in_bounds(nx, ny) && self.tile_at(nx, ny) == TILE_FLOOR {
+                        if self.in_bounds(nx, ny) && self.tile_at(nx, ny) != TILE_WALL {
                             found = true;
                             break;
                         }
@@ -265,6 +275,7 @@ impl MicroMap {
             self.room_count += 1;
         }
 
+        self.place_stairs_down();
         self.compute_structural_walls();
         (start_x, start_y)
     }
@@ -341,7 +352,7 @@ mod tests {
         let mut manual: u16 = 0;
         for y in 0..map.height {
             for x in 0..map.width {
-                if map.tiles[map.idx(x, y)] == TILE_FLOOR {
+                if map.tiles[map.idx(x, y)] != TILE_WALL {
                     manual += 1;
                 }
             }
@@ -399,5 +410,57 @@ mod tests {
         assert_eq!(map.width, 80);
         assert_eq!(map.height, 40);
         assert!(map.room_count > 0);
+    }
+
+    #[test]
+    fn stairs_placed_in_last_room() {
+        let (map, _) = make_map(42);
+        assert!(map.room_count >= 2, "need at least 2 rooms for stairs");
+        let last = map.rooms[(map.room_count - 1) as usize];
+        assert_eq!(
+            map.tile_at(last.cx(), last.cy()),
+            TILE_STAIRS_DOWN,
+            "stairs should be at last room center"
+        );
+    }
+
+    #[test]
+    fn stairs_placed_with_single_room() {
+        // Tiny map that can only fit 1 room — stairs should still be placed
+        let mut rng = LfsrRng16::new(42);
+        let mut map = MicroMap::new(12, 12);
+        map.generate(&mut rng);
+        assert!(map.room_count > 0);
+        let last = map.rooms[(map.room_count - 1) as usize];
+        assert_eq!(
+            map.tile_at(last.cx(), last.cy()),
+            TILE_STAIRS_DOWN,
+            "stairs should be placed even with a single room"
+        );
+    }
+
+    #[test]
+    fn stairs_are_walkable() {
+        let (map, _) = make_map(42);
+        let last = map.rooms[(map.room_count - 1) as usize];
+        assert!(
+            map.is_walkable(last.cx(), last.cy()),
+            "stairs tile should be walkable"
+        );
+    }
+
+    #[test]
+    fn floor_count_includes_stairs() {
+        let (map, _) = make_map(42);
+        // Manual count of all non-wall tiles
+        let mut manual: u16 = 0;
+        for y in 0..map.height {
+            for x in 0..map.width {
+                if map.tiles[map.idx(x, y)] != TILE_WALL {
+                    manual += 1;
+                }
+            }
+        }
+        assert_eq!(map.floor_count(), manual);
     }
 }

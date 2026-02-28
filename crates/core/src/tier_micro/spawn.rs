@@ -45,9 +45,24 @@ pub fn spawn_monsters(entities: &mut EntityStore, map: &MicroMap, rng: &mut Lfsr
     }
 }
 
+/// Apply per-floor stat increases to spawned monsters (slots 1..count).
+pub fn apply_depth_scaling(entities: &mut EntityStore, depth: u8) {
+    if depth <= 1 {
+        return;
+    }
+    let hp_bonus = balance::MONSTER_HP_PER_FLOOR.saturating_mul(depth - 1);
+    let atk_bonus = balance::MONSTER_ATK_PER_FLOOR.saturating_mul(depth - 1);
+    for i in 1..entities.count as usize {
+        entities.hp[i] = entities.hp[i].saturating_add(hp_bonus);
+        entities.max_hp[i] = entities.max_hp[i].saturating_add(hp_bonus);
+        entities.atk[i] = entities.atk[i].saturating_add(atk_bonus);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rules::monster_table::AiBehavior;
 
     #[test]
     fn pick_monster_kind_returns_valid_kind() {
@@ -89,6 +104,36 @@ mod tests {
 
         // No monster should be exactly at the player's start position
         assert_eq!(entities.monster_at(sx, sy), NO_ENTITY);
+    }
+
+    #[test]
+    fn apply_depth_scaling_increases_stats() {
+        let mut entities = EntityStore::new();
+        entities.spawn_player(0, 0);
+        entities.spawn_monster(MonsterKind::Goblin, 5, 5, AiBehavior::Chase);
+
+        let base_hp = entities.hp[1];
+        let base_atk = entities.atk[1];
+
+        apply_depth_scaling(&mut entities, 3); // depth 3 → +2 bonus
+
+        assert_eq!(entities.hp[1], base_hp + 2);
+        assert_eq!(entities.max_hp[1], base_hp + 2);
+        assert_eq!(entities.atk[1], base_atk + 2);
+        // Player should be unchanged
+        assert_eq!(entities.hp[0], balance::PLAYER_HP);
+        assert_eq!(entities.atk[0], balance::PLAYER_ATK);
+    }
+
+    #[test]
+    fn apply_depth_scaling_noop_at_depth_1() {
+        let mut entities = EntityStore::new();
+        entities.spawn_player(0, 0);
+        entities.spawn_monster(MonsterKind::Goblin, 5, 5, AiBehavior::Chase);
+
+        let base_hp = entities.hp[1];
+        apply_depth_scaling(&mut entities, 1);
+        assert_eq!(entities.hp[1], base_hp);
     }
 
     #[test]

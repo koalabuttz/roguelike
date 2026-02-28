@@ -16,13 +16,14 @@ use roguelike_core::rules::message::{GameEvent, SoundDistance};
 use roguelike_core::rules::monster_table;
 use roguelike_core::rules::seed_code::{self, MAX_MICRO_SEED_CODE_LEN};
 use roguelike_core::tier_micro::game::MicroGameState;
-use roguelike_core::tier_micro::map::{TILE_FLOOR, TILE_WALL};
+use roguelike_core::tier_micro::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_WALL};
 use roguelike_core::tier_micro::types::PLAYER_IDX;
 
 // Screen codes for map tiles
 const SC_SPACE: u8 = 0x20;
-const SC_FLOOR: u8 = 0x2E; // .
-const SC_WALL: u8 = 0xA0;  // reverse space = solid block
+const SC_FLOOR: u8 = 0x2E;  // .
+const SC_WALL: u8 = 0xA0;   // reverse space = solid block
+const SC_STAIRS: u8 = 0x3E; // >
 
 const STATUS_ROW: u8 = 22;
 const MSG_ROW: u8 = 23;
@@ -78,6 +79,7 @@ fn render_map(state: &MicroGameState, vx: u8, vy: u8) {
             let (sc, color) = if visible {
                 match tile {
                     TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
+                    TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
                     TILE_WALL => {
                         if state.map.is_structural(wx, wy) {
                             (SC_WALL, c64::COLOR_LGREY)
@@ -90,6 +92,7 @@ fn render_map(state: &MicroGameState, vx: u8, vy: u8) {
             } else if explored {
                 match tile {
                     TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
+                    TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
                     TILE_WALL => {
                         if state.map.is_structural(wx, wy) {
                             (SC_WALL, c64::COLOR_BLUE)
@@ -186,32 +189,24 @@ fn render_status_bar(state: &MicroGameState) {
     col += 1;
     col += c64::draw_number(col, STATUS_ROW, max_hp, c64::COLOR_WHITE);
 
-    // Kills counter
+    // Depth indicator
+    col += 1;
+    c64::draw_text(col, STATUS_ROW, b"D:", c64::COLOR_GREY);
     col += 2;
+    col += c64::draw_number(col, STATUS_ROW, state.depth, c64::COLOR_WHITE);
+    c64::draw_char(col, STATUS_ROW, c64::to_screen_code(b'/'), c64::COLOR_GREY);
+    col += 1;
+    col += c64::draw_number(col, STATUS_ROW, balance::TARGET_DEPTH, c64::COLOR_WHITE);
+
+    // Kills counter
+    col += 1;
     c64::draw_text(col, STATUS_ROW, b"K:", c64::COLOR_GREY);
     col += 2;
     c64::draw_number(col, STATUS_ROW, state.kills, c64::COLOR_WHITE);
 
     // Turn counter (right-aligned)
     c64::draw_text(33, STATUS_ROW, b"T:", c64::COLOR_GREY);
-    let turn_lo = (state.turn_count % 256) as u8;
-    let turn_hi = (state.turn_count / 256) as u8;
-    if turn_hi > 0 {
-        let w = c64::draw_number(35, STATUS_ROW, turn_hi, c64::COLOR_WHITE);
-        if turn_lo < 100 {
-            c64::draw_char(35 + w, STATUS_ROW, c64::to_screen_code(b'0'), c64::COLOR_WHITE);
-            if turn_lo < 10 {
-                c64::draw_char(36 + w, STATUS_ROW, c64::to_screen_code(b'0'), c64::COLOR_WHITE);
-                c64::draw_number(37 + w, STATUS_ROW, turn_lo, c64::COLOR_WHITE);
-            } else {
-                c64::draw_number(36 + w, STATUS_ROW, turn_lo, c64::COLOR_WHITE);
-            }
-        } else {
-            c64::draw_number(35 + w, STATUS_ROW, turn_lo, c64::COLOR_WHITE);
-        }
-    } else {
-        c64::draw_number(35, STATUS_ROW, turn_lo, c64::COLOR_WHITE);
-    }
+    c64::draw_number_u16(35, STATUS_ROW, state.turn_count, c64::COLOR_WHITE);
 }
 
 // ---------------------------------------------------------------------------
@@ -442,10 +437,32 @@ pub fn render_game_over(state: &MicroGameState, selected: u8) {
     c64::draw_number(bx + 9, by + 3, state.kills, c64::COLOR_WHITE);
 
     c64::draw_text(bx + 2, by + 4, b"Turns: ", c64::COLOR_GREY);
-    let turn_lo = (state.turn_count % 256) as u8;
-    let turn_hi = (state.turn_count / 256) as u8;
-    c64::draw_number(bx + 9, by + 4, turn_hi, c64::COLOR_WHITE);
-    c64::draw_number(bx + 12, by + 4, turn_lo, c64::COLOR_WHITE);
+    c64::draw_number_u16(bx + 9, by + 4, state.turn_count, c64::COLOR_WHITE);
+
+    c64::draw_text(bx + 2, by + 5, b"Seed: ", c64::COLOR_GREY);
+    draw_seed_code(bx + 8, by + 5, state.seed, state.map.width, state.map.height, c64::COLOR_YELLOW);
+
+    // Menu items inside the box
+    let menu_items: [&[u8]; 2] = [b"Play Again", b"Title Screen"];
+    draw_menu(&menu_items, selected, bx + 4, by + 7);
+}
+
+/// Render the victory screen overlay with menu items.
+pub fn render_victory(state: &MicroGameState, selected: u8) {
+    let bx: u8 = 8;
+    let by: u8 = 7;
+    let bw: u8 = 24;
+    let bh: u8 = 11;
+
+    draw_box(bx, by, bw, bh, c64::COLOR_GREEN);
+
+    c64::draw_text(bx + 7, by + 1, b"VICTORY!", c64::COLOR_GREEN);
+
+    c64::draw_text(bx + 2, by + 3, b"Kills: ", c64::COLOR_GREY);
+    c64::draw_number(bx + 9, by + 3, state.kills, c64::COLOR_WHITE);
+
+    c64::draw_text(bx + 2, by + 4, b"Turns: ", c64::COLOR_GREY);
+    c64::draw_number_u16(bx + 9, by + 4, state.turn_count, c64::COLOR_WHITE);
 
     c64::draw_text(bx + 2, by + 5, b"Seed: ", c64::COLOR_GREY);
     draw_seed_code(bx + 8, by + 5, state.seed, state.map.width, state.map.height, c64::COLOR_YELLOW);
@@ -472,7 +489,8 @@ pub fn render_title(selected: u8) {
     // Condensed controls help
     c64::draw_text(4, 17, b"W/UP MOVE  Q/E DIAG", c64::COLOR_DGREY);
     c64::draw_text(4, 18, b"S/DN       Z/C", c64::COLOR_DGREY);
-    c64::draw_text(4, 19, b"SPACE WAIT  JOY2 OK", c64::COLOR_DGREY);
+    c64::draw_text(4, 19, b"SPACE WAIT  RETURN DESCEND", c64::COLOR_DGREY);
+    c64::draw_text(4, 20, b"JOY2 OK", c64::COLOR_DGREY);
 }
 
 /// Render the pause menu overlay on top of the game screen.

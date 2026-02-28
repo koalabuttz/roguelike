@@ -57,6 +57,7 @@ fn key_to_cmd(key: u8) -> Option<GameCommand> {
         KEY_C             => Some(GameCommand::Move(Direction::SouthEast)),
         KEY_Z             => Some(GameCommand::Move(Direction::SouthWest)),
         KEY_SPACE         => Some(GameCommand::Wait),
+        KEY_RETURN        => Some(GameCommand::Descend),
         KEY_RUNSTOP       => Some(GameCommand::Quit),
         _ => None,
     }

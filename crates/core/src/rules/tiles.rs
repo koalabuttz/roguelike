@@ -42,8 +42,9 @@ pub const fn color(kind: TileKind) -> GameColor {
 /// Returns `None` for unknown tile values (rendered as blank space).
 pub const fn from_micro(tile: u8) -> Option<TileKind> {
     match tile {
-        0 => Some(TileKind::Wall),  // TILE_WALL
-        1 => Some(TileKind::Floor), // TILE_FLOOR
+        0 => Some(TileKind::Wall),       // TILE_WALL
+        1 => Some(TileKind::Floor),      // TILE_FLOOR
+        2 => Some(TileKind::StairsDown), // TILE_STAIRS_DOWN
         _ => None,
     }
 }
@@ -54,9 +55,10 @@ mod tests {
 
     #[test]
     fn micro_constants_match_discriminants() {
-        // TILE_WALL = 0, TILE_FLOOR = 1 in tier_micro::map.
+        // TILE_WALL = 0, TILE_FLOOR = 1, TILE_STAIRS_DOWN = 2 in tier_micro::map.
         assert_eq!(from_micro(0), Some(TileKind::Wall));
         assert_eq!(from_micro(1), Some(TileKind::Floor));
+        assert_eq!(from_micro(2), Some(TileKind::StairsDown));
         assert_eq!(from_micro(255), None);
     }
 

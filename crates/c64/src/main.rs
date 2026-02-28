@@ -153,23 +153,30 @@ fn run_pause(state: &MicroGameState) -> AppState {
     }
 }
 
-/// Run the game over menu. Returns the next AppState.
-fn run_game_over(state: &MicroGameState) -> AppState {
+/// Run the end-of-game screen (death or victory). Returns the next AppState.
+fn run_end_screen(state: &MicroGameState) -> AppState {
     let mut selected: u8 = 0;
-    render::render_game_over(state, selected);
+    let render = |s: &MicroGameState, sel: u8| {
+        if s.game_won {
+            render::render_victory(s, sel);
+        } else {
+            render::render_game_over(s, sel);
+        }
+    };
+    render(state, selected);
 
     loop {
         match input::wait_for_menu_input() {
             MenuInput::Up => {
                 if selected > 0 {
                     selected -= 1;
-                    render::render_game_over(state, selected);
+                    render(state, selected);
                 }
             }
             MenuInput::Down => {
                 if selected < 1 {
                     selected += 1;
-                    render::render_game_over(state, selected);
+                    render(state, selected);
                 }
             }
             MenuInput::Select => {
@@ -178,7 +185,7 @@ fn run_game_over(state: &MicroGameState) -> AppState {
                     _ => AppState::Title,    // Title Screen
                 };
             }
-            MenuInput::Back => {} // No back from game over
+            MenuInput::Back => {} // No back from end screen
         }
     }
 }
@@ -207,7 +214,7 @@ pub extern "C" fn main() -> isize {
             AppState::Playing => {
                 let state = unsafe { STATE.assume_init_mut() };
 
-                if state.game_over {
+                if state.is_terminal() {
                     render::render_all(state);
                     app_state = AppState::GameOver;
                     continue;
@@ -223,7 +230,7 @@ pub extern "C" fn main() -> isize {
                 state.step(cmd);
                 render::render_all(state);
 
-                if state.game_over {
+                if state.is_terminal() {
                     app_state = AppState::GameOver;
                 }
             }
@@ -242,7 +249,7 @@ pub extern "C" fn main() -> isize {
             }
             AppState::GameOver => {
                 let state = unsafe { STATE.assume_init_mut() };
-                match run_game_over(state) {
+                match run_end_screen(state) {
                     AppState::Playing => {
                         // Play Again — new random seed, same dimensions
                         let seed = read_cia_seed();

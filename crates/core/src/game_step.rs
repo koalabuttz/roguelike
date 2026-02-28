@@ -19,7 +19,7 @@ use crate::rules::{balance, monster_table};
 use crate::seed_code::{self, SeedParams};
 use crate::tier_micro::fov::MicroFov;
 use crate::tier_micro::game::MicroGameState;
-use crate::tier_micro::map::{TILE_FLOOR, TILE_WALL};
+use crate::tier_micro::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_WALL};
 use crate::tier_micro::types::PLAYER_IDX;
 use crate::types::Stat;
 
@@ -244,7 +244,7 @@ impl GameStep for MicroGameStateAdapter {
             action_taken: result.action_taken,
             new_messages,
             game_over: result.game_over,
-            game_won: false,
+            game_won: result.game_won,
         }
     }
 
@@ -300,9 +300,9 @@ impl GameStep for MicroGameStateAdapter {
             explored_pct,
             seed: self.seed as u64,
             seed_code,
-            depth: 1,
-            target_depth: 1,
-            game_won: false,
+            depth: self.game.depth as i32,
+            target_depth: balance::TARGET_DEPTH as i32,
+            game_won: self.game.game_won,
         }
     }
 
@@ -346,6 +346,7 @@ impl GameStep for MicroGameStateAdapter {
         let terrain = match tile {
             TILE_FLOOR => "Floor".into(),
             TILE_WALL => "Wall".into(),
+            TILE_STAIRS_DOWN => "Stairs down".into(),
             _ => "Unknown".into(),
         };
 
@@ -394,7 +395,7 @@ impl GameStep for MicroGameStateAdapter {
     }
 
     fn is_game_over(&self) -> bool {
-        self.game.game_over
+        self.game.is_terminal()
     }
 
     fn turn_count(&self) -> u32 {
@@ -567,6 +568,7 @@ fn tile_glyph(tile: u8) -> char {
     match tile {
         TILE_FLOOR => '.',
         TILE_WALL => '#',
+        TILE_STAIRS_DOWN => '>',
         _ => ' ',
     }
 }
@@ -825,6 +827,32 @@ mod tests {
             assert!(result.action_taken);
             assert_eq!(game.turn_count(), 1);
         }
+    }
+
+    #[test]
+    fn micro_adapter_observe_depth() {
+        let adapter = MicroGameStateAdapter::new(42, 80, 40);
+        let obs = adapter.observe();
+        assert_eq!(obs.depth, 1);
+        assert_eq!(obs.target_depth, balance::TARGET_DEPTH as i32);
+        assert!(!obs.game_won);
+    }
+
+    #[test]
+    fn micro_adapter_descend_updates_depth() {
+        let mut adapter = MicroGameStateAdapter::new(42, 80, 40);
+        // Teleport player to stairs
+        let last = adapter.game.map.rooms[(adapter.game.map.room_count - 1) as usize];
+        adapter.game.entities.x[0] = last.cx();
+        adapter.game.entities.y[0] = last.cy();
+
+        let result = adapter.step(GameCommand::Descend);
+        assert!(result.action_taken);
+        assert!(!result.game_won);
+
+        let obs = adapter.observe();
+        assert_eq!(obs.depth, 2);
+        assert_eq!(obs.target_depth, balance::TARGET_DEPTH as i32);
     }
 
     #[test]

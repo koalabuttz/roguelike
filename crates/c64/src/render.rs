@@ -8,7 +8,7 @@
 //   Row 22:     Status bar (HP bar, kills, turns)
 //   Rows 23-24: Message log (2 most recent GameEvents, formatted to PETSCII)
 
-use core::ptr::{read_volatile, write_volatile};
+use core::ptr::write_volatile;
 
 use crate::c64;
 use roguelike_core::rules::balance;
@@ -330,13 +330,31 @@ fn scroll_horizontal(dx: i8) {
     }
 }
 
-/// Single-pass diagonal scroll: copies each cell directly to its final
-/// position, avoiding the visible intermediate state of sequential
-/// vertical + horizontal copies.  Iterates in the correct order so
-/// destination cells are written before they'd be read as sources.
+/// Row-wise diagonal scroll using `ptr::copy` per row.
+///
+/// Each row's 39-byte slice is copied in bulk rather than per-cell,
+/// matching the approach used by `scroll_vertical`/`scroll_horizontal`.
+/// Screen rows are copied first (time-critical — stays ahead of the
+/// raster with the vblank head start), then color rows (may lag by
+/// one frame but is fixed by the subsequent `refresh_fov_area` pass).
+///
+/// Within each row, source and destination don't overlap (they are in
+/// different rows, copying 39 out of 40 columns), so `ptr::copy` is
+/// safe.  Row iteration order (top-to-bottom for dy>0, bottom-to-top
+/// for dy<0) ensures each source row is read before being overwritten.
 fn scroll_diagonal(dx: i8, dy: i8) {
+    // Screen first — glyph correctness is most visible
+    copy_diagonal_rows(c64::SCREEN, dx, dy);
+    // Color second — stale colors for one frame are barely noticeable
+    copy_diagonal_rows(c64::COLOR_RAM, dx, dy);
+}
+
+/// Copy 21 rows of 39 bytes diagonally within a 40-column buffer.
+fn copy_diagonal_rows(base: *mut u8, dx: i8, dy: i8) {
     let rows = (VIEW_H - 1) as usize;
     let cols = (VIEW_W - 1) as usize;
+    let src_col_start = if dx > 0 { 1usize } else { 0 };
+    let dst_col_start = if dx > 0 { 0usize } else { 1 };
 
     for row_step in 0..rows {
         let dst_row = if dy > 0 {
@@ -345,29 +363,13 @@ fn scroll_diagonal(dx: i8, dy: i8) {
             VIEW_H as usize - 1 - row_step
         };
         let src_row = (dst_row as isize + dy as isize) as usize;
-        let dst_base = dst_row * 40;
-        let src_base = src_row * 40;
 
-        for col_step in 0..cols {
-            let dst_col = if dx > 0 {
-                col_step
-            } else {
-                VIEW_W as usize - 1 - col_step
-            };
-            let src_col = (dst_col as isize + dx as isize) as usize;
-            let dst_off = dst_base + dst_col;
-            let src_off = src_base + src_col;
-
-            unsafe {
-                write_volatile(
-                    c64::SCREEN.add(dst_off),
-                    read_volatile(c64::SCREEN.add(src_off) as *const u8),
-                );
-                write_volatile(
-                    c64::COLOR_RAM.add(dst_off),
-                    read_volatile(c64::COLOR_RAM.add(src_off) as *const u8),
-                );
-            }
+        unsafe {
+            core::ptr::copy(
+                base.add(src_row * 40 + src_col_start),
+                base.add(dst_row * 40 + dst_col_start),
+                cols,
+            );
         }
     }
 }

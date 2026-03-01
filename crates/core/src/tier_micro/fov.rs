@@ -1,16 +1,51 @@
-//! Field of view — Bresenham raycasting for the micro tier.
+//! Field of view — iterative shadowcasting for the micro tier.
 //!
-//! Casts rays from the player to the perimeter of a square (Chebyshev radius),
-//! using Bresenham's line algorithm (integer-only). Each ray marks tiles
-//! visible until it hits a wall.
+//! Uses octant-based shadowcasting with integer rational slopes and an
+//! explicit stack (no recursion, no alloc). Visits every tile in the FOV
+//! area exactly once per octant, eliminating the coverage gaps that
+//! Bresenham raycasting had between adjacent rays.
 //!
-//! The perimeter is computed at runtime from `FOV_RADIUS`, so any radius works.
+//! The `can_see` free function still uses Bresenham for fast point-to-point
+//! line-of-sight checks (O(R) vs O(R²) for full shadowcasting).
 
 use super::map::{MicroMap, TILE_FLOOR};
 use super::types::*;
 use crate::rules::balance;
 
 pub const FOV_RADIUS: u8 = balance::MICRO_FOV_RADIUS;
+
+/// Maximum iterative stack depth for shadowcasting sub-wedges.
+const MAX_STACK: usize = 16;
+
+/// Octant transform multipliers for shadowcasting.
+/// Maps abstract (dx, dy) to map (x, y) offsets for each of 8 octants.
+const OCT_XX: [i8; 8] = [1, 0, 0, -1, -1, 0, 0, 1];
+const OCT_XY: [i8; 8] = [0, 1, -1, 0, 0, -1, 1, 0];
+const OCT_YX: [i8; 8] = [0, 1, 1, 0, 0, -1, -1, 0];
+const OCT_YY: [i8; 8] = [1, 0, 0, 1, -1, 0, 0, -1];
+
+/// One pending scan wedge for iterative shadowcasting.
+/// Slopes are rational numbers: slope = num / den (den always > 0).
+#[derive(Copy, Clone)]
+struct ScanJob {
+    row: u8,
+    start_num: i8,
+    start_den: i8,
+    end_num: i8,
+    end_den: i8,
+}
+
+/// Returns true if slope a/a_den < b/b_den (both denominators positive).
+#[inline(always)]
+fn slope_lt(a_num: i8, a_den: i8, b_num: i8, b_den: i8) -> bool {
+    (a_num as i16) * (b_den as i16) < (b_num as i16) * (a_den as i16)
+}
+
+/// Returns true if slope a/a_den > b/b_den (both denominators positive).
+#[inline(always)]
+fn slope_gt(a_num: i8, a_den: i8, b_num: i8, b_den: i8) -> bool {
+    (a_num as i16) * (b_den as i16) > (b_num as i16) * (a_den as i16)
+}
 
 pub struct MicroFov {
     visible: [u8; MAX_BITFIELD_SIZE],
@@ -91,67 +126,112 @@ impl MicroFov {
         }
     }
 
-    /// Cast a single ray, marking tiles visible until hitting a wall or leaving bounds.
-    /// Uses supercover stepping: on diagonal moves, also marks the two orthogonal
-    /// neighbors to prevent coverage gaps between adjacent rays.
-    fn cast_ray(&mut self, ox: u8, oy: u8, tx: u8, ty: u8, map: &MicroMap) {
-        let mut x = ox as i8;
-        let mut y = oy as i8;
-        let target_x = tx as i8;
-        let target_y = ty as i8;
-
-        let dx = if target_x > x {
-            target_x - x
-        } else {
-            x - target_x
+    /// Scan one octant using iterative shadowcasting with integer slopes.
+    ///
+    /// Scans row by row outward from the origin, tracking start/end slope
+    /// boundaries. When a wall is found, the sub-wedge beyond it is pushed
+    /// to an explicit stack for later processing.
+    #[allow(clippy::too_many_arguments)]
+    fn scan_octant(&mut self, ox: u8, oy: u8, map: &MicroMap, xx: i8, xy: i8, yx: i8, yy: i8) {
+        let mut stack = [ScanJob {
+            row: 0,
+            start_num: 0,
+            start_den: 1,
+            end_num: 0,
+            end_den: 1,
+        }; MAX_STACK];
+        let mut sp: usize = 1;
+        stack[0] = ScanJob {
+            row: 1,
+            start_num: 1,
+            start_den: 1,
+            end_num: 0,
+            end_den: 1,
         };
-        let dy = if target_y > y {
-            target_y - y
-        } else {
-            y - target_y
-        };
-        let sx: i8 = if target_x > x { 1 } else { -1 };
-        let sy: i8 = if target_y > y { 1 } else { -1 };
-        let mut err = dx - dy;
 
-        loop {
-            let ux = x as u8;
-            let uy = y as u8;
+        let w = self.width as i8;
+        let h = self.height as i8;
 
-            if !map.in_bounds(ux, uy) {
-                break;
+        while sp > 0 {
+            sp -= 1;
+            let job = stack[sp];
+            let mut start_num = job.start_num;
+            let mut start_den = job.start_den;
+            let end_num = job.end_num;
+            let end_den = job.end_den;
+
+            if slope_lt(start_num, start_den, end_num, end_den) {
+                continue;
             }
 
-            self.mark_visible(ux, uy);
+            let mut next_start_num = start_num;
+            let mut next_start_den = start_den;
 
-            if map.tile_at(ux, uy) < TILE_FLOOR {
-                break;
-            }
+            'row_loop: for j in job.row..=FOV_RADIUS {
+                let dy = -(j as i8);
+                let mut blocked = false;
 
-            if x == target_x && y == target_y {
-                break;
-            }
+                // Scan from dx=-j to dx=0 (matching the standard tier's
+                // top-to-bottom order for correct slope boundary tracking).
+                let mut dx = -(j as i8);
+                while dx <= 0 {
+                    // Tile slope boundaries (positive-denominator convention).
+                    let l_num: i8 = 1 - 2 * dx;
+                    let l_den: i8 = 2 * (j as i8) - 1;
+                    let r_num: i8 = -1 - 2 * dx;
+                    let r_den: i8 = 1 + 2 * (j as i8);
 
-            let e2 = err * 2;
+                    if slope_lt(start_num, start_den, r_num, r_den) {
+                        dx += 1;
+                        continue;
+                    }
+                    if slope_gt(end_num, end_den, l_num, l_den) {
+                        break;
+                    }
 
-            // Supercover: on diagonal steps, mark both orthogonal neighbors
-            // so adjacent rays don't leave gap tiles between them.
-            if e2 > -dy && e2 < dx {
-                if map.in_bounds((x + sx) as u8, uy) {
-                    self.mark_visible((x + sx) as u8, uy);
+                    let map_x = (ox as i8) + dx * xx + dy * xy;
+                    let map_y = (oy as i8) + dx * yx + dy * yy;
+
+                    let in_bounds = map_x >= 0 && map_x < w && map_y >= 0 && map_y < h;
+
+                    if in_bounds {
+                        self.mark_visible(map_x as u8, map_y as u8);
+                    }
+
+                    let tile_blocks =
+                        !in_bounds || map.tile_at(map_x as u8, map_y as u8) < TILE_FLOOR;
+
+                    if blocked {
+                        if tile_blocks {
+                            next_start_num = r_num;
+                            next_start_den = r_den;
+                        } else {
+                            blocked = false;
+                            start_num = next_start_num;
+                            start_den = next_start_den;
+                        }
+                    } else if tile_blocks && j < FOV_RADIUS {
+                        blocked = true;
+                        if sp < MAX_STACK {
+                            stack[sp] = ScanJob {
+                                row: j + 1,
+                                start_num,
+                                start_den,
+                                end_num: l_num,
+                                end_den: l_den,
+                            };
+                            sp += 1;
+                        }
+                        next_start_num = r_num;
+                        next_start_den = r_den;
+                    }
+
+                    dx += 1;
                 }
-                if map.in_bounds(ux, (y + sy) as u8) {
-                    self.mark_visible(ux, (y + sy) as u8);
-                }
-            }
 
-            if e2 > -dy {
-                err -= dy;
-                x += sx;
-            }
-            if e2 < dx {
-                err += dx;
-                y += sy;
+                if blocked {
+                    break 'row_loop;
+                }
             }
         }
     }
@@ -161,25 +241,16 @@ impl MicroFov {
         self.clear_visible();
         self.mark_visible(ox, oy);
 
-        let r = FOV_RADIUS as i8;
-        for dy in -r..=r {
-            for dx in -r..=r {
-                // Chebyshev distance == radius (perimeter only).
-                // Manual abs + max avoids unsigned_abs()/max() which may
-                // miscompile on MOS for negative values.
-                let adx: u8 = if dx >= 0 { dx as u8 } else { (0i8 - dx) as u8 };
-                let ady: u8 = if dy >= 0 { dy as u8 } else { (0i8 - dy) as u8 };
-                let cheb = if adx > ady { adx } else { ady };
-                if cheb != FOV_RADIUS {
-                    continue;
-                }
-                let tx = (ox as i8) + dx;
-                let ty = (oy as i8) + dy;
-                if tx < 0 || ty < 0 || tx >= self.width as i8 || ty >= self.height as i8 {
-                    continue;
-                }
-                self.cast_ray(ox, oy, tx as u8, ty as u8, map);
-            }
+        for octant in 0..8usize {
+            self.scan_octant(
+                ox,
+                oy,
+                map,
+                OCT_XX[octant],
+                OCT_XY[octant],
+                OCT_YX[octant],
+                OCT_YY[octant],
+            );
         }
     }
 }
@@ -333,17 +404,90 @@ mod tests {
     }
 
     #[test]
-    fn computed_perimeter_count() {
-        // For radius R, Chebyshev perimeter has 8*R points.
-        let r = FOV_RADIUS as i8;
-        let mut count = 0u32;
-        for dy in -r..=r {
-            for dx in -r..=r {
-                if dx.unsigned_abs().max(dy.unsigned_abs()) == FOV_RADIUS {
-                    count += 1;
+    fn open_room_full_coverage() {
+        // Every floor tile within FOV_RADIUS must be visible in an open room.
+        // This is the bug the Bresenham algorithm had.
+        let mut map = MicroMap::new_default();
+        let cx: u8 = 20;
+        let cy: u8 = 20;
+        let r = FOV_RADIUS;
+        for y in (cy - r - 2)..=(cy + r + 2) {
+            for x in (cx - r - 2)..=(cx + r + 2) {
+                if map.in_bounds(x, y) {
+                    map.set_tile(x, y, TILE_FLOOR);
                 }
             }
         }
-        assert_eq!(count, 8 * FOV_RADIUS as u32);
+
+        let mut fov = MicroFov::new(map.width, map.height);
+        fov.compute_fov(cx, cy, &map);
+
+        for dy in -(r as i8)..=(r as i8) {
+            for dx in -(r as i8)..=(r as i8) {
+                let dist = (dx.unsigned_abs()).max(dy.unsigned_abs());
+                if dist > r {
+                    continue;
+                }
+                let x = (cx as i8 + dx) as u8;
+                let y = (cy as i8 + dy) as u8;
+                assert!(
+                    fov.is_visible(x, y),
+                    "tile ({},{}) at Chebyshev distance {} should be visible in open room",
+                    x,
+                    y,
+                    dist
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wall_blocks_behind() {
+        let mut map = MicroMap::new_default();
+        let cx: u8 = 20;
+        let cy: u8 = 20;
+        for y in 15..26 {
+            for x in 15..26 {
+                map.set_tile(x, y, TILE_FLOOR);
+            }
+        }
+        // Wall 3 tiles east of origin
+        map.set_tile(23, 20, super::super::map::TILE_WALL);
+
+        let mut fov = MicroFov::new(map.width, map.height);
+        fov.compute_fov(cx, cy, &map);
+
+        assert!(fov.is_visible(23, 20), "wall should be visible");
+        assert!(
+            !fov.is_visible(24, 20),
+            "tile behind wall should not be visible"
+        );
+    }
+
+    #[test]
+    fn corridor_visibility() {
+        let mut map = MicroMap::new_default();
+        // Horizontal corridor at y=20, from x=10 to x=30
+        for x in 10..31 {
+            map.set_tile(x, 20, TILE_FLOOR);
+        }
+
+        let mut fov = MicroFov::new(map.width, map.height);
+        fov.compute_fov(20, 20, &map);
+
+        assert!(fov.is_visible(20, 20));
+        // Along corridor within radius
+        assert!(fov.is_visible(20 + FOV_RADIUS, 20));
+        assert!(fov.is_visible(20 - FOV_RADIUS, 20));
+        // Wall adjacent to corridor should be visible
+        assert!(
+            fov.is_visible(20, 19),
+            "wall adjacent to corridor should be visible"
+        );
+        // Behind corridor wall should not be visible
+        assert!(
+            !fov.is_visible(20, 18),
+            "tile behind corridor wall should not be visible"
+        );
     }
 }

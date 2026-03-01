@@ -8,6 +8,8 @@
 //   Row 22:     Status bar (HP bar, kills, turns)
 //   Rows 23-24: Message log (2 most recent GameEvents, formatted to PETSCII)
 
+use core::ptr::write_volatile;
+
 use crate::c64;
 use roguelike_core::rules::balance;
 use roguelike_core::rules::color::GameColor;
@@ -15,8 +17,9 @@ use roguelike_core::rules::items;
 use roguelike_core::rules::message::{GameEvent, SoundDistance};
 use roguelike_core::rules::monster_table;
 use roguelike_core::tier_micro::game::MicroGameState;
+use roguelike_core::tier_micro::item_store::MAX_ITEMS;
 use roguelike_core::tier_micro::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_STRUCTURAL, TILE_WALL};
-use roguelike_core::tier_micro::types::{NO_ENTITY, PLAYER_IDX};
+use roguelike_core::tier_micro::types::{MAX_BITFIELD_SIZE, MAX_ENTITIES, NO_ENTITY, PLAYER_IDX};
 
 // Screen codes for map tiles
 const SC_SPACE: u8 = 0x20;
@@ -94,14 +97,155 @@ pub fn render_all(state: &MicroGameState) {
     render_messages(state);
 }
 
-/// Render the dungeon map tiles within the current viewport.
-fn render_map(state: &MicroGameState, vx: u8, vy: u8) {
-    for sy in 0..VIEW_H {
-        for sx in 0..VIEW_W {
-            let (sc, color) = tile_appearance(state, sx + vx, sy + vy);
-            c64::draw_char(sx, sy, sc, color);
-        }
+/// Extract a 4-bit packed tile from the tile array using a linear index.
+#[inline(always)]
+fn tile_at_index(tiles: &[u8], fi: usize) -> u8 {
+    let byte = tiles[fi >> 1];
+    if fi & 1 == 0 {
+        byte & 0x0F
+    } else {
+        byte >> 4
     }
+}
+
+/// Render the dungeon map tiles within the current viewport.
+///
+/// Uses row-major index pre-computation to avoid per-cell multiplies.
+/// Two counters advance through the loop: `fi` (FOV/map linear index,
+/// stride = map_width) and `si` (screen memory offset, stride = 40).
+/// Both share the same per-column increment of 1. This eliminates ~4
+/// multiplies per cell vs the naive `tile_appearance` + `draw_char` path.
+fn render_map(state: &MicroGameState, vx: u8, vy: u8) {
+    let vis = state.fov.visible_bytes();
+    let exp = state.fov.explored_bytes();
+    let tiles = &state.map.tiles;
+    let map_w = state.fov.width as usize;
+
+    let mut fov_row = (vy as usize) * map_w + (vx as usize);
+    let mut scr_row: usize = 0;
+
+    for _sy in 0..VIEW_H as usize {
+        let mut fi = fov_row;
+        let mut si = scr_row;
+
+        for _sx in 0..VIEW_W as usize {
+            let byte_idx = fi >> 3;
+            let bit = 1u8 << (fi & 7);
+
+            let (sc, color) = if vis[byte_idx] & bit != 0 {
+                match tile_at_index(tiles, fi) {
+                    TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
+                    TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
+                    TILE_STRUCTURAL => (SC_WALL, c64::COLOR_LGREY),
+                    _ => (SC_SPACE, c64::COLOR_BLACK),
+                }
+            } else if exp[byte_idx] & bit != 0 {
+                match tile_at_index(tiles, fi) {
+                    TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
+                    TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
+                    TILE_STRUCTURAL => (SC_WALL, c64::COLOR_BLUE),
+                    _ => (SC_SPACE, c64::COLOR_BLACK),
+                }
+            } else {
+                (SC_SPACE, c64::COLOR_BLACK)
+            };
+
+            unsafe {
+                write_volatile(c64::SCREEN.add(si), sc);
+                write_volatile(c64::COLOR_RAM.add(si), color);
+            }
+
+            fi += 1;
+            si += 1;
+        }
+
+        fov_row += map_w;
+        scr_row += 40;
+    }
+}
+
+/// Sparse re-render for viewport scrolls: skip cells where both the old and
+/// new world tiles are unexplored (both render as black, so the write is
+/// redundant). Uses the same row-major dual-counter pattern as `render_map()`
+/// with an additional `old_fi` index tracking the previous viewport position.
+///
+/// The explored bitfield is monotonically increasing (tiles never become
+/// unexplored), so checking the current explored state is sufficient to know
+/// that both old and new tiles are unexplored.
+fn render_map_sparse(
+    state: &MicroGameState,
+    vx: u8,
+    vy: u8,
+    old_vx: u8,
+    old_vy: u8,
+) {
+    let vis = state.fov.visible_bytes();
+    let exp = state.fov.explored_bytes();
+    let tiles = &state.map.tiles;
+    let map_w = state.fov.width as usize;
+
+    let mut fov_row = (vy as usize) * map_w + (vx as usize);
+    let mut old_row = (old_vy as usize) * map_w + (old_vx as usize);
+    let mut scr_row: usize = 0;
+    let row_skip = map_w - (VIEW_W as usize);
+
+    for _sy in 0..VIEW_H as usize {
+        let mut fi = fov_row;
+        let mut old_fi = old_row;
+        let mut si = scr_row;
+
+        for _sx in 0..VIEW_W as usize {
+            // If both old and new world tiles are unexplored, the screen cell
+            // was black and stays black — skip the write.
+            let new_explored = exp[fi >> 3] & (1u8 << (fi & 7)) != 0;
+            let old_explored = exp[old_fi >> 3] & (1u8 << (old_fi & 7)) != 0;
+
+            if !new_explored && !old_explored {
+                fi += 1;
+                old_fi += 1;
+                si += 1;
+                continue;
+            }
+
+            let byte_idx = fi >> 3;
+            let bit = 1u8 << (fi & 7);
+
+            let (sc, color) = if vis[byte_idx] & bit != 0 {
+                match tile_at_index(tiles, fi) {
+                    TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
+                    TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
+                    TILE_STRUCTURAL => (SC_WALL, c64::COLOR_LGREY),
+                    _ => (SC_SPACE, c64::COLOR_BLACK),
+                }
+            } else if new_explored {
+                match tile_at_index(tiles, fi) {
+                    TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
+                    TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
+                    TILE_STRUCTURAL => (SC_WALL, c64::COLOR_BLUE),
+                    _ => (SC_SPACE, c64::COLOR_BLACK),
+                }
+            } else {
+                (SC_SPACE, c64::COLOR_BLACK)
+            };
+
+            unsafe {
+                write_volatile(c64::SCREEN.add(si), sc);
+                write_volatile(c64::COLOR_RAM.add(si), color);
+            }
+
+            fi += 1;
+            old_fi += 1;
+            si += 1;
+        }
+
+        fov_row += map_w;
+        old_row += map_w;
+        scr_row += 40;
+    }
+
+    // Suppress unused-variable warning — row_skip is zero when VIEW_W == 40
+    // but kept for clarity; the compiler optimizes it away.
+    let _ = row_skip;
 }
 
 /// Render ground items that are visible and within the viewport.
@@ -367,6 +511,269 @@ fn render_messages(state: &MicroGameState) {
             c64::fill_row(MSG_ROW + 1, SC_SPACE, c64::COLOR_BLACK);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Differential rendering — snapshot + dirty-cell diffing
+// ---------------------------------------------------------------------------
+
+/// Viewport dirty bitfield size: ceil(40 * 22 / 8) = 110 bytes.
+const DIRTY_SIZE: usize = ((VIEW_W as usize) * (VIEW_H as usize) + 7) / 8;
+
+/// Packed alive-flag bitfield size for entities.
+const ENTITY_ALIVE_BYTES: usize = (MAX_ENTITIES + 7) / 8;
+
+/// Packed alive-flag bitfield size for items.
+const ITEM_ALIVE_BYTES: usize = (MAX_ITEMS + 7) / 8;
+
+/// Previous-frame snapshot for differential rendering.
+///
+/// Stored as `static mut` in main.rs (~810 bytes in BSS). Captures the
+/// rendering-relevant state after each frame so the next frame can diff
+/// against it and only redraw changed cells.
+pub struct DiffState {
+    pub viewport: (u8, u8),
+    pub depth: u8,
+    fov_visible: [u8; MAX_BITFIELD_SIZE],
+    entity_x: [u8; MAX_ENTITIES],
+    entity_y: [u8; MAX_ENTITIES],
+    entity_alive: [u8; ENTITY_ALIVE_BYTES],
+    entity_count: u8,
+    item_x: [u8; MAX_ITEMS],
+    item_y: [u8; MAX_ITEMS],
+    item_alive: [u8; ITEM_ALIVE_BYTES],
+    item_count: u8,
+}
+
+impl DiffState {
+    /// Create a zeroed DiffState. Call `snapshot()` before first use.
+    pub const fn new() -> Self {
+        Self {
+            viewport: (0, 0),
+            depth: 0,
+            fov_visible: [0; MAX_BITFIELD_SIZE],
+            entity_x: [0; MAX_ENTITIES],
+            entity_y: [0; MAX_ENTITIES],
+            entity_alive: [0; ENTITY_ALIVE_BYTES],
+            entity_count: 0,
+            item_x: [0; MAX_ITEMS],
+            item_y: [0; MAX_ITEMS],
+            item_alive: [0; ITEM_ALIVE_BYTES],
+            item_count: 0,
+        }
+    }
+
+    /// Save the current rendering-relevant state for next-frame comparison.
+    pub fn snapshot(&mut self, state: &MicroGameState) {
+        self.viewport = viewport_pos(state);
+        self.depth = state.depth;
+
+        // Copy FOV visible bitfield
+        let vis = state.fov.visible_bytes();
+        self.fov_visible.copy_from_slice(vis);
+
+        // Copy entity positions and pack alive flags
+        let ec = state.entities.count as usize;
+        self.entity_count = state.entities.count;
+        self.entity_x[..ec].copy_from_slice(&state.entities.x[..ec]);
+        self.entity_y[..ec].copy_from_slice(&state.entities.y[..ec]);
+        for b in self.entity_alive.iter_mut() {
+            *b = 0;
+        }
+        for i in 0..ec {
+            if state.entities.alive[i] {
+                self.entity_alive[i >> 3] |= 1u8 << (i & 7);
+            }
+        }
+
+        // Copy item positions and pack alive flags
+        let ic = state.items.count as usize;
+        self.item_count = state.items.count;
+        self.item_x[..ic].copy_from_slice(&state.items.x[..ic]);
+        self.item_y[..ic].copy_from_slice(&state.items.y[..ic]);
+        for b in self.item_alive.iter_mut() {
+            *b = 0;
+        }
+        for i in 0..ic {
+            if state.items.alive[i] {
+                self.item_alive[i >> 3] |= 1u8 << (i & 7);
+            }
+        }
+    }
+
+    fn was_entity_alive(&self, i: usize) -> bool {
+        self.entity_alive[i >> 3] & (1u8 << (i & 7)) != 0
+    }
+
+    fn was_item_alive(&self, i: usize) -> bool {
+        self.item_alive[i >> 3] & (1u8 << (i & 7)) != 0
+    }
+}
+
+/// Set a bit in the viewport dirty bitfield.
+#[inline(always)]
+fn mark_dirty(dirty: &mut [u8; DIRTY_SIZE], sx: u8, sy: u8) {
+    let idx = (sy as usize) * (VIEW_W as usize) + (sx as usize);
+    dirty[idx >> 3] |= 1u8 << (idx & 7);
+}
+
+/// Mark a world-coordinate position dirty if it falls within the viewport.
+#[inline(always)]
+fn mark_dirty_world(dirty: &mut [u8; DIRTY_SIZE], vx: u8, vy: u8, wx: u8, wy: u8) {
+    if wx >= vx && wx < vx + VIEW_W && wy >= vy && wy < vy + VIEW_H {
+        mark_dirty(dirty, wx - vx, wy - vy);
+    }
+}
+
+/// Differential render: only redraw cells that changed since the last frame.
+///
+/// Falls back to `render_all()` on depth change (entire level replaced).
+/// On viewport scroll, uses `render_map_sparse()` to skip cells where both
+/// old and new world tiles are unexplored (~44% of viewport on average).
+/// Otherwise, computes a dirty bitfield from FOV/entity/item changes and
+/// redraws only those cells via `restore_tile()`.
+pub fn render_diff(state: &MicroGameState, prev: &DiffState) {
+    let (vx, vy) = viewport_pos(state);
+
+    // Depth changed → full redraw (entire level changed)
+    if state.depth != prev.depth {
+        render_all(state);
+        return;
+    }
+
+    // Viewport scrolled → sparse re-render (skip unexplored cells)
+    if (vx, vy) != prev.viewport {
+        let (old_vx, old_vy) = prev.viewport;
+        render_map_sparse(state, vx, vy, old_vx, old_vy);
+        render_items(state, vx, vy);
+        render_entities(state, vx, vy);
+        render_status_bar(state);
+        render_messages(state);
+        return;
+    }
+
+    let mut dirty = [0u8; DIRTY_SIZE];
+
+    // --- 1. FOV visibility changes ---
+    // XOR old and new visible bitfields; differing bits indicate tiles
+    // that gained or lost visibility and need redrawing.
+    let vis = state.fov.visible_bytes();
+    let map_w = state.fov.width as usize;
+    let fov_bytes_used = (map_w * (state.fov.height as usize) + 7) / 8;
+    for byte_idx in 0..fov_bytes_used {
+        let diff = prev.fov_visible[byte_idx] ^ vis[byte_idx];
+        if diff == 0 {
+            continue;
+        }
+        for bit in 0..8u8 {
+            if diff & (1u8 << bit) == 0 {
+                continue;
+            }
+            let tile_idx = byte_idx * 8 + (bit as usize);
+            let wy = (tile_idx / map_w) as u8;
+            let wx = (tile_idx % map_w) as u8;
+            mark_dirty_world(&mut dirty, vx, vy, wx, wy);
+        }
+    }
+
+    // --- 2. Entity position changes ---
+    // Mark old positions of entities that moved, died, or were removed.
+    let prev_ec = prev.entity_count as usize;
+    for i in 0..prev_ec {
+        if !prev.was_entity_alive(i) {
+            continue;
+        }
+        let ox = prev.entity_x[i];
+        let oy = prev.entity_y[i];
+        let changed = if i < state.entities.count as usize {
+            !state.entities.alive[i]
+                || state.entities.x[i] != ox
+                || state.entities.y[i] != oy
+        } else {
+            true
+        };
+        if changed {
+            mark_dirty_world(&mut dirty, vx, vy, ox, oy);
+        }
+    }
+    // Mark new positions of entities that moved or were spawned.
+    for i in 0..state.entities.count as usize {
+        if !state.entities.alive[i] {
+            continue;
+        }
+        let ex = state.entities.x[i];
+        let ey = state.entities.y[i];
+        let changed = if i < prev_ec {
+            !prev.was_entity_alive(i)
+                || prev.entity_x[i] != ex
+                || prev.entity_y[i] != ey
+        } else {
+            true
+        };
+        if changed {
+            mark_dirty_world(&mut dirty, vx, vy, ex, ey);
+        }
+    }
+
+    // --- 3. Item changes ---
+    let prev_ic = prev.item_count as usize;
+    for i in 0..prev_ic {
+        if !prev.was_item_alive(i) {
+            continue;
+        }
+        let ox = prev.item_x[i];
+        let oy = prev.item_y[i];
+        let changed = if i < state.items.count as usize {
+            !state.items.alive[i]
+                || state.items.x[i] != ox
+                || state.items.y[i] != oy
+        } else {
+            true
+        };
+        if changed {
+            mark_dirty_world(&mut dirty, vx, vy, ox, oy);
+        }
+    }
+    for i in 0..state.items.count as usize {
+        if !state.items.alive[i] {
+            continue;
+        }
+        let ix = state.items.x[i];
+        let iy = state.items.y[i];
+        let changed = if i < prev_ic {
+            !prev.was_item_alive(i)
+                || prev.item_x[i] != ix
+                || prev.item_y[i] != iy
+        } else {
+            true
+        };
+        if changed {
+            mark_dirty_world(&mut dirty, vx, vy, ix, iy);
+        }
+    }
+
+    // --- 4. Render dirty cells ---
+    for byte_idx in 0..DIRTY_SIZE {
+        if dirty[byte_idx] == 0 {
+            continue;
+        }
+        for bit in 0..8u8 {
+            if dirty[byte_idx] & (1u8 << bit) == 0 {
+                continue;
+            }
+            let cell_idx = byte_idx * 8 + (bit as usize);
+            if cell_idx >= (VIEW_W as usize) * (VIEW_H as usize) {
+                break;
+            }
+            let sx = (cell_idx % (VIEW_W as usize)) as u8;
+            let sy = (cell_idx / (VIEW_W as usize)) as u8;
+            restore_tile(state, vx, vy, sx + vx, sy + vy);
+        }
+    }
+
+    // --- 5. Status bar and messages (always, cheap) ---
+    render_status_bar(state);
+    render_messages(state);
 }
 
 // ---------------------------------------------------------------------------

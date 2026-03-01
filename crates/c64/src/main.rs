@@ -33,6 +33,9 @@ fn panic(_info: &PanicInfo) -> ! {
 /// (256 bytes) but fine in BSS. MaybeUninit avoids requiring Default.
 static mut STATE: MaybeUninit<MicroGameState> = MaybeUninit::uninit();
 
+/// Previous-frame snapshot for differential rendering (~810 bytes in BSS).
+static mut DIFF: render::DiffState = render::DiffState::new();
+
 /// Application states for the main loop.
 enum AppState {
     Title,
@@ -278,6 +281,8 @@ pub extern "C" fn main() -> isize {
                 current_height = h;
                 let state = start_game(seed, w, h);
                 render::render_all(state);
+                let diff = unsafe { &mut DIFF };
+                diff.snapshot(state);
                 app_state = AppState::Playing;
             }
             AppState::Playing => {
@@ -301,8 +306,21 @@ pub extern "C" fn main() -> isize {
                     continue;
                 }
 
-                state.step(cmd);
-                render::render_all(state);
+                let old_depth = state.depth;
+                let result = state.step(cmd);
+
+                if !result.action_taken {
+                    continue; // nothing changed, skip rendering
+                }
+
+                let diff = unsafe { &mut DIFF };
+                if state.depth != old_depth {
+                    // Descent — full redraw (entire level changed)
+                    render::render_all(state);
+                } else {
+                    render::render_diff(state, diff);
+                }
+                diff.snapshot(state);
 
                 if state.is_terminal() {
                     app_state = AppState::GameOver;
@@ -312,6 +330,8 @@ pub extern "C" fn main() -> isize {
                 let state = unsafe { STATE.assume_init_mut() };
                 run_look_mode(state);
                 render::render_all(state);
+                let diff = unsafe { &mut DIFF };
+                diff.snapshot(state);
                 app_state = AppState::Playing;
             }
             AppState::Paused => {
@@ -319,6 +339,8 @@ pub extern "C" fn main() -> isize {
                 match run_pause(state) {
                     AppState::Playing => {
                         render::render_all(state);
+                        let diff = unsafe { &mut DIFF };
+                        diff.snapshot(state);
                         app_state = AppState::Playing;
                     }
                     AppState::Title => {
@@ -335,6 +357,8 @@ pub extern "C" fn main() -> isize {
                         let seed = read_cia_seed();
                         let state = start_game(seed, current_width, current_height);
                         render::render_all(state);
+                        let diff = unsafe { &mut DIFF };
+                        diff.snapshot(state);
                         app_state = AppState::Playing;
                     }
                     AppState::Title => {

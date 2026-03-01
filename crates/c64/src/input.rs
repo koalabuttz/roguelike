@@ -101,23 +101,22 @@ fn joy_bits() -> u8 {
 }
 
 /// Decode 5-bit joystick state into (direction, fire).
+/// Uses direct bit-pattern match instead of tuple destructuring to avoid
+/// MOS compiler codegen issues with multi-field tuple pattern matching.
 fn decode_joy(bits: u8) -> (Option<Direction>, bool) {
-    let up    = bits & 0x01 != 0;
-    let down  = bits & 0x02 != 0;
-    let left  = bits & 0x04 != 0;
-    let right = bits & 0x08 != 0;
-    let fire  = bits & 0x10 != 0;
+    let fire = bits & 0x10 != 0;
 
-    let dir = match (up, down, left, right) {
-        (true,  false, false, false) => Some(Direction::North),
-        (false, true,  false, false) => Some(Direction::South),
-        (false, false, false, true)  => Some(Direction::East),
-        (false, false, true,  false) => Some(Direction::West),
-        (true,  false, false, true)  => Some(Direction::NorthEast),
-        (true,  false, true,  false) => Some(Direction::NorthWest),
-        (false, true,  false, true)  => Some(Direction::SouthEast),
-        (false, true,  true,  false) => Some(Direction::SouthWest),
-        _ => None,
+    // Match on direction bits (0-3) directly: bit0=up, bit1=down, bit2=left, bit3=right
+    let dir = match bits & 0x0F {
+        0x01 => Some(Direction::North),
+        0x02 => Some(Direction::South),
+        0x08 => Some(Direction::East),
+        0x04 => Some(Direction::West),
+        0x09 => Some(Direction::NorthEast),
+        0x05 => Some(Direction::NorthWest),
+        0x0A => Some(Direction::SouthEast),
+        0x06 => Some(Direction::SouthWest),
+        _    => None,
     };
 
     (dir, fire)

@@ -34,6 +34,18 @@ impl MicroFov {
         Self::new(DEFAULT_MAP_WIDTH, DEFAULT_MAP_HEIGHT)
     }
 
+    /// Raw visible bitfield bytes (read-only). Used for frame-to-frame
+    /// diffing and direct row-major rendering on constrained platforms.
+    pub fn visible_bytes(&self) -> &[u8; MAX_BITFIELD_SIZE] {
+        &self.visible
+    }
+
+    /// Raw explored bitfield bytes (read-only). Used for direct row-major
+    /// rendering on constrained platforms.
+    pub fn explored_bytes(&self) -> &[u8; MAX_BITFIELD_SIZE] {
+        &self.explored
+    }
+
     fn bit_idx(&self, x: u8, y: u8) -> (usize, u8) {
         let i = (y as usize) * (self.width as usize) + (x as usize);
         (i / 8, 1u8 << (i % 8))
@@ -80,6 +92,8 @@ impl MicroFov {
     }
 
     /// Cast a single ray, marking tiles visible until hitting a wall or leaving bounds.
+    /// Uses supercover stepping: on diagonal moves, also marks the two orthogonal
+    /// neighbors to prevent coverage gaps between adjacent rays.
     fn cast_ray(&mut self, ox: u8, oy: u8, tx: u8, ty: u8, map: &MicroMap) {
         let mut x = ox as i8;
         let mut y = oy as i8;
@@ -119,6 +133,18 @@ impl MicroFov {
             }
 
             let e2 = err * 2;
+
+            // Supercover: on diagonal steps, mark both orthogonal neighbors
+            // so adjacent rays don't leave gap tiles between them.
+            if e2 > -dy && e2 < dx {
+                if map.in_bounds((x + sx) as u8, uy) {
+                    self.mark_visible((x + sx) as u8, uy);
+                }
+                if map.in_bounds(ux, (y + sy) as u8) {
+                    self.mark_visible(ux, (y + sy) as u8);
+                }
+            }
+
             if e2 > -dy {
                 err -= dy;
                 x += sx;
@@ -138,12 +164,17 @@ impl MicroFov {
         let r = FOV_RADIUS as i8;
         for dy in -r..=r {
             for dx in -r..=r {
-                // Only cast to perimeter points (Chebyshev distance == radius).
-                if dx.unsigned_abs().max(dy.unsigned_abs()) != FOV_RADIUS {
+                // Chebyshev distance == radius (perimeter only).
+                // Manual abs + max avoids unsigned_abs()/max() which may
+                // miscompile on MOS for negative values.
+                let adx: u8 = if dx >= 0 { dx as u8 } else { (0i8 - dx) as u8 };
+                let ady: u8 = if dy >= 0 { dy as u8 } else { (0i8 - dy) as u8 };
+                let cheb = if adx > ady { adx } else { ady };
+                if cheb != FOV_RADIUS {
                     continue;
                 }
-                let tx = (ox as i8).wrapping_add(dx);
-                let ty = (oy as i8).wrapping_add(dy);
+                let tx = (ox as i8) + dx;
+                let ty = (oy as i8) + dy;
                 if tx < 0 || ty < 0 || tx >= self.width as i8 || ty >= self.height as i8 {
                     continue;
                 }

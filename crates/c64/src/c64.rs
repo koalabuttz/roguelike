@@ -89,14 +89,21 @@ pub fn draw_text(x: u8, y: u8, text: &[u8], color: u8) {
     }
 }
 
-/// Write a single character (screen code) with color at position.
+/// Write a raw screen code with color at position.
 #[inline(always)]
-pub fn draw_char(x: u8, y: u8, sc: u8, color: u8) {
+pub fn draw_sc(x: u8, y: u8, sc: u8, color: u8) {
     let offset = (y as usize) * 40 + (x as usize);
     unsafe {
         write_volatile(SCREEN.add(offset), sc);
         write_volatile(COLOR_RAM.add(offset), color);
     }
+}
+
+/// Write a single ASCII character with color at position.
+/// Converts to C64 screen code internally.
+#[inline(always)]
+pub fn draw_char(x: u8, y: u8, ascii: u8, color: u8) {
+    draw_sc(x, y, to_screen_code(ascii), color);
 }
 
 /// Fill a screen row with a character and color.
@@ -117,6 +124,18 @@ pub fn clear_screen() {
             write_volatile(SCREEN.add(i), 0x20); // space
             write_volatile(COLOR_RAM.add(i), COLOR_LGREY);
         }
+    }
+}
+
+/// Master switch for vblank synchronization in the render path.
+/// Set to `false` to disable — the compiler dead-code-eliminates entirely.
+pub const VBLANK_SYNC: bool = true;
+
+/// Wait for vblank if `VBLANK_SYNC` is enabled; no-op otherwise.
+#[inline(always)]
+pub fn sync_frame() {
+    if VBLANK_SYNC {
+        wait_vblank();
     }
 }
 
@@ -296,7 +315,7 @@ pub fn draw_number_u16(x: u8, y: u8, mut val: u16, color: u8) -> u8 {
     let mut buf = [0u8; 5];
     let mut len: u8 = 0;
     if val == 0 {
-        draw_char(x, y, to_screen_code(b'0'), color);
+        draw_char(x, y, b'0', color);
         return 1;
     }
     while val > 0 {
@@ -306,7 +325,7 @@ pub fn draw_number_u16(x: u8, y: u8, mut val: u16, color: u8) -> u8 {
     }
     for i in 0..len {
         let ch = buf[(len - 1 - i) as usize];
-        draw_char(x + i, y, to_screen_code(ch), color);
+        draw_char(x + i, y, ch, color);
     }
     len
 }

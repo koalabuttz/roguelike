@@ -59,26 +59,20 @@ pub fn viewport_pos_lazy(
     let px = state.entities.x[PLAYER_IDX as usize];
     let py = state.entities.y[PLAYER_IDX as usize];
 
-    // Screen-relative player position.  wrapping_sub is safe: if px <
-    // prev_vx the large result triggers the < DEADZONE branch below,
-    // which is the correct "player left of viewport" recovery.
-    let sx = px.wrapping_sub(prev_vx);
-    let sy = py.wrapping_sub(prev_vy);
-
     let max_vx = state.map.width.saturating_sub(VIEW_W);
     let max_vy = state.map.height.saturating_sub(VIEW_H);
 
-    let new_vx = if sx < DEADZONE {
+    let new_vx = if px < prev_vx + DEADZONE {
         prev_vx.saturating_sub(1).min(max_vx)
-    } else if sx >= VIEW_W - DEADZONE {
+    } else if px >= prev_vx + VIEW_W - DEADZONE {
         (prev_vx + 1).min(max_vx)
     } else {
         prev_vx
     };
 
-    let new_vy = if sy < DEADZONE {
+    let new_vy = if py < prev_vy + DEADZONE {
         prev_vy.saturating_sub(1).min(max_vy)
-    } else if sy >= VIEW_H - DEADZONE {
+    } else if py >= prev_vy + VIEW_H - DEADZONE {
         (prev_vy + 1).min(max_vy)
     } else {
         prev_vy
@@ -134,6 +128,7 @@ fn tile_appearance(state: &MicroGameState, wx: u8, wy: u8) -> (u8, u8) {
 
 /// Full screen render: map + items + entities + status + messages.
 pub fn render_all(state: &MicroGameState) {
+    c64::sync_frame();
     let (vx, vy) = viewport_pos(state);
     render_map(state, vx, vy);
     render_items(state, vx, vy);
@@ -478,6 +473,7 @@ pub fn render_viewport_scroll(
 
     if dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1 {
         // 1-tile scroll: memory-copy + edge render
+        c64::sync_frame();
         if dx != 0 && dy != 0 {
             // Diagonal: single-pass to avoid visible intermediate state
             scroll_diagonal(dx, dy);
@@ -598,7 +594,7 @@ fn render_items(state: &MicroGameState, vx: u8, vy: u8) {
         let kind = state.items.kind[i];
         let glyph = items::glyph(kind) as u8;
         let color = game_color_to_c64(items::color(kind));
-        c64::draw_char(sx, sy, c64::to_screen_code(glyph), color);
+        c64::draw_char(sx, sy, glyph, color);
     }
 }
 
@@ -635,7 +631,7 @@ fn render_entities(state: &MicroGameState, vx: u8, vy: u8) {
             }
         };
 
-        c64::draw_char(sx, sy, c64::to_screen_code(glyph), color);
+        c64::draw_char(sx, sy, glyph, color);
     }
 }
 
@@ -667,16 +663,16 @@ fn render_status_bar(state: &MicroGameState) {
 
     for i in 0..bar_width {
         if i < filled {
-            c64::draw_char(3 + i, STATUS_ROW, 0xA0, bar_color); // filled block
+            c64::draw_sc(3 + i, STATUS_ROW, 0xA0, bar_color); // filled block
         } else {
-            c64::draw_char(3 + i, STATUS_ROW, 0x65, c64::COLOR_DGREY); // light shade
+            c64::draw_sc(3 + i, STATUS_ROW, 0x65, c64::COLOR_DGREY); // light shade
         }
     }
 
     // "HP/MaxHP" after bar
     let mut col = 3 + bar_width + 1;
     col += c64::draw_number(col, STATUS_ROW, hp, c64::COLOR_WHITE);
-    c64::draw_char(col, STATUS_ROW, c64::to_screen_code(b'/'), c64::COLOR_GREY);
+    c64::draw_char(col, STATUS_ROW, b'/', c64::COLOR_GREY);
     col += 1;
     col += c64::draw_number(col, STATUS_ROW, max_hp, c64::COLOR_WHITE);
 
@@ -685,7 +681,7 @@ fn render_status_bar(state: &MicroGameState) {
     c64::draw_text(col, STATUS_ROW, b"D:", c64::COLOR_GREY);
     col += 2;
     col += c64::draw_number(col, STATUS_ROW, state.depth, c64::COLOR_WHITE);
-    c64::draw_char(col, STATUS_ROW, c64::to_screen_code(b'/'), c64::COLOR_GREY);
+    c64::draw_char(col, STATUS_ROW, b'/', c64::COLOR_GREY);
     col += 1;
     col += c64::draw_number(col, STATUS_ROW, balance::TARGET_DEPTH, c64::COLOR_WHITE);
 
@@ -812,12 +808,7 @@ fn render_messages(state: &MicroGameState) {
         Some(event) => {
             format_event(event, &mut buf);
             for i in 0..40u8 {
-                c64::draw_char(
-                    i,
-                    MSG_ROW,
-                    c64::to_screen_code(buf[i as usize]),
-                    c64::COLOR_GREY,
-                );
+                c64::draw_char(i, MSG_ROW, buf[i as usize], c64::COLOR_GREY);
             }
         }
         None => {
@@ -830,12 +821,7 @@ fn render_messages(state: &MicroGameState) {
         Some(event) => {
             format_event(event, &mut buf);
             for i in 0..40u8 {
-                c64::draw_char(
-                    i,
-                    MSG_ROW + 1,
-                    c64::to_screen_code(buf[i as usize]),
-                    c64::COLOR_WHITE,
-                );
+                c64::draw_char(i, MSG_ROW + 1, buf[i as usize], c64::COLOR_WHITE);
             }
         }
         None => {
@@ -1099,19 +1085,14 @@ pub fn draw_player_immediate(state: &MicroGameState, prev: &DiffState, vx: u8, v
         let oy = prev.entity_y[PLAYER_IDX as usize];
         if ox >= vx && ox < vx + VIEW_W && oy >= vy && oy < vy + VIEW_H {
             let (sc, color) = tile_appearance(state, ox, oy);
-            c64::draw_char(ox - vx, oy - vy, sc, color);
+            c64::draw_sc(ox - vx, oy - vy, sc, color);
         }
     }
     // Draw new position
     let px = state.entities.x[PLAYER_IDX as usize];
     let py = state.entities.y[PLAYER_IDX as usize];
     if px >= vx && px < vx + VIEW_W && py >= vy && py < vy + VIEW_H {
-        c64::draw_char(
-            px - vx,
-            py - vy,
-            c64::to_screen_code(balance::PLAYER_GLYPH as u8),
-            c64::COLOR_YELLOW,
-        );
+        c64::draw_char(px - vx, py - vy, balance::PLAYER_GLYPH as u8, c64::COLOR_YELLOW);
     }
 }
 
@@ -1137,7 +1118,7 @@ pub fn render_look(state: &MicroGameState, vx: u8, vy: u8, cx: u8, cy: u8) {
     // Cursor overlay
     let sx = cx - vx;
     let sy = cy - vy;
-    c64::draw_char(sx, sy, c64::to_screen_code(b'X'), c64::COLOR_YELLOW);
+    c64::draw_char(sx, sy, b'X', c64::COLOR_YELLOW);
 
     // Look status bar (replaces normal status bar)
     render_look_status(state, cx, cy);
@@ -1156,7 +1137,7 @@ pub fn restore_tile(state: &MicroGameState, vx: u8, vy: u8, wx: u8, wy: u8) {
 
     // 1. Terrain layer
     let (sc, color) = tile_appearance(state, wx, wy);
-    c64::draw_char(sx, sy, sc, color);
+    c64::draw_sc(sx, sy, sc, color);
     let visible = state.fov.is_visible(wx, wy);
 
     // 2. Item layer (only if visible)
@@ -1166,7 +1147,7 @@ pub fn restore_tile(state: &MicroGameState, vx: u8, vy: u8, wx: u8, wy: u8) {
                 let kind = state.items.kind[i];
                 let glyph = items::glyph(kind) as u8;
                 let c = game_color_to_c64(items::color(kind));
-                c64::draw_char(sx, sy, c64::to_screen_code(glyph), c);
+                c64::draw_char(sx, sy, glyph, c);
                 break;
             }
         }
@@ -1189,7 +1170,7 @@ pub fn restore_tile(state: &MicroGameState, vx: u8, vy: u8, wx: u8, wy: u8) {
                         None => (b'?', c64::COLOR_WHITE),
                     }
                 };
-                c64::draw_char(sx, sy, c64::to_screen_code(glyph), c);
+                c64::draw_char(sx, sy, glyph, c);
                 break;
             }
         }
@@ -1200,7 +1181,7 @@ pub fn restore_tile(state: &MicroGameState, vx: u8, vy: u8, wx: u8, wy: u8) {
 pub fn draw_cursor(vx: u8, vy: u8, cx: u8, cy: u8) {
     let sx = cx - vx;
     let sy = cy - vy;
-    c64::draw_char(sx, sy, c64::to_screen_code(b'X'), c64::COLOR_YELLOW);
+    c64::draw_char(sx, sy, b'X', c64::COLOR_YELLOW);
 }
 
 /// Render the look mode status bar on row 22, replacing the normal status bar.
@@ -1251,12 +1232,7 @@ pub fn render_look_status(state: &MicroGameState, cx: u8, cy: u8) {
     let _ = p;
 
     for i in 0..40u8 {
-        c64::draw_char(
-            i,
-            STATUS_ROW,
-            c64::to_screen_code(buf[i as usize]),
-            c64::COLOR_CYAN,
-        );
+        c64::draw_char(i, STATUS_ROW, buf[i as usize], c64::COLOR_CYAN);
     }
 }
 
@@ -1274,12 +1250,12 @@ pub fn draw_menu(items: &[&[u8]], selected: u8, x: u8, y: u8) {
         // Clear the row area (item + prefix)
         for col in x..(x + 20) {
             if col < 40 {
-                c64::draw_char(col, row, SC_SPACE, c64::COLOR_BLACK);
+                c64::draw_sc(col, row, SC_SPACE, c64::COLOR_BLACK);
             }
         }
 
         if is_selected {
-            c64::draw_char(x, row, c64::to_screen_code(b'>'), c64::COLOR_YELLOW);
+            c64::draw_char(x, row, b'>', c64::COLOR_YELLOW);
             c64::draw_text(x + 2, row, item, c64::COLOR_YELLOW);
         } else {
             c64::draw_text(x + 2, row, item, c64::COLOR_LGREY);
@@ -1291,7 +1267,7 @@ pub fn draw_menu(items: &[&[u8]], selected: u8, x: u8, y: u8) {
 fn clear_rect(bx: u8, by: u8, bw: u8, bh: u8) {
     for y in by..(by + bh) {
         for x in bx..(bx + bw) {
-            c64::draw_char(x, y, SC_SPACE, c64::COLOR_BLACK);
+            c64::draw_sc(x, y, SC_SPACE, c64::COLOR_BLACK);
         }
     }
 }
@@ -1378,7 +1354,7 @@ pub fn render_seed_input(buf: &[u8], len: u8) {
     let field_y = by + 3;
     let field_w: u8 = 16;
     for i in 0..field_w {
-        c64::draw_char(field_x + i, field_y, c64::to_screen_code(b'_'), c64::COLOR_DGREY);
+        c64::draw_char(field_x + i, field_y, b'_', c64::COLOR_DGREY);
     }
 
     for i in 0..len {
@@ -1388,11 +1364,11 @@ pub fn render_seed_input(buf: &[u8], len: u8) {
         } else {
             ch
         };
-        c64::draw_char(field_x + i, field_y, c64::to_screen_code(display), c64::COLOR_WHITE);
+        c64::draw_char(field_x + i, field_y, display, c64::COLOR_WHITE);
     }
 
     if (len as u8) < field_w {
-        c64::draw_char(field_x + len, field_y, 0xA0, c64::COLOR_YELLOW);
+        c64::draw_sc(field_x + len, field_y, 0xA0, c64::COLOR_YELLOW);
     }
 }
 

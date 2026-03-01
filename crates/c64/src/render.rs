@@ -8,7 +8,7 @@
 //   Row 22:     Status bar (HP bar, kills, turns)
 //   Rows 23-24: Message log (2 most recent GameEvents, formatted to PETSCII)
 
-use core::ptr::write_volatile;
+use core::ptr::{read_volatile, write_volatile};
 
 use crate::c64;
 use roguelike_core::rules::balance;
@@ -40,6 +40,51 @@ pub fn viewport_pos(state: &MicroGameState) -> (u8, u8) {
     let vx = px.saturating_sub(VIEW_W / 2).min(state.map.width.saturating_sub(VIEW_W));
     let vy = py.saturating_sub(VIEW_H / 2).min(state.map.height.saturating_sub(VIEW_H));
     (vx, vy)
+}
+
+/// Dead-zone margin: the player can roam this many tiles from the
+/// viewport edge before a scroll is triggered.  With VIEW_W=40 and
+/// VIEW_H=22 this gives a 30×12 free-movement zone.
+const DEADZONE: u8 = 5;
+
+/// Dead-zone viewport positioning.  Returns the previous viewport
+/// unchanged unless the player is within DEADZONE tiles of an edge,
+/// in which case the viewport shifts by exactly 1 tile in the
+/// breached direction(s).  Clamped to valid map bounds.
+pub fn viewport_pos_lazy(
+    state: &MicroGameState,
+    prev_vx: u8,
+    prev_vy: u8,
+) -> (u8, u8) {
+    let px = state.entities.x[PLAYER_IDX as usize];
+    let py = state.entities.y[PLAYER_IDX as usize];
+
+    // Screen-relative player position.  wrapping_sub is safe: if px <
+    // prev_vx the large result triggers the < DEADZONE branch below,
+    // which is the correct "player left of viewport" recovery.
+    let sx = px.wrapping_sub(prev_vx);
+    let sy = py.wrapping_sub(prev_vy);
+
+    let max_vx = state.map.width.saturating_sub(VIEW_W);
+    let max_vy = state.map.height.saturating_sub(VIEW_H);
+
+    let new_vx = if sx < DEADZONE {
+        prev_vx.saturating_sub(1).min(max_vx)
+    } else if sx >= VIEW_W - DEADZONE {
+        (prev_vx + 1).min(max_vx)
+    } else {
+        prev_vx
+    };
+
+    let new_vy = if sy < DEADZONE {
+        prev_vy.saturating_sub(1).min(max_vy)
+    } else if sy >= VIEW_H - DEADZONE {
+        (prev_vy + 1).min(max_vy)
+    } else {
+        prev_vy
+    };
+
+    (new_vx, new_vy)
 }
 
 /// Map a platform-independent GameColor to a C64 4-bit color value.
@@ -246,6 +291,292 @@ fn render_map_sparse(
     // Suppress unused-variable warning — row_skip is zero when VIEW_W == 40
     // but kept for clarity; the compiler optimizes it away.
     let _ = row_skip;
+}
+
+// ---------------------------------------------------------------------------
+// Memory-copy viewport scrolling (1-tile shifts)
+// ---------------------------------------------------------------------------
+
+/// Shift screen RAM and color RAM vertically by 1 row.
+/// `dy > 0` (scroll down): copy rows 1..VIEW_H to 0..VIEW_H-1.
+/// `dy < 0` (scroll up):   copy rows 0..VIEW_H-1 to 1..VIEW_H.
+fn scroll_vertical(dy: i8) {
+    let row_bytes = VIEW_W as usize; // 40
+    let total = row_bytes * (VIEW_H as usize - 1); // 840
+
+    unsafe {
+        if dy > 0 {
+            core::ptr::copy(c64::SCREEN.add(row_bytes), c64::SCREEN, total);
+            core::ptr::copy(c64::COLOR_RAM.add(row_bytes), c64::COLOR_RAM, total);
+        } else {
+            core::ptr::copy(c64::SCREEN, c64::SCREEN.add(row_bytes), total);
+            core::ptr::copy(c64::COLOR_RAM, c64::COLOR_RAM.add(row_bytes), total);
+        }
+    }
+}
+
+/// Shift screen RAM and color RAM horizontally by 1 column.
+/// `dx > 0` (scroll right): for each row, copy cols 1..VIEW_W to 0..VIEW_W-1.
+/// `dx < 0` (scroll left):  for each row, copy cols 0..VIEW_W-1 to 1..VIEW_W.
+fn scroll_horizontal(dx: i8) {
+    let copy_len = (VIEW_W - 1) as usize; // 39
+
+    for row in 0..VIEW_H as usize {
+        let base = row * (VIEW_W as usize);
+        unsafe {
+            if dx > 0 {
+                core::ptr::copy(c64::SCREEN.add(base + 1), c64::SCREEN.add(base), copy_len);
+                core::ptr::copy(c64::COLOR_RAM.add(base + 1), c64::COLOR_RAM.add(base), copy_len);
+            } else {
+                core::ptr::copy(c64::SCREEN.add(base), c64::SCREEN.add(base + 1), copy_len);
+                core::ptr::copy(c64::COLOR_RAM.add(base), c64::COLOR_RAM.add(base + 1), copy_len);
+            }
+        }
+    }
+}
+
+/// Single-pass diagonal scroll: copies each cell directly to its final
+/// position, avoiding the visible intermediate state of sequential
+/// vertical + horizontal copies.  Iterates in the correct order so
+/// destination cells are written before they'd be read as sources.
+fn scroll_diagonal(dx: i8, dy: i8) {
+    let rows = (VIEW_H - 1) as usize;
+    let cols = (VIEW_W - 1) as usize;
+
+    for row_step in 0..rows {
+        let dst_row = if dy > 0 {
+            row_step
+        } else {
+            VIEW_H as usize - 1 - row_step
+        };
+        let src_row = (dst_row as isize + dy as isize) as usize;
+        let dst_base = dst_row * 40;
+        let src_base = src_row * 40;
+
+        for col_step in 0..cols {
+            let dst_col = if dx > 0 {
+                col_step
+            } else {
+                VIEW_W as usize - 1 - col_step
+            };
+            let src_col = (dst_col as isize + dx as isize) as usize;
+            let dst_off = dst_base + dst_col;
+            let src_off = src_base + src_col;
+
+            unsafe {
+                write_volatile(
+                    c64::SCREEN.add(dst_off),
+                    read_volatile(c64::SCREEN.add(src_off) as *const u8),
+                );
+                write_volatile(
+                    c64::COLOR_RAM.add(dst_off),
+                    read_volatile(c64::COLOR_RAM.add(src_off) as *const u8),
+                );
+            }
+        }
+    }
+}
+
+/// Render a single viewport row at screen row `sy`.
+fn render_edge_row(state: &MicroGameState, vx: u8, vy: u8, sy: u8) {
+    let wy = vy + sy;
+    let vis = state.fov.visible_bytes();
+    let exp = state.fov.explored_bytes();
+    let tiles = &state.map.tiles;
+    let map_w = state.fov.width as usize;
+
+    let fi_base = (wy as usize) * map_w + (vx as usize);
+    let si_base = (sy as usize) * (VIEW_W as usize);
+
+    for sx in 0..VIEW_W as usize {
+        let fi = fi_base + sx;
+        let byte_idx = fi >> 3;
+        let bit = 1u8 << (fi & 7);
+
+        let (sc, color) = if vis[byte_idx] & bit != 0 {
+            match tile_at_index(tiles, fi) {
+                TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
+                TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
+                TILE_STRUCTURAL => (SC_WALL, c64::COLOR_LGREY),
+                _ => (SC_SPACE, c64::COLOR_BLACK),
+            }
+        } else if exp[byte_idx] & bit != 0 {
+            match tile_at_index(tiles, fi) {
+                TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
+                TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
+                TILE_STRUCTURAL => (SC_WALL, c64::COLOR_BLUE),
+                _ => (SC_SPACE, c64::COLOR_BLACK),
+            }
+        } else {
+            (SC_SPACE, c64::COLOR_BLACK)
+        };
+
+        unsafe {
+            write_volatile(c64::SCREEN.add(si_base + sx), sc);
+            write_volatile(c64::COLOR_RAM.add(si_base + sx), color);
+        }
+    }
+}
+
+/// Render a single viewport column at screen column `sx`.
+fn render_edge_col(state: &MicroGameState, vx: u8, vy: u8, sx: u8) {
+    let wx = vx + sx;
+    let vis = state.fov.visible_bytes();
+    let exp = state.fov.explored_bytes();
+    let tiles = &state.map.tiles;
+    let map_w = state.fov.width as usize;
+
+    for sy in 0..VIEW_H as usize {
+        let wy = vy as usize + sy;
+        let fi = wy * map_w + (wx as usize);
+        let si = sy * (VIEW_W as usize) + (sx as usize);
+        let byte_idx = fi >> 3;
+        let bit = 1u8 << (fi & 7);
+
+        let (sc, color) = if vis[byte_idx] & bit != 0 {
+            match tile_at_index(tiles, fi) {
+                TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
+                TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
+                TILE_STRUCTURAL => (SC_WALL, c64::COLOR_LGREY),
+                _ => (SC_SPACE, c64::COLOR_BLACK),
+            }
+        } else if exp[byte_idx] & bit != 0 {
+            match tile_at_index(tiles, fi) {
+                TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
+                TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
+                TILE_STRUCTURAL => (SC_WALL, c64::COLOR_BLUE),
+                _ => (SC_SPACE, c64::COLOR_BLACK),
+            }
+        } else {
+            (SC_SPACE, c64::COLOR_BLACK)
+        };
+
+        unsafe {
+            write_volatile(c64::SCREEN.add(si), sc);
+            write_volatile(c64::COLOR_RAM.add(si), color);
+        }
+    }
+}
+
+/// Handle a viewport scroll.  Uses memory-copy for 1-tile shifts,
+/// falls back to sparse render for larger deltas.  Always re-renders
+/// items, entities, status bar, and messages.
+///
+/// `prev` is needed for the memory-copy path: the copy shifts old
+/// entity/item glyphs embedded in screen RAM, creating ghosts.  We
+/// erase them by restoring tiles at the old entity/item positions.
+pub fn render_viewport_scroll(
+    state: &MicroGameState,
+    prev: &DiffState,
+    new_vx: u8,
+    new_vy: u8,
+    old_vx: u8,
+    old_vy: u8,
+) {
+    let dx = (new_vx as i8) - (old_vx as i8);
+    let dy = (new_vy as i8) - (old_vy as i8);
+
+    if dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1 {
+        // 1-tile scroll: memory-copy + edge render
+        if dx != 0 && dy != 0 {
+            // Diagonal: single-pass to avoid visible intermediate state
+            scroll_diagonal(dx, dy);
+        } else {
+            // Cardinal: bulk copy
+            if dy != 0 {
+                scroll_vertical(dy);
+            }
+            if dx != 0 {
+                scroll_horizontal(dx);
+            }
+        }
+        // Render newly revealed edges
+        if dy == 1 {
+            render_edge_row(state, new_vx, new_vy, VIEW_H - 1);
+        } else if dy == -1 {
+            render_edge_row(state, new_vx, new_vy, 0);
+        }
+        if dx == 1 {
+            render_edge_col(state, new_vx, new_vy, VIEW_W - 1);
+        } else if dx == -1 {
+            render_edge_col(state, new_vx, new_vy, 0);
+        }
+
+        // The copy shifted old FOV lighting and entity glyphs.
+        // Re-render all tiles that are or were visible to fix both.
+        refresh_fov_area(state, prev, new_vx, new_vy);
+    } else {
+        // Large scroll: fall back to sparse render (rewrites all
+        // explored/visible cells, so no ghost issue).
+        render_map_sparse(state, new_vx, new_vy, old_vx, old_vy);
+    }
+
+    render_items(state, new_vx, new_vy);
+    render_entities(state, new_vx, new_vy);
+    render_status_bar(state);
+    render_messages(state);
+}
+
+/// Re-render terrain for all viewport tiles that are currently visible
+/// or were visible in the previous frame.  This fixes two issues after
+/// a memory-copy scroll:
+/// 1. FOV lighting — tiles that gained/lost visibility get correct colors
+/// 2. Entity ghosts — old entity glyphs in the visible area are overwritten
+fn refresh_fov_area(
+    state: &MicroGameState,
+    prev: &DiffState,
+    vx: u8,
+    vy: u8,
+) {
+    let vis = state.fov.visible_bytes();
+    let tiles = &state.map.tiles;
+    let map_w = state.fov.width as usize;
+
+    let mut fov_row = (vy as usize) * map_w + (vx as usize);
+    let mut scr_row: usize = 0;
+
+    for _sy in 0..VIEW_H as usize {
+        let mut fi = fov_row;
+        let mut si = scr_row;
+
+        for _sx in 0..VIEW_W as usize {
+            let byte_idx = fi >> 3;
+            let bit = 1u8 << (fi & 7);
+
+            let is_visible = vis[byte_idx] & bit != 0;
+            let was_visible = prev.fov_visible[byte_idx] & bit != 0;
+
+            if is_visible || was_visible {
+                let (sc, color) = if is_visible {
+                    match tile_at_index(tiles, fi) {
+                        TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
+                        TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
+                        TILE_STRUCTURAL => (SC_WALL, c64::COLOR_LGREY),
+                        _ => (SC_SPACE, c64::COLOR_BLACK),
+                    }
+                } else {
+                    // Was visible, now explored-only — dim
+                    match tile_at_index(tiles, fi) {
+                        TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
+                        TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
+                        TILE_STRUCTURAL => (SC_WALL, c64::COLOR_BLUE),
+                        _ => (SC_SPACE, c64::COLOR_BLACK),
+                    }
+                };
+
+                unsafe {
+                    write_volatile(c64::SCREEN.add(si), sc);
+                    write_volatile(c64::COLOR_RAM.add(si), color);
+                }
+            }
+
+            fi += 1;
+            si += 1;
+        }
+
+        fov_row += map_w;
+        scr_row += 40;
+    }
 }
 
 /// Render ground items that are visible and within the viewport.
@@ -564,8 +895,10 @@ impl DiffState {
     }
 
     /// Save the current rendering-relevant state for next-frame comparison.
-    pub fn snapshot(&mut self, state: &MicroGameState) {
-        self.viewport = viewport_pos(state);
+    /// The viewport is passed explicitly because the main loop may use
+    /// `viewport_pos_lazy` (dead-zone) instead of always-center.
+    pub fn snapshot(&mut self, state: &MicroGameState, viewport: (u8, u8)) {
+        self.viewport = viewport;
         self.depth = state.depth;
 
         // Copy FOV visible bitfield
@@ -627,31 +960,11 @@ fn mark_dirty_world(dirty: &mut [u8; DIRTY_SIZE], vx: u8, vy: u8, wx: u8, wy: u8
 
 /// Differential render: only redraw cells that changed since the last frame.
 ///
-/// Falls back to `render_all()` on depth change (entire level replaced).
-/// On viewport scroll, uses `render_map_sparse()` to skip cells where both
-/// old and new world tiles are unexplored (~44% of viewport on average).
-/// Otherwise, computes a dirty bitfield from FOV/entity/item changes and
-/// redraws only those cells via `restore_tile()`.
-pub fn render_diff(state: &MicroGameState, prev: &DiffState) {
-    let (vx, vy) = viewport_pos(state);
-
-    // Depth changed → full redraw (entire level changed)
-    if state.depth != prev.depth {
-        render_all(state);
-        return;
-    }
-
-    // Viewport scrolled → sparse re-render (skip unexplored cells)
-    if (vx, vy) != prev.viewport {
-        let (old_vx, old_vy) = prev.viewport;
-        render_map_sparse(state, vx, vy, old_vx, old_vy);
-        render_items(state, vx, vy);
-        render_entities(state, vx, vy);
-        render_status_bar(state);
-        render_messages(state);
-        return;
-    }
-
+/// Assumes the viewport has NOT scrolled and the depth has NOT changed —
+/// the caller handles those cases separately via `render_viewport_scroll()`
+/// or `render_all()`. Computes a dirty bitfield from FOV/entity/item
+/// changes and redraws only those cells via `restore_tile()`.
+pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
     let mut dirty = [0u8; DIRTY_SIZE];
 
     // --- 1. FOV visibility changes ---
@@ -774,6 +1087,32 @@ pub fn render_diff(state: &MicroGameState, prev: &DiffState) {
     // --- 5. Status bar and messages (always, cheap) ---
     render_status_bar(state);
     render_messages(state);
+}
+
+/// Erase the old player glyph and draw the new one instantly.
+/// Called before the background render so the player sees immediate
+/// feedback with no ghost at the old position.
+pub fn draw_player_immediate(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
+    // Erase old position
+    if prev.entity_count > 0 {
+        let ox = prev.entity_x[PLAYER_IDX as usize];
+        let oy = prev.entity_y[PLAYER_IDX as usize];
+        if ox >= vx && ox < vx + VIEW_W && oy >= vy && oy < vy + VIEW_H {
+            let (sc, color) = tile_appearance(state, ox, oy);
+            c64::draw_char(ox - vx, oy - vy, sc, color);
+        }
+    }
+    // Draw new position
+    let px = state.entities.x[PLAYER_IDX as usize];
+    let py = state.entities.y[PLAYER_IDX as usize];
+    if px >= vx && px < vx + VIEW_W && py >= vy && py < vy + VIEW_H {
+        c64::draw_char(
+            px - vx,
+            py - vy,
+            c64::to_screen_code(balance::PLAYER_GLYPH as u8),
+            c64::COLOR_YELLOW,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

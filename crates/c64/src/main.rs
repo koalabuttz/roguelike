@@ -282,7 +282,7 @@ pub extern "C" fn main() -> isize {
                 let state = start_game(seed, w, h);
                 render::render_all(state);
                 let diff = unsafe { &mut DIFF };
-                diff.snapshot(state);
+                diff.snapshot(state, render::viewport_pos(state));
                 app_state = AppState::Playing;
             }
             AppState::Playing => {
@@ -316,11 +316,24 @@ pub extern "C" fn main() -> isize {
                 let diff = unsafe { &mut DIFF };
                 if state.depth != old_depth {
                     // Descent — full redraw (entire level changed)
+                    let vp = render::viewport_pos(state);
                     render::render_all(state);
+                    diff.snapshot(state, vp);
                 } else {
-                    render::render_diff(state, diff);
+                    // Dead-zone viewport: only scroll when near edge
+                    let (old_vx, old_vy) = diff.viewport;
+                    let (vx, vy) = render::viewport_pos_lazy(state, old_vx, old_vy);
+
+                    if (vx, vy) != (old_vx, old_vy) {
+                        // Viewport scrolled — memory-copy or sparse fallback
+                        render::render_viewport_scroll(state, diff, vx, vy, old_vx, old_vy);
+                    } else {
+                        // No scroll — player-first then dirty-cell diff
+                        render::draw_player_immediate(state, diff, vx, vy);
+                        render::render_diff(state, diff, vx, vy);
+                    }
+                    diff.snapshot(state, (vx, vy));
                 }
-                diff.snapshot(state);
 
                 if state.is_terminal() {
                     app_state = AppState::GameOver;
@@ -331,7 +344,7 @@ pub extern "C" fn main() -> isize {
                 run_look_mode(state);
                 render::render_all(state);
                 let diff = unsafe { &mut DIFF };
-                diff.snapshot(state);
+                diff.snapshot(state, render::viewport_pos(state));
                 app_state = AppState::Playing;
             }
             AppState::Paused => {
@@ -340,7 +353,7 @@ pub extern "C" fn main() -> isize {
                     AppState::Playing => {
                         render::render_all(state);
                         let diff = unsafe { &mut DIFF };
-                        diff.snapshot(state);
+                        diff.snapshot(state, render::viewport_pos(state));
                         app_state = AppState::Playing;
                     }
                     AppState::Title => {
@@ -358,7 +371,7 @@ pub extern "C" fn main() -> isize {
                         let state = start_game(seed, current_width, current_height);
                         render::render_all(state);
                         let diff = unsafe { &mut DIFF };
-                        diff.snapshot(state);
+                        diff.snapshot(state, render::viewport_pos(state));
                         app_state = AppState::Playing;
                     }
                     AppState::Title => {

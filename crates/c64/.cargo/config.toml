@@ -4,3 +4,6 @@ target = "mos-c64-none"
 [unstable]
 build-std = ["core"]
 build-std-features = ["compiler-builtins-mem"]
+
+[target.mos-c64-none]
+rustflags = ["-C", "link-arg=-Tlink.ld"]

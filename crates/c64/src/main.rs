@@ -30,10 +30,15 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 
 /// Game state stored in a static — too large for the 6502 hardware stack
-/// (256 bytes) but fine in BSS. MaybeUninit avoids requiring Default.
+/// (256 bytes) but fine in main RAM. MaybeUninit avoids requiring Default.
+/// Explicit link_section keeps it in main ram so the linker can overflow
+/// smaller compiler-generated statics to the freed KERNAL region.
+#[link_section = ".noinit.state"]
 static mut STATE: MaybeUninit<MicroGameState> = MaybeUninit::uninit();
 
-/// Previous-frame snapshot for differential rendering (~810 bytes in BSS).
+/// Previous-frame snapshot for differential rendering (~810 bytes).
+/// Placed in freed KERNAL region alongside STATE.
+#[link_section = ".noinit.state"]
 static mut DIFF: render::DiffState = render::DiffState::new();
 
 /// Application states for the main loop.

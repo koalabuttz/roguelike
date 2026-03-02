@@ -17,8 +17,9 @@ pub const SCREEN_HEIGHT: u8 = 25;
 // --- VIC-II registers ---
 pub const VIC_BORDER: *mut u8 = 0xD020 as *mut u8;
 pub const VIC_BG: *mut u8 = 0xD021 as *mut u8;
-pub const VIC_RASTER: *const u8 = 0xD012 as *const u8;
+pub const VIC_RASTER: *mut u8 = 0xD012 as *mut u8;
 pub const VIC_CTRL1: *mut u8 = 0xD011 as *mut u8;
+pub const VIC_IRQ_STATUS: *mut u8 = 0xD019 as *mut u8;
 
 // --- CIA 1 (keyboard + joystick) ---
 pub const CIA1_PA: *mut u8 = 0xDC00 as *mut u8;   // port A: keyboard col / joy2
@@ -334,4 +335,131 @@ pub fn draw_number_u16(x: u8, y: u8, mut val: u16, color: u8) -> u8 {
 #[inline(always)]
 pub fn draw_number(x: u8, y: u8, val: u8, color: u8) -> u8 {
     draw_number_u16(x, y, val as u16, color)
+}
+
+// ---------------------------------------------------------------------------
+// Raster interrupt spinner — animates a character during level generation
+// ---------------------------------------------------------------------------
+
+/// 6502 machine code for the raster IRQ handler (53 bytes).
+///
+/// Animates a spinner character at a fixed screen position. All state is
+/// stored at absolute addresses in the free datasette area ($0334-$0337):
+///   - $0334: frame counter (update every 8th frame)
+///   - $0335: spinner index (0-3)
+///   - $0336: saved A register
+///   - $0337: saved X register
+///
+/// Register save/restore uses absolute memory instead of the hardware stack
+/// to minimize stack pressure during deep map-generation call chains.
+///
+/// Two addresses are patched at runtime by `spinner_start()`:
+///   - Offset 0x1D-0x1E: address of the character table (LDA abs,X)
+///   - Offset 0x20-0x21: screen RAM position to write (STA abs)
+///
+/// `#[used]` prevents the compiler from eliminating this array since
+/// Rust code only takes its address via `addr_of!`, never reads contents.
+#[used]
+static mut SPINNER_HANDLER: [u8; 53] = [
+    0x8D, 0x36, 0x03,       // STA $0336  (save A)
+    0x8E, 0x37, 0x03,       // STX $0337  (save X)
+    0xCE, 0x34, 0x03,       // DEC $0334
+    0xD0, 0x17,             // BNE +23 → offset 0x22 (ack)
+    0xA9, 0x08,             // LDA #8
+    0x8D, 0x34, 0x03,       // STA $0334
+    0xEE, 0x35, 0x03,       // INC $0335
+    0xAD, 0x35, 0x03,       // LDA $0335
+    0x29, 0x03,             // AND #3
+    0x8D, 0x35, 0x03,       // STA $0335
+    0xAA,                   // TAX
+    0xBD, 0x00, 0x00,       // LDA $0000,X  [patched: table addr]
+    0x8D, 0x00, 0x00,       // STA $0000    [patched: screen addr]
+    // ack:
+    0xA9, 0xFF,             // LDA #$FF
+    0x8D, 0x19, 0xD0,       // STA $D019
+    0xAD, 0x0D, 0xDC,       // LDA $DC0D
+    0xAE, 0x37, 0x03,       // LDX $0337  (restore X)
+    0xAD, 0x36, 0x03,       // LDA $0336  (restore A)
+    0x40,                   // RTI
+    // Character table (screen codes):
+    0x2F, 0x2D, 0x2F, 0x2D, // / - / -
+];
+
+/// Byte offset of the LDA operand (table address) in SPINNER_HANDLER.
+const PATCH_LDA_LO: usize = 0x1D;
+const PATCH_LDA_HI: usize = 0x1E;
+/// Byte offset of the STA operand (screen address) in SPINNER_HANDLER.
+const PATCH_STA_LO: usize = 0x20;
+const PATCH_STA_HI: usize = 0x21;
+/// Byte offset of the character table within SPINNER_HANDLER.
+const HANDLER_TABLE_OFFSET: u16 = 0x31;
+
+/// Start the raster interrupt spinner.
+///
+/// Installs a VIC-II raster IRQ handler that animates a spinner character
+/// at the given screen RAM address. No SEI/CLI trampolines needed:
+/// after init_hardware(), the CPU already has I=0 (interrupts allowed)
+/// and all sources are disabled, so we just enable the VIC raster source.
+///
+/// Safety: disabling the source in $D01A deasserts the IRQ line immediately,
+/// so updating $FFFE/$FFFF before enabling the source is race-free.
+#[inline(never)]
+pub fn spinner_start(screen_addr: u16) {
+    unsafe {
+        // Initialize spinner state
+        write_volatile(0x0334 as *mut u8, 8);  // frame counter
+        write_volatile(0x0335 as *mut u8, 0);  // spinner index
+
+        // Patch handler: character table address
+        let handler_addr = core::ptr::addr_of!(SPINNER_HANDLER) as u16;
+        let table_addr = handler_addr + HANDLER_TABLE_OFFSET;
+        SPINNER_HANDLER[PATCH_LDA_LO] = (table_addr & 0xFF) as u8;
+        SPINNER_HANDLER[PATCH_LDA_HI] = (table_addr >> 8) as u8;
+
+        // Patch handler: screen write address
+        SPINNER_HANDLER[PATCH_STA_LO] = (screen_addr & 0xFF) as u8;
+        SPINNER_HANDLER[PATCH_STA_HI] = (screen_addr >> 8) as u8;
+
+        // Point hardware IRQ vector to our handler
+        // Safe: no IRQ sources enabled yet, so no IRQ can fire mid-update
+        write_volatile(0xFFFE as *mut u8, (handler_addr & 0xFF) as u8);
+        write_volatile(0xFFFF as *mut u8, (handler_addr >> 8) as u8);
+
+        // Configure VIC-II raster interrupt at line 251 (vblank)
+        poke(VIC_RASTER, 251);
+        let ctrl1 = peek(VIC_CTRL1 as *const u8);
+        poke(VIC_CTRL1, ctrl1 & 0x7F); // clear raster bit 8
+
+        // Acknowledge all pending interrupt sources
+        poke(VIC_IRQ_STATUS, 0xFF);
+        let _ = peek(CIA1_ICR as *const u8);
+        let _ = peek(CIA2_ICR as *const u8);
+
+        // Enable VIC-II raster interrupt — IRQs start firing immediately
+        // (CPU I flag is already 0 from KERNAL init, never changed)
+        poke(VIC_IRQ_MASK, 0x01);
+    }
+}
+
+/// Stop the raster interrupt spinner.
+///
+/// Disabling the VIC-II raster source in $D01A immediately deasserts
+/// the IRQ line, so no more handler invocations occur after the write.
+/// This means we can safely update $FFFE/$FFFF without SEI.
+#[inline(never)]
+pub fn spinner_stop() {
+    // Disable VIC-II raster interrupt — IRQ line deasserts immediately
+    poke(VIC_IRQ_MASK, 0x00);
+
+    // Acknowledge any pending + clear CIA latches
+    poke(VIC_IRQ_STATUS, 0xFF);
+    let _ = peek(CIA1_ICR as *const u8);
+    let _ = peek(CIA2_ICR as *const u8);
+
+    // Restore IRQ vector to safe RTI stub
+    // Safe: source disabled above, no IRQ can fire mid-update
+    unsafe {
+        write_volatile(0xFFFE as *mut u8, 0x00); // $E000 low
+        write_volatile(0xFFFF as *mut u8, 0xE0); // $E000 high
+    }
 }

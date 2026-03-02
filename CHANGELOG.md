@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add item system to roguelike (#2)
 
 ### Fixed
+- Debug raster IRQ on C64 port - spinner corrupts game state during map generation (#60)
 - Add joystick edge detection with auto-repeat to prevent phantom input (#55)
 - Fix C64 I/O banking - CPU port value C unmaps I/O area causing frozen input (#54)
 - Replace division with right-shift for idle acceleration in micro tier (#50)

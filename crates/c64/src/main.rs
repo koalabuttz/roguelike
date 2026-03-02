@@ -17,8 +17,9 @@ use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 use input::{LookInput, MenuInput};
 use roguelike_core::command::GameCommand;
-use roguelike_core::rules::seed_code;
+use roguelike_core::rules::{balance, seed_code};
 use roguelike_core::tier_micro::game::MicroGameState;
+use roguelike_core::tier_micro::map::TILE_STAIRS_DOWN;
 use roguelike_core::tier_micro::types::{DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, PLAYER_IDX};
 
 /// Panic handler — flash the border red (classic C64 crash indicator).
@@ -284,7 +285,10 @@ pub extern "C" fn main() -> isize {
                 let (seed, w, h) = run_title();
                 current_width = w;
                 current_height = h;
+                render::render_loading();
+                c64::spinner_start(render::SPINNER_SCREEN_ADDR);
                 let state = start_game(seed, w, h);
+                c64::spinner_stop();
                 render::render_all(state);
                 let diff = unsafe { &mut DIFF };
                 diff.snapshot(state, render::viewport_pos(state));
@@ -311,8 +315,25 @@ pub extern "C" fn main() -> isize {
                     continue;
                 }
 
+                // Show loading spinner during descent (map generation is slow)
+                let will_generate = cmd == GameCommand::Descend
+                    && state.depth < balance::TARGET_DEPTH
+                    && {
+                        let pi = PLAYER_IDX as usize;
+                        state.map.tile_at(state.entities.x[pi], state.entities.y[pi])
+                            == TILE_STAIRS_DOWN
+                    };
+                if will_generate {
+                    render::render_loading();
+                    c64::spinner_start(render::SPINNER_SCREEN_ADDR);
+                }
+
                 let old_depth = state.depth;
                 let result = state.step(cmd);
+
+                if will_generate {
+                    c64::spinner_stop();
+                }
 
                 if !result.action_taken {
                     continue; // nothing changed, skip rendering
@@ -373,7 +394,10 @@ pub extern "C" fn main() -> isize {
                     AppState::Playing => {
                         // Play Again — new random seed, same dimensions
                         let seed = read_cia_seed();
+                        render::render_loading();
+                        c64::spinner_start(render::SPINNER_SCREEN_ADDR);
                         let state = start_game(seed, current_width, current_height);
+                        c64::spinner_stop();
                         render::render_all(state);
                         let diff = unsafe { &mut DIFF };
                         diff.snapshot(state, render::viewport_pos(state));

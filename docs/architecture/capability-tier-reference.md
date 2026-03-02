@@ -16,7 +16,7 @@ see the [C64 platform guide](../platforms/c64-platform-guide.md).
 `roguelike-core` is organized around three capability tiers, plus a `rules/` module containing pure game rules shared by all tiers:
 
 - **rules** (all platforms): Pure functions and constants — damage formulas, balance constants, `MonsterKind` enum, `GameEvent` structured messages, `no_std` seed encoding. No game state interaction. Spawn logic produces `SpawnDirective` structs; each tier applies them to its own state.
-- **tier micro** (C64): `u8` coords/stats, 16 entities, 64x48 maps, LFSR-16, Bresenham FOV, `no_std`
+- **tier micro** (C64): `u8` coords/stats, 16 entities, 64x48 maps, LFSR-16, iterative shadowcasting FOV, `no_std`
 - **tier compact** (GBA): `i16` coords, `u8` stats, 128 entities, 128x96 maps, LFSR-32, Bresenham FOV, `no_std` — initially stubs only (type aliases + PRNG) until GBA port begins
 - **tier standard** (Vita/PC): `i32` coords/stats, 512-1024 entities, 80x40+ maps, ChaCha20, shadowcasting FOV, `std`
 
@@ -49,14 +49,14 @@ roguelike/
           tiles.rs    # TileKind enum, pure tile display definitions (glyph, color)
           color.rs    # GameColor enum (#[repr(u8)]), palette management
         command.rs    # GameCommand with Direction enum — no Coord dependency, no_std
-        tier_micro/   # u8 types, LFSR-16, Bresenham FOV, fixed arrays — no_std
+        tier_micro/   # u8 types, LFSR-16, shadowcasting FOV, fixed arrays — no_std
           mod.rs
           types.rs    # Coord = u8, Stat = u8, Pos = (u8, u8)
           prng.rs     # LfsrRng — 16-bit Galois LFSR
           entity.rs   # fixed-size entity array (max 16 entities)
           game.rs     # MicroGameState with fixed-size arrays
           map.rs      # generate() on fixed-size tile arrays (64×48)
-          fov.rs      # Bresenham FOV → bitfield
+          fov.rs      # Iterative shadowcasting FOV → bitfield (Bresenham LOS)
           ai.rs       # monster AI (micro tier)
           spawn.rs    # micro-tier spawn: weighted monster spawning to fixed arrays
           msglog.rs   # Circular buffer for GameEvent values (no string formatting)
@@ -109,7 +109,7 @@ toml = { version = "0.8", optional = true }
 pub mod rules;         // pure game rules: damage, balance, items, enchantment,
                        //   seed_code, monster_table, GameEvent — no state interaction
 pub mod command;       // GameCommand with Direction enum — no Coord dependency
-pub mod tier_micro;    // u8 types, LFSR-16, Bresenham FOV, fixed arrays
+pub mod tier_micro;    // u8 types, LFSR-16, shadowcasting FOV, fixed arrays
 pub mod tier_compact;  // stubs: type aliases + PRNG only (until GBA port)
 
 // --- Cross-tier interface (requires std) ---
@@ -410,7 +410,7 @@ the `std` feature. The C64 uses `default-features = false` and only accesses
 | **Entity system** | Per-tier | Per-tier | `core/tier_*/entity.rs` | micro: 16-entry fixed array; compact: stubs; standard: `Vec<Entity>` |
 | **AI** | Per-tier | Per-tier | `core/tier_*/ai.rs`, `core/ai.rs` | Chase, wander, mood logic — same algorithms, tier-appropriate types |
 | **Game state** | Per-tier | Per-tier | `core/tier_*/game.rs` | `MicroGameState` / `CompactGameState` (stub) / `GameState` |
-| **FOV** | Per-tier | Per-tier | `core/tier_*/fov.rs` | micro/compact: Bresenham → bitfield; standard: shadowcasting (std) |
+| **FOV** | Per-tier | Per-tier | `core/tier_*/fov.rs` | micro: iterative shadowcasting → bitfield; compact: Bresenham → bitfield; standard: recursive shadowcasting (std) |
 | A\* pathfinding | standard | **No** | PC only (`std`) | Requires heap (HashMap, BinaryHeap) |
 | Rendering | N/A | **No** | Separate impls | crossterm vs VIC-II vs GBA hardware |
 | Input handling | N/A | **No** | Separate impls | crossterm vs CIA keyboard/joystick vs GBA buttons |
@@ -482,12 +482,12 @@ Each tier defines its own types and algorithms:
 | Entity cap | 16 | 128 | 512-1024 |
 | Map | 64x48 | 128x96 | 80x40+ |
 | PRNG | LFSR-16 | LFSR-32 | ChaCha20 |
-| FOV | Bresenham | Bresenham | Shadowcasting |
+| FOV | Iterative shadowcasting | Bresenham | Shadowcasting |
 | Pathfinding | Greedy chase | Greedy chase | A* |
 
 The compact tier will initially be stubs only — `tier_compact/types.rs` (type aliases) and `tier_compact/prng.rs` (`LfsrRng32`). Full implementation (game state, mapgen, entity storage) is deferred until the GBA port begins.
 
-When a higher platform runs a lower-tier game, it uses the lower tier's types and algorithms. This means a PC running a tier micro seed instantiates `MicroGameState` with an adapter (wrap, not reimplement) — using `u8` coords, LFSR-16, and Bresenham FOV to produce the same dungeon a C64 would generate. Remaining values (turn counts, kill counts, etc.) are sized per-field based on their value ranges.
+When a higher platform runs a lower-tier game, it uses the lower tier's types and algorithms. This means a PC running a tier micro seed instantiates `MicroGameState` with an adapter (wrap, not reimplement) — using `u8` coords, LFSR-16, and iterative shadowcasting FOV to produce the same dungeon a C64 would generate. Remaining values (turn counts, kill counts, etc.) are sized per-field based on their value ranges.
 
 ### 1.9 Seed System and Cross-Platform Seeds
 
@@ -498,7 +498,7 @@ numeric value and shows platform compatibility in the UI.
 
 The decoded numeric value of the seed determines the tier:
 
-- **seed <= 0xFFFF** (u16 range) → **micro**: 64×48, LFSR-16, Bresenham FOV
+- **seed <= 0xFFFF** (u16 range) → **micro**: 64×48, LFSR-16, iterative shadowcasting FOV
 - **seed <= 0xFFFFFFFF** (u32 range) → **compact**: 128×96, LFSR-32, Bresenham FOV
 - **seed > 0xFFFFFFFF** (u64 range) → **standard**: 80×40, ChaCha20, shadowcasting FOV
 
@@ -510,7 +510,7 @@ numeric value directly: `seed <= 0xFFFF` → micro.
 ```
 Seed: r7z              (value: 0x2E93, fits u16)
 Plays on: C64 · GBA · Vita · PC
-Map: 64×48 · 16 entities · Bresenham FOV
+Map: 64×48 · 16 entities · Iterative shadowcasting FOV
 
 Seed: r7z3kq           (value: 0x3A1B_C4E2, fits u32)
 Plays on: GBA · Vita · PC
@@ -559,7 +559,7 @@ hardware constraints.
 
 | Aspect | Tier micro | Tier compact | Tier standard |
 |--------|-----------|-------------|--------------|
-| FOV | Bresenham rays | Bresenham rays | Shadowcasting |
+| FOV | Iterative shadowcasting | Bresenham rays | Shadowcasting |
 | Pathfinding | Greedy chase | Greedy chase | A* |
 | Entity cap | 16 (fixed array) | 128 (fixed array) | 512-1024 (Vec) |
 | Messages | GameEvent enum (Copy) | GameEvent enum (Copy) | GameEvent → String formatting |

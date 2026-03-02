@@ -98,29 +98,23 @@ fn game_color_to_c64(gc: GameColor) -> u8 {
     }
 }
 
+/// Map a raw tile value to (screen_code, color) for the given visibility.
+#[inline(always)]
+fn tile_sc_color(tile: u8, visible: bool) -> (u8, u8) {
+    match tile {
+        TILE_FLOOR => (SC_FLOOR, if visible { c64::COLOR_DGREY } else { c64::COLOR_BLUE }),
+        TILE_STAIRS_DOWN => (SC_STAIRS, if visible { c64::COLOR_CYAN } else { c64::COLOR_BLUE }),
+        TILE_STRUCTURAL => (SC_WALL, if visible { c64::COLOR_LGREY } else { c64::COLOR_BLUE }),
+        _ => (SC_SPACE, c64::COLOR_BLACK),
+    }
+}
+
 /// Compute the screen code and color for a map tile based on visibility.
 fn tile_appearance(state: &MicroGameState, wx: u8, wy: u8) -> (u8, u8) {
-    let visible = state.fov.is_visible(wx, wy);
-    let explored = state.fov.is_explored(wx, wy);
-
-    if visible {
-        let tile = state.map.tile_at(wx, wy);
-        match tile {
-            TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
-            TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
-            TILE_STRUCTURAL => (SC_WALL, c64::COLOR_LGREY),
-            TILE_WALL => (SC_SPACE, c64::COLOR_BLACK),
-            _ => (SC_SPACE, c64::COLOR_BLACK),
-        }
-    } else if explored {
-        let tile = state.map.tile_at(wx, wy);
-        match tile {
-            TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
-            TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
-            TILE_STRUCTURAL => (SC_WALL, c64::COLOR_BLUE),
-            TILE_WALL => (SC_SPACE, c64::COLOR_BLACK),
-            _ => (SC_SPACE, c64::COLOR_BLACK),
-        }
+    if state.fov.is_visible(wx, wy) {
+        tile_sc_color(state.map.tile_at(wx, wy), true)
+    } else if state.fov.is_explored(wx, wy) {
+        tile_sc_color(state.map.tile_at(wx, wy), false)
     } else {
         (SC_SPACE, c64::COLOR_BLACK)
     }
@@ -173,19 +167,9 @@ fn render_map(state: &MicroGameState, vx: u8, vy: u8) {
             let bit = 1u8 << (fi & 7);
 
             let (sc, color) = if vis[byte_idx] & bit != 0 {
-                match tile_at_index(tiles, fi) {
-                    TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
-                    TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
-                    TILE_STRUCTURAL => (SC_WALL, c64::COLOR_LGREY),
-                    _ => (SC_SPACE, c64::COLOR_BLACK),
-                }
+                tile_sc_color(tile_at_index(tiles, fi), true)
             } else if exp[byte_idx] & bit != 0 {
-                match tile_at_index(tiles, fi) {
-                    TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
-                    TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
-                    TILE_STRUCTURAL => (SC_WALL, c64::COLOR_BLUE),
-                    _ => (SC_SPACE, c64::COLOR_BLACK),
-                }
+                tile_sc_color(tile_at_index(tiles, fi), false)
             } else {
                 (SC_SPACE, c64::COLOR_BLACK)
             };
@@ -251,19 +235,9 @@ fn render_map_sparse(
             let bit = 1u8 << (fi & 7);
 
             let (sc, color) = if vis[byte_idx] & bit != 0 {
-                match tile_at_index(tiles, fi) {
-                    TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
-                    TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
-                    TILE_STRUCTURAL => (SC_WALL, c64::COLOR_LGREY),
-                    _ => (SC_SPACE, c64::COLOR_BLACK),
-                }
+                tile_sc_color(tile_at_index(tiles, fi), true)
             } else if new_explored {
-                match tile_at_index(tiles, fi) {
-                    TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
-                    TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
-                    TILE_STRUCTURAL => (SC_WALL, c64::COLOR_BLUE),
-                    _ => (SC_SPACE, c64::COLOR_BLACK),
-                }
+                tile_sc_color(tile_at_index(tiles, fi), false)
             } else {
                 (SC_SPACE, c64::COLOR_BLACK)
             };
@@ -391,19 +365,9 @@ fn render_edge_row(state: &MicroGameState, vx: u8, vy: u8, sy: u8) {
         let bit = 1u8 << (fi & 7);
 
         let (sc, color) = if vis[byte_idx] & bit != 0 {
-            match tile_at_index(tiles, fi) {
-                TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
-                TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
-                TILE_STRUCTURAL => (SC_WALL, c64::COLOR_LGREY),
-                _ => (SC_SPACE, c64::COLOR_BLACK),
-            }
+            tile_sc_color(tile_at_index(tiles, fi), true)
         } else if exp[byte_idx] & bit != 0 {
-            match tile_at_index(tiles, fi) {
-                TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
-                TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
-                TILE_STRUCTURAL => (SC_WALL, c64::COLOR_BLUE),
-                _ => (SC_SPACE, c64::COLOR_BLACK),
-            }
+            tile_sc_color(tile_at_index(tiles, fi), false)
         } else {
             (SC_SPACE, c64::COLOR_BLACK)
         };
@@ -431,19 +395,9 @@ fn render_edge_col(state: &MicroGameState, vx: u8, vy: u8, sx: u8) {
         let bit = 1u8 << (fi & 7);
 
         let (sc, color) = if vis[byte_idx] & bit != 0 {
-            match tile_at_index(tiles, fi) {
-                TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
-                TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
-                TILE_STRUCTURAL => (SC_WALL, c64::COLOR_LGREY),
-                _ => (SC_SPACE, c64::COLOR_BLACK),
-            }
+            tile_sc_color(tile_at_index(tiles, fi), true)
         } else if exp[byte_idx] & bit != 0 {
-            match tile_at_index(tiles, fi) {
-                TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
-                TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
-                TILE_STRUCTURAL => (SC_WALL, c64::COLOR_BLUE),
-                _ => (SC_SPACE, c64::COLOR_BLACK),
-            }
+            tile_sc_color(tile_at_index(tiles, fi), false)
         } else {
             (SC_SPACE, c64::COLOR_BLACK)
         };
@@ -545,22 +499,7 @@ fn refresh_fov_area(
             let was_visible = prev.fov_visible[byte_idx] & bit != 0;
 
             if is_visible || was_visible {
-                let (sc, color) = if is_visible {
-                    match tile_at_index(tiles, fi) {
-                        TILE_FLOOR => (SC_FLOOR, c64::COLOR_DGREY),
-                        TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_CYAN),
-                        TILE_STRUCTURAL => (SC_WALL, c64::COLOR_LGREY),
-                        _ => (SC_SPACE, c64::COLOR_BLACK),
-                    }
-                } else {
-                    // Was visible, now explored-only — dim
-                    match tile_at_index(tiles, fi) {
-                        TILE_FLOOR => (SC_FLOOR, c64::COLOR_BLUE),
-                        TILE_STAIRS_DOWN => (SC_STAIRS, c64::COLOR_BLUE),
-                        TILE_STRUCTURAL => (SC_WALL, c64::COLOR_BLUE),
-                        _ => (SC_SPACE, c64::COLOR_BLACK),
-                    }
-                };
+                let (sc, color) = tile_sc_color(tile_at_index(tiles, fi), is_visible);
 
                 unsafe {
                     write_volatile(c64::SCREEN.add(si), sc);

@@ -17,7 +17,7 @@ use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 use input::{LookInput, MenuInput};
 use roguelike_core::command::GameCommand;
-use roguelike_core::rules::message::GameEvent;
+use roguelike_core::rules::message::{Combatant, GameEvent};
 use roguelike_core::rules::{balance, seed_code};
 use roguelike_core::tier_micro::game::MicroGameState;
 use roguelike_core::tier_micro::map::TILE_STAIRS_DOWN;
@@ -201,21 +201,39 @@ fn run_end_screen(state: &MicroGameState) -> AppState {
     }
 }
 
-/// Check if any events added this turn include combat (player attacking
-/// or being attacked). `old_total` is the log total from before `step()`.
-fn has_combat(state: &MicroGameState, old_total: u16) -> bool {
+/// Combat events detected this turn, used to select screen shake + SFX.
+struct CombatInfo {
+    /// Player attacked or killed a monster.
+    player_attacked: bool,
+    /// Player was hit by a monster (or took damage).
+    player_hurt: bool,
+}
+
+/// Scan events added this turn for combat involving the player.
+/// `old_total` is the log total from before `step()`.
+fn detect_combat(state: &MicroGameState, old_total: u16) -> CombatInfo {
     let new_events = state.log.total().wrapping_sub(old_total);
     // Only scan events generated this turn (cap at 4 — practical max per step)
     let limit = if new_events > 4 { 4 } else { new_events as u8 };
+    let mut info = CombatInfo { player_attacked: false, player_hurt: false };
     let mut i: u8 = 0;
     while i < limit {
         match state.log.recent(i) {
-            Some(GameEvent::Attack { .. }) | Some(GameEvent::Kill { .. }) => return true,
+            Some(GameEvent::Attack { attacker: Combatant::Player, .. })
+            | Some(GameEvent::Kill { attacker: Combatant::Player, .. })
+            | Some(GameEvent::NoDamage { attacker: Combatant::Player, .. }) => {
+                info.player_attacked = true;
+            }
+            Some(GameEvent::Attack { defender: Combatant::Player, .. })
+            | Some(GameEvent::NoDamage { defender: Combatant::Player, .. })
+            | Some(GameEvent::Kill { victim: Combatant::Player, .. }) => {
+                info.player_hurt = true;
+            }
             _ => {}
         }
         i += 1;
     }
-    false
+    info
 }
 
 /// (dx, dy) offsets indexed by Direction discriminant. i8 for sign,
@@ -358,10 +376,17 @@ pub extern "C" fn main() -> isize {
                     continue; // nothing changed, skip rendering
                 }
 
-                // Screen shake on player attack — IRQ handler runs
-                // asynchronously during rendering and input polling
-                if has_combat(state, msg_total) {
+                // Combat feedback: screen shake + SID sound effects.
+                // IRQ-driven shake runs asynchronously during rendering.
+                let combat = detect_combat(state, msg_total);
+                if combat.player_attacked || combat.player_hurt {
                     c64::shake_start();
+                }
+                if combat.player_attacked {
+                    c64::sfx_attack();
+                }
+                if combat.player_hurt {
+                    c64::sfx_hurt();
                 }
 
                 let diff = unsafe { &mut DIFF };

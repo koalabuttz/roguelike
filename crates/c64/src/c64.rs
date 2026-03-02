@@ -44,6 +44,25 @@ pub const CPU_PORT: *mut u8 = 0x01 as *mut u8;
 // --- SID registers ---
 pub const SID_BASE: *mut u8 = 0xD400 as *mut u8;
 
+// Voice 1 ($D400-$D406) — player attack SFX
+const SID_V1_FREQ_LO: *mut u8 = 0xD400 as *mut u8;
+const SID_V1_FREQ_HI: *mut u8 = 0xD401 as *mut u8;
+const SID_V1_CTRL: *mut u8 = 0xD404 as *mut u8;
+const SID_V1_AD: *mut u8 = 0xD405 as *mut u8;
+const SID_V1_SR: *mut u8 = 0xD406 as *mut u8;
+
+// Voice 2 ($D407-$D40D) — player hurt SFX
+const SID_V2_FREQ_LO: *mut u8 = 0xD407 as *mut u8;
+const SID_V2_FREQ_HI: *mut u8 = 0xD408 as *mut u8;
+const SID_V2_PW_LO: *mut u8 = 0xD409 as *mut u8;
+const SID_V2_PW_HI: *mut u8 = 0xD40A as *mut u8;
+const SID_V2_CTRL: *mut u8 = 0xD40B as *mut u8;
+const SID_V2_AD: *mut u8 = 0xD40C as *mut u8;
+const SID_V2_SR: *mut u8 = 0xD40D as *mut u8;
+
+// Volume/filter mode ($D418)
+const SID_VOL: *mut u8 = 0xD418 as *mut u8;
+
 // --- C64 color palette (4-bit values for color RAM) ---
 pub const COLOR_BLACK: u8 = 0;
 pub const COLOR_WHITE: u8 = 1;
@@ -226,6 +245,9 @@ pub fn init_hardware() {
     poke(0x02 as *mut u8, 0xF8); // rc0 (low byte)
     poke(0x03 as *mut u8, 0xFF); // rc1 (high byte)
 
+    // Initialize SID for sound effects
+    sid_init();
+
     // Black background and border
     poke(VIC_BG, COLOR_BLACK);
     poke(VIC_BORDER, COLOR_BLACK);
@@ -344,6 +366,54 @@ pub fn draw_number_u16(x: u8, y: u8, mut val: u16, color: u8) -> u8 {
 #[inline(always)]
 pub fn draw_number(x: u8, y: u8, val: u8, color: u8) -> u8 {
     draw_number_u16(x, y, val as u16, color)
+}
+
+// ---------------------------------------------------------------------------
+// SID sound effects — percussive one-shots for combat feedback
+// ---------------------------------------------------------------------------
+
+/// Initialize SID for sound effects. Sets master volume to max.
+/// Called once from init_hardware().
+fn sid_init() {
+    // Master volume = 15 (max), no filter routing
+    poke(SID_VOL, 0x0F);
+}
+
+/// Play attack sound: short noise burst on Voice 1 (sword slash).
+///
+/// Noise waveform at mid-high frequency with instant attack and fast decay.
+/// Gate off→on transition restarts the ADSR envelope each call.
+pub fn sfx_attack() {
+    // Gate off to reset ADSR (needed if previous sound's gate is still on)
+    poke(SID_V1_CTRL, 0x80);        // noise waveform, gate=0
+    // Frequency: $2000 — mid-high noise for a sharp hiss
+    poke(SID_V1_FREQ_LO, 0x00);
+    poke(SID_V1_FREQ_HI, 0x20);
+    // ADSR: A=0 (2ms), D=3 (72ms), S=0, R=0 (6ms)
+    poke(SID_V1_AD, 0x03);
+    poke(SID_V1_SR, 0x00);
+    // Gate on — triggers ADSR: instant peak → 72ms decay to silence
+    poke(SID_V1_CTRL, 0x81);        // noise + gate
+}
+
+/// Play hurt sound: low pulse thud on Voice 2 (taking damage).
+///
+/// Pulse waveform at low frequency with instant attack and medium decay.
+/// Distinct from attack sound in both pitch and timbre.
+pub fn sfx_hurt() {
+    // Gate off to reset ADSR
+    poke(SID_V2_CTRL, 0x40);        // pulse waveform, gate=0
+    // Frequency: $0800 — low tone for a dull impact
+    poke(SID_V2_FREQ_LO, 0x00);
+    poke(SID_V2_FREQ_HI, 0x08);
+    // Pulse width: $0800 (50% duty cycle)
+    poke(SID_V2_PW_LO, 0x00);
+    poke(SID_V2_PW_HI, 0x08);
+    // ADSR: A=0 (2ms), D=5 (168ms), S=0, R=0 (6ms)
+    poke(SID_V2_AD, 0x05);
+    poke(SID_V2_SR, 0x00);
+    // Gate on — triggers ADSR: instant peak → 168ms decay to silence
+    poke(SID_V2_CTRL, 0x41);        // pulse + gate
 }
 
 // ---------------------------------------------------------------------------

@@ -360,7 +360,7 @@ pub fn draw_number(x: u8, y: u8, val: u8, color: u8) -> u8 {
 /// `#[used]` prevents the compiler from eliminating this array since
 /// Rust code only takes its address via `addr_of!`, never reads contents.
 #[used]
-static mut SPINNER_HANDLER: [u8; 53] = [
+static mut SPINNER_HANDLER: [u8; 51] = [
     0x8D, 0x36, 0x03,       // STA $0336  (save A)
     0x8E, 0x37, 0x03,       // STX $0337  (save X)
     0xCE, 0x34, 0x03,       // DEC $0334
@@ -369,7 +369,7 @@ static mut SPINNER_HANDLER: [u8; 53] = [
     0x8D, 0x34, 0x03,       // STA $0334
     0xEE, 0x35, 0x03,       // INC $0335
     0xAD, 0x35, 0x03,       // LDA $0335
-    0x29, 0x03,             // AND #3
+    0x29, 0x01,             // AND #1     (2-frame animation)
     0x8D, 0x35, 0x03,       // STA $0335
     0xAA,                   // TAX
     0xBD, 0x00, 0x00,       // LDA $0000,X  [patched: table addr]
@@ -381,8 +381,8 @@ static mut SPINNER_HANDLER: [u8; 53] = [
     0xAE, 0x37, 0x03,       // LDX $0337  (restore X)
     0xAD, 0x36, 0x03,       // LDA $0336  (restore A)
     0x40,                   // RTI
-    // Character table (screen codes):
-    0x2F, 0x2D, 0x2F, 0x2D, // / - / -
+    // Character table: ─ │ crosshair pulse
+    0x40, 0x5D,
 ];
 
 /// Byte offset of the LDA operand (table address) in SPINNER_HANDLER.
@@ -392,7 +392,7 @@ const PATCH_LDA_HI: usize = 0x1E;
 const PATCH_STA_LO: usize = 0x20;
 const PATCH_STA_HI: usize = 0x21;
 /// Byte offset of the character table within SPINNER_HANDLER.
-const HANDLER_TABLE_OFFSET: u16 = 0x31;
+const HANDLER_TABLE_OFFSET: u16 = 0x31; // table at byte 49 (0x31) within array
 
 /// Start the raster interrupt spinner.
 ///

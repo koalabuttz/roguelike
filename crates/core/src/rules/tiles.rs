@@ -69,7 +69,12 @@ mod tests {
 
     #[test]
     fn all_kinds_have_glyph_and_color() {
-        for kind in [TileKind::Wall, TileKind::Structural, TileKind::Floor, TileKind::StairsDown] {
+        for kind in [
+            TileKind::Wall,
+            TileKind::Structural,
+            TileKind::Floor,
+            TileKind::StairsDown,
+        ] {
             let _ = glyph(kind);
             let _ = color(kind);
         }

@@ -98,11 +98,7 @@ impl MicroMap {
         }
         let i = self.idx(x, y);
         let byte = self.tiles[i / 2];
-        if i & 1 == 0 {
-            byte & 0x0F
-        } else {
-            byte >> 4
-        }
+        if i & 1 == 0 { byte & 0x0F } else { byte >> 4 }
     }
 
     pub fn is_walkable(&self, x: u8, y: u8) -> bool {

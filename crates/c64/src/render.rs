@@ -1313,14 +1313,11 @@ pub fn render_seed_input(buf: &[u8], len: u8) {
     }
 }
 
-/// Screen RAM address for the spinner character (row 12, col 19 — centered).
-pub const SPINNER_SCREEN_ADDR: u16 = 0x0400 + 12 * 40 + 19;
-
 /// Render the loading screen shown during level generation.
 pub fn render_loading() {
     c64::clear_screen();
     // "GENERATING..." = 13 chars, centered: x = (40-13)/2 ≈ 13
-    c64::draw_text(13, 11, b"GENERATING...", c64::COLOR_LGREY);
+    c64::draw_text(13, 10, b"GENERATING...", c64::COLOR_LGREY);
 }
 
 /// Render a brief error message overlay for invalid seed codes.

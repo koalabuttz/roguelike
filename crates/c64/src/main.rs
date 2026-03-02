@@ -286,7 +286,7 @@ pub extern "C" fn main() -> isize {
                 current_width = w;
                 current_height = h;
                 render::render_loading();
-                c64::spinner_start(render::SPINNER_SCREEN_ADDR);
+                c64::spinner_start();
                 let state = start_game(seed, w, h);
                 c64::spinner_stop();
                 render::render_all(state);
@@ -325,7 +325,7 @@ pub extern "C" fn main() -> isize {
                     };
                 if will_generate {
                     render::render_loading();
-                    c64::spinner_start(render::SPINNER_SCREEN_ADDR);
+                    c64::spinner_start();
                 }
 
                 let old_depth = state.depth;
@@ -395,7 +395,7 @@ pub extern "C" fn main() -> isize {
                         // Play Again — new random seed, same dimensions
                         let seed = read_cia_seed();
                         render::render_loading();
-                        c64::spinner_start(render::SPINNER_SCREEN_ADDR);
+                        c64::spinner_start();
                         let state = start_game(seed, current_width, current_height);
                         c64::spinner_stop();
                         render::render_all(state);

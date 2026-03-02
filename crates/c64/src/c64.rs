@@ -21,6 +21,14 @@ pub const VIC_RASTER: *mut u8 = 0xD012 as *mut u8;
 pub const VIC_CTRL1: *mut u8 = 0xD011 as *mut u8;
 pub const VIC_IRQ_STATUS: *mut u8 = 0xD019 as *mut u8;
 
+// --- VIC-II sprite registers ---
+pub const VIC_SPR0_X: *mut u8 = 0xD000 as *mut u8;
+pub const VIC_SPR0_Y: *mut u8 = 0xD001 as *mut u8;
+pub const VIC_SPR_ENABLE: *mut u8 = 0xD015 as *mut u8;
+pub const VIC_SPR0_COLOR: *mut u8 = 0xD027 as *mut u8;
+/// Sprite 0 data pointer (last 8 bytes of screen RAM: $07F8-$07FF)
+pub const SPR0_PTR: *mut u8 = 0x07F8 as *mut u8;
+
 // --- CIA 1 (keyboard + joystick) ---
 pub const CIA1_PA: *mut u8 = 0xDC00 as *mut u8;   // port A: keyboard col / joy2
 pub const CIA1_PB: *const u8 = 0xDC01 as *const u8; // port B: keyboard row / joy1
@@ -338,90 +346,171 @@ pub fn draw_number(x: u8, y: u8, val: u8, color: u8) -> u8 {
 }
 
 // ---------------------------------------------------------------------------
-// Raster interrupt spinner — animates a character during level generation
+// Sprite-based loading spinner — animates a spinning sword during generation
 // ---------------------------------------------------------------------------
 
-/// 6502 machine code for the raster IRQ handler (53 bytes).
+/// Sprite frame data: 8 frames × 64 bytes (63 pixel data + 1 padding).
+/// Designed in Spritemate, singlecolor, color $03 (cyan).
+/// Copied to $0340-$053F at runtime (VIC-II sprite pointers 13-20).
+const SPRITE_DATA: [u8; 512] = [
+    // Frame 0: vertical sword pointing up
+    0x00, 0x18, 0x00, 0x00, 0x3C, 0x00, 0x00, 0x3C,
+    0x00, 0x00, 0x3C, 0x00, 0x00, 0x3C, 0x00, 0x00,
+    0x3C, 0x00, 0x00, 0x3C, 0x00, 0x00, 0x3C, 0x00,
+    0x00, 0x3C, 0x00, 0x00, 0x3C, 0x00, 0x00, 0x3C,
+    0x00, 0x00, 0x3C, 0x00, 0x03, 0xBD, 0xC0, 0x01,
+    0xFF, 0x80, 0x00, 0x7E, 0x00, 0x00, 0x18, 0x00,
+    0x00, 0x18, 0x00, 0x00, 0x18, 0x00, 0x00, 0x18,
+    0x00, 0x00, 0x3C, 0x00, 0x00, 0x18, 0x00, 0x00,
+    // Frame 1: NE diagonal
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x18, 0x00, 0x00, 0x38, 0x00, 0x00, 0x78, 0x00,
+    0x00, 0xF0, 0x00, 0x01, 0xE0, 0x00, 0x03, 0xC0,
+    0x00, 0x07, 0x80, 0x00, 0x0F, 0x00, 0x04, 0x1E,
+    0x00, 0x06, 0x3C, 0x00, 0x03, 0x78, 0x00, 0x01,
+    0xF0, 0x00, 0x01, 0xE0, 0x00, 0x03, 0xF0, 0x00,
+    0x0F, 0xB8, 0x00, 0x0F, 0x0C, 0x00, 0x0F, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // Frame 2: horizontal sword pointing right
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x01,
+    0x80, 0x00, 0x01, 0x80, 0x00, 0x03, 0x00, 0x00,
+    0x43, 0xFF, 0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0x43, 0xFF, 0xFE, 0x03, 0x00, 0x00, 0x01,
+    0x80, 0x00, 0x01, 0x80, 0x00, 0x00, 0x80, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // Frame 3: SE diagonal
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F, 0x00,
+    0x00, 0x0F, 0x0C, 0x00, 0x0F, 0xB8, 0x00, 0x03,
+    0xF0, 0x00, 0x01, 0xE0, 0x00, 0x01, 0xF0, 0x00,
+    0x03, 0x78, 0x00, 0x06, 0x3C, 0x00, 0x04, 0x1E,
+    0x00, 0x00, 0x0F, 0x00, 0x00, 0x07, 0x80, 0x00,
+    0x03, 0xC0, 0x00, 0x01, 0xE0, 0x00, 0x00, 0xF0,
+    0x00, 0x00, 0x78, 0x00, 0x00, 0x38, 0x00, 0x00,
+    0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // Frame 4: vertical sword pointing down
+    0x00, 0x18, 0x00, 0x00, 0x3C, 0x00, 0x00, 0x18,
+    0x00, 0x00, 0x18, 0x00, 0x00, 0x18, 0x00, 0x00,
+    0x18, 0x00, 0x00, 0x7E, 0x00, 0x01, 0xFF, 0x80,
+    0x03, 0xBD, 0xC0, 0x00, 0x3C, 0x00, 0x00, 0x3C,
+    0x00, 0x00, 0x3C, 0x00, 0x00, 0x3C, 0x00, 0x00,
+    0x3C, 0x00, 0x00, 0x3C, 0x00, 0x00, 0x3C, 0x00,
+    0x00, 0x3C, 0x00, 0x00, 0x3C, 0x00, 0x00, 0x3C,
+    0x00, 0x00, 0x3C, 0x00, 0x00, 0x18, 0x00, 0x00,
+    // Frame 5: SW diagonal
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xF0, 0x00, 0x30, 0xF0, 0x00, 0x1D, 0xF0, 0x00,
+    0x0F, 0xC0, 0x00, 0x07, 0x80, 0x00, 0x0F, 0x80,
+    0x00, 0x1E, 0xC0, 0x00, 0x3C, 0x60, 0x00, 0x78,
+    0x20, 0x00, 0xF0, 0x00, 0x01, 0xE0, 0x00, 0x03,
+    0xC0, 0x00, 0x07, 0x80, 0x00, 0x0F, 0x00, 0x00,
+    0x1E, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x18, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // Frame 6: horizontal sword pointing left
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+    0x01, 0x80, 0x00, 0x01, 0x80, 0x00, 0x00, 0xC0,
+    0x7F, 0xFF, 0xC2, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0x7F, 0xFF, 0xC2, 0x00, 0x00, 0xC0, 0x00,
+    0x01, 0x80, 0x00, 0x01, 0x80, 0x00, 0x01, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // Frame 7: NW diagonal
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x00,
+    0x00, 0x1C, 0x00, 0x00, 0x1E, 0x00, 0x00, 0x0F,
+    0x00, 0x00, 0x07, 0x80, 0x00, 0x03, 0xC0, 0x00,
+    0x01, 0xE0, 0x00, 0x00, 0xF0, 0x00, 0x00, 0x78,
+    0x20, 0x00, 0x3C, 0x60, 0x00, 0x1E, 0xC0, 0x00,
+    0x0F, 0x80, 0x00, 0x07, 0x80, 0x00, 0x0F, 0xC0,
+    0x00, 0x1D, 0xF0, 0x00, 0x30, 0xF0, 0x00, 0x00,
+    0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
+
+/// Base address for sprite data in VIC bank 0.
+const SPRITE_BASE_ADDR: u16 = 0x0340;
+/// VIC-II sprite pointer value for first frame ($0340 / 64 = 13).
+const SPRITE_BASE_PTR: u8 = (SPRITE_BASE_ADDR / 64) as u8; // 13
+
+/// 6502 machine code for the raster IRQ handler (48 bytes).
 ///
-/// Animates a spinner character at a fixed screen position. All state is
-/// stored at absolute addresses in the free datasette area ($0334-$0337):
-///   - $0334: frame counter (update every 8th frame)
-///   - $0335: spinner index (0-3)
+/// Cycles sprite 0's data pointer through 8 frames every 6th VBlank
+/// (~120ms per frame at 50Hz, full rotation ≈ 960ms).
+///
+/// State at absolute addresses ($0334-$0337):
+///   - $0334: frame counter (decrements each VBlank, reloads to 6)
+///   - $0335: sprite frame index (0-7)
 ///   - $0336: saved A register
 ///   - $0337: saved X register
 ///
-/// Register save/restore uses absolute memory instead of the hardware stack
-/// to minimize stack pressure during deep map-generation call chains.
-///
-/// Two addresses are patched at runtime by `spinner_start()`:
-///   - Offset 0x1D-0x1E: address of the character table (LDA abs,X)
-///   - Offset 0x20-0x21: screen RAM position to write (STA abs)
-///
-/// `#[used]` prevents the compiler from eliminating this array since
-/// Rust code only takes its address via `addr_of!`, never reads contents.
+/// No runtime patching needed — all addresses are compile-time constants.
 #[used]
-static mut SPINNER_HANDLER: [u8; 51] = [
-    0x8D, 0x36, 0x03,       // STA $0336  (save A)
-    0x8E, 0x37, 0x03,       // STX $0337  (save X)
-    0xCE, 0x34, 0x03,       // DEC $0334
-    0xD0, 0x17,             // BNE +23 → offset 0x22 (ack)
-    0xA9, 0x08,             // LDA #8
-    0x8D, 0x34, 0x03,       // STA $0334
-    0xEE, 0x35, 0x03,       // INC $0335
-    0xAD, 0x35, 0x03,       // LDA $0335
-    0x29, 0x01,             // AND #1     (2-frame animation)
-    0x8D, 0x35, 0x03,       // STA $0335
-    0xAA,                   // TAX
-    0xBD, 0x00, 0x00,       // LDA $0000,X  [patched: table addr]
-    0x8D, 0x00, 0x00,       // STA $0000    [patched: screen addr]
+static SPINNER_HANDLER: [u8; 48] = [
+    0x8D, 0x36, 0x03,       // 00: STA $0336  (save A)
+    0x8E, 0x37, 0x03,       // 03: STX $0337  (save X)
+    0xCE, 0x34, 0x03,       // 06: DEC $0334  (frame counter)
+    0xD0, 0x16,             // 09: BNE +22 → offset 0x21 (ack)
+    0xA9, 0x06,             // 0B: LDA #6     (reload counter)
+    0x8D, 0x34, 0x03,       // 0D: STA $0334
+    0xAD, 0x35, 0x03,       // 10: LDA $0335  (current frame)
+    0x18,                   // 13: CLC
+    0x69, 0x01,             // 14: ADC #1
+    0x29, 0x07,             // 16: AND #7     (wrap 0-7)
+    0x8D, 0x35, 0x03,       // 18: STA $0335
+    0x18,                   // 1B: CLC
+    0x69, 0x0D,             // 1C: ADC #13    (base pointer: $0340/64)
+    0x8D, 0xF8, 0x07,       // 1E: STA $07F8  (sprite 0 pointer)
     // ack:
-    0xA9, 0xFF,             // LDA #$FF
-    0x8D, 0x19, 0xD0,       // STA $D019
-    0xAD, 0x0D, 0xDC,       // LDA $DC0D
-    0xAE, 0x37, 0x03,       // LDX $0337  (restore X)
-    0xAD, 0x36, 0x03,       // LDA $0336  (restore A)
-    0x40,                   // RTI
-    // Character table: ─ │ crosshair pulse
-    0x40, 0x5D,
+    0xA9, 0xFF,             // 21: LDA #$FF
+    0x8D, 0x19, 0xD0,       // 23: STA $D019  (clear VIC-II IRQ)
+    0xAD, 0x0D, 0xDC,       // 26: LDA $DC0D  (ack CIA)
+    0xAE, 0x37, 0x03,       // 29: LDX $0337  (restore X)
+    0xAD, 0x36, 0x03,       // 2C: LDA $0336  (restore A)
+    0x40,                   // 2F: RTI
 ];
 
-/// Byte offset of the LDA operand (table address) in SPINNER_HANDLER.
-const PATCH_LDA_LO: usize = 0x1D;
-const PATCH_LDA_HI: usize = 0x1E;
-/// Byte offset of the STA operand (screen address) in SPINNER_HANDLER.
-const PATCH_STA_LO: usize = 0x20;
-const PATCH_STA_HI: usize = 0x21;
-/// Byte offset of the character table within SPINNER_HANDLER.
-const HANDLER_TABLE_OFFSET: u16 = 0x31; // table at byte 49 (0x31) within array
-
-/// Start the raster interrupt spinner.
+/// Start the sprite-based raster interrupt spinner.
 ///
-/// Installs a VIC-II raster IRQ handler that animates a spinner character
-/// at the given screen RAM address. No SEI/CLI trampolines needed:
-/// after init_hardware(), the CPU already has I=0 (interrupts allowed)
-/// and all sources are disabled, so we just enable the VIC raster source.
+/// Copies sprite frame data to $0340-$053F (VIC bank 0), sets up sprite 0,
+/// and installs a VIC-II raster IRQ handler that cycles through 8 frames.
 ///
-/// Safety: disabling the source in $D01A deasserts the IRQ line immediately,
-/// so updating $FFFE/$FFFF before enabling the source is race-free.
+/// Screen RAM rows 0-7 are temporarily overwritten with sprite data;
+/// color RAM for those rows is set to black so the garbage is invisible.
+/// The full screen is redrawn after generation completes.
+///
+/// No SEI/CLI needed: after init_hardware() the CPU I flag is already clear
+/// and all IRQ sources are disabled. Disabling the source in $D01A deasserts
+/// the IRQ line immediately, making vector updates race-free.
 #[inline(never)]
-pub fn spinner_start(screen_addr: u16) {
+pub fn spinner_start() {
     unsafe {
+        // Copy 512 bytes of sprite frame data to $0340-$053F
+        let src = SPRITE_DATA.as_ptr();
+        let dst = SPRITE_BASE_ADDR as *mut u8;
+        for i in 0..512u16 {
+            write_volatile(dst.add(i as usize), *src.add(i as usize));
+        }
+
+        // Zero color RAM for screen rows 0-7 so overwritten screen chars
+        // are invisible (black on black). Rows 0-7 = 320 bytes at $D800.
+        let color_base = COLOR_RAM;
+        for i in 0..320u16 {
+            write_volatile(color_base.add(i as usize), COLOR_BLACK);
+        }
+
+        // Configure sprite 0
+        poke(VIC_SPR0_X, 168);    // centered on text (pixel 168+12=180)
+        poke(VIC_SPR0_Y, 146);    // row 12, below "GENERATING..." at row 10
+        poke(VIC_SPR0_COLOR, COLOR_CYAN);
+        poke(SPR0_PTR, SPRITE_BASE_PTR); // initial frame
+        poke(VIC_SPR_ENABLE, 0x01);      // enable sprite 0
+
         // Initialize spinner state
-        write_volatile(0x0334 as *mut u8, 8);  // frame counter
-        write_volatile(0x0335 as *mut u8, 0);  // spinner index
-
-        // Patch handler: character table address
-        let handler_addr = core::ptr::addr_of!(SPINNER_HANDLER) as u16;
-        let table_addr = handler_addr + HANDLER_TABLE_OFFSET;
-        SPINNER_HANDLER[PATCH_LDA_LO] = (table_addr & 0xFF) as u8;
-        SPINNER_HANDLER[PATCH_LDA_HI] = (table_addr >> 8) as u8;
-
-        // Patch handler: screen write address
-        SPINNER_HANDLER[PATCH_STA_LO] = (screen_addr & 0xFF) as u8;
-        SPINNER_HANDLER[PATCH_STA_HI] = (screen_addr >> 8) as u8;
+        write_volatile(0x0334 as *mut u8, 6);  // frame counter
+        write_volatile(0x0335 as *mut u8, 0);  // frame index
 
         // Point hardware IRQ vector to our handler
-        // Safe: no IRQ sources enabled yet, so no IRQ can fire mid-update
+        let handler_addr = core::ptr::addr_of!(SPINNER_HANDLER) as u16;
         write_volatile(0xFFFE as *mut u8, (handler_addr & 0xFF) as u8);
         write_volatile(0xFFFF as *mut u8, (handler_addr >> 8) as u8);
 
@@ -436,7 +525,6 @@ pub fn spinner_start(screen_addr: u16) {
         let _ = peek(CIA2_ICR as *const u8);
 
         // Enable VIC-II raster interrupt — IRQs start firing immediately
-        // (CPU I flag is already 0 from KERNAL init, never changed)
         poke(VIC_IRQ_MASK, 0x01);
     }
 }
@@ -455,6 +543,9 @@ pub fn spinner_stop() {
     poke(VIC_IRQ_STATUS, 0xFF);
     let _ = peek(CIA1_ICR as *const u8);
     let _ = peek(CIA2_ICR as *const u8);
+
+    // Disable sprite 0
+    poke(VIC_SPR_ENABLE, 0x00);
 
     // Restore IRQ vector to safe RTI stub
     // Safe: source disabled above, no IRQ can fire mid-update

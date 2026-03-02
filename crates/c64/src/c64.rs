@@ -19,6 +19,7 @@ pub const VIC_BORDER: *mut u8 = 0xD020 as *mut u8;
 pub const VIC_BG: *mut u8 = 0xD021 as *mut u8;
 pub const VIC_RASTER: *mut u8 = 0xD012 as *mut u8;
 pub const VIC_CTRL1: *mut u8 = 0xD011 as *mut u8;
+pub const VIC_CTRL2: *mut u8 = 0xD016 as *mut u8;
 pub const VIC_IRQ_STATUS: *mut u8 = 0xD019 as *mut u8;
 
 // --- VIC-II sprite registers ---
@@ -552,5 +553,91 @@ pub fn spinner_stop() {
     unsafe {
         write_volatile(0xFFFE as *mut u8, 0x00); // $E000 low
         write_volatile(0xFFFF as *mut u8, 0xE0); // $E000 high
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Screen shake — brief horizontal jolt on player attack via raster IRQ
+// ---------------------------------------------------------------------------
+
+/// Number of VBlank frames the screen shake lasts.
+/// With alternating pattern: ceil(N/2) frames of visible shift.
+const SHAKE_FRAMES: u8 = 4;
+
+/// 6502 machine code for the screen shake IRQ handler (59 bytes).
+///
+/// Alternates VIC-II XSCROLL ($D016 bits 0-2) between 2 pixels and 0
+/// each VBlank, creating a brief horizontal screen jolt. Auto-stops
+/// after the frame counter expires: restores $D016, disables raster
+/// IRQ, and resets the IRQ vector to the RTI stub at $E000.
+///
+/// State at absolute addresses (shared save slots with spinner — they
+/// never run simultaneously):
+///   - $0336: saved A register
+///   - $0337: saved X register
+///   - $0338: frame counter (decremented each VBlank, 0 = done)
+#[used]
+static SHAKE_HANDLER: [u8; 59] = [
+    0x8D, 0x36, 0x03,       // 00: STA $0336  (save A)
+    0x8E, 0x37, 0x03,       // 03: STX $0337  (save X)
+    0xAE, 0x38, 0x03,       // 06: LDX $0338  (load counter)
+    0xCA,                    // 09: DEX         (counter--)
+    0x8E, 0x38, 0x03,       // 0A: STX $0338  (store counter)
+    0xF0, 0x18,              // 0D: BEQ +24 → stop (offset 0x27)
+    0x8A,                    // 0F: TXA         (A = counter)
+    0x29, 0x01,              // 10: AND #$01    (odd = shift, even = center)
+    0x0A,                    // 12: ASL A       (0 or 2)
+    0x09, 0x08,              // 13: ORA #$08    (CSEL=1: 40 columns)
+    0x8D, 0x16, 0xD0,       // 15: STA $D016   (apply XSCROLL)
+    // ack:
+    0xA9, 0xFF,              // 18: LDA #$FF
+    0x8D, 0x19, 0xD0,       // 1A: STA $D019   (clear VIC-II IRQ)
+    0xAD, 0x0D, 0xDC,       // 1D: LDA $DC0D   (ack CIA)
+    0xAE, 0x37, 0x03,       // 20: LDX $0337   (restore X)
+    0xAD, 0x36, 0x03,       // 23: LDA $0336   (restore A)
+    0x40,                    // 26: RTI
+    // stop:
+    0xA9, 0x08,              // 27: LDA #$08
+    0x8D, 0x16, 0xD0,       // 29: STA $D016   (restore XSCROLL=0)
+    0xA9, 0x00,              // 2C: LDA #$00
+    0x8D, 0x1A, 0xD0,       // 2E: STA $D01A   (disable raster IRQ)
+    0x8D, 0xFE, 0xFF,       // 31: STA $FFFE   (IRQ vector lo = $00)
+    0xA9, 0xE0,              // 34: LDA #$E0
+    0x8D, 0xFF, 0xFF,       // 36: STA $FFFF   (IRQ vector hi = $E0)
+    0xD0, 0xDD,              // 39: BNE -35 → ack (offset 0x18)
+];
+
+/// Start a screen shake effect using VIC-II horizontal fine scroll.
+///
+/// Installs a raster IRQ handler that alternates XSCROLL between 0 and 2
+/// pixels for [`SHAKE_FRAMES`] vblanks, creating a brief screen-jolt
+/// effect. The handler auto-stops: restores $D016, disables the raster
+/// IRQ source, and resets the IRQ vector when the counter expires.
+///
+/// Safe to call during an active shake (resets the counter).
+/// Must not overlap with spinner (they share register save slots).
+#[inline(never)]
+pub fn shake_start() {
+    unsafe {
+        // Set frame counter
+        write_volatile(0x0338 as *mut u8, SHAKE_FRAMES);
+
+        // Point hardware IRQ vector to shake handler
+        let handler_addr = core::ptr::addr_of!(SHAKE_HANDLER) as u16;
+        write_volatile(0xFFFE as *mut u8, (handler_addr & 0xFF) as u8);
+        write_volatile(0xFFFF as *mut u8, (handler_addr >> 8) as u8);
+
+        // Configure VIC-II raster interrupt at line 251 (vblank)
+        poke(VIC_RASTER, 251);
+        let ctrl1 = peek(VIC_CTRL1 as *const u8);
+        poke(VIC_CTRL1, ctrl1 & 0x7F); // clear raster bit 8
+
+        // Acknowledge all pending interrupt sources
+        poke(VIC_IRQ_STATUS, 0xFF);
+        let _ = peek(CIA1_ICR as *const u8);
+        let _ = peek(CIA2_ICR as *const u8);
+
+        // Enable VIC-II raster interrupt — shake starts on next vblank
+        poke(VIC_IRQ_MASK, 0x01);
     }
 }

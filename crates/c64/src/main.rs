@@ -17,6 +17,7 @@ use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 use input::{LookInput, MenuInput};
 use roguelike_core::command::GameCommand;
+use roguelike_core::rules::message::GameEvent;
 use roguelike_core::rules::{balance, seed_code};
 use roguelike_core::tier_micro::game::MicroGameState;
 use roguelike_core::tier_micro::map::TILE_STAIRS_DOWN;
@@ -200,6 +201,23 @@ fn run_end_screen(state: &MicroGameState) -> AppState {
     }
 }
 
+/// Check if any events added this turn include combat (player attacking
+/// or being attacked). `old_total` is the log total from before `step()`.
+fn has_combat(state: &MicroGameState, old_total: u16) -> bool {
+    let new_events = state.log.total().wrapping_sub(old_total);
+    // Only scan events generated this turn (cap at 4 — practical max per step)
+    let limit = if new_events > 4 { 4 } else { new_events as u8 };
+    let mut i: u8 = 0;
+    while i < limit {
+        match state.log.recent(i) {
+            Some(GameEvent::Attack { .. }) | Some(GameEvent::Kill { .. }) => return true,
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
 /// (dx, dy) offsets indexed by Direction discriminant. i8 for sign,
 /// applied via u8 checked arithmetic — no widening to i32.
 const DIR_OFFSETS: [(i8, i8); 8] = [
@@ -329,6 +347,7 @@ pub extern "C" fn main() -> isize {
                 }
 
                 let old_depth = state.depth;
+                let msg_total = state.log.total();
                 let result = state.step(cmd);
 
                 if will_generate {
@@ -337,6 +356,12 @@ pub extern "C" fn main() -> isize {
 
                 if !result.action_taken {
                     continue; // nothing changed, skip rendering
+                }
+
+                // Screen shake on player attack — IRQ handler runs
+                // asynchronously during rendering and input polling
+                if has_combat(state, msg_total) {
+                    c64::shake_start();
                 }
 
                 let diff = unsafe { &mut DIFF };

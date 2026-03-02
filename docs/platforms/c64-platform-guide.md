@@ -29,7 +29,7 @@ core/src/rules/message.rs    →  used directly from core      Rules    GameEven
 core/src/command.rs          →  used directly from core      Rules    GameCommand, Direction enum
 core/src/game_step.rs        →  (PC only, #[cfg(feature = "std")])    GameStep trait
 core/src/tier_micro/map.rs   →  used directly from core      Micro    64×48 mapgen, tile types
-core/src/tier_micro/fov.rs   →  used directly from core      Micro    Bresenham raycasting
+core/src/tier_micro/fov.rs   →  used directly from core      Micro    Iterative shadowcasting
 core/src/tier_micro/entity.rs→  used directly from core      Micro    16-entity fixed array
 core/src/tier_micro/prng.rs  →  used directly from core      Micro    LFSR-16 (Galois LFSR)
 core/src/tier_micro/game.rs  →  used directly from core      Micro    MicroGameState, turn loop
@@ -63,7 +63,7 @@ Production estimate:             ~8 source files             ~1,200 lines (front
    ensuring gameplay feature parity across platforms for micro-tier seeds)
 ```
 
-Note: FOV is no longer C64-specific — Bresenham raycasting lives in
+Note: FOV is no longer C64-specific — iterative shadowcasting lives in
 `core::tier_micro::fov` and is used by ALL platforms running micro-tier seeds.
 
 ---
@@ -111,7 +111,7 @@ directly for input detection.
 llvm-mos's static stack allocation is the key to acceptable performance. For
 it to work optimally:
 
-- **Avoid recursion** — all game algorithms are iterative (Bresenham FOV,
+- **Avoid recursion** — all game algorithms are iterative (shadowcasting FOV,
   greedy AI, room placement loop).
 - **Minimize function pointers** — trait objects and dynamic dispatch prevent
   call graph analysis. Use static dispatch via generics.
@@ -201,7 +201,7 @@ which patterns help and which hurt.
 **Summary:** The C64 crate uses `tier_micro::MicroGameState` directly. The
 C64-specific frontend code (rendering, input, sound, saves) keeps
 C64-appropriate patterns: raw pointer arithmetic, `write_volatile` for hardware
-access. FOV uses the tier micro Bresenham implementation. The core game logic
+access. FOV uses the tier micro iterative shadowcasting implementation. The core game logic
 (entities, combat, AI, mapgen) comes from `roguelike-core::tier_micro` via
 `&mut MicroGameState` — a tradeoff that eliminates ~1,200 lines of C64 engine
 reimplementation in exchange for a testable and recoverable potential

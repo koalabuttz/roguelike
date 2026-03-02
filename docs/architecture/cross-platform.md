@@ -241,7 +241,7 @@ Key milestones in the cross-platform architecture:
 - `SaveBackend` extracted to `crates/saves` — depends only on `roguelike-core`. See [atproto design doc](../design/atproto.md#prerequisite-extract-savebackend-to-cratessaves).
 - `FrameSink` and `render_frame()` extracted to core — `crates/core/src/spectate.rs`. See [atproto spectating design doc](../design/atproto-spectating.md#phase-0-extract-render_frame-and-define-framesink).
 - C64 POC validated — rust-mos toolchain, 13 KB `.PRG`, playable on VICE and c64.emu. See [C64 port proposal](../platforms/c64-port-proposal.md).
-- Tier micro ported to core — `tier_micro/` module with complete no_std game engine (MicroGameState, Bresenham FOV, LFSR-16, fixed arrays)
+- Tier micro ported to core — `tier_micro/` module with complete no_std game engine (MicroGameState, iterative shadowcasting FOV, LFSR-16, fixed arrays)
 - Rules module extracted — `rules/` with pure game rules (damage, balance, items, monster_table, GameEvent, Direction, seed_code, tiles, color)
 - Standard-tier code gated behind `std` feature — `#![cfg_attr(not(feature = "std"), no_std)]`
 - GameStep cross-tier trait — `game_step.rs` with MicroGameStateAdapter, create_game() factory

@@ -1289,9 +1289,9 @@ The existing golden replay tests (`crates/core/tests/`) verify determinism by re
 
 5. **Terrain damage (brambles) — does it scale?** 1 damage on entry is meaningful early-game (player has 30 HP, goblins have 6 HP) but trivial late-game. Should bramble damage scale with floor depth, or remain fixed as a minor tactical consideration?
 
-6. **FOV radius as difficulty lever.** C64 (Bresenham raycasting, CPU budget) uses FOV radius 6; PC uses 8. This doesn't affect the map but does affect gameplay — C64 players see less, making the game harder. Should this be a feature ("hardcore mode" on PC uses radius 6) or a limitation to minimize? FOV radius could be configurable per-platform in `GameConfig`, with the understanding that it doesn't affect seed determinism.
+6. **FOV radius as difficulty lever.** C64 uses FOV radius 8 (same as PC). FOV radius could be configurable per-platform in `GameConfig`, with the understanding that it doesn't affect seed determinism.
 
-7. **FungalGrowth + FOV interaction.** FungalGrowth blocks sight but not movement. The FOV algorithm (shadowcasting on PC, Bresenham on C64) must treat FungalGrowth as opaque — identical to Wall for sight purposes but transparent for movement. This is straightforward (`blocks_sight()` check instead of `== Tile::Wall`), but the C64's Bresenham raycasting must be updated to check the new method.
+7. **FungalGrowth + FOV interaction.** FungalGrowth blocks sight but not movement. The FOV algorithm (shadowcasting on both PC and C64) must treat FungalGrowth as opaque — identical to Wall for sight purposes but transparent for movement. This is straightforward (`blocks_sight()` check instead of `== Tile::Wall`).
 
 8. **Theme-specific monster spawning.** Should themes adjust monster spawn weights? A "Hive" floor could spawn more goblins (swarm theme). A "Frozen Vault" could spawn only trolls (guardians). This would require per-theme spawn weight overrides in `game.toml`, which complicates the spawn system. Alternatively, themes only affect terrain — monster variety comes from depth scaling.
 

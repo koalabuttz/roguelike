@@ -16,7 +16,7 @@ single language, enables shared game logic between the PC and C64 codebases, and
 preserves Rust's type safety and ownership model on an 8-bit platform.
 
 A working proof-of-concept has been built and tested. The POC implements the
-complete game loop — procedural dungeon generation, Bresenham FOV, entity
+complete game loop — procedural dungeon generation, FOV, entity
 system, melee combat, monster AI, PETSCII rendering, keyboard + joystick
 input, and a message log — in **1,898 lines of `no_std` Rust** compiling to a
 **13 KB .PRG binary**. It runs on both c64.emu (Android) and VICE.
@@ -110,7 +110,7 @@ docker run --rm \
 |---------|--------|------------|
 | Inline assembly (`asm!`) | Not supported — no 6502 register constraints in Rust's asm infrastructure | Use C FFI wrappers for hardware access, or use `mos-hardware` crate |
 | `std` library | Not available (bare metal) | `no_std` + `core` only |
-| Floating point | Partial — soft float exists but `f64 as i32` casting has bugs | Integer-only algorithms (Bresenham FOV already avoids FP) |
+| Floating point | Partial — soft float exists but `f64 as i32` casting has bugs | Integer-only algorithms (shadowcasting FOV uses integer slopes) |
 | 128-bit division | LLVM legalization error | Enable LTO (already required) |
 | Dynamic dispatch (trait objects) | Works but expensive — vtable indirection costs ~20 cycles per call | Use static dispatch (generics) exclusively |
 | Recursion | Works but prevents static stack allocation optimization | Avoid — already mitigated by iterative algorithms |
@@ -491,26 +491,20 @@ Key parameters for C64 maps:
 FOV algorithm is part of the tier definition. Within a tier, ALL platforms use
 the same algorithm — no cross-platform divergence.
 
-**Tier micro / compact — Bresenham raycasting** (integer-only) with
-precomputed perimeter table:
+**Tier micro — Iterative shadowcasting** (integer-only, `no_std`) with
+octant-based scanning and an explicit stack (no recursion). Uses `i8`
+numerator/denominator slopes with `i16` cross-multiplication for comparisons.
 
-```rust
-// Precomputed perimeter offsets for radius 6 — 40 ray targets
-const PERIMETER: [(i8, i8); 40] = [
-    (6, 0), (6, 1), (6, 2), (5, 3), (5, 4), (4, 5), (3, 5), (2, 6),
-    // ... (computed at compile time)
-];
-```
-
-Visibility stored as `[u8; 110]` bitfield. Cost: ~150 tile checks per FOV
-recompute = ~7,500 cycles = ~7.5 ms. Imperceptible.
+Visibility stored as bitfield. The algorithm scans 8 octants, tracking shadow
+intervals to skip occluded tiles. Point-to-point LOS (`can_see()`) uses
+Bresenham for fast single-ray checks.
 
 **Tier standard — Recursive shadowcasting** with `f64` slopes and
 `HashSet<(i32,i32)>`. Symmetric (if A sees B, B sees A), handles thin
 diagonal walls cleanly.
 
-When the PC runs a micro-tier seed, it uses Bresenham — the same algorithm as
-the C64. This eliminates the FOV divergence that would otherwise make
+When the PC runs a micro-tier seed, it uses the same iterative shadowcasting
+as the C64. This eliminates the FOV divergence that would otherwise make
 cross-platform seeds produce different tactical experiences. Same seed, same
 tier, same dungeon, same visibility — on every platform.
 
@@ -846,7 +840,7 @@ Depends on:         core (std)            core::tier_micro        core::tier_mic
                     + serde, rand, toml   (via core, std)         + nothing (zero extra deps)
 Entity storage:     Vec or fixed array    fixed array (16)        fixed array (16) (same)
 Map storage:        core's Map (80×40)    tier_micro Map (64×48)  tier_micro Map (64×48) (same)
-FOV:                f64 shadowcasting     Bresenham raycasting    Bresenham raycasting (same)
+FOV:                f64 shadowcasting     iterative shadowcasting iterative shadowcasting (same)
 Pathfinding:        A* (HashMap, std)     greedy chase            greedy chase (same)
 Data loading:       game.toml (runtime)   const ROM tables        const ROM tables (same)
 PRNG:               ChaCha20              LFSR-16                 LFSR-16 (same)
@@ -918,7 +912,7 @@ milestone is shippable independently — v0.4.0 is a complete standalone game.
 
 1. **Add `core/src/tier_micro/` module** — Create the tier micro module with
    `u8` coords, `u8` stats, fixed-size arrays bounded by `MAX_ENTITIES` (16),
-   bitfield visibility storage, `LfsrRng` (Galois LFSR-16), Bresenham FOV,
+   bitfield visibility storage, `LfsrRng` (Galois LFSR-16), iterative shadowcasting FOV,
    greedy chase pathfinding, and spawn mechanics. Move balance constants and
    item and enchantment constants into `core/src/rules/`. Core's existing top-level code
    (i32 types, std collections) remains untouched as tier standard.
@@ -1096,7 +1090,7 @@ micro-tier parameters.
 |---------|--------------|-----------|--------|
 | Map size | 80×40 (configurable) | 64×48 (scrolling 40×21 viewport) | Screen size + UI (§6.1) |
 | FOV radius | 8 tiles | 6 tiles | CPU budget |
-| FOV algorithm | Recursive shadowcasting | Bresenham raycasting | No FP, no recursion |
+| FOV algorithm | Recursive shadowcasting | Iterative shadowcasting | No FP, no recursion |
 | Max rooms | 30 | 12 | Map size |
 | Max entities | 512–1024 | 16 | Memory + CPU |
 | Save format | JSON (serde) | Binary (compact) | Disk space/speed |
@@ -1150,7 +1144,7 @@ micro-tier parameters.
 | **Spawn mechanics** | `core::tier_micro::spawn` / `core::spawn` | Per-tier — placement using SpawnDirective |
 | **Map generation** | `core::tier_micro::map` / `core::map` | Per-tier — same algorithm, tier-specific params |
 | **Entity system** | `core::tier_micro::entity` / `core::entity` | Per-tier — fixed array (micro) vs Vec (standard) |
-| **FOV** | `core::tier_micro::fov` / `core::fov` | Per-tier — Bresenham (micro/compact) vs shadowcasting (standard) |
+| **FOV** | `core::tier_micro::fov` / `core::fov` | Per-tier — iterative shadowcasting (micro) vs recursive shadowcasting (standard) |
 | **AI** | `core::tier_micro::ai` / `core::ai` | Per-tier — greedy chase (micro/compact) vs A* (standard) |
 | **Game loop** | `core::tier_micro::game` / `core::game` | Per-tier — GameState with tier-appropriate types |
 
@@ -1287,7 +1281,7 @@ The main advantages over the cc65 approach:
    in Rust. The C64 will be another frontend in the existing multi-frontend
    architecture (terminal, SSH, MCP, C64).
 2. **Capability tier hierarchy** — `roguelike-core` is organized around
-   capability tiers: tier micro (`u8` coords, LFSR-16, Bresenham FOV, `no_std`)
+   capability tiers: tier micro (`u8` coords, LFSR-16, iterative shadowcasting FOV, `no_std`)
    for C64 and cross-platform play; tier compact (`i16` coords, LFSR-32) for
    GBA; tier standard (`i32` coords, ChaCha20, shadowcasting, `std`) for
    Vita/PC. Each platform compiles its native tier plus all lower tiers. Rules

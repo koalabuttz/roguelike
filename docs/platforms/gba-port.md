@@ -65,7 +65,7 @@ crates/core/src/
   rules/          # Pure functions + constants: damage, balance, items, enchantment,
                   #   seed_code, monster_table, GameEvent — no_std, always compiled
   command.rs      # GameCommand with Direction enum — no Coord dependency, no_std
-  tier_micro/     # u8 coords, u8 stats, LFSR-16, Bresenham FOV, fixed arrays — no_std
+  tier_micro/     # u8 coords, u8 stats, LFSR-16, iterative shadowcasting FOV, fixed arrays — no_std
   tier_compact/   # i16 coords, u8 stats, LFSR-32, Bresenham FOV, fixed arrays — no_std
                   #   (stubs only — types.rs + prng.rs — until GBA port fleshes it out)
   game_step.rs    # #[cfg(feature = "std")] GameStep trait — cross-tier interface
@@ -76,7 +76,7 @@ The three named tiers are:
 
 | Tier | Target | Coord | Stats | Entities | Map size | RNG | FOV | Alloc |
 |------|--------|-------|-------|----------|----------|-----|-----|-------|
-| **micro** | C64 | `u8` | `u8` | 16 | 64×48 | LFSR-16 | Bresenham | `no_std` |
+| **micro** | C64 | `u8` | `u8` | 16 | 64×48 | LFSR-16 | Shadowcasting | `no_std` |
 | **compact** | GBA | `i16` | `u8` | 128 | 128×96 | LFSR-32 | Bresenham | `no_std` |
 | **standard** | Vita/PC | `i32` | `i32` | 512–1024 | 80×40+ | ChaCha20 | Shadowcasting | `std` |
 
@@ -573,7 +573,7 @@ The patterns established here are reusable:
 | Core module | `core::rules` + `core::tier_compact` + `core::tier_micro` | `core::rules` + all tiers | `core::rules` + `core::tier_micro` |
 | Coord / Stat types | `i16` / `u8` | `i32` / `i32` | `u8` / `u8` |
 | RNG | LFSR-32 | ChaCha20 | LFSR-16 |
-| FOV | Bresenham | Shadowcasting | Bresenham |
+| FOV | Bresenham | Shadowcasting | Shadowcasting |
 | `no_std` / `std` | `no_std` (tier compact/micro are `no_std`) | `std` | `no_std` (tier micro is `no_std`) |
 | Containers | Fixed-size arrays (128 entities, 128×96 maps) | `Vec`, `HashMap`, `HashSet` | Fixed-size arrays (16 entities, 64×48 maps) |
 | Compact save format | `postcard` over SRAM | JSON / `postcard` | Custom binary over disk |

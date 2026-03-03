@@ -47,6 +47,8 @@ pub const SID_BASE: *mut u8 = 0xD400 as *mut u8;
 // Voice 1 ($D400-$D406) — player attack SFX
 const SID_V1_FREQ_LO: *mut u8 = 0xD400 as *mut u8;
 const SID_V1_FREQ_HI: *mut u8 = 0xD401 as *mut u8;
+const SID_V1_PW_LO: *mut u8 = 0xD402 as *mut u8;
+const SID_V1_PW_HI: *mut u8 = 0xD403 as *mut u8;
 const SID_V1_CTRL: *mut u8 = 0xD404 as *mut u8;
 const SID_V1_AD: *mut u8 = 0xD405 as *mut u8;
 const SID_V1_SR: *mut u8 = 0xD406 as *mut u8;
@@ -59,6 +61,18 @@ const SID_V2_PW_HI: *mut u8 = 0xD40A as *mut u8;
 const SID_V2_CTRL: *mut u8 = 0xD40B as *mut u8;
 const SID_V2_AD: *mut u8 = 0xD40C as *mut u8;
 const SID_V2_SR: *mut u8 = 0xD40D as *mut u8;
+
+// Voice 3 ($D40E-$D414) — music bass
+const SID_V3_FREQ_LO: *mut u8 = 0xD40E as *mut u8;
+const SID_V3_FREQ_HI: *mut u8 = 0xD40F as *mut u8;
+const SID_V3_CTRL: *mut u8 = 0xD412 as *mut u8;
+const SID_V3_AD: *mut u8 = 0xD413 as *mut u8;
+const SID_V3_SR: *mut u8 = 0xD414 as *mut u8;
+
+// Filter registers ($D415-$D417)
+const SID_FILTER_LO: *mut u8 = 0xD415 as *mut u8;
+const SID_FILTER_HI: *mut u8 = 0xD416 as *mut u8;
+const SID_FILTER_ROUTE: *mut u8 = 0xD417 as *mut u8;
 
 // Volume/filter mode ($D418)
 const SID_VOL: *mut u8 = 0xD418 as *mut u8;
@@ -383,7 +397,12 @@ fn sid_init() {
 ///
 /// Noise waveform at mid-high frequency with instant attack and fast decay.
 /// Gate off→on transition restarts the ADSR envelope each call.
+///
+/// Sets the V1 SFX holdoff counter ($033B) so the music handler won't
+/// overwrite Voice 1 while the SFX is playing.
 pub fn sfx_attack() {
+    // Tell music handler to leave V1 alone for 12 frames (240ms)
+    unsafe { write_volatile(0x033B as *mut u8, SFX_HOLDOFF_V1); }
     // Gate off to reset ADSR (needed if previous sound's gate is still on)
     poke(SID_V1_CTRL, 0x80);        // noise waveform, gate=0
     // Frequency: $2000 — mid-high noise for a sharp hiss
@@ -400,7 +419,12 @@ pub fn sfx_attack() {
 ///
 /// Pulse waveform at low frequency with instant attack and medium decay.
 /// Distinct from attack sound in both pitch and timbre.
+///
+/// Sets the V2 SFX holdoff counter ($033C) so the music handler won't
+/// overwrite Voice 2 while the SFX is playing.
 pub fn sfx_hurt() {
+    // Tell music handler to leave V2 alone for 15 frames (300ms)
+    unsafe { write_volatile(0x033C as *mut u8, SFX_HOLDOFF_V2); }
     // Gate off to reset ADSR
     poke(SID_V2_CTRL, 0x40);        // pulse waveform, gate=0
     // Frequency: $0800 — low tone for a dull impact
@@ -677,23 +701,372 @@ static SHAKE_HANDLER: [u8; 59] = [
     0xD0, 0xDD,              // 39: BNE -35 → ack (offset 0x18)
 ];
 
-/// Start a screen shake effect using VIC-II horizontal fine scroll.
+/// Trigger a screen shake effect.
 ///
-/// Installs a raster IRQ handler that alternates XSCROLL between 0 and 2
-/// pixels for [`SHAKE_FRAMES`] vblanks, creating a brief screen-jolt
-/// effect. The handler auto-stops: restores $D016, disables the raster
-/// IRQ source, and resets the IRQ vector when the counter expires.
+/// Sets the shake frame counter at $0338. The music IRQ handler reads this
+/// counter each VBlank and alternates `$D016` XSCROLL between 0 and 2 pixels,
+/// restoring on expiry.
 ///
-/// Safe to call during an active shake (resets the counter).
-/// Must not overlap with spinner (they share register save slots).
+/// During gameplay the music handler is always active, so no handler swap is
+/// needed — just poke the counter. Safe to call during an active shake
+/// (resets the counter).
 #[inline(never)]
 pub fn shake_start() {
     unsafe {
-        // Set frame counter
         write_volatile(0x0338 as *mut u8, SHAKE_FRAMES);
+    }
+}
 
-        // Point hardware IRQ vector to shake handler
-        let handler_addr = core::ptr::addr_of!(SHAKE_HANDLER) as u16;
+// ---------------------------------------------------------------------------
+// SID ambient music — 3-voice dungeon soundtrack via raster IRQ
+// ---------------------------------------------------------------------------
+//
+// Three triangle-wave voices play a slow A-minor pattern during gameplay:
+//   V3 (bass):  root notes, always active
+//   V1 (lead):  sparse mid-range melody, yielded to attack SFX
+//   V2 (pad):   sustained harmony, yielded to hurt SFX
+//
+// SFX priority: per-voice holdoff counters at $033B/$033C prevent the music
+// handler from overwriting SID registers while a combat SFX is active.
+// When the holdoff expires, the handler reclaims the voice immediately
+// (gate off → set freq/ADSR → gate on) for a clean ADSR restart.
+
+/// Music ADSR: A=8 (100ms attack), D=0.
+const MUSIC_AD: u8 = 0x80;
+/// Music ADSR: S=F (max sustain), R=6 (300ms release).
+const MUSIC_SR: u8 = 0xF6;
+/// V2/V3 waveform: triangle + gate.
+const MUSIC_TRI_ON: u8 = 0x11;
+/// V2/V3 waveform: triangle, gate off (for ADSR restart).
+const MUSIC_TRI_OFF: u8 = 0x10;
+/// V1 waveform: pulse + gate (richer timbre for lead voice).
+const MUSIC_PULSE_ON: u8 = 0x41;
+/// V1 waveform: pulse, gate off (for ADSR restart).
+const MUSIC_PULSE_OFF: u8 = 0x40;
+/// Ticks per note step (1.0s at 50 Hz PAL).
+const MUSIC_TEMPO: u8 = 50;
+/// Number of notes in the loop.
+const MUSIC_SEQ_LEN: u8 = 32;
+
+/// Frames to hold off music on V1 after attack SFX (240ms at 50 Hz).
+/// Attack SFX ADSR: A=0, D=3 (72ms) — holdoff of 12 frames gives margin.
+const SFX_HOLDOFF_V1: u8 = 12;
+/// Frames to hold off music on V2 after hurt SFX (300ms at 50 Hz).
+/// Hurt SFX ADSR: A=0, D=5 (168ms) — holdoff of 15 frames gives margin.
+const SFX_HOLDOFF_V2: u8 = 15;
+
+/// SID frequency lookup table — PAL clock (985248 Hz).
+///
+/// freq_register = note_hz × 16777216 / 985248
+///
+/// Each entry is (freq_lo, freq_hi). Notes span 3 octaves:
+///   Bass (V3):  E2–Bb2  (82–117 Hz)  — triangle, LP filtered
+///   Pad  (V2):  B2–E3   (123–165 Hz) — triangle
+///   Lead (V1):  A3–E4   (220–330 Hz) — pulse wave
+const NOTE_E2: (u8, u8)  = (0x7B, 0x05);   //  82.41 Hz  bass
+const NOTE_F2: (u8, u8)  = (0xCF, 0x05);   //  87.31 Hz  bass
+const NOTE_A2: (u8, u8)  = (0x51, 0x07);   // 110.00 Hz  bass
+const NOTE_BB2: (u8, u8) = (0xC1, 0x07);   // 116.54 Hz  bass (Phrygian bII)
+const NOTE_B2: (u8, u8)  = (0x37, 0x08);   // 123.47 Hz  pad
+const NOTE_C3: (u8, u8)  = (0xB4, 0x08);   // 130.81 Hz  pad
+const NOTE_D3: (u8, u8)  = (0xC4, 0x09);   // 146.83 Hz  pad
+const NOTE_E3: (u8, u8)  = (0xF7, 0x0A);   // 164.81 Hz  pad
+const NOTE_A3: (u8, u8)  = (0xA3, 0x0E);   // 220.00 Hz  lead
+const NOTE_B3: (u8, u8)  = (0x6D, 0x10);   // 246.94 Hz  lead
+const NOTE_C4: (u8, u8)  = (0x68, 0x11);   // 261.63 Hz  lead
+const NOTE_D4: (u8, u8)  = (0x89, 0x13);   // 293.66 Hz  lead
+const NOTE_E4: (u8, u8)  = (0xEE, 0x15);   // 329.63 Hz  lead
+
+/// Note sequence tables: 6 arrays × 32 entries, copied to $0340-$03FF.
+///
+/// 32-step A Phrygian ambient: staggered voice movement, 32s loop (1s/step).
+/// Voices span 3 octaves for separation — no block-chord lockstep.
+///
+/// Design: bass drones (5 changes), pad drifts (6 changes), lead floats (10
+/// changes). At most ONE voice changes per step (except step 30 return).
+///
+/// Step  V3(bass)  V2(pad)   V1(lead)  Sonority
+/// ───── ──────── ──────── ──────── ──────────────────
+///  0    A2        E3        E4        Am open 5ths
+///  1    A2        E3        E4          │
+///  2    A2        E3        E4          │
+///  3    A2        E3        D4        lead descends
+///  4    A2        E3        C4        Am spread
+///  5    A2        E3        C4          │
+///  6    A2        E3        C4          │
+///  7    A2        C3        C4        pad drops (darker)
+///  8    A2        C3        B3        lead steps down
+///  9    A2        C3        A3        Am close (root-m3-8va)
+/// 10    A2        C3        A3          │
+/// 11    A2        C3        A3          │
+/// 12    F2        C3        A3        bass → F (bVI)
+/// 13    F2        C3        A3          │
+/// 14    F2        C3        C4        lead rises
+/// 15    F2        C3        C4          │
+/// 16    F2        C3        C4          │
+/// 17    E2        C3        C4        bass → E
+/// 18    E2        C3        B3        lead steps down
+/// 19    E2        B2        B3        pad → B (Em open)
+/// 20    E2        B2        E4        lead leaps to E4
+/// 21    E2        B2        E4          │
+/// 22    E2        B2        D4        lead → D (Em7 color)
+/// 23    E2        B2        D4          │
+/// 24    E2        C3        D4        pad rises
+/// 25    A2        C3        D4        bass home
+/// 26    A2        C3        C4        lead steps down
+/// 27    A2        D3        C4        pad → D (Dm color)
+/// 28    BB2       D3        D4        bass Bb — Phrygian bII
+/// 29    A2        D3        D4        bass resolves
+/// 30    A2        E3        E4        pad+lead return
+/// 31    A2        E3        E4        (= step 0, seamless)
+const NOTE_TABLES: [u8; 192] = [
+    // $0340: V3 freq_lo (bass) — 32 entries
+    NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   //  0: Am
+    NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   //  4: Am
+    NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   //  8: Am
+    NOTE_F2.0,  NOTE_F2.0,  NOTE_F2.0,  NOTE_F2.0,   // 12: F (bVI)
+    NOTE_F2.0,  NOTE_E2.0,  NOTE_E2.0,  NOTE_E2.0,   // 16: F→E
+    NOTE_E2.0,  NOTE_E2.0,  NOTE_E2.0,  NOTE_E2.0,   // 20: Em
+    NOTE_E2.0,  NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   // 24: →Am
+    NOTE_BB2.0, NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   // 28: Bb→Am
+    // $0360: V3 freq_hi (bass) — 32 entries
+    NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   //  0: Am
+    NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   //  4: Am
+    NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   //  8: Am
+    NOTE_F2.1,  NOTE_F2.1,  NOTE_F2.1,  NOTE_F2.1,   // 12: F
+    NOTE_F2.1,  NOTE_E2.1,  NOTE_E2.1,  NOTE_E2.1,   // 16: F→E
+    NOTE_E2.1,  NOTE_E2.1,  NOTE_E2.1,  NOTE_E2.1,   // 20: Em
+    NOTE_E2.1,  NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   // 24: →Am
+    NOTE_BB2.1, NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   // 28: Bb→Am
+    // $0380: V1 freq_lo (lead, pulse wave) — 32 entries
+    NOTE_E4.0,  NOTE_E4.0,  NOTE_E4.0,  NOTE_D4.0,   //  0: E4 hold → D4
+    NOTE_C4.0,  NOTE_C4.0,  NOTE_C4.0,  NOTE_C4.0,   //  4: C4 hold
+    NOTE_B3.0,  NOTE_A3.0,  NOTE_A3.0,  NOTE_A3.0,   //  8: B3→A3
+    NOTE_A3.0,  NOTE_A3.0,  NOTE_C4.0,  NOTE_C4.0,   // 12: A3→C4
+    NOTE_C4.0,  NOTE_C4.0,  NOTE_B3.0,  NOTE_B3.0,   // 16: C4→B3
+    NOTE_E4.0,  NOTE_E4.0,  NOTE_D4.0,  NOTE_D4.0,   // 20: E4→D4
+    NOTE_D4.0,  NOTE_D4.0,  NOTE_C4.0,  NOTE_C4.0,   // 24: D4→C4
+    NOTE_D4.0,  NOTE_D4.0,  NOTE_E4.0,  NOTE_E4.0,   // 28: D4→E4
+    // $03A0: V1 freq_hi (lead, pulse wave) — 32 entries
+    NOTE_E4.1,  NOTE_E4.1,  NOTE_E4.1,  NOTE_D4.1,   //  0: E4 hold → D4
+    NOTE_C4.1,  NOTE_C4.1,  NOTE_C4.1,  NOTE_C4.1,   //  4: C4 hold
+    NOTE_B3.1,  NOTE_A3.1,  NOTE_A3.1,  NOTE_A3.1,   //  8: B3→A3
+    NOTE_A3.1,  NOTE_A3.1,  NOTE_C4.1,  NOTE_C4.1,   // 12: A3→C4
+    NOTE_C4.1,  NOTE_C4.1,  NOTE_B3.1,  NOTE_B3.1,   // 16: C4→B3
+    NOTE_E4.1,  NOTE_E4.1,  NOTE_D4.1,  NOTE_D4.1,   // 20: E4→D4
+    NOTE_D4.1,  NOTE_D4.1,  NOTE_C4.1,  NOTE_C4.1,   // 24: D4→C4
+    NOTE_D4.1,  NOTE_D4.1,  NOTE_E4.1,  NOTE_E4.1,   // 28: D4→E4
+    // $03C0: V2 freq_lo (pad, triangle) — 32 entries
+    NOTE_E3.0,  NOTE_E3.0,  NOTE_E3.0,  NOTE_E3.0,   //  0: E3 hold
+    NOTE_E3.0,  NOTE_E3.0,  NOTE_E3.0,  NOTE_C3.0,   //  4: →C3
+    NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,   //  8: C3 hold
+    NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,   // 12: C3 hold
+    NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,  NOTE_B2.0,   // 16: →B2
+    NOTE_B2.0,  NOTE_B2.0,  NOTE_B2.0,  NOTE_B2.0,   // 20: B2 hold
+    NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,  NOTE_D3.0,   // 24: C3→D3
+    NOTE_D3.0,  NOTE_D3.0,  NOTE_E3.0,  NOTE_E3.0,   // 28: D3→E3
+    // $03E0: V2 freq_hi (pad, triangle) — 32 entries
+    NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,   //  0: E3 hold
+    NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,  NOTE_C3.1,   //  4: →C3
+    NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,   //  8: C3 hold
+    NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,   // 12: C3 hold
+    NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,  NOTE_B2.1,   // 16: →B2
+    NOTE_B2.1,  NOTE_B2.1,  NOTE_B2.1,  NOTE_B2.1,   // 20: B2 hold
+    NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,  NOTE_D3.1,   // 24: C3→D3
+    NOTE_D3.1,  NOTE_D3.1,  NOTE_E3.1,  NOTE_E3.1,   // 28: D3→E3
+];
+
+/// 6502 machine code for the combined music + shake IRQ handler (210 bytes).
+///
+/// Runs every VBlank (50 Hz). Handles screen shake (reads $0338), SFX holdoff
+/// voice reclaim ($033B/$033C), and 3-voice music stepping ($0339/$033A).
+///
+/// State at absolute addresses:
+///   - $0336: saved A register (shared with spinner/shake)
+///   - $0337: saved X register (shared with spinner/shake)
+///   - $0338: shake frame counter (0 = inactive)
+///   - $0339: music tick counter (decrements each VBlank)
+///   - $033A: note sequence index (0-15)
+///   - $033B: V1 SFX holdoff counter (0 = music owns voice)
+///   - $033C: V2 SFX holdoff counter (0 = music owns voice)
+///   - $0340-$03FF: note frequency tables (6 × 32 bytes)
+#[used]
+static MUSIC_HANDLER: [u8; 210] = [
+    // === Save registers ===
+    0x8D, 0x36, 0x03,       // 00: STA $0336      (save A)
+    0x8E, 0x37, 0x03,       // 03: STX $0337      (save X)
+
+    // === Shake section ===
+    0xAD, 0x38, 0x03,       // 06: LDA $0338      (shake counter)
+    0xF0, 0x13,              // 09: BEQ +19 → .no_shake (0x1E)
+    0x38,                    // 0B: SEC
+    0xE9, 0x01,              // 0C: SBC #1         (counter--)
+    0x8D, 0x38, 0x03,       // 0E: STA $0338
+    0xF0, 0x06,              // 11: BEQ +6 → .shk_rest (0x19)
+    0x29, 0x01,              // 13: AND #$01       (odd = shift)
+    0x0A,                    // 15: ASL A          (0 or 2)
+    0x09, 0x08,              // 16: ORA #$08       (CSEL=1)
+    0x2C,                    // 18: .byte $2C      (BIT abs — skip LDA)
+    // .shk_rest:
+    0xA9, 0x08,              // 19: LDA #$08       (XSCROLL=0, CSEL=1)
+    0x8D, 0x16, 0xD0,       // 1B: STA $D016
+
+    // === V1 holdoff — decrement, reclaim on expiry ===
+    // .no_shake:
+    0xAD, 0x3B, 0x03,       // 1E: LDA $033B      (V1 holdoff)
+    0xF0, 0x2B,              // 21: BEQ +43 → .v1_done (0x4E)
+    0x38,                    // 23: SEC
+    0xE9, 0x01,              // 24: SBC #1
+    0x8D, 0x3B, 0x03,       // 26: STA $033B
+    0xD0, 0x23,              // 29: BNE +35 → .v1_done (0x4E)
+    // Reclaim V1: gate off → freq + ADSR → gate on
+    0xA9, MUSIC_PULSE_OFF,   // 2B: LDA #$40       (pulse, gate off)
+    0x8D, 0x04, 0xD4,       // 2D: STA $D404
+    0xAE, 0x3A, 0x03,       // 30: LDX $033A      (note index)
+    0xBD, 0x80, 0x03,       // 33: LDA $0380,X    (V1 freq_lo)
+    0x8D, 0x00, 0xD4,       // 36: STA $D400
+    0xBD, 0xA0, 0x03,       // 39: LDA $03A0,X    (V1 freq_hi)
+    0x8D, 0x01, 0xD4,       // 3C: STA $D401
+    0xA9, MUSIC_AD,          // 3F: LDA #$80       (AD: A=8, D=0)
+    0x8D, 0x05, 0xD4,       // 41: STA $D405
+    0xA9, MUSIC_SR,          // 44: LDA #$F6       (SR: S=F, R=6)
+    0x8D, 0x06, 0xD4,       // 46: STA $D406
+    0xA9, MUSIC_PULSE_ON,    // 49: LDA #$41       (pulse + gate on)
+    0x8D, 0x04, 0xD4,       // 4B: STA $D404
+
+    // === V2 holdoff — decrement, reclaim on expiry ===
+    // .v1_done:
+    0xAD, 0x3C, 0x03,       // 4E: LDA $033C      (V2 holdoff)
+    0xF0, 0x2B,              // 51: BEQ +43 → .v2_done (0x7E)
+    0x38,                    // 53: SEC
+    0xE9, 0x01,              // 54: SBC #1
+    0x8D, 0x3C, 0x03,       // 56: STA $033C
+    0xD0, 0x23,              // 59: BNE +35 → .v2_done (0x7E)
+    // Reclaim V2: gate off → freq + ADSR → gate on
+    0xA9, MUSIC_TRI_OFF,     // 5B: LDA #$10       (tri, gate off)
+    0x8D, 0x0B, 0xD4,       // 5D: STA $D40B
+    0xAE, 0x3A, 0x03,       // 60: LDX $033A      (note index)
+    0xBD, 0xC0, 0x03,       // 63: LDA $03C0,X    (V2 freq_lo)
+    0x8D, 0x07, 0xD4,       // 66: STA $D407
+    0xBD, 0xE0, 0x03,       // 69: LDA $03E0,X    (V2 freq_hi)
+    0x8D, 0x08, 0xD4,       // 6C: STA $D408
+    0xA9, MUSIC_AD,          // 6F: LDA #$80       (AD)
+    0x8D, 0x0C, 0xD4,       // 71: STA $D40C
+    0xA9, MUSIC_SR,          // 74: LDA #$F6       (SR)
+    0x8D, 0x0D, 0xD4,       // 76: STA $D40D
+    0xA9, MUSIC_TRI_ON,      // 79: LDA #$11       (tri + gate on)
+    0x8D, 0x0B, 0xD4,       // 7B: STA $D40B
+
+    // === Music tick — step through note sequence ===
+    // .v2_done:
+    0xCE, 0x39, 0x03,       // 7E: DEC $0339      (tick counter)
+    0xD0, 0x40,              // 81: BNE +64 → .ack (0xC3)
+    // Tick expired — reload counter and update note frequencies
+    0xA9, MUSIC_TEMPO,       // 83: LDA #50        (tempo reload)
+    0x8D, 0x39, 0x03,       // 85: STA $0339
+    0xAE, 0x3A, 0x03,       // 88: LDX $033A      (note index)
+    // V3: always update
+    0xBD, 0x40, 0x03,       // 8B: LDA $0340,X    (V3 freq_lo)
+    0x8D, 0x0E, 0xD4,       // 8E: STA $D40E
+    0xBD, 0x60, 0x03,       // 91: LDA $0360,X    (V3 freq_hi)
+    0x8D, 0x0F, 0xD4,       // 94: STA $D40F
+    // V1: update only if holdoff == 0
+    0xAD, 0x3B, 0x03,       // 97: LDA $033B
+    0xD0, 0x0C,              // 9A: BNE +12 → .skip_v1 (0xA8)
+    0xBD, 0x80, 0x03,       // 9C: LDA $0380,X    (V1 freq_lo)
+    0x8D, 0x00, 0xD4,       // 9F: STA $D400
+    0xBD, 0xA0, 0x03,       // A2: LDA $03A0,X    (V1 freq_hi)
+    0x8D, 0x01, 0xD4,       // A5: STA $D401
+    // V2: update only if holdoff == 0
+    // .skip_v1:
+    0xAD, 0x3C, 0x03,       // A8: LDA $033C
+    0xD0, 0x0C,              // AB: BNE +12 → .skip_v2 (0xB9)
+    0xBD, 0xC0, 0x03,       // AD: LDA $03C0,X    (V2 freq_lo)
+    0x8D, 0x07, 0xD4,       // B0: STA $D407
+    0xBD, 0xE0, 0x03,       // B3: LDA $03E0,X    (V2 freq_hi)
+    0x8D, 0x08, 0xD4,       // B6: STA $D408
+    // Advance note index (wraps at 32)
+    // .skip_v2:
+    0xE8,                    // B9: INX
+    0xE0, MUSIC_SEQ_LEN,    // BA: CPX #32
+    0x90, 0x02,              // BC: BCC +2 → .store_idx (0xC0)
+    0xA2, 0x00,              // BE: LDX #0         (wrap)
+    // .store_idx:
+    0x8E, 0x3A, 0x03,       // C0: STX $033A
+
+    // === Ack + restore ===
+    // .ack:
+    0xA9, 0xFF,              // C3: LDA #$FF
+    0x8D, 0x19, 0xD0,       // C5: STA $D019      (clear VIC-II IRQ)
+    0xAD, 0x0D, 0xDC,       // C8: LDA $DC0D      (ack CIA)
+    0xAE, 0x37, 0x03,       // CB: LDX $0337      (restore X)
+    0xAD, 0x36, 0x03,       // CE: LDA $0336      (restore A)
+    0x40,                    // D1: RTI
+];
+
+/// Start the 3-voice ambient music engine.
+///
+/// Configures all three SID voices with triangle wave and music ADSR,
+/// copies note frequency tables to $0340-$03FF, and installs the combined
+/// music + shake IRQ handler on the VBlank raster interrupt.
+///
+/// Voice 3 plays bass (always active). Voices 1 and 2 play lead and pad
+/// respectively, and can be temporarily stolen by combat SFX via holdoff
+/// counters at $033B/$033C.
+///
+/// Must not overlap with spinner (they share register save slots and the
+/// IRQ vector). Call music_stop() before spinner_start().
+#[inline(never)]
+pub fn music_start() {
+    unsafe {
+        // --- Configure Voice 1 (lead — pulse wave) ---
+        poke(SID_V1_CTRL, MUSIC_PULSE_OFF);        // gate off first
+        poke(SID_V1_FREQ_LO, NOTE_TABLES[64]);     // V1 freq_lo[0]
+        poke(SID_V1_FREQ_HI, NOTE_TABLES[96]);     // V1 freq_hi[0]
+        poke(SID_V1_PW_LO, 0x00);                  // pulse width $0600
+        poke(SID_V1_PW_HI, 0x06);                  //   (~37% duty cycle)
+        poke(SID_V1_AD, MUSIC_AD);
+        poke(SID_V1_SR, MUSIC_SR);
+        poke(SID_V1_CTRL, MUSIC_PULSE_ON);         // gate on
+
+        // --- Configure Voice 2 (pad — triangle wave) ---
+        poke(SID_V2_CTRL, MUSIC_TRI_OFF);          // gate off first
+        poke(SID_V2_FREQ_LO, NOTE_TABLES[128]);    // V2 freq_lo[0]
+        poke(SID_V2_FREQ_HI, NOTE_TABLES[160]);    // V2 freq_hi[0]
+        poke(SID_V2_AD, MUSIC_AD);
+        poke(SID_V2_SR, MUSIC_SR);
+        poke(SID_V2_CTRL, MUSIC_TRI_ON);           // gate on
+
+        // --- Configure Voice 3 (bass — triangle wave) ---
+        poke(SID_V3_CTRL, MUSIC_TRI_OFF);
+        poke(SID_V3_FREQ_LO, NOTE_TABLES[0]);      // V3 freq_lo[0]
+        poke(SID_V3_FREQ_HI, NOTE_TABLES[32]);     // V3 freq_hi[0]
+        poke(SID_V3_AD, MUSIC_AD);
+        poke(SID_V3_SR, MUSIC_SR);
+        poke(SID_V3_CTRL, MUSIC_TRI_ON);
+
+        // --- Low-pass filter on Voice 3 for warm bass ---
+        poke(SID_FILTER_LO, 0x00);                 // cutoff lo (bits 0-2)
+        poke(SID_FILTER_HI, 0x30);                 // cutoff hi → ~$300
+        poke(SID_FILTER_ROUTE, 0x44);              // resonance=4, route V3
+        poke(SID_VOL, 0x1F);                       // low-pass mode + vol=15
+
+        // --- Copy note tables to $0340-$03FF ---
+        let src = NOTE_TABLES.as_ptr();
+        let dst = 0x0340 as *mut u8;
+        for i in 0..192usize {
+            write_volatile(dst.add(i), *src.add(i));
+        }
+
+        // --- Initialize music state ---
+        write_volatile(0x0339 as *mut u8, MUSIC_TEMPO); // tick counter
+        write_volatile(0x033A as *mut u8, 0);            // note index
+        write_volatile(0x033B as *mut u8, 0);            // V1 holdoff
+        write_volatile(0x033C as *mut u8, 0);            // V2 holdoff
+        write_volatile(0x0338 as *mut u8, 0);            // shake counter
+
+        // --- Install music IRQ handler ---
+        let handler_addr = core::ptr::addr_of!(MUSIC_HANDLER) as u16;
         write_volatile(0xFFFE as *mut u8, (handler_addr & 0xFF) as u8);
         write_volatile(0xFFFF as *mut u8, (handler_addr >> 8) as u8);
 
@@ -707,7 +1080,38 @@ pub fn shake_start() {
         let _ = peek(CIA1_ICR as *const u8);
         let _ = peek(CIA2_ICR as *const u8);
 
-        // Enable VIC-II raster interrupt — shake starts on next vblank
+        // Enable VIC-II raster interrupt — music starts on next vblank
         poke(VIC_IRQ_MASK, 0x01);
+    }
+}
+
+/// Stop the ambient music engine.
+///
+/// Disables the raster IRQ, gates off all three voices (triggering their
+/// release phase for a smooth fade), resets the filter, and restores the
+/// IRQ vector to the RTI stub at $E000.
+#[inline(never)]
+pub fn music_stop() {
+    // Disable VIC-II raster interrupt
+    poke(VIC_IRQ_MASK, 0x00);
+
+    // Acknowledge pending + clear CIA latches
+    poke(VIC_IRQ_STATUS, 0xFF);
+    let _ = peek(CIA1_ICR as *const u8);
+    let _ = peek(CIA2_ICR as *const u8);
+
+    // Gate off all voices — ADSR release phase silences them
+    poke(SID_V1_CTRL, MUSIC_PULSE_OFF);
+    poke(SID_V2_CTRL, MUSIC_TRI_OFF);
+    poke(SID_V3_CTRL, MUSIC_TRI_OFF);
+
+    // Reset filter: volume 15, no filter mode
+    poke(SID_VOL, 0x0F);
+    poke(SID_FILTER_ROUTE, 0x00);
+
+    // Restore IRQ vector to safe RTI stub
+    unsafe {
+        write_volatile(0xFFFE as *mut u8, 0x00); // $E000 low
+        write_volatile(0xFFFF as *mut u8, 0xE0); // $E000 high
     }
 }

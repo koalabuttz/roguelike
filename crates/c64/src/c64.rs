@@ -440,6 +440,34 @@ pub fn sfx_hurt() {
     poke(SID_V2_CTRL, 0x41);        // pulse + gate
 }
 
+/// Descending stone footstep SFX — set up V3 noise for the spinner handler.
+///
+/// Configures V3 with a percussive noise waveform (instant attack, short
+/// decay, no sustain) and arms the spinner handler's footstep section to
+/// re-trigger the gate 8 times at ~0.36s intervals with descending pitch.
+///
+/// Must be called AFTER `spinner_start()` (which zeros the footstep
+/// counters) and BEFORE the generation loop. Sets SID volume to $0F
+/// (no filter, full volume) so the SFX is audible.
+pub fn sfx_descent() {
+    // Configure V3 for noise footstep
+    poke(SID_V3_CTRL, 0x80);          // noise waveform, gate OFF
+    poke(SID_V3_FREQ_LO, 0x00);
+    poke(SID_V3_FREQ_HI, 0x20);      // starting frequency (mid-range thud)
+    // ADSR: A=0 (instant), D=6 (204ms), S=0 (full decay), R=2 (48ms)
+    poke(SID_V3_AD, 0x06);
+    poke(SID_V3_SR, 0x02);
+    // Ensure SFX is audible
+    poke(SID_VOL, 0x0F);              // no filter + vol 15
+
+    // Arm footstep state for the spinner handler
+    unsafe {
+        write_volatile(0x0330 as *mut u8, 0x20);  // freq_hi mirror
+        write_volatile(0x033E as *mut u8, 1);      // fire first step on next IRQ
+        write_volatile(0x033F as *mut u8, 4);      // 4 footsteps total
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Sprite-based loading spinner — animates a spinning sword during generation
 // ---------------------------------------------------------------------------
@@ -527,24 +555,32 @@ const SPRITE_BASE_ADDR: u16 = 0x0340;
 /// VIC-II sprite pointer value for first frame ($0340 / 64 = 13).
 const SPRITE_BASE_PTR: u8 = (SPRITE_BASE_ADDR / 64) as u8; // 13
 
-/// 6502 machine code for the raster IRQ handler (48 bytes).
+/// 6502 machine code for the spinner + footstep IRQ handler (88 bytes).
 ///
 /// Cycles sprite 0's data pointer through 8 frames every 6th VBlank
 /// (~120ms per frame at 50Hz, full rotation ≈ 960ms).
 ///
-/// State at absolute addresses ($0334-$0337):
-///   - $0334: frame counter (decrements each VBlank, reloads to 6)
+/// Optionally triggers noise footstep SFX on V3 when $033F > 0 (steps
+/// remaining). Each step re-triggers the noise gate with a slightly lower
+/// frequency for a "descending stone stairs" effect.
+///
+/// State at absolute addresses:
+///   - $0330: V3 freq_hi mirror (descending pitch, write-only SID needs mirror)
+///   - $0334: sprite frame counter (decrements each VBlank, reloads to 6)
 ///   - $0335: sprite frame index (0-7)
 ///   - $0336: saved A register
 ///   - $0337: saved X register
-///
-/// No runtime patching needed — all addresses are compile-time constants.
+///   - $033E: footstep frame counter (countdown to next step)
+///   - $033F: steps remaining (0 = disabled)
 #[used]
-static SPINNER_HANDLER: [u8; 48] = [
+static SPINNER_HANDLER: [u8; 88] = [
+    // === Save registers ===
     0x8D, 0x36, 0x03,       // 00: STA $0336  (save A)
     0x8E, 0x37, 0x03,       // 03: STX $0337  (save X)
+
+    // === Spinner animation ===
     0xCE, 0x34, 0x03,       // 06: DEC $0334  (frame counter)
-    0xD0, 0x16,             // 09: BNE +22 → offset 0x21 (ack)
+    0xD0, 0x16,             // 09: BNE +22 → .no_anim (0x21)
     0xA9, 0x06,             // 0B: LDA #6     (reload counter)
     0x8D, 0x34, 0x03,       // 0D: STA $0334
     0xAD, 0x35, 0x03,       // 10: LDA $0335  (current frame)
@@ -555,13 +591,34 @@ static SPINNER_HANDLER: [u8; 48] = [
     0x18,                   // 1B: CLC
     0x69, 0x0D,             // 1C: ADC #13    (base pointer: $0340/64)
     0x8D, 0xF8, 0x07,       // 1E: STA $07F8  (sprite 0 pointer)
-    // ack:
-    0xA9, 0xFF,             // 21: LDA #$FF
-    0x8D, 0x19, 0xD0,       // 23: STA $D019  (clear VIC-II IRQ)
-    0xAD, 0x0D, 0xDC,       // 26: LDA $DC0D  (ack CIA)
-    0xAE, 0x37, 0x03,       // 29: LDX $0337  (restore X)
-    0xAD, 0x36, 0x03,       // 2C: LDA $0336  (restore A)
-    0x40,                   // 2F: RTI
+
+    // === Footstep SFX (gated by $033F) ===
+    // .no_anim:
+    0xAD, 0x3F, 0x03,       // 21: LDA $033F  (steps remaining)
+    0xF0, 0x23,             // 24: BEQ +35 → .ack (0x49)
+    0xCE, 0x3E, 0x03,       // 26: DEC $033E  (step frame counter)
+    0xD0, 0x1E,             // 29: BNE +30 → .ack (0x49)
+    0xA9, 0x12,             // 2B: LDA #18    (reload: 18 frames ≈ 0.36s)
+    0x8D, 0x3E, 0x03,       // 2D: STA $033E
+    0xA9, 0x80,             // 30: LDA #$80   (noise, gate OFF — retrigger)
+    0x8D, 0x12, 0xD4,       // 32: STA $D412  (V3 control)
+    0xAD, 0x30, 0x03,       // 35: LDA $0330  (freq_hi mirror)
+    0x38,                   // 38: SEC
+    0xE9, 0x02,             // 39: SBC #2     (descend pitch)
+    0x8D, 0x30, 0x03,       // 3B: STA $0330  (update mirror)
+    0x8D, 0x0F, 0xD4,       // 3E: STA $D40F  (V3 freq_hi)
+    0xA9, 0x81,             // 41: LDA #$81   (noise, gate ON)
+    0x8D, 0x12, 0xD4,       // 43: STA $D412  (V3 control)
+    0xCE, 0x3F, 0x03,       // 46: DEC $033F  (one fewer step)
+
+    // === Ack + restore ===
+    // .ack:
+    0xA9, 0xFF,             // 49: LDA #$FF
+    0x8D, 0x19, 0xD0,       // 4B: STA $D019  (clear VIC-II IRQ)
+    0xAD, 0x0D, 0xDC,       // 4E: LDA $DC0D  (ack CIA)
+    0xAE, 0x37, 0x03,       // 51: LDX $0337  (restore X)
+    0xAD, 0x36, 0x03,       // 54: LDA $0336  (restore A)
+    0x40,                   // 57: RTI
 ];
 
 /// Start the sprite-based raster interrupt spinner.
@@ -603,6 +660,8 @@ pub fn spinner_start() {
         // Initialize spinner state
         write_volatile(0x0334 as *mut u8, 6);  // frame counter
         write_volatile(0x0335 as *mut u8, 0);  // frame index
+        write_volatile(0x033E as *mut u8, 0);  // footstep counter (disabled)
+        write_volatile(0x033F as *mut u8, 0);  // steps remaining (disabled)
 
         // Point hardware IRQ vector to our handler
         let handler_addr = core::ptr::addr_of!(SPINNER_HANDLER) as u16;
@@ -641,6 +700,9 @@ pub fn spinner_stop() {
 
     // Disable sprite 0
     poke(VIC_SPR_ENABLE, 0x00);
+
+    // Gate off V3 noise (footstep SFX may still be releasing)
+    poke(SID_V3_CTRL, 0x00);
 
     // Restore IRQ vector to safe RTI stub
     // Safe: source disabled above, no IRQ can fire mid-update
@@ -770,6 +832,8 @@ static mut MUSIC_TIMER: u16 = 0;
 static mut MUSIC_FADE_VOL: u8 = 15;
 /// Frames until next volume step during fades.
 static mut MUSIC_FADE_TICK: u8 = 0;
+/// Last-seen IRQ frame counter value (for computing elapsed delta).
+static mut MUSIC_FRAME_LAST: u8 = 0;
 
 /// Frames to hold off music on V1 after attack SFX (240ms at 50 Hz).
 /// Attack SFX ADSR: A=0, D=3 (72ms) — holdoff of 12 frames gives margin.
@@ -957,10 +1021,11 @@ const NOTE_TABLES: [u8; 288] = [
     NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,   // 44:   │
 ];
 
-/// 6502 machine code for the combined music + shake IRQ handler (238 bytes).
+/// 6502 machine code for the combined music + shake IRQ handler (241 bytes).
 ///
-/// Runs every VBlank (50 Hz). Handles screen shake (reads $0338), SFX holdoff
-/// voice reclaim ($033B/$033C), and 3-voice music stepping ($0339/$033A).
+/// Runs every VBlank (50 Hz). Increments a frame counter ($033D) for
+/// wall-clock timing, handles screen shake ($0338), SFX holdoff voice
+/// reclaim ($033B/$033C), and 3-voice music stepping ($0339/$033A).
 ///
 /// State at absolute addresses:
 ///   - $0336: saved A register (shared with spinner/shake)
@@ -970,16 +1035,20 @@ const NOTE_TABLES: [u8; 288] = [
 ///   - $033A: note sequence index (0-15)
 ///   - $033B: V1 SFX holdoff counter (0 = music owns voice)
 ///   - $033C: V2 SFX holdoff counter (0 = music owns voice)
+///   - $033D: frame counter (wrapping u8, incremented each VBlank)
 ///   - $0200-$025F: V2 frequency tables (2 × 48 bytes)
 ///   - $0340-$03FF: V3 + V1 frequency tables (4 × 48 bytes)
 #[used]
-static MUSIC_HANDLER: [u8; 238] = [
+static MUSIC_HANDLER: [u8; 241] = [
     // === Save registers ===
     0x8D, 0x36, 0x03,       // 00: STA $0336      (save A)
     0x8E, 0x37, 0x03,       // 03: STX $0337      (save X)
 
+    // === Frame counter (for wall-clock music timing) ===
+    0xEE, 0x3D, 0x03,       // 06: INC $033D      (wrapping u8 frame counter)
+
     // === Shake section ===
-    0xAD, 0x38, 0x03,       // 06: LDA $0338      (shake counter)
+    0xAD, 0x38, 0x03,       // 09: LDA $0338      (shake counter)
     0xF0, 0x13,              // 09: BEQ +19 → .no_shake (0x1E)
     0x38,                    // 0B: SEC
     0xE9, 0x01,              // 0C: SBC #1         (counter--)
@@ -1100,6 +1169,58 @@ static MUSIC_HANDLER: [u8; 238] = [
     0x40,                    // ED: RTI
 ];
 
+/// Lightweight IRQ handler for silence periods (54 bytes).
+///
+/// Runs every VBlank while music is stopped. Keeps the frame counter,
+/// screen shake, and SFX holdoff countdown working so combat feedback
+/// continues during silence. No music note updates.
+///
+/// Holdoff just decrements to 0 without reclaiming — SFX's own ADSR
+/// release silences the voice naturally.
+#[used]
+static SILENCE_HANDLER: [u8; 64] = [
+    // === Save registers ===
+    0x8D, 0x36, 0x03,       // 00: STA $0336      (save A)
+    0x8E, 0x37, 0x03,       // 03: STX $0337      (save X)
+
+    // === Frame counter ===
+    0xEE, 0x3D, 0x03,       // 06: INC $033D
+
+    // === Shake section (identical to music handler) ===
+    0xAD, 0x38, 0x03,       // 09: LDA $0338      (shake counter)
+    0xF0, 0x13,              // 0C: BEQ +19 → .no_shake (0x21)
+    0x38,                    // 0E: SEC
+    0xE9, 0x01,              // 0F: SBC #1
+    0x8D, 0x38, 0x03,       // 11: STA $0338
+    0xF0, 0x06,              // 14: BEQ +6 → .shk_rest (0x1C)
+    0x29, 0x01,              // 16: AND #$01
+    0x0A,                    // 18: ASL A
+    0x09, 0x08,              // 19: ORA #$08
+    0x2C,                    // 1B: .byte $2C      (BIT abs skip)
+    // .shk_rest:
+    0xA9, 0x08,              // 1C: LDA #$08
+    0x8D, 0x16, 0xD0,       // 1E: STA $D016
+
+    // === Holdoff countdown (decrement only, no reclaim) ===
+    // .no_shake:
+    0xAD, 0x3B, 0x03,       // 21: LDA $033B      (V1 holdoff)
+    0xF0, 0x03,              // 24: BEQ +3 → .v1ok (0x29)
+    0xCE, 0x3B, 0x03,       // 26: DEC $033B
+    // .v1ok:
+    0xAD, 0x3C, 0x03,       // 29: LDA $033C      (V2 holdoff)
+    0xF0, 0x03,              // 2C: BEQ +3 → .ack (0x31)
+    0xCE, 0x3C, 0x03,       // 2E: DEC $033C
+
+    // === Ack + restore ===
+    // .ack:
+    0xA9, 0xFF,              // 31: LDA #$FF
+    0x8D, 0x19, 0xD0,       // 33: STA $D019      (clear VIC-II IRQ)
+    0xAD, 0x0D, 0xDC,       // 36: LDA $DC0D      (ack CIA)
+    0xAE, 0x37, 0x03,       // 39: LDX $0337      (restore X)
+    0xAD, 0x36, 0x03,       // 3C: LDA $0336      (restore A)
+    0x40,                    // 3F: RTI
+];
+
 /// Hardware-level music init: configure SID voices, copy note tables,
 /// install IRQ handler. Does NOT touch $D418 (volume/filter mode) —
 /// the caller sets volume to avoid pops during fades.
@@ -1152,7 +1273,9 @@ fn music_start_hw() {
         write_volatile(0x033A as *mut u8, 0);            // note index
         write_volatile(0x033B as *mut u8, 0);            // V1 holdoff
         write_volatile(0x033C as *mut u8, 0);            // V2 holdoff
+        write_volatile(0x033D as *mut u8, 0);            // frame counter
         write_volatile(0x0338 as *mut u8, 0);            // shake counter
+        MUSIC_FRAME_LAST = 0;
 
         // --- Install music IRQ handler ---
         let handler_addr = core::ptr::addr_of!(MUSIC_HANDLER) as u16;
@@ -1193,19 +1316,16 @@ pub fn music_start() {
     }
 }
 
-/// Hardware-level music teardown: disable IRQ, gate off voices, clear filter
-/// routing. Does NOT touch $D418 (volume/filter mode) — the caller manages
-/// volume to avoid pops during fades.
+/// Transition from music handler to silence handler.
+///
+/// Gates off all music voices, clears filter routing, and swaps the IRQ
+/// vector from MUSIC_HANDLER to SILENCE_HANDLER. The raster interrupt
+/// stays enabled so the frame counter, screen shake, and SFX holdoff
+/// keep working during silence.
+///
+/// Does NOT touch $D418 (volume/filter mode) — the caller manages volume.
 fn stop_sid_quiet() {
-    // Disable VIC-II raster interrupt
-    poke(VIC_IRQ_MASK, 0x00);
-
-    // Acknowledge pending + clear CIA latches
-    poke(VIC_IRQ_STATUS, 0xFF);
-    let _ = peek(CIA1_ICR as *const u8);
-    let _ = peek(CIA2_ICR as *const u8);
-
-    // Gate off all voices — ADSR release phase silences them
+    // Gate off all music voices — ADSR release silences them
     poke(SID_V1_CTRL, MUSIC_TRI_OFF);
     poke(SID_V2_CTRL, MUSIC_TRI_OFF);
     poke(SID_V3_CTRL, MUSIC_TRI_OFF);
@@ -1213,10 +1333,115 @@ fn stop_sid_quiet() {
     // Clear filter routing (leave $D418 untouched)
     poke(SID_FILTER_ROUTE, 0x00);
 
+    // Swap to silence handler — keeps frame counter + shake + holdoff alive
+    unsafe {
+        let handler_addr = core::ptr::addr_of!(SILENCE_HANDLER) as u16;
+        write_volatile(0xFFFE as *mut u8, (handler_addr & 0xFF) as u8);
+        write_volatile(0xFFFF as *mut u8, (handler_addr >> 8) as u8);
+    }
+}
+
+/// Suspend the music engine for a brief hardware-exclusive operation
+/// (e.g. map generation with spinner). Silences SID and disables the
+/// raster IRQ but preserves the intermittent music phase and timer so
+/// `music_resume()` can pick up where it left off.
+#[inline(never)]
+pub fn music_pause() {
+    // Disable VIC-II raster interrupt entirely
+    poke(VIC_IRQ_MASK, 0x00);
+    poke(VIC_IRQ_STATUS, 0xFF);
+    let _ = peek(CIA1_ICR as *const u8);
+    let _ = peek(CIA2_ICR as *const u8);
+
+    // Gate off all voices
+    poke(SID_V1_CTRL, MUSIC_TRI_OFF);
+    poke(SID_V2_CTRL, MUSIC_TRI_OFF);
+    poke(SID_V3_CTRL, MUSIC_TRI_OFF);
+
+    // Reset filter + volume
+    poke(SID_VOL, 0x0F);
+    poke(SID_FILTER_ROUTE, 0x00);
+
     // Restore IRQ vector to safe RTI stub
     unsafe {
         write_volatile(0xFFFE as *mut u8, 0x00); // $E000 low
         write_volatile(0xFFFF as *mut u8, 0xE0); // $E000 high
+        // Phase and timer are NOT reset — resume will continue the cycle
+    }
+}
+
+/// Resume the music engine after `music_pause()`. Restores the IRQ
+/// handler and SID state appropriate for the current intermittent phase.
+#[inline(never)]
+pub fn music_resume() {
+    unsafe {
+        match MUSIC_PHASE {
+            MUSIC_PLAYING | MUSIC_FADE_OUT | MUSIC_FADE_IN => {
+                // Was actively playing — restart the hardware and restore volume
+                music_start_hw();
+                let vol = MUSIC_FADE_VOL & 0x0F;
+                poke(SID_VOL, 0x10 | vol); // low-pass mode + current fade volume
+            }
+            MUSIC_SILENT => {
+                // Was in silence — just install the silence handler
+                let handler_addr = core::ptr::addr_of!(SILENCE_HANDLER) as u16;
+                write_volatile(0xFFFE as *mut u8, (handler_addr & 0xFF) as u8);
+                write_volatile(0xFFFF as *mut u8, (handler_addr >> 8) as u8);
+                poke(VIC_RASTER, 251);
+                let ctrl1 = peek(VIC_CTRL1 as *const u8);
+                poke(VIC_CTRL1, ctrl1 & 0x7F);
+                poke(VIC_IRQ_STATUS, 0xFF);
+                let _ = peek(CIA1_ICR as *const u8);
+                let _ = peek(CIA2_ICR as *const u8);
+                poke(VIC_IRQ_MASK, 0x01);
+                poke(SID_VOL, 0x0F); // SFX-ready volume
+            }
+            _ => {
+                // MUSIC_OFF — do nothing, music was never started
+            }
+        }
+        // Re-sync frame counter so auto_tick doesn't see a huge delta
+        MUSIC_FRAME_LAST = read_volatile(0x033D as *const u8);
+    }
+}
+
+/// Fast synchronous fade-out for descent transitions (~0.9s).
+///
+/// Rapidly steps down the SID master volume while the music handler keeps
+/// playing, then calls `music_pause()` to disable the IRQ. Sets the phase
+/// to FADE_IN with volume 0 so `music_resume()` will fade back in.
+///
+/// If music is already silent or off, skips the fade and just prepares
+/// for fade-in on resume.
+#[inline(never)]
+pub fn music_fade_for_descent() {
+    unsafe {
+        match MUSIC_PHASE {
+            MUSIC_OFF => return,
+            MUSIC_SILENT => {
+                // Already silent — just prepare for fade-in on resume
+                music_pause();
+                MUSIC_PHASE = MUSIC_FADE_IN;
+                MUSIC_FADE_VOL = 0;
+                MUSIC_FADE_TICK = 0;
+                return;
+            }
+            _ => {}
+        }
+        // Rapidly decrease volume (~3 frames per step × 15 steps ≈ 0.9s)
+        while MUSIC_FADE_VOL > 0 {
+            MUSIC_FADE_VOL -= 1;
+            poke(SID_VOL, 0x10 | MUSIC_FADE_VOL);
+            wait_next_frame();
+            wait_next_frame();
+            wait_next_frame();
+        }
+        // Silence voices and disable IRQ
+        music_pause();
+        // Set up for fade-in when music_resume() is called later
+        MUSIC_PHASE = MUSIC_FADE_IN;
+        MUSIC_FADE_VOL = 0;
+        MUSIC_FADE_TICK = 0;
     }
 }
 
@@ -1230,31 +1455,57 @@ fn stop_sid_quiet() {
 /// until the next `music_start()`.
 #[inline(never)]
 pub fn music_stop() {
-    stop_sid_quiet();
-    poke(SID_VOL, 0x0F); // no filter + vol 15 (for SFX during silence)
+    // Disable VIC-II raster interrupt entirely
+    poke(VIC_IRQ_MASK, 0x00);
+    poke(VIC_IRQ_STATUS, 0xFF);
+    let _ = peek(CIA1_ICR as *const u8);
+    let _ = peek(CIA2_ICR as *const u8);
+
+    // Gate off all voices
+    poke(SID_V1_CTRL, MUSIC_TRI_OFF);
+    poke(SID_V2_CTRL, MUSIC_TRI_OFF);
+    poke(SID_V3_CTRL, MUSIC_TRI_OFF);
+
+    // Reset filter + volume
+    poke(SID_VOL, 0x0F);
+    poke(SID_FILTER_ROUTE, 0x00);
+
+    // Restore IRQ vector to safe RTI stub
     unsafe {
+        write_volatile(0xFFFE as *mut u8, 0x00); // $E000 low
+        write_volatile(0xFFFF as *mut u8, 0xE0); // $E000 high
         MUSIC_PHASE = MUSIC_OFF;
         MUSIC_TIMER = 0;
     }
 }
 
-/// Called each frame from input wait loops. Manages intermittent music
-/// with smooth volume fades: play one loop → fade out (3s) → silence
-/// (60-123s) → fade in (3s) → repeat.
+/// Called from input wait loops. Manages intermittent music with smooth
+/// volume fades: play one loop → fade out (3s) → silence (60-123s) →
+/// fade in (3s) → repeat.
+///
+/// Uses a delta from the IRQ frame counter at $033D for wall-clock
+/// accuracy — the timer advances correctly regardless of how often this
+/// function is called (idle vs active play).
 ///
 /// Fades use the SID master volume register ($D418) to ramp 0-15 over
-/// 15 steps at 10 frames/step (3.0 seconds). Music continues playing
-/// during both fades — volume alone controls audibility.
-///
-/// Volume-safe: never jumps $D418 abruptly. Uses `stop_sid_quiet()` (no
-/// volume change) for teardown and `music_start_hw()` (no volume set) for
-/// init, so the only $D418 writes are single-step increments/decrements.
+/// 15 steps at 10 frames/step (3.0 seconds). Volume-safe: never jumps
+/// $D418 abruptly.
 pub fn music_auto_tick() {
     unsafe {
+        if MUSIC_PHASE == MUSIC_OFF { return; }
+
+        // Compute wall-clock frames elapsed since last call.
+        // IRQ handler increments $033D every VBlank (50 Hz).
+        // Wrapping u8 subtraction handles overflow correctly.
+        let ctr = read_volatile(0x033D as *const u8);
+        let elapsed = ctr.wrapping_sub(MUSIC_FRAME_LAST) as u16;
+        MUSIC_FRAME_LAST = ctr;
+        if elapsed == 0 { return; }
+
         match MUSIC_PHASE {
             MUSIC_PLAYING => {
-                if MUSIC_TIMER > 0 {
-                    MUSIC_TIMER -= 1;
+                if MUSIC_TIMER > elapsed {
+                    MUSIC_TIMER -= elapsed;
                 } else {
                     // Play period ended → begin fade out
                     MUSIC_PHASE = MUSIC_FADE_OUT;
@@ -1263,27 +1514,37 @@ pub fn music_auto_tick() {
                 }
             }
             MUSIC_FADE_OUT => {
-                if MUSIC_FADE_TICK > 0 {
-                    MUSIC_FADE_TICK -= 1;
-                } else if MUSIC_FADE_VOL > 0 {
-                    MUSIC_FADE_VOL -= 1;
-                    poke(SID_VOL, 0x10 | MUSIC_FADE_VOL); // low-pass + volume
-                    MUSIC_FADE_TICK = MUSIC_FADE_STEP;
-                } else {
-                    // Fade complete at vol 0 — quiet teardown (no volume jump)
+                // Advance fade tick by elapsed frames, stepping volume as needed
+                let mut remain = elapsed;
+                while remain > 0 && MUSIC_FADE_VOL > 0 {
+                    let tick = MUSIC_FADE_TICK as u16;
+                    if tick >= remain {
+                        MUSIC_FADE_TICK -= remain as u8;
+                        remain = 0;
+                    } else {
+                        remain -= tick + 1;
+                        MUSIC_FADE_VOL -= 1;
+                        poke(SID_VOL, 0x10 | MUSIC_FADE_VOL);
+                        MUSIC_FADE_TICK = MUSIC_FADE_STEP;
+                    }
+                }
+                if MUSIC_FADE_VOL == 0 {
+                    // Fade complete at vol 0 — swap to silence handler
                     stop_sid_quiet();
+                    // Restore full volume for SFX during silence.
+                    // Safe: all voices just gated off, ADSR at zero amplitude.
+                    poke(SID_VOL, 0x0F); // no filter + vol 15
                     MUSIC_PHASE = MUSIC_SILENT;
                     let random = (peek(CIA1_TIMER_LO) as u16) & 0x3F; // 0-63
                     MUSIC_TIMER = MUSIC_SILENCE_MIN + random * 50;
                 }
             }
             MUSIC_SILENT => {
-                if MUSIC_TIMER > 0 {
-                    MUSIC_TIMER -= 1;
+                if MUSIC_TIMER > elapsed {
+                    MUSIC_TIMER -= elapsed;
                 } else {
                     // Silence ended → start music at zero volume, fade in
-                    // Set vol 0 BEFORE starting voices — no spike
-                    poke(SID_VOL, 0x10); // low-pass + vol 0
+                    poke(SID_VOL, 0x10); // low-pass + vol 0 BEFORE voices start
                     music_start_hw();
                     MUSIC_PHASE = MUSIC_FADE_IN;
                     MUSIC_FADE_VOL = 0;
@@ -1291,13 +1552,20 @@ pub fn music_auto_tick() {
                 }
             }
             MUSIC_FADE_IN => {
-                if MUSIC_FADE_TICK > 0 {
-                    MUSIC_FADE_TICK -= 1;
-                } else if MUSIC_FADE_VOL < 15 {
-                    MUSIC_FADE_VOL += 1;
-                    poke(SID_VOL, 0x10 | MUSIC_FADE_VOL); // low-pass + volume
-                    MUSIC_FADE_TICK = MUSIC_FADE_STEP;
-                } else {
+                let mut remain = elapsed;
+                while remain > 0 && MUSIC_FADE_VOL < 15 {
+                    let tick = MUSIC_FADE_TICK as u16;
+                    if tick >= remain {
+                        MUSIC_FADE_TICK -= remain as u8;
+                        remain = 0;
+                    } else {
+                        remain -= tick + 1;
+                        MUSIC_FADE_VOL += 1;
+                        poke(SID_VOL, 0x10 | MUSIC_FADE_VOL);
+                        MUSIC_FADE_TICK = MUSIC_FADE_STEP;
+                    }
+                }
+                if MUSIC_FADE_VOL >= 15 {
                     // Fade in complete → normal play
                     MUSIC_PHASE = MUSIC_PLAYING;
                     MUSIC_TIMER = MUSIC_PLAY_FRAMES;

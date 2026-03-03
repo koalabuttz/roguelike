@@ -363,9 +363,10 @@ pub extern "C" fn main() -> isize {
                             == TILE_STAIRS_DOWN
                     };
                 if will_generate {
-                    c64::music_stop();
+                    c64::music_fade_for_descent();
                     render::render_loading();
                     c64::spinner_start();
+                    c64::sfx_descent();
                 }
 
                 let old_depth = state.depth;
@@ -374,7 +375,7 @@ pub extern "C" fn main() -> isize {
 
                 if will_generate {
                     c64::spinner_stop();
-                    c64::music_start();
+                    c64::music_resume();
                 }
 
                 if !result.action_taken {

@@ -40,6 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix equipment stats not applied during monster attacks (#12)
 
 ### Changed
+- Fix combat event detection cap missing events in rare multi-monster scenarios (#68)
 - Screen shake effect on enemy hit (#63)
 - Sprite-based loading spinner for C64 (#64)
 - Refactor TUI game loop to use dyn GameStep (#37)

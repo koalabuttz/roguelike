@@ -213,8 +213,7 @@ struct CombatInfo {
 /// `old_total` is the log total from before `step()`.
 fn detect_combat(state: &MicroGameState, old_total: u16) -> CombatInfo {
     let new_events = state.log.total().wrapping_sub(old_total);
-    // Only scan events generated this turn (cap at 4 — practical max per step)
-    let limit = if new_events > 4 { 4 } else { new_events as u8 };
+    let limit = if new_events > 8 { 8 } else { new_events as u8 };
     let mut info = CombatInfo { player_attacked: false, player_hurt: false };
     let mut i: u8 = 0;
     while i < limit {

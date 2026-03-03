@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Redesign SID music composition with sparse motivic lead and wider intervals (#65)
+- Refine lead voice timbre and register for less distracting ambient feel (#1)
+
 ## [0.4.0] - 2026-02-27
 
 ### Added

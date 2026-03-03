@@ -328,12 +328,14 @@ pub extern "C" fn main() -> isize {
                 render::render_all(state);
                 let diff = unsafe { &mut DIFF };
                 diff.snapshot(state, render::viewport_pos(state));
+                c64::music_start();
                 app_state = AppState::Playing;
             }
             AppState::Playing => {
                 let state = unsafe { STATE.assume_init_mut() };
 
                 if state.is_terminal() {
+                    c64::music_stop();
                     render::render_all(state);
                     app_state = AppState::GameOver;
                     continue;
@@ -342,6 +344,7 @@ pub extern "C" fn main() -> isize {
                 let cmd = input::wait_for_input();
 
                 if cmd == GameCommand::Quit {
+                    c64::music_stop();
                     app_state = AppState::Paused;
                     continue;
                 }
@@ -360,6 +363,7 @@ pub extern "C" fn main() -> isize {
                             == TILE_STAIRS_DOWN
                     };
                 if will_generate {
+                    c64::music_stop();
                     render::render_loading();
                     c64::spinner_start();
                 }
@@ -370,6 +374,7 @@ pub extern "C" fn main() -> isize {
 
                 if will_generate {
                     c64::spinner_stop();
+                    c64::music_start();
                 }
 
                 if !result.action_taken {
@@ -412,6 +417,7 @@ pub extern "C" fn main() -> isize {
                 }
 
                 if state.is_terminal() {
+                    c64::music_stop();
                     app_state = AppState::GameOver;
                 }
             }
@@ -430,6 +436,7 @@ pub extern "C" fn main() -> isize {
                         render::render_all(state);
                         let diff = unsafe { &mut DIFF };
                         diff.snapshot(state, render::viewport_pos(state));
+                        c64::music_start();
                         app_state = AppState::Playing;
                     }
                     AppState::Title => {
@@ -451,6 +458,7 @@ pub extern "C" fn main() -> isize {
                         render::render_all(state);
                         let diff = unsafe { &mut DIFF };
                         diff.snapshot(state, render::viewport_pos(state));
+                        c64::music_start();
                         app_state = AppState::Playing;
                     }
                     AppState::Title => {

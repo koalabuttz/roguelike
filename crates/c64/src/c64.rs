@@ -47,8 +47,8 @@ pub const SID_BASE: *mut u8 = 0xD400 as *mut u8;
 // Voice 1 ($D400-$D406) — player attack SFX
 const SID_V1_FREQ_LO: *mut u8 = 0xD400 as *mut u8;
 const SID_V1_FREQ_HI: *mut u8 = 0xD401 as *mut u8;
-const SID_V1_PW_LO: *mut u8 = 0xD402 as *mut u8;
-const SID_V1_PW_HI: *mut u8 = 0xD403 as *mut u8;
+const _SID_V1_PW_LO: *mut u8 = 0xD402 as *mut u8;
+const _SID_V1_PW_HI: *mut u8 = 0xD403 as *mut u8;
 const SID_V1_CTRL: *mut u8 = 0xD404 as *mut u8;
 const SID_V1_AD: *mut u8 = 0xD405 as *mut u8;
 const SID_V1_SR: *mut u8 = 0xD406 as *mut u8;
@@ -731,18 +731,18 @@ pub fn shake_start() {
 // When the holdoff expires, the handler reclaims the voice immediately
 // (gate off → set freq/ADSR → gate on) for a clean ADSR restart.
 
-/// Music ADSR: A=8 (100ms attack), D=0.
+/// Bass/pad ADSR: A=8 (100ms attack), D=0.
 const MUSIC_AD: u8 = 0x80;
-/// Music ADSR: S=F (max sustain), R=6 (300ms release).
+/// Bass/pad ADSR: S=F (max sustain), R=6 (300ms release).
 const MUSIC_SR: u8 = 0xF6;
-/// V2/V3 waveform: triangle + gate.
+/// Lead ADSR: A=A (500ms attack), D=0 — notes swell in gradually.
+const MUSIC_LEAD_AD: u8 = 0xA0;
+/// Lead ADSR: S=A (~67% sustain), R=9 (750ms release) — sits below drone.
+const MUSIC_LEAD_SR: u8 = 0xA9;
+/// Triangle waveform + gate (all voices).
 const MUSIC_TRI_ON: u8 = 0x11;
-/// V2/V3 waveform: triangle, gate off (for ADSR restart).
+/// Triangle waveform, gate off (for ADSR restart / rest).
 const MUSIC_TRI_OFF: u8 = 0x10;
-/// V1 waveform: pulse + gate (richer timbre for lead voice).
-const MUSIC_PULSE_ON: u8 = 0x41;
-/// V1 waveform: pulse, gate off (for ADSR restart).
-const MUSIC_PULSE_OFF: u8 = 0x40;
 /// Ticks per note step (1.0s at 50 Hz PAL).
 const MUSIC_TEMPO: u8 = 50;
 /// Number of notes in the loop.
@@ -979,18 +979,18 @@ static MUSIC_HANDLER: [u8; 238] = [
     0x8D, 0x3B, 0x03,       // 26: STA $033B
     0xD0, 0x23,              // 29: BNE +35 → .v1_done (0x4E)
     // Reclaim V1: gate off → freq + ADSR → gate on
-    0xA9, MUSIC_PULSE_OFF,   // 2B: LDA #$40       (pulse, gate off)
+    0xA9, MUSIC_TRI_OFF,     // 2B: LDA #$10       (tri, gate off)
     0x8D, 0x04, 0xD4,       // 2D: STA $D404
     0xAE, 0x3A, 0x03,       // 30: LDX $033A      (note index)
     0xBD, 0xA0, 0x03,       // 33: LDA $03A0,X    (V1 freq_lo)
     0x8D, 0x00, 0xD4,       // 36: STA $D400
     0xBD, 0xD0, 0x03,       // 39: LDA $03D0,X    (V1 freq_hi)
     0x8D, 0x01, 0xD4,       // 3C: STA $D401
-    0xA9, MUSIC_AD,          // 3F: LDA #$80       (AD: A=8, D=0)
+    0xA9, MUSIC_LEAD_AD,     // 3F: LDA #$A0       (AD: A=A, D=0)
     0x8D, 0x05, 0xD4,       // 41: STA $D405
-    0xA9, MUSIC_SR,          // 44: LDA #$F6       (SR: S=F, R=6)
+    0xA9, MUSIC_LEAD_SR,     // 44: LDA #$A9       (SR: S=A, R=9)
     0x8D, 0x06, 0xD4,       // 46: STA $D406
-    0xA9, MUSIC_PULSE_ON,    // 49: LDA #$41       (pulse + gate on)
+    0xA9, MUSIC_TRI_ON,      // 49: LDA #$11       (tri + gate on)
     0x8D, 0x04, 0xD4,       // 4B: STA $D404
 
     // === V2 holdoff — decrement, reclaim on expiry ===
@@ -1037,11 +1037,11 @@ static MUSIC_HANDLER: [u8; 238] = [
     0x8D, 0x01, 0xD4,       // A1: STA $D401      (freq_hi)
     0xBD, 0xA0, 0x03,       // A4: LDA $03A0,X    (V1 freq_lo)
     0x8D, 0x00, 0xD4,       // A7: STA $D400      (freq_lo)
-    0xA9, MUSIC_PULSE_ON,    // AA: LDA #$41       (pulse + gate on)
+    0xA9, MUSIC_TRI_ON,      // AA: LDA #$11       (tri + gate on)
     0x8D, 0x04, 0xD4,       // AC: STA $D404
     0xD0, 0x05,              // AF: BNE +5 → .skip_v1 (0xB6)
     // .v1_rest:
-    0xA9, MUSIC_PULSE_OFF,   // B1: LDA #$40       (pulse, gate off)
+    0xA9, MUSIC_TRI_OFF,     // B1: LDA #$10       (tri, gate off)
     0x8D, 0x04, 0xD4,       // B3: STA $D404
     // .skip_v1:
     // V2 (pad): rest-aware — freq_hi==0 gates off, nonzero gates on
@@ -1092,14 +1092,12 @@ static MUSIC_HANDLER: [u8; 238] = [
 #[inline(never)]
 pub fn music_start() {
     unsafe {
-        // --- Configure Voice 1 (lead — pulse wave) ---
-        // Step 0 is a rest — configure ADSR and pulse width but leave gated off.
+        // --- Configure Voice 1 (lead — triangle, slow attack) ---
+        // Step 0 is a rest — configure ADSR but leave gated off.
         // The handler will gate on when the lead enters at step 6.
-        poke(SID_V1_CTRL, MUSIC_PULSE_OFF);        // gate off (rest)
-        poke(SID_V1_PW_LO, 0x00);                  // pulse width $0600
-        poke(SID_V1_PW_HI, 0x06);                  //   (~37% duty cycle)
-        poke(SID_V1_AD, MUSIC_AD);
-        poke(SID_V1_SR, MUSIC_SR);
+        poke(SID_V1_CTRL, MUSIC_TRI_OFF);          // gate off (rest)
+        poke(SID_V1_AD, MUSIC_LEAD_AD);             // 500ms attack
+        poke(SID_V1_SR, MUSIC_LEAD_SR);              // 67% sustain, 750ms release
 
         // --- Configure Voice 2 (pad — triangle wave) ---
         poke(SID_V2_CTRL, MUSIC_TRI_OFF);          // gate off first
@@ -1179,7 +1177,7 @@ pub fn music_stop() {
     let _ = peek(CIA2_ICR as *const u8);
 
     // Gate off all voices — ADSR release phase silences them
-    poke(SID_V1_CTRL, MUSIC_PULSE_OFF);
+    poke(SID_V1_CTRL, MUSIC_TRI_OFF);
     poke(SID_V2_CTRL, MUSIC_TRI_OFF);
     poke(SID_V3_CTRL, MUSIC_TRI_OFF);
 

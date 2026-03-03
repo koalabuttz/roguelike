@@ -746,7 +746,7 @@ const MUSIC_PULSE_OFF: u8 = 0x40;
 /// Ticks per note step (1.0s at 50 Hz PAL).
 const MUSIC_TEMPO: u8 = 50;
 /// Number of notes in the loop.
-const MUSIC_SEQ_LEN: u8 = 32;
+const MUSIC_SEQ_LEN: u8 = 48;
 
 /// Frames to hold off music on V1 after attack SFX (240ms at 50 Hz).
 /// Attack SFX ADSR: A=0, D=3 (72ms) — holdoff of 12 frames gives margin.
@@ -772,111 +772,169 @@ const NOTE_C3: (u8, u8)  = (0xB4, 0x08);   // 130.81 Hz  pad
 const NOTE_D3: (u8, u8)  = (0xC4, 0x09);   // 146.83 Hz  pad
 const NOTE_E3: (u8, u8)  = (0xF7, 0x0A);   // 164.81 Hz  pad
 const NOTE_A3: (u8, u8)  = (0xA3, 0x0E);   // 220.00 Hz  lead
-const NOTE_B3: (u8, u8)  = (0x6D, 0x10);   // 246.94 Hz  lead
+const NOTE_BB3: (u8, u8) = (0x81, 0x0F);   // 233.08 Hz  lead (Phrygian bII)
 const NOTE_C4: (u8, u8)  = (0x68, 0x11);   // 261.63 Hz  lead
 const NOTE_D4: (u8, u8)  = (0x89, 0x13);   // 293.66 Hz  lead
 const NOTE_E4: (u8, u8)  = (0xEE, 0x15);   // 329.63 Hz  lead
+/// Rest sentinel: freq_hi == 0 tells the handler to gate off the voice.
+const REST: (u8, u8)     = (0x00, 0x00);
 
-/// Note sequence tables: 6 arrays × 32 entries, copied to $0340-$03FF.
+/// Note sequence tables: 48-step A Phrygian ambient (288 bytes).
 ///
-/// 32-step A Phrygian ambient: staggered voice movement, 32s loop (1s/step).
-/// Voices span 3 octaves for separation — no block-chord lockstep.
+/// Split across two memory regions:
+///   $0340-$03FF: V3 freq_lo/hi + V1 freq_lo/hi (4 × 48 = 192 bytes)
+///   $0200-$025F: V2 freq_lo/hi (2 × 48 = 96 bytes)
 ///
-/// Design: bass drones (5 changes), pad drifts (6 changes), lead floats (10
-/// changes). At most ONE voice changes per step (except step 30 return).
+/// 48s loop (1s/step at 50 Hz PAL). Voices span 3 octaves.
+/// Rest sentinel (freq_hi=0) gates voice off for silence.
+///
+/// Lead (~15% present): 7 notes in 48 steps, built from two motifs:
+///   Opening: E4..D4 (gentle descent, 4s apart)
+///   Closing: Bb3→A3 (Phrygian half-step cadence, immediate)
+///   Between: solo notes A3, C4, E4 spaced 7-9s apart
+///
+/// Three-act arc:
+///   A (0-15):  The Void — root drone, lead enters E4 then D4, pad fades
+///   B (16-31): The Descent — bass drops E2→F2, pad shifts, lead sparse
+///   C (32-47): Return — Bb2 bass dread, Bb3→A3 cadence, resolves home
 ///
 /// Step  V3(bass)  V2(pad)   V1(lead)  Sonority
 /// ───── ──────── ──────── ──────── ──────────────────
-///  0    A2        E3        E4        Am open 5ths
-///  1    A2        E3        E4          │
-///  2    A2        E3        E4          │
-///  3    A2        E3        D4        lead descends
-///  4    A2        E3        C4        Am spread
-///  5    A2        E3        C4          │
-///  6    A2        E3        C4          │
-///  7    A2        C3        C4        pad drops (darker)
-///  8    A2        C3        B3        lead steps down
-///  9    A2        C3        A3        Am close (root-m3-8va)
-/// 10    A2        C3        A3          │
-/// 11    A2        C3        A3          │
-/// 12    F2        C3        A3        bass → F (bVI)
-/// 13    F2        C3        A3          │
-/// 14    F2        C3        C4        lead rises
-/// 15    F2        C3        C4          │
-/// 16    F2        C3        C4          │
-/// 17    E2        C3        C4        bass → E
-/// 18    E2        C3        B3        lead steps down
-/// 19    E2        B2        B3        pad → B (Em open)
-/// 20    E2        B2        E4        lead leaps to E4
-/// 21    E2        B2        E4          │
-/// 22    E2        B2        D4        lead → D (Em7 color)
-/// 23    E2        B2        D4          │
-/// 24    E2        C3        D4        pad rises
-/// 25    A2        C3        D4        bass home
-/// 26    A2        C3        C4        lead steps down
-/// 27    A2        D3        C4        pad → D (Dm color)
-/// 28    BB2       D3        D4        bass Bb — Phrygian bII
-/// 29    A2        D3        D4        bass resolves
-/// 30    A2        E3        E4        pad+lead return
-/// 31    A2        E3        E4        (= step 0, seamless)
-const NOTE_TABLES: [u8; 192] = [
-    // $0340: V3 freq_lo (bass) — 32 entries
-    NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   //  0: Am
-    NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   //  4: Am
-    NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   //  8: Am
-    NOTE_F2.0,  NOTE_F2.0,  NOTE_F2.0,  NOTE_F2.0,   // 12: F (bVI)
-    NOTE_F2.0,  NOTE_E2.0,  NOTE_E2.0,  NOTE_E2.0,   // 16: F→E
-    NOTE_E2.0,  NOTE_E2.0,  NOTE_E2.0,  NOTE_E2.0,   // 20: Em
-    NOTE_E2.0,  NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   // 24: →Am
-    NOTE_BB2.0, NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   // 28: Bb→Am
-    // $0360: V3 freq_hi (bass) — 32 entries
-    NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   //  0: Am
-    NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   //  4: Am
-    NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   //  8: Am
-    NOTE_F2.1,  NOTE_F2.1,  NOTE_F2.1,  NOTE_F2.1,   // 12: F
-    NOTE_F2.1,  NOTE_E2.1,  NOTE_E2.1,  NOTE_E2.1,   // 16: F→E
-    NOTE_E2.1,  NOTE_E2.1,  NOTE_E2.1,  NOTE_E2.1,   // 20: Em
-    NOTE_E2.1,  NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   // 24: →Am
-    NOTE_BB2.1, NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   // 28: Bb→Am
-    // $0380: V1 freq_lo (lead, pulse wave) — 32 entries
-    NOTE_E4.0,  NOTE_E4.0,  NOTE_E4.0,  NOTE_D4.0,   //  0: E4 hold → D4
-    NOTE_C4.0,  NOTE_C4.0,  NOTE_C4.0,  NOTE_C4.0,   //  4: C4 hold
-    NOTE_B3.0,  NOTE_A3.0,  NOTE_A3.0,  NOTE_A3.0,   //  8: B3→A3
-    NOTE_A3.0,  NOTE_A3.0,  NOTE_C4.0,  NOTE_C4.0,   // 12: A3→C4
-    NOTE_C4.0,  NOTE_C4.0,  NOTE_B3.0,  NOTE_B3.0,   // 16: C4→B3
-    NOTE_E4.0,  NOTE_E4.0,  NOTE_D4.0,  NOTE_D4.0,   // 20: E4→D4
-    NOTE_D4.0,  NOTE_D4.0,  NOTE_C4.0,  NOTE_C4.0,   // 24: D4→C4
-    NOTE_D4.0,  NOTE_D4.0,  NOTE_E4.0,  NOTE_E4.0,   // 28: D4→E4
-    // $03A0: V1 freq_hi (lead, pulse wave) — 32 entries
-    NOTE_E4.1,  NOTE_E4.1,  NOTE_E4.1,  NOTE_D4.1,   //  0: E4 hold → D4
-    NOTE_C4.1,  NOTE_C4.1,  NOTE_C4.1,  NOTE_C4.1,   //  4: C4 hold
-    NOTE_B3.1,  NOTE_A3.1,  NOTE_A3.1,  NOTE_A3.1,   //  8: B3→A3
-    NOTE_A3.1,  NOTE_A3.1,  NOTE_C4.1,  NOTE_C4.1,   // 12: A3→C4
-    NOTE_C4.1,  NOTE_C4.1,  NOTE_B3.1,  NOTE_B3.1,   // 16: C4→B3
-    NOTE_E4.1,  NOTE_E4.1,  NOTE_D4.1,  NOTE_D4.1,   // 20: E4→D4
-    NOTE_D4.1,  NOTE_D4.1,  NOTE_C4.1,  NOTE_C4.1,   // 24: D4→C4
-    NOTE_D4.1,  NOTE_D4.1,  NOTE_E4.1,  NOTE_E4.1,   // 28: D4→E4
-    // $03C0: V2 freq_lo (pad, triangle) — 32 entries
-    NOTE_E3.0,  NOTE_E3.0,  NOTE_E3.0,  NOTE_E3.0,   //  0: E3 hold
-    NOTE_E3.0,  NOTE_E3.0,  NOTE_E3.0,  NOTE_C3.0,   //  4: →C3
-    NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,   //  8: C3 hold
-    NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,   // 12: C3 hold
-    NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,  NOTE_B2.0,   // 16: →B2
-    NOTE_B2.0,  NOTE_B2.0,  NOTE_B2.0,  NOTE_B2.0,   // 20: B2 hold
-    NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,  NOTE_D3.0,   // 24: C3→D3
-    NOTE_D3.0,  NOTE_D3.0,  NOTE_E3.0,  NOTE_E3.0,   // 28: D3→E3
-    // $03E0: V2 freq_hi (pad, triangle) — 32 entries
-    NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,   //  0: E3 hold
-    NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,  NOTE_C3.1,   //  4: →C3
-    NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,   //  8: C3 hold
-    NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,   // 12: C3 hold
-    NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,  NOTE_B2.1,   // 16: →B2
-    NOTE_B2.1,  NOTE_B2.1,  NOTE_B2.1,  NOTE_B2.1,   // 20: B2 hold
-    NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,  NOTE_D3.1,   // 24: C3→D3
-    NOTE_D3.1,  NOTE_D3.1,  NOTE_E3.1,  NOTE_E3.1,   // 28: D3→E3
+///  0    A2        E3        —         open 5th drone
+///  1    A2        E3        —           │
+///  2    A2        E3        —           │
+///  3    A2        E3        —           │
+///  4    A2        E3        —           │
+///  5    A2        E3        —           │
+///  6    A2        E3        E4        lead enters high: Am spread
+///  7    A2        E3        —         lead fades
+///  8    A2        —         —         pad drops — just bass drone
+///  9    A2        —         —           │
+/// 10    A2        —         D4        lead descends, exposed over bass
+/// 11    A2        —         —         lead fades, bass drone alone
+/// 12    A2        —         —           │
+/// 13    A2        —         —           │
+/// 14    A2        —         —           │
+/// 15    A2        —         —           │
+/// 16    E2        B2        —         bass descends, pad returns: Em open
+/// 17    E2        B2        —           │
+/// 18    E2        B2        A3        lead: root octave, grounding
+/// 19    E2        B2        —         lead fades
+/// 20    E2        C3        —         pad darkens: Am/E
+/// 21    E2        C3        —           │
+/// 22    E2        C3        —           │
+/// 23    E2        C3        —           │
+/// 24    F2        C3        —         bass → F (bVI): imposing F5
+/// 25    F2        C3        C4        lead: C octave with pad, warm
+/// 26    F2        C3        —         lead fades
+/// 27    F2        C3        —           │
+/// 28    F2        —         —         pad drops — F bass alone (desolate)
+/// 29    F2        —         —           │
+/// 30    F2        —         —           │
+/// 31    F2        —         —           │
+/// 32    E2        B2        —         bass → E, pad returns: Em open
+/// 33    E2        B2        —           │
+/// 34    E2        B2        E4        lead returns high: echo of step 6
+/// 35    E2        B2        —         lead fades
+/// 36    BB2       D3        —         !! Phrygian bII bass (Bb major)
+/// 37    BB2       D3        —           │
+/// 38    BB2       D3        —           │
+/// 39    BB2       D3        —           │
+/// 40    A2        E3        —         bass resolves home, open 5th
+/// 41    A2        E3        —           │
+/// 42    A2        E3        BB3       !! Phrygian shock: Am(b9)
+/// 43    A2        E3        A3        resolves: Bb→A half-step cadence
+/// 44    A2        E3        —         silence, settling
+/// 45    A2        E3        —           │
+/// 46    A2        E3        —           │
+/// 47    A2        E3        —         (= step 0, seamless loop)
+const NOTE_TABLES: [u8; 288] = [
+    // ====== Copied to $0340-$03FF (192 bytes) ======
+
+    // $0340: V3 freq_lo (bass — always plays) — 48 entries
+    NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   //  0: A drone
+    NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   //  4:   │
+    NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   //  8:   │
+    NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   // 12:   │
+    NOTE_E2.0,  NOTE_E2.0,  NOTE_E2.0,  NOTE_E2.0,   // 16: →E (descent)
+    NOTE_E2.0,  NOTE_E2.0,  NOTE_E2.0,  NOTE_E2.0,   // 20:   │
+    NOTE_F2.0,  NOTE_F2.0,  NOTE_F2.0,  NOTE_F2.0,   // 24: →F (bVI)
+    NOTE_F2.0,  NOTE_F2.0,  NOTE_F2.0,  NOTE_F2.0,   // 28:   │
+    NOTE_E2.0,  NOTE_E2.0,  NOTE_E2.0,  NOTE_E2.0,   // 32: →E
+    NOTE_BB2.0, NOTE_BB2.0, NOTE_BB2.0, NOTE_BB2.0,  // 36: →Bb (bII!)
+    NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   // 40: →A (home)
+    NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,  NOTE_A2.0,   // 44:   │
+    // $0370: V3 freq_hi (bass) — 48 entries
+    NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   //  0: A drone
+    NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   //  4:   │
+    NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   //  8:   │
+    NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   // 12:   │
+    NOTE_E2.1,  NOTE_E2.1,  NOTE_E2.1,  NOTE_E2.1,   // 16: →E
+    NOTE_E2.1,  NOTE_E2.1,  NOTE_E2.1,  NOTE_E2.1,   // 20:   │
+    NOTE_F2.1,  NOTE_F2.1,  NOTE_F2.1,  NOTE_F2.1,   // 24: →F
+    NOTE_F2.1,  NOTE_F2.1,  NOTE_F2.1,  NOTE_F2.1,   // 28:   │
+    NOTE_E2.1,  NOTE_E2.1,  NOTE_E2.1,  NOTE_E2.1,   // 32: →E
+    NOTE_BB2.1, NOTE_BB2.1, NOTE_BB2.1, NOTE_BB2.1,  // 36: →Bb
+    NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   // 40: →A
+    NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,  NOTE_A2.1,   // 44:   │
+    // $03A0: V1 freq_lo (lead — pulse wave, very sparse) — 48 entries
+    REST.0,     REST.0,     REST.0,     REST.0,       //  0: silence
+    REST.0,     REST.0,     NOTE_E4.0,  REST.0,       //  4: —,—,E4,—
+    REST.0,     REST.0,     NOTE_D4.0,  REST.0,       //  8: —,—,D4,—
+    REST.0,     REST.0,     REST.0,     REST.0,       // 12: silence
+    REST.0,     REST.0,     NOTE_A3.0,  REST.0,       // 16: —,—,A3,—
+    REST.0,     REST.0,     REST.0,     REST.0,       // 20: silence
+    REST.0,     NOTE_C4.0,  REST.0,     REST.0,       // 24: —,C4,—,—
+    REST.0,     REST.0,     REST.0,     REST.0,       // 28: silence
+    REST.0,     REST.0,     NOTE_E4.0,  REST.0,       // 32: —,—,E4,—
+    REST.0,     REST.0,     REST.0,     REST.0,       // 36: silence
+    REST.0,     REST.0,     NOTE_BB3.0, NOTE_A3.0,    // 40: —,—,Bb3,A3
+    REST.0,     REST.0,     REST.0,     REST.0,       // 44: silence
+    // $03D0: V1 freq_hi (lead) — 48 entries (0x00 = rest)
+    REST.1,     REST.1,     REST.1,     REST.1,       //  0: silence
+    REST.1,     REST.1,     NOTE_E4.1,  REST.1,       //  4: —,—,E4,—
+    REST.1,     REST.1,     NOTE_D4.1,  REST.1,       //  8: —,—,D4,—
+    REST.1,     REST.1,     REST.1,     REST.1,       // 12: silence
+    REST.1,     REST.1,     NOTE_A3.1,  REST.1,       // 16: —,—,A3,—
+    REST.1,     REST.1,     REST.1,     REST.1,       // 20: silence
+    REST.1,     NOTE_C4.1,  REST.1,     REST.1,       // 24: —,C4,—,—
+    REST.1,     REST.1,     REST.1,     REST.1,       // 28: silence
+    REST.1,     REST.1,     NOTE_E4.1,  REST.1,       // 32: —,—,E4,—
+    REST.1,     REST.1,     REST.1,     REST.1,       // 36: silence
+    REST.1,     REST.1,     NOTE_BB3.1, NOTE_A3.1,    // 40: —,—,Bb3,A3
+    REST.1,     REST.1,     REST.1,     REST.1,       // 44: silence
+
+    // ====== Copied to $0200-$025F (96 bytes) ======
+
+    // $0200: V2 freq_lo (pad — triangle, rests at 8-15 and 28-31) — 48 entries
+    NOTE_E3.0,  NOTE_E3.0,  NOTE_E3.0,  NOTE_E3.0,   //  0: E3 (open 5th)
+    NOTE_E3.0,  NOTE_E3.0,  NOTE_E3.0,  NOTE_E3.0,   //  4:   │
+    REST.0,     REST.0,     REST.0,     REST.0,       //  8: — (bass alone)
+    REST.0,     REST.0,     REST.0,     REST.0,       // 12:   │
+    NOTE_B2.0,  NOTE_B2.0,  NOTE_B2.0,  NOTE_B2.0,   // 16: B2 (Em open)
+    NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,   // 20: C3 (Am/E)
+    NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,  NOTE_C3.0,   // 24: C3 (F5)
+    REST.0,     REST.0,     REST.0,     REST.0,       // 28: — (F bass alone)
+    NOTE_B2.0,  NOTE_B2.0,  NOTE_B2.0,  NOTE_B2.0,   // 32: B2 (Em open)
+    NOTE_D3.0,  NOTE_D3.0,  NOTE_D3.0,  NOTE_D3.0,   // 36: D3 (Bb major)
+    NOTE_E3.0,  NOTE_E3.0,  NOTE_E3.0,  NOTE_E3.0,   // 40: E3 (open 5th)
+    NOTE_E3.0,  NOTE_E3.0,  NOTE_E3.0,  NOTE_E3.0,   // 44:   │
+    // $0230: V2 freq_hi (pad) — 48 entries (0x00 = rest)
+    NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,   //  0: E3
+    NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,   //  4:   │
+    REST.1,     REST.1,     REST.1,     REST.1,       //  8: —
+    REST.1,     REST.1,     REST.1,     REST.1,       // 12:   │
+    NOTE_B2.1,  NOTE_B2.1,  NOTE_B2.1,  NOTE_B2.1,   // 16: B2
+    NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,   // 20: C3
+    NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,  NOTE_C3.1,   // 24: C3
+    REST.1,     REST.1,     REST.1,     REST.1,       // 28: —
+    NOTE_B2.1,  NOTE_B2.1,  NOTE_B2.1,  NOTE_B2.1,   // 32: B2
+    NOTE_D3.1,  NOTE_D3.1,  NOTE_D3.1,  NOTE_D3.1,   // 36: D3
+    NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,   // 40: E3
+    NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,   // 44:   │
 ];
 
-/// 6502 machine code for the combined music + shake IRQ handler (210 bytes).
+/// 6502 machine code for the combined music + shake IRQ handler (238 bytes).
 ///
 /// Runs every VBlank (50 Hz). Handles screen shake (reads $0338), SFX holdoff
 /// voice reclaim ($033B/$033C), and 3-voice music stepping ($0339/$033A).
@@ -889,9 +947,10 @@ const NOTE_TABLES: [u8; 192] = [
 ///   - $033A: note sequence index (0-15)
 ///   - $033B: V1 SFX holdoff counter (0 = music owns voice)
 ///   - $033C: V2 SFX holdoff counter (0 = music owns voice)
-///   - $0340-$03FF: note frequency tables (6 × 32 bytes)
+///   - $0200-$025F: V2 frequency tables (2 × 48 bytes)
+///   - $0340-$03FF: V3 + V1 frequency tables (4 × 48 bytes)
 #[used]
-static MUSIC_HANDLER: [u8; 210] = [
+static MUSIC_HANDLER: [u8; 238] = [
     // === Save registers ===
     0x8D, 0x36, 0x03,       // 00: STA $0336      (save A)
     0x8E, 0x37, 0x03,       // 03: STX $0337      (save X)
@@ -923,9 +982,9 @@ static MUSIC_HANDLER: [u8; 210] = [
     0xA9, MUSIC_PULSE_OFF,   // 2B: LDA #$40       (pulse, gate off)
     0x8D, 0x04, 0xD4,       // 2D: STA $D404
     0xAE, 0x3A, 0x03,       // 30: LDX $033A      (note index)
-    0xBD, 0x80, 0x03,       // 33: LDA $0380,X    (V1 freq_lo)
+    0xBD, 0xA0, 0x03,       // 33: LDA $03A0,X    (V1 freq_lo)
     0x8D, 0x00, 0xD4,       // 36: STA $D400
-    0xBD, 0xA0, 0x03,       // 39: LDA $03A0,X    (V1 freq_hi)
+    0xBD, 0xD0, 0x03,       // 39: LDA $03D0,X    (V1 freq_hi)
     0x8D, 0x01, 0xD4,       // 3C: STA $D401
     0xA9, MUSIC_AD,          // 3F: LDA #$80       (AD: A=8, D=0)
     0x8D, 0x05, 0xD4,       // 41: STA $D405
@@ -946,9 +1005,9 @@ static MUSIC_HANDLER: [u8; 210] = [
     0xA9, MUSIC_TRI_OFF,     // 5B: LDA #$10       (tri, gate off)
     0x8D, 0x0B, 0xD4,       // 5D: STA $D40B
     0xAE, 0x3A, 0x03,       // 60: LDX $033A      (note index)
-    0xBD, 0xC0, 0x03,       // 63: LDA $03C0,X    (V2 freq_lo)
+    0xBD, 0x00, 0x02,       // 63: LDA $0200,X    (V2 freq_lo)
     0x8D, 0x07, 0xD4,       // 66: STA $D407
-    0xBD, 0xE0, 0x03,       // 69: LDA $03E0,X    (V2 freq_hi)
+    0xBD, 0x30, 0x02,       // 69: LDA $0230,X    (V2 freq_hi)
     0x8D, 0x08, 0xD4,       // 6C: STA $D408
     0xA9, MUSIC_AD,          // 6F: LDA #$80       (AD)
     0x8D, 0x0C, 0xD4,       // 71: STA $D40C
@@ -957,51 +1016,65 @@ static MUSIC_HANDLER: [u8; 210] = [
     0xA9, MUSIC_TRI_ON,      // 79: LDA #$11       (tri + gate on)
     0x8D, 0x0B, 0xD4,       // 7B: STA $D40B
 
-    // === Music tick — step through note sequence ===
+    // === Music tick — rest-aware note stepping ===
     // .v2_done:
     0xCE, 0x39, 0x03,       // 7E: DEC $0339      (tick counter)
-    0xD0, 0x40,              // 81: BNE +64 → .ack (0xC3)
+    0xD0, 0x5C,              // 81: BNE +92 → .ack (0xDF)
     // Tick expired — reload counter and update note frequencies
     0xA9, MUSIC_TEMPO,       // 83: LDA #50        (tempo reload)
     0x8D, 0x39, 0x03,       // 85: STA $0339
     0xAE, 0x3A, 0x03,       // 88: LDX $033A      (note index)
-    // V3: always update
+    // V3 (bass): always update — no rests in bass table
     0xBD, 0x40, 0x03,       // 8B: LDA $0340,X    (V3 freq_lo)
     0x8D, 0x0E, 0xD4,       // 8E: STA $D40E
-    0xBD, 0x60, 0x03,       // 91: LDA $0360,X    (V3 freq_hi)
+    0xBD, 0x70, 0x03,       // 91: LDA $0370,X    (V3 freq_hi)
     0x8D, 0x0F, 0xD4,       // 94: STA $D40F
-    // V1: update only if holdoff == 0
-    0xAD, 0x3B, 0x03,       // 97: LDA $033B
-    0xD0, 0x0C,              // 9A: BNE +12 → .skip_v1 (0xA8)
-    0xBD, 0x80, 0x03,       // 9C: LDA $0380,X    (V1 freq_lo)
-    0x8D, 0x00, 0xD4,       // 9F: STA $D400
-    0xBD, 0xA0, 0x03,       // A2: LDA $03A0,X    (V1 freq_hi)
-    0x8D, 0x01, 0xD4,       // A5: STA $D401
-    // V2: update only if holdoff == 0
+    // V1 (lead): rest-aware — freq_hi==0 gates off, nonzero gates on
+    0xAD, 0x3B, 0x03,       // 97: LDA $033B      (V1 holdoff)
+    0xD0, 0x1A,              // 9A: BNE +26 → .skip_v1 (0xB6)
+    0xBD, 0xD0, 0x03,       // 9C: LDA $03D0,X    (V1 freq_hi)
+    0xF0, 0x10,              // 9F: BEQ +16 → .v1_rest (0xB1)
+    0x8D, 0x01, 0xD4,       // A1: STA $D401      (freq_hi)
+    0xBD, 0xA0, 0x03,       // A4: LDA $03A0,X    (V1 freq_lo)
+    0x8D, 0x00, 0xD4,       // A7: STA $D400      (freq_lo)
+    0xA9, MUSIC_PULSE_ON,    // AA: LDA #$41       (pulse + gate on)
+    0x8D, 0x04, 0xD4,       // AC: STA $D404
+    0xD0, 0x05,              // AF: BNE +5 → .skip_v1 (0xB6)
+    // .v1_rest:
+    0xA9, MUSIC_PULSE_OFF,   // B1: LDA #$40       (pulse, gate off)
+    0x8D, 0x04, 0xD4,       // B3: STA $D404
     // .skip_v1:
-    0xAD, 0x3C, 0x03,       // A8: LDA $033C
-    0xD0, 0x0C,              // AB: BNE +12 → .skip_v2 (0xB9)
-    0xBD, 0xC0, 0x03,       // AD: LDA $03C0,X    (V2 freq_lo)
-    0x8D, 0x07, 0xD4,       // B0: STA $D407
-    0xBD, 0xE0, 0x03,       // B3: LDA $03E0,X    (V2 freq_hi)
-    0x8D, 0x08, 0xD4,       // B6: STA $D408
-    // Advance note index (wraps at 32)
+    // V2 (pad): rest-aware — freq_hi==0 gates off, nonzero gates on
+    0xAD, 0x3C, 0x03,       // B6: LDA $033C      (V2 holdoff)
+    0xD0, 0x1A,              // B9: BNE +26 → .skip_v2 (0xD5)
+    0xBD, 0x30, 0x02,       // BB: LDA $0230,X    (V2 freq_hi)
+    0xF0, 0x10,              // BE: BEQ +16 → .v2_rest (0xD0)
+    0x8D, 0x08, 0xD4,       // C0: STA $D408      (freq_hi)
+    0xBD, 0x00, 0x02,       // C3: LDA $0200,X    (V2 freq_lo)
+    0x8D, 0x07, 0xD4,       // C6: STA $D407      (freq_lo)
+    0xA9, MUSIC_TRI_ON,      // C9: LDA #$11       (tri + gate on)
+    0x8D, 0x0B, 0xD4,       // CB: STA $D40B
+    0xD0, 0x05,              // CE: BNE +5 → .skip_v2 (0xD5)
+    // .v2_rest:
+    0xA9, MUSIC_TRI_OFF,     // D0: LDA #$10       (tri, gate off)
+    0x8D, 0x0B, 0xD4,       // D2: STA $D40B
     // .skip_v2:
-    0xE8,                    // B9: INX
-    0xE0, MUSIC_SEQ_LEN,    // BA: CPX #32
-    0x90, 0x02,              // BC: BCC +2 → .store_idx (0xC0)
-    0xA2, 0x00,              // BE: LDX #0         (wrap)
+    // Advance note index (wraps at 32)
+    0xE8,                    // D5: INX
+    0xE0, MUSIC_SEQ_LEN,    // D6: CPX #32
+    0x90, 0x02,              // D8: BCC +2 → .store_idx (0xDC)
+    0xA2, 0x00,              // DA: LDX #0         (wrap)
     // .store_idx:
-    0x8E, 0x3A, 0x03,       // C0: STX $033A
+    0x8E, 0x3A, 0x03,       // DC: STX $033A
 
     // === Ack + restore ===
     // .ack:
-    0xA9, 0xFF,              // C3: LDA #$FF
-    0x8D, 0x19, 0xD0,       // C5: STA $D019      (clear VIC-II IRQ)
-    0xAD, 0x0D, 0xDC,       // C8: LDA $DC0D      (ack CIA)
-    0xAE, 0x37, 0x03,       // CB: LDX $0337      (restore X)
-    0xAD, 0x36, 0x03,       // CE: LDA $0336      (restore A)
-    0x40,                    // D1: RTI
+    0xA9, 0xFF,              // DF: LDA #$FF
+    0x8D, 0x19, 0xD0,       // E1: STA $D019      (clear VIC-II IRQ)
+    0xAD, 0x0D, 0xDC,       // E4: LDA $DC0D      (ack CIA)
+    0xAE, 0x37, 0x03,       // E7: LDX $0337      (restore X)
+    0xAD, 0x36, 0x03,       // EA: LDA $0336      (restore A)
+    0x40,                    // ED: RTI
 ];
 
 /// Start the 3-voice ambient music engine.
@@ -1020,19 +1093,18 @@ static MUSIC_HANDLER: [u8; 210] = [
 pub fn music_start() {
     unsafe {
         // --- Configure Voice 1 (lead — pulse wave) ---
-        poke(SID_V1_CTRL, MUSIC_PULSE_OFF);        // gate off first
-        poke(SID_V1_FREQ_LO, NOTE_TABLES[64]);     // V1 freq_lo[0]
-        poke(SID_V1_FREQ_HI, NOTE_TABLES[96]);     // V1 freq_hi[0]
+        // Step 0 is a rest — configure ADSR and pulse width but leave gated off.
+        // The handler will gate on when the lead enters at step 6.
+        poke(SID_V1_CTRL, MUSIC_PULSE_OFF);        // gate off (rest)
         poke(SID_V1_PW_LO, 0x00);                  // pulse width $0600
         poke(SID_V1_PW_HI, 0x06);                  //   (~37% duty cycle)
         poke(SID_V1_AD, MUSIC_AD);
         poke(SID_V1_SR, MUSIC_SR);
-        poke(SID_V1_CTRL, MUSIC_PULSE_ON);         // gate on
 
         // --- Configure Voice 2 (pad — triangle wave) ---
         poke(SID_V2_CTRL, MUSIC_TRI_OFF);          // gate off first
-        poke(SID_V2_FREQ_LO, NOTE_TABLES[128]);    // V2 freq_lo[0]
-        poke(SID_V2_FREQ_HI, NOTE_TABLES[160]);    // V2 freq_hi[0]
+        poke(SID_V2_FREQ_LO, NOTE_TABLES[192]);    // V2 freq_lo[0]
+        poke(SID_V2_FREQ_HI, NOTE_TABLES[240]);    // V2 freq_hi[0]
         poke(SID_V2_AD, MUSIC_AD);
         poke(SID_V2_SR, MUSIC_SR);
         poke(SID_V2_CTRL, MUSIC_TRI_ON);           // gate on
@@ -1040,7 +1112,7 @@ pub fn music_start() {
         // --- Configure Voice 3 (bass — triangle wave) ---
         poke(SID_V3_CTRL, MUSIC_TRI_OFF);
         poke(SID_V3_FREQ_LO, NOTE_TABLES[0]);      // V3 freq_lo[0]
-        poke(SID_V3_FREQ_HI, NOTE_TABLES[32]);     // V3 freq_hi[0]
+        poke(SID_V3_FREQ_HI, NOTE_TABLES[48]);     // V3 freq_hi[0]
         poke(SID_V3_AD, MUSIC_AD);
         poke(SID_V3_SR, MUSIC_SR);
         poke(SID_V3_CTRL, MUSIC_TRI_ON);
@@ -1051,11 +1123,17 @@ pub fn music_start() {
         poke(SID_FILTER_ROUTE, 0x44);              // resonance=4, route V3
         poke(SID_VOL, 0x1F);                       // low-pass mode + vol=15
 
-        // --- Copy note tables to $0340-$03FF ---
+        // --- Copy note tables to RAM ---
         let src = NOTE_TABLES.as_ptr();
-        let dst = 0x0340 as *mut u8;
+        // V3 + V1 tables → $0340-$03FF (192 bytes)
+        let dst_a = 0x0340 as *mut u8;
         for i in 0..192usize {
-            write_volatile(dst.add(i), *src.add(i));
+            write_volatile(dst_a.add(i), *src.add(i));
+        }
+        // V2 tables → $0200-$025F (96 bytes)
+        let dst_b = 0x0200 as *mut u8;
+        for i in 0..96usize {
+            write_volatile(dst_b.add(i), *src.add(192 + i));
         }
 
         // --- Initialize music state ---

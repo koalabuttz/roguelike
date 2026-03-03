@@ -748,6 +748,29 @@ const MUSIC_TEMPO: u8 = 50;
 /// Number of notes in the loop.
 const MUSIC_SEQ_LEN: u8 = 48;
 
+/// Frames of music playback at full volume before fade-out begins.
+const MUSIC_PLAY_FRAMES: u16 = (MUSIC_SEQ_LEN as u16) * (MUSIC_TEMPO as u16); // 2400
+/// Minimum frames of silence between music loops (60 seconds at 50 Hz).
+const MUSIC_SILENCE_MIN: u16 = 3000;
+/// Frames between volume steps during fade (10 × 15 steps = 3.0s at 50 Hz).
+const MUSIC_FADE_STEP: u8 = 10;
+
+/// Auto-cycle phase constants.
+const MUSIC_OFF: u8 = 0;
+const MUSIC_PLAYING: u8 = 1;
+const MUSIC_FADE_OUT: u8 = 2;
+const MUSIC_SILENT: u8 = 3;
+const MUSIC_FADE_IN: u8 = 4;
+
+/// Current auto-cycle phase (MUSIC_OFF/PLAYING/FADE_OUT/SILENT/FADE_IN).
+static mut MUSIC_PHASE: u8 = MUSIC_OFF;
+/// Frames remaining in the current phase (play duration or silence duration).
+static mut MUSIC_TIMER: u16 = 0;
+/// Current master volume during fades (0-15).
+static mut MUSIC_FADE_VOL: u8 = 15;
+/// Frames until next volume step during fades.
+static mut MUSIC_FADE_TICK: u8 = 0;
+
 /// Frames to hold off music on V1 after attack SFX (240ms at 50 Hz).
 /// Attack SFX ADSR: A=0, D=3 (72ms) — holdoff of 12 frames gives margin.
 const SFX_HOLDOFF_V1: u8 = 12;
@@ -1077,27 +1100,17 @@ static MUSIC_HANDLER: [u8; 238] = [
     0x40,                    // ED: RTI
 ];
 
-/// Start the 3-voice ambient music engine.
-///
-/// Configures all three SID voices with triangle wave and music ADSR,
-/// copies note frequency tables to $0340-$03FF, and installs the combined
-/// music + shake IRQ handler on the VBlank raster interrupt.
-///
-/// Voice 3 plays bass (always active). Voices 1 and 2 play lead and pad
-/// respectively, and can be temporarily stolen by combat SFX via holdoff
-/// counters at $033B/$033C.
-///
-/// Must not overlap with spinner (they share register save slots and the
-/// IRQ vector). Call music_stop() before spinner_start().
-#[inline(never)]
-pub fn music_start() {
+/// Hardware-level music init: configure SID voices, copy note tables,
+/// install IRQ handler. Does NOT touch $D418 (volume/filter mode) —
+/// the caller sets volume to avoid pops during fades.
+fn music_start_hw() {
     unsafe {
         // --- Configure Voice 1 (lead — triangle, slow attack) ---
         // Step 0 is a rest — configure ADSR but leave gated off.
         // The handler will gate on when the lead enters at step 6.
         poke(SID_V1_CTRL, MUSIC_TRI_OFF);          // gate off (rest)
         poke(SID_V1_AD, MUSIC_LEAD_AD);             // 500ms attack
-        poke(SID_V1_SR, MUSIC_LEAD_SR);              // 67% sustain, 750ms release
+        poke(SID_V1_SR, MUSIC_LEAD_SR);             // 67% sustain, 750ms release
 
         // --- Configure Voice 2 (pad — triangle wave) ---
         poke(SID_V2_CTRL, MUSIC_TRI_OFF);          // gate off first
@@ -1119,7 +1132,7 @@ pub fn music_start() {
         poke(SID_FILTER_LO, 0x00);                 // cutoff lo (bits 0-2)
         poke(SID_FILTER_HI, 0x30);                 // cutoff hi → ~$300
         poke(SID_FILTER_ROUTE, 0x44);              // resonance=4, route V3
-        poke(SID_VOL, 0x1F);                       // low-pass mode + vol=15
+        // NOTE: $D418 (SID_VOL) intentionally NOT set here
 
         // --- Copy note tables to RAM ---
         let src = NOTE_TABLES.as_ptr();
@@ -1161,13 +1174,29 @@ pub fn music_start() {
     }
 }
 
-/// Stop the ambient music engine.
+/// Start the 3-voice ambient music engine at full volume.
 ///
-/// Disables the raster IRQ, gates off all three voices (triggering their
-/// release phase for a smooth fade), resets the filter, and restores the
-/// IRQ vector to the RTI stub at $E000.
+/// Configures all three SID voices with triangle wave and music ADSR,
+/// copies note frequency tables to $0340-$03FF, and installs the combined
+/// music + shake IRQ handler on the VBlank raster interrupt.
+///
+/// Must not overlap with spinner (they share register save slots and the
+/// IRQ vector). Call music_stop() before spinner_start().
 #[inline(never)]
-pub fn music_stop() {
+pub fn music_start() {
+    music_start_hw();
+    poke(SID_VOL, 0x1F); // low-pass mode + vol=15
+    unsafe {
+        // Start intermittent music auto-cycle
+        MUSIC_PHASE = MUSIC_PLAYING;
+        MUSIC_TIMER = MUSIC_PLAY_FRAMES;
+    }
+}
+
+/// Hardware-level music teardown: disable IRQ, gate off voices, clear filter
+/// routing. Does NOT touch $D418 (volume/filter mode) — the caller manages
+/// volume to avoid pops during fades.
+fn stop_sid_quiet() {
     // Disable VIC-II raster interrupt
     poke(VIC_IRQ_MASK, 0x00);
 
@@ -1181,13 +1210,100 @@ pub fn music_stop() {
     poke(SID_V2_CTRL, MUSIC_TRI_OFF);
     poke(SID_V3_CTRL, MUSIC_TRI_OFF);
 
-    // Reset filter: volume 15, no filter mode
-    poke(SID_VOL, 0x0F);
+    // Clear filter routing (leave $D418 untouched)
     poke(SID_FILTER_ROUTE, 0x00);
 
     // Restore IRQ vector to safe RTI stub
     unsafe {
         write_volatile(0xFFFE as *mut u8, 0x00); // $E000 low
         write_volatile(0xFFFF as *mut u8, 0xE0); // $E000 high
+    }
+}
+
+/// Stop the ambient music engine.
+///
+/// Disables the raster IRQ, gates off all three voices (triggering their
+/// release phase for a smooth fade), resets the filter, and restores the
+/// IRQ vector to the RTI stub at $E000.
+///
+/// Also disables the intermittent music timer so `music_auto_tick()` is inert
+/// until the next `music_start()`.
+#[inline(never)]
+pub fn music_stop() {
+    stop_sid_quiet();
+    poke(SID_VOL, 0x0F); // no filter + vol 15 (for SFX during silence)
+    unsafe {
+        MUSIC_PHASE = MUSIC_OFF;
+        MUSIC_TIMER = 0;
+    }
+}
+
+/// Called each frame from input wait loops. Manages intermittent music
+/// with smooth volume fades: play one loop → fade out (3s) → silence
+/// (60-123s) → fade in (3s) → repeat.
+///
+/// Fades use the SID master volume register ($D418) to ramp 0-15 over
+/// 15 steps at 10 frames/step (3.0 seconds). Music continues playing
+/// during both fades — volume alone controls audibility.
+///
+/// Volume-safe: never jumps $D418 abruptly. Uses `stop_sid_quiet()` (no
+/// volume change) for teardown and `music_start_hw()` (no volume set) for
+/// init, so the only $D418 writes are single-step increments/decrements.
+pub fn music_auto_tick() {
+    unsafe {
+        match MUSIC_PHASE {
+            MUSIC_PLAYING => {
+                if MUSIC_TIMER > 0 {
+                    MUSIC_TIMER -= 1;
+                } else {
+                    // Play period ended → begin fade out
+                    MUSIC_PHASE = MUSIC_FADE_OUT;
+                    MUSIC_FADE_VOL = 15;
+                    MUSIC_FADE_TICK = MUSIC_FADE_STEP;
+                }
+            }
+            MUSIC_FADE_OUT => {
+                if MUSIC_FADE_TICK > 0 {
+                    MUSIC_FADE_TICK -= 1;
+                } else if MUSIC_FADE_VOL > 0 {
+                    MUSIC_FADE_VOL -= 1;
+                    poke(SID_VOL, 0x10 | MUSIC_FADE_VOL); // low-pass + volume
+                    MUSIC_FADE_TICK = MUSIC_FADE_STEP;
+                } else {
+                    // Fade complete at vol 0 — quiet teardown (no volume jump)
+                    stop_sid_quiet();
+                    MUSIC_PHASE = MUSIC_SILENT;
+                    let random = (peek(CIA1_TIMER_LO) as u16) & 0x3F; // 0-63
+                    MUSIC_TIMER = MUSIC_SILENCE_MIN + random * 50;
+                }
+            }
+            MUSIC_SILENT => {
+                if MUSIC_TIMER > 0 {
+                    MUSIC_TIMER -= 1;
+                } else {
+                    // Silence ended → start music at zero volume, fade in
+                    // Set vol 0 BEFORE starting voices — no spike
+                    poke(SID_VOL, 0x10); // low-pass + vol 0
+                    music_start_hw();
+                    MUSIC_PHASE = MUSIC_FADE_IN;
+                    MUSIC_FADE_VOL = 0;
+                    MUSIC_FADE_TICK = MUSIC_FADE_STEP;
+                }
+            }
+            MUSIC_FADE_IN => {
+                if MUSIC_FADE_TICK > 0 {
+                    MUSIC_FADE_TICK -= 1;
+                } else if MUSIC_FADE_VOL < 15 {
+                    MUSIC_FADE_VOL += 1;
+                    poke(SID_VOL, 0x10 | MUSIC_FADE_VOL); // low-pass + volume
+                    MUSIC_FADE_TICK = MUSIC_FADE_STEP;
+                } else {
+                    // Fade in complete → normal play
+                    MUSIC_PHASE = MUSIC_PLAYING;
+                    MUSIC_TIMER = MUSIC_PLAY_FRAMES;
+                }
+            }
+            _ => {} // MUSIC_OFF — no-op
+        }
     }
 }

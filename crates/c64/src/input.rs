@@ -173,6 +173,7 @@ fn joy_edge() -> Option<u8> {
 pub fn wait_for_input() -> GameCommand {
     loop {
         c64::wait_next_frame();
+        c64::music_auto_tick();
 
         let key = read_key();
         if key != 0 {
@@ -282,6 +283,7 @@ pub enum LookInput {
 pub fn wait_for_look_input() -> LookInput {
     loop {
         c64::wait_next_frame();
+        c64::music_auto_tick();
 
         let key = read_key();
         if key != 0 {

@@ -109,11 +109,24 @@ impl MicroGameState {
         Self::new(seed, DEFAULT_MAP_WIDTH, DEFAULT_MAP_HEIGHT)
     }
 
+    /// Execute one player command + monster turns + regen, but skip FOV.
+    ///
+    /// Used by autorun for intermediate steps where full shadowcasting
+    /// is unnecessary. Monster AI still runs (uses Bresenham LOS, not FOV).
+    /// Caller must ensure `compute_fov` is called before reading visibility.
+    pub fn step_skip_fov(&mut self, cmd: GameCommand) -> MicroStepResult {
+        self.step_inner(cmd, false)
+    }
+
     /// Execute one player command + monster turns + regen.
     ///
     /// Accepts the full `GameCommand` enum. Variants the micro tier doesn't
     /// support (Autorun, AutoExplore, Look, etc.) are silently ignored.
     pub fn step(&mut self, cmd: GameCommand) -> MicroStepResult {
+        self.step_inner(cmd, true)
+    }
+
+    fn step_inner(&mut self, cmd: GameCommand, compute_fov: bool) -> MicroStepResult {
         if self.is_terminal() {
             return MicroStepResult {
                 action_taken: false,
@@ -150,9 +163,11 @@ impl MicroGameState {
                 self.idle_count = 0;
             }
 
-            let px = self.entities.x[PLAYER_IDX as usize];
-            let py = self.entities.y[PLAYER_IDX as usize];
-            self.fov.compute_fov(px, py, &self.map);
+            if compute_fov {
+                let px = self.entities.x[PLAYER_IDX as usize];
+                let py = self.entities.y[PLAYER_IDX as usize];
+                self.fov.compute_fov(px, py, &self.map);
+            }
 
             let player_def = self.effective_defense();
             let player_died = ai::run_monster_turns(

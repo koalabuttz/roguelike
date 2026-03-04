@@ -315,6 +315,12 @@ static mut PREV_KEYS: [u8; 8] = [0; 8];
 /// Scan the CIA1 keyboard matrix directly. Returns a key code on new
 /// keypress (rising edge), or 0 if no new key. No KERNAL dependency.
 pub fn scan_keyboard() -> u8 {
+    scan_keyboard_shifted().0
+}
+
+/// Scan the CIA1 keyboard matrix. Returns (key_code, shifted).
+/// key_code is 0 if no new key. shifted is true if either shift key is held.
+pub fn scan_keyboard_shifted() -> (u8, bool) {
     let mut rows = [0u8; 8];
 
     // Scan all 8 rows
@@ -353,7 +359,7 @@ pub fn scan_keyboard() -> u8 {
     }
 
     unsafe { PREV_KEYS = rows; }
-    result
+    (result, shifted)
 }
 
 /// Draw a decimal number (0-65535) at position. Returns number of digits written.

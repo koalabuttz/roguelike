@@ -55,11 +55,8 @@ fn key_to_direction(key: u8) -> Option<Direction> {
     }
 }
 
-/// Translate keyboard PETSCII code to game command.
-fn key_to_cmd(key: u8) -> Option<GameCommand> {
-    if let Some(dir) = key_to_direction(key) {
-        return Some(GameCommand::Move(dir));
-    }
+/// Translate non-directional key to game command (unaffected by shift).
+fn key_to_action(key: u8) -> Option<GameCommand> {
     match key {
         KEY_X             => Some(GameCommand::Look),
         KEY_SPACE         => Some(GameCommand::Wait),
@@ -170,14 +167,24 @@ fn joy_edge() -> Option<u8> {
 
 /// Wait for and return a game command from either keyboard or joystick.
 /// Blocks until a valid command is received. Polls once per frame.
+///
+/// Shift+direction (keyboard) or fire+direction (joystick) produces
+/// `Autorun(dir)` instead of `Move(dir)`.
 pub fn wait_for_input() -> GameCommand {
     loop {
         c64::wait_next_frame();
         c64::music_auto_tick();
 
-        let key = read_key();
+        let (key, shifted) = c64::scan_keyboard_shifted();
         if key != 0 {
-            if let Some(cmd) = key_to_cmd(key) {
+            if let Some(dir) = key_to_direction(key) {
+                return if shifted {
+                    GameCommand::Autorun(dir)
+                } else {
+                    GameCommand::Move(dir)
+                };
+            }
+            if let Some(cmd) = key_to_action(key) {
                 return cmd;
             }
         }
@@ -188,7 +195,11 @@ pub fn wait_for_input() -> GameCommand {
                 return GameCommand::Wait;
             }
             if let Some(d) = dir {
-                return GameCommand::Move(d);
+                return if fire {
+                    GameCommand::Autorun(d)
+                } else {
+                    GameCommand::Move(d)
+                };
             }
         }
     }

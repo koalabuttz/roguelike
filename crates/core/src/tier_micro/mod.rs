@@ -5,6 +5,7 @@
 //! static muts, no allocations.
 
 pub mod ai;
+pub mod autorun;
 pub mod combat;
 pub mod entity;
 pub mod fov;

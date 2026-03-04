@@ -205,11 +205,8 @@ impl MicroGameStateAdapter {
     /// Create a stepper for directional autorun (micro tier).
     pub fn start_autorun(&self, dir: Direction) -> MicroAutorunStepper {
         MicroAutorunStepper {
-            dir,
-            steps_taken: 0,
-            max_steps: balance::MAX_AUTORUN_STEPS as Stat,
+            inner: crate::tier_micro::autorun::MicroAutorunStepper::new(dir),
             all_messages: Vec::new(),
-            visible_before: [false; balance::MICRO_MAX_ENTITIES as usize],
             explored_floor_before: self.game.fov.explored_floor_count(&self.game.map) as Stat,
         }
     }
@@ -435,84 +432,63 @@ impl GameStep for MicroGameStateAdapter {
 
 // ── Micro tier autorun ───────────────────────────────────────────────
 
-/// Autorun stepper for the micro tier — directional movement only.
-///
-/// Mirrors the standard tier's `AutorunStepper` stop conditions but operates
-/// on `MicroGameStateAdapter` with `u8` coordinates and fixed arrays.
+/// Autorun stepper for the micro tier — wraps the no_std stepper from
+/// `tier_micro::autorun` and adds std-tier concerns (message collection,
+/// explored tile tracking).
 pub struct MicroAutorunStepper {
-    dir: Direction,
-    steps_taken: Stat,
-    max_steps: Stat,
+    inner: crate::tier_micro::autorun::MicroAutorunStepper,
     all_messages: Vec<String>,
-    /// Tracks which entity slots were visible before each step.
-    visible_before: [bool; balance::MICRO_MAX_ENTITIES as usize],
     explored_floor_before: Stat,
+}
+
+/// Map a no_std `MicroAutorunStop` to the std-tier `AutorunStopReason`.
+fn map_stop_reason(stop: crate::tier_micro::autorun::MicroAutorunStop) -> AutorunStopReason {
+    use crate::tier_micro::autorun::MicroAutorunStop;
+    match stop {
+        MicroAutorunStop::WallReached => AutorunStopReason::WallReached,
+        MicroAutorunStop::MonsterSpotted => AutorunStopReason::MonsterSpotted,
+        MicroAutorunStop::DamageTaken => AutorunStopReason::DamageTaken,
+        MicroAutorunStop::GameOver => AutorunStopReason::GameOver,
+        MicroAutorunStop::CorridorBranches => AutorunStopReason::CorridorBranches,
+        MicroAutorunStop::MaxSteps => AutorunStopReason::MaxSteps,
+    }
 }
 
 impl MicroAutorunStepper {
     /// Execute one step of the autorun sequence.
     pub fn next_step(&mut self, adapter: &mut MicroGameStateAdapter) -> StepOutcome {
-        let pi = PLAYER_IDX as usize;
+        use crate::tier_micro::autorun::MicroStepOutcome;
+        use crate::tier_micro::msglog::MSG_COUNT;
 
-        // Check 1: max steps.
-        if self.steps_taken >= self.max_steps {
-            return self.finish(adapter, AutorunStopReason::MaxSteps);
-        }
+        // Capture message count before the inner step (which calls state.step()).
+        let msg_count_before = adapter.game.log.total();
 
-        // Check 2: adjacent monster before stepping.
-        if has_adjacent_monster_micro(&adapter.game.entities) {
-            return self.finish(adapter, AutorunStopReason::MonsterSpotted);
-        }
+        let outcome = self.inner.next_step(&mut adapter.game);
 
-        // Snapshot HP and visible monsters before step.
-        let hp_before = adapter.game.entities.hp[pi];
-        self.snapshot_visible_monsters(&adapter.game.entities, &adapter.game.fov);
-
-        // Execute step via the adapter (handles message collection).
-        let result = adapter.step(GameCommand::Move(self.dir));
-        self.all_messages.extend(result.new_messages);
-
-        // Check 3: wall hit.
-        if !result.action_taken {
-            return self.finish(adapter, AutorunStopReason::WallReached);
-        }
-
-        self.steps_taken += 1;
-
-        // Check 4: game over.
-        if result.game_over {
-            return self.finish(adapter, AutorunStopReason::GameOver);
-        }
-
-        // Check 5: damage taken.
-        if adapter.game.entities.hp[pi] < hp_before {
-            return self.finish(adapter, AutorunStopReason::DamageTaken);
-        }
-
-        // Check 6: new monster spotted.
-        if self.has_new_visible_monster(&adapter.game.entities, &adapter.game.fov) {
-            return self.finish(adapter, AutorunStopReason::MonsterSpotted);
-        }
-
-        // Check 7: corridor branches.
-        let (dx, dy) = self.dir.to_offset();
-        let px = adapter.game.entities.x[pi];
-        let py = adapter.game.entities.y[pi];
-        let ahead_x = (px as i8 + dx as i8) as u8;
-        let ahead_y = (py as i8 + dy as i8) as u8;
-        if !adapter.game.map.is_walkable(ahead_x, ahead_y) {
-            let alternatives =
-                adapter
-                    .game
-                    .map
-                    .open_neighbors_excluding(px, py, -(dx as i8), -(dy as i8));
-            if alternatives >= 2 {
-                return self.finish(adapter, AutorunStopReason::CorridorBranches);
+        // Collect new messages by diffing the wrapping total counter.
+        let new_count = adapter.game.log.total();
+        let added = new_count
+            .wrapping_sub(msg_count_before)
+            .min(MSG_COUNT as u16) as u8;
+        for i in 0..added {
+            if let Some(evt) = adapter.game.log.recent(added - 1 - i) {
+                self.all_messages.push(format_event(evt));
             }
-            return self.finish(adapter, AutorunStopReason::WallReached);
         }
 
-        StepOutcome::Continue
+        match outcome {
+            MicroStepOutcome::Continue => StepOutcome::Continue,
+            MicroStepOutcome::Done(stop) => {
+                let explored_floor_after =
+                    adapter.game.fov.explored_floor_count(&adapter.game.map) as Stat;
+                StepOutcome::Done(AutorunResult {
+                    steps_taken: self.inner.steps_taken() as Stat,
+                    stop_reason: map_stop_reason(stop),
+                    messages: std::mem::take(&mut self.all_messages),
+                    new_tiles_revealed: explored_floor_after - self.explored_floor_before,
+                })
+            }
+        }
     }
 
     /// Run all remaining steps without pausing.
@@ -524,64 +500,6 @@ impl MicroAutorunStepper {
             }
         }
     }
-
-    fn snapshot_visible_monsters(
-        &mut self,
-        entities: &crate::tier_micro::entity::EntityStore,
-        fov: &MicroFov,
-    ) {
-        for i in 1..entities.count as usize {
-            self.visible_before[i] =
-                entities.alive[i] && fov.is_visible(entities.x[i], entities.y[i]);
-        }
-    }
-
-    fn has_new_visible_monster(
-        &self,
-        entities: &crate::tier_micro::entity::EntityStore,
-        fov: &MicroFov,
-    ) -> bool {
-        for i in 1..entities.count as usize {
-            if entities.alive[i]
-                && fov.is_visible(entities.x[i], entities.y[i])
-                && !self.visible_before[i]
-            {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn finish(
-        &mut self,
-        adapter: &MicroGameStateAdapter,
-        reason: AutorunStopReason,
-    ) -> StepOutcome {
-        let explored_floor_after = adapter.game.fov.explored_floor_count(&adapter.game.map) as Stat;
-        StepOutcome::Done(AutorunResult {
-            steps_taken: self.steps_taken,
-            stop_reason: reason,
-            messages: std::mem::take(&mut self.all_messages),
-            new_tiles_revealed: explored_floor_after - self.explored_floor_before,
-        })
-    }
-}
-
-/// Check if any alive monster is adjacent (Chebyshev distance <= 1) to the player.
-fn has_adjacent_monster_micro(entities: &crate::tier_micro::entity::EntityStore) -> bool {
-    let pi = PLAYER_IDX as usize;
-    let px = entities.x[pi];
-    let py = entities.y[pi];
-    for i in 1..entities.count as usize {
-        if entities.alive[i] {
-            let dx = entities.x[i].abs_diff(px);
-            let dy = entities.y[i].abs_diff(py);
-            if dx <= 1 && dy <= 1 {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 // ── Micro adapter helpers ────────────────────────────────────────────

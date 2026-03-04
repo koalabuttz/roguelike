@@ -737,11 +737,24 @@ fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
             copy_bytes(buf, 0, msg)
         }
         GameEvent::PlayerDeath => copy_bytes(buf, 0, b"You have died!"),
+        GameEvent::Autorun => copy_bytes(buf, 0, b"Running..."),
+        GameEvent::AutorunStop { cause } => {
+            use roguelike_core::rules::message::AutorunStopCause;
+            let msg = match cause {
+                AutorunStopCause::WallReached => b"Path blocked." as &[u8],
+                AutorunStopCause::MonsterSpotted => b"Monster spotted!",
+                AutorunStopCause::DamageTaken => b"You take damage!",
+                AutorunStopCause::GameOver => b"You have died!",
+                AutorunStopCause::CorridorBranches => b"Path branches.",
+                AutorunStopCause::MaxSteps => b"You stop running.",
+            };
+            copy_bytes(buf, 0, msg)
+        }
     };
 }
 
 /// Render the 2 most recent messages on rows 23-24.
-fn render_messages(state: &MicroGameState) {
+pub(crate) fn render_messages(state: &MicroGameState) {
     let mut buf = [b' '; 40];
 
     // Row 23: second most recent (dim)

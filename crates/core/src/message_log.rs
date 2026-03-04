@@ -1,5 +1,5 @@
 use crate::rules::items;
-use crate::rules::message::{Combatant, GameEvent, SoundDistance};
+use crate::rules::message::{AutorunStopCause, Combatant, GameEvent, SoundDistance};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct MessageLog {
@@ -104,6 +104,15 @@ pub fn format_event(event: GameEvent) -> String {
             SoundDistance::Far => "You hear a faint sound in the distance.".into(),
         },
         GameEvent::PlayerDeath => "You have died!".into(),
+        GameEvent::Autorun => "Running...".into(),
+        GameEvent::AutorunStop { cause } => match cause {
+            AutorunStopCause::WallReached => "Path blocked.".into(),
+            AutorunStopCause::MonsterSpotted => "Monster spotted!".into(),
+            AutorunStopCause::DamageTaken => "You take damage!".into(),
+            AutorunStopCause::GameOver => "You have died!".into(),
+            AutorunStopCause::CorridorBranches => "Path branches.".into(),
+            AutorunStopCause::MaxSteps => "You stop running.".into(),
+        },
     }
 }
 

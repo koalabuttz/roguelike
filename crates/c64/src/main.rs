@@ -16,9 +16,10 @@ mod input;
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 use input::{LookInput, MenuInput};
-use roguelike_core::command::GameCommand;
+use roguelike_core::command::{Direction, GameCommand};
 use roguelike_core::rules::message::{Combatant, GameEvent};
 use roguelike_core::rules::{balance, seed_code};
+use roguelike_core::tier_micro::autorun::{MicroAutorunStop, MicroAutorunStepper, MicroStepOutcome};
 use roguelike_core::tier_micro::game::MicroGameState;
 use roguelike_core::tier_micro::map::TILE_STAIRS_DOWN;
 use roguelike_core::tier_micro::types::{DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, PLAYER_IDX};
@@ -306,6 +307,53 @@ fn run_look_mode(state: &MicroGameState) {
     }
 }
 
+/// Run autorun: skip to destination instantly, then render once.
+/// Combat SFX/shake fires if the final step involved combat.
+fn run_autorun(state: &mut MicroGameState, dir: Direction) {
+    // Immediate feedback: show "Running..." via the game log.
+    state.log.add(GameEvent::Autorun);
+    render::render_messages(state);
+
+    let mut stepper = MicroAutorunStepper::new(dir);
+    let mut last_msg_total;
+
+    let stop_reason = loop {
+        last_msg_total = state.log.total();
+        match stepper.next_step(state) {
+            MicroStepOutcome::Continue => continue,
+            MicroStepOutcome::Done(reason) => break reason,
+        }
+    };
+
+    // Log why autorun stopped (unless combat/death events already explain it).
+    match stop_reason {
+        MicroAutorunStop::DamageTaken | MicroAutorunStop::GameOver => {}
+        reason => {
+            state.log.add(GameEvent::AutorunStop {
+                cause: reason.to_cause(),
+            });
+        }
+    }
+
+    // Ensure FOV is current (last step may have skipped it).
+    let pi = PLAYER_IDX as usize;
+    state
+        .fov
+        .compute_fov(state.entities.x[pi], state.entities.y[pi], &state.map);
+
+    // Combat feedback for the final step.
+    let combat = detect_combat(state, last_msg_total);
+    if combat.player_attacked || combat.player_hurt {
+        c64::shake_start();
+    }
+    if combat.player_attacked {
+        c64::sfx_attack();
+    }
+    if combat.player_hurt {
+        c64::sfx_hurt();
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn main() -> isize {
     c64::init_hardware();
@@ -350,6 +398,19 @@ pub extern "C" fn main() -> isize {
 
                 if cmd == GameCommand::Look {
                     app_state = AppState::Looking;
+                    continue;
+                }
+
+                if let GameCommand::Autorun(dir) = cmd {
+                    run_autorun(state, dir);
+                    // Full re-render after autorun to ensure clean state.
+                    let diff = unsafe { &mut DIFF };
+                    render::render_all(state);
+                    diff.snapshot(state, render::viewport_pos(state));
+                    if state.is_terminal() {
+                        c64::music_stop();
+                        app_state = AppState::GameOver;
+                    }
                     continue;
                 }
 

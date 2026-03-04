@@ -10,6 +10,19 @@ use core::mem::size_of;
 use super::items::ItemKind;
 use super::monster_table::MonsterKind;
 
+/// Why autorun stopped — mirrors `MicroAutorunStop` but lives in the
+/// shared `rules` layer so all tiers can produce messages from it.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AutorunStopCause {
+    WallReached = 0,
+    MonsterSpotted = 1,
+    DamageTaken = 2,
+    GameOver = 3,
+    CorridorBranches = 4,
+    MaxSteps = 5,
+}
+
 /// An actor in a game event — the player, a known monster type, or an
 /// unrecognized monster (custom/modded entities without a `MonsterKind`).
 ///
@@ -92,6 +105,10 @@ pub enum GameEvent {
     SoundCue { distance: SoundDistance },
     /// The player died.
     PlayerDeath,
+    /// Autorun started.
+    Autorun,
+    /// Autorun finished — carries the stop reason.
+    AutorunStop { cause: AutorunStopCause },
 }
 
 // Compile-time size checks — keep these small for constrained tiers.

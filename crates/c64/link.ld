@@ -1,12 +1,13 @@
 /* Custom C64 linker script for roguelike-c64.
  *
- * Based on the default mos-c64-none script, with one key change:
- * adds a second RAM region at $E000-$FFF7 (freed KERNAL ROM area).
+ * Memory layout:
+ *   ram    $0801-$CFFF  ~50 KB  Code, rodata, data, BSS
+ *   hiram  $E000-$FFF7  ~8 KB   Game state (.noinit.state) + static stacks (.noinit)
  *
- * The game unmaps KERNAL in init_hardware() and relocates the soft
- * stack to $FFF8.  This gives the linker ~8 KB of extra space for
- * .noinit (static stacks and imaginary register spills) beyond the
- * main $0801-$CFFF region.
+ * init_hardware() unmaps both KERNAL ($E000-$FFFF) and BASIC ($A000-$BFFF)
+ * ROMs via CPU port $35.  BASIC's 8 KB is already inside the ram region.
+ * KERNAL's 8 KB becomes hiram.  The soft stack is relocated to $FFF8 at
+ * startup so it grows down from the top of hiram.
  */
 
 __basic_zp_start = 0x0002;
@@ -48,7 +49,8 @@ SECTIONS {
      * gameplay, after init_hardware() unmaps KERNAL. */
     .noinit.state (NOLOAD) : { *(.noinit.state) } >hiram
 
-    /* Compiler-generated static stacks (~9 KB) stay in main ram. */
+    /* Compiler-generated static stacks (~10 KB) stay in ram — too large
+     * for hiram's ~3.5 KB remaining after game state. */
     .noinit (NOLOAD) : { INCLUDE noinit-sections.ld } >ram
 }
 

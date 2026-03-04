@@ -26,6 +26,7 @@ const SC_SPACE: u8 = 0x20;
 const SC_FLOOR: u8 = 0x2E;  // .
 const SC_WALL: u8 = 0xA0;   // reverse space = solid block
 const SC_STAIRS: u8 = 0x3E; // >
+const SC_CORPSE: u8 = 0x25; // %
 
 const STATUS_ROW: u8 = 22;
 const MSG_ROW: u8 = 23;
@@ -539,27 +540,25 @@ fn render_items(state: &MicroGameState, vx: u8, vy: u8) {
     }
 }
 
-/// Render all alive entities that are visible and within the viewport.
+/// Render all entities that are visible and within the viewport.
+/// Dead non-player entities are drawn as corpse glyphs (%).
+/// Alive entities are drawn with their normal glyph/color.
 fn render_entities(state: &MicroGameState, vx: u8, vy: u8) {
     for i in 0..state.entities.count {
         let idx = i as usize;
-        if !state.entities.alive[idx] {
-            continue;
-        }
         let ex = state.entities.x[idx];
         let ey = state.entities.y[idx];
         if !state.fov.is_visible(ex, ey) {
             continue;
         }
-        // Check if entity is within viewport
         if ex < vx || ex >= vx + VIEW_W || ey < vy || ey >= vy + VIEW_H {
             continue;
         }
 
-        let sx = ex - vx;
-        let sy = ey - vy;
-
-        let (glyph, color) = if i == PLAYER_IDX {
+        let (glyph, color) = if !state.entities.alive[idx] {
+            if i == PLAYER_IDX { continue; }
+            (SC_CORPSE, c64::COLOR_BROWN)
+        } else if i == PLAYER_IDX {
             (balance::PLAYER_GLYPH as u8, c64::COLOR_YELLOW)
         } else {
             match state.entities.kind[idx] {
@@ -572,7 +571,7 @@ fn render_entities(state: &MicroGameState, vx: u8, vy: u8) {
             }
         };
 
-        c64::draw_char(sx, sy, glyph, color);
+        c64::draw_char(ex - vx, ey - vy, glyph, color);
     }
 }
 
@@ -1106,27 +1105,28 @@ pub fn restore_tile(state: &MicroGameState, vx: u8, vy: u8, wx: u8, wy: u8) {
             }
         }
 
-        // 3. Entity layer (only if visible — entities occlude items)
+        // 3. Entity layer (alive entities + corpses occlude items)
         for i in 0..state.entities.count {
             let idx = i as usize;
-            if !state.entities.alive[idx] {
+            if state.entities.x[idx] != wx || state.entities.y[idx] != wy {
                 continue;
             }
-            if state.entities.x[idx] == wx && state.entities.y[idx] == wy {
-                let (glyph, c) = if i == PLAYER_IDX {
-                    (balance::PLAYER_GLYPH as u8, c64::COLOR_YELLOW)
-                } else {
-                    match state.entities.kind[idx] {
-                        Some(kind) => {
-                            let g = monster_table::glyph(kind) as u8;
-                            (g, game_color_to_c64(monster_table::color(kind)))
-                        }
-                        None => (b'?', c64::COLOR_WHITE),
+            let (glyph, c) = if !state.entities.alive[idx] {
+                if i == PLAYER_IDX { continue; }
+                (SC_CORPSE, c64::COLOR_BROWN)
+            } else if i == PLAYER_IDX {
+                (balance::PLAYER_GLYPH as u8, c64::COLOR_YELLOW)
+            } else {
+                match state.entities.kind[idx] {
+                    Some(kind) => {
+                        let g = monster_table::glyph(kind) as u8;
+                        (g, game_color_to_c64(monster_table::color(kind)))
                     }
-                };
-                c64::draw_char(sx, sy, glyph, c);
-                break;
-            }
+                    None => (b'?', c64::COLOR_WHITE),
+                }
+            };
+            c64::draw_char(sx, sy, glyph, c);
+            break;
         }
     }
 }
@@ -1162,6 +1162,7 @@ pub fn render_look_status(state: &MicroGameState, cx: u8, cy: u8) {
         if !visible {
             p = copy_bytes(&mut buf, p, b" (dim)");
         } else {
+            // Entity or item on this tile
             let eidx = state.entities.entity_at(cx, cy);
             if eidx != NO_ENTITY {
                 if p < 40 { buf[p] = b' '; p += 1; }

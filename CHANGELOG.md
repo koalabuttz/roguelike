@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add corpse glyph rendering and look mode descriptions on C64 (#69)
 - Redesign SID music composition with sparse motivic lead and wider intervals (#65)
 - Refine lead voice timbre and register for less distracting ambient feel (#1)
 
@@ -27,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add item system to roguelike (#2)
 
 ### Fixed
+- Fix C64 .noinit RAM overflow from corpse and look mode additions (#70)
 - Debug raster IRQ on C64 port - spinner corrupts game state during map generation (#60)
 - Add joystick edge detection with auto-repeat to prevent phantom input (#55)
 - Fix C64 I/O banking - CPU port value C unmaps I/O area causing frozen input (#54)

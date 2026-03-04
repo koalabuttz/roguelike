@@ -1,5 +1,8 @@
 **/target
 
+# Linker map files (generated during C64 memory analysis)
+crates/c64/map*.txt
+
 # Editor / IDE
 .vscode/
 .idea/

@@ -191,13 +191,19 @@ pub fn wait_vblank() {
 }
 
 /// Wait for the next video frame. Two-phase wait ensures exactly one
-/// frame per call: first exit the current vblank (if in one), then
-/// wait for the next vblank to arrive. Provides ~50 Hz (PAL) or
-/// ~60 Hz (NTSC) timing for input polling and repeat counters.
+/// frame per call: first wait for the lower border (raster >= 256),
+/// then wait for the new frame (raster < 256). Provides ~50 Hz (PAL)
+/// or ~60 Hz (NTSC) timing for input polling and repeat counters.
+///
+/// Uses $D011 bit 7 (raster counter MSB) instead of polling $D012 for
+/// an exact line. The music IRQ handler fires at line 251 and can steal
+/// 3-5 raster lines of CPU time, causing an exact-value poll on $D012
+/// to miss. Bit 7 gives a 56-line detection window (lines 256-311),
+/// far wider than any IRQ handler duration.
 pub fn wait_next_frame() {
     unsafe {
-        while read_volatile(VIC_RASTER) == 251 {}
-        while read_volatile(VIC_RASTER) != 251 {}
+        while (read_volatile(VIC_CTRL1) & 0x80) == 0 {}
+        while (read_volatile(VIC_CTRL1) & 0x80) != 0 {}
     }
 }
 

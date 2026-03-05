@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add seed code display to C64 end screens (#74)
 - Add I/O banking overlay on C64 — frees 3.6KB by placing pure-computation functions under $D000-$DFFF with bank-aware IRQ handlers (#72)
 - Add corpse glyph rendering and look mode descriptions on C64 (#69)
 - Redesign SID music composition with sparse motivic lead and wider intervals (#65)

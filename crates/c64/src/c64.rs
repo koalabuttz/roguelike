@@ -247,11 +247,17 @@ pub fn init_hardware() {
     //    → BASIC off (needs both LORAM+HIRAM), KERNAL off (needs HIRAM),
     //      I/O visible at $D000-$DFFF (needs CHAREN + at least one of LORAM/HIRAM),
     //      RAM at $E000-$FFFF
-    //    NOTE: $3C (LORAM=0, HIRAM=0) would unmap I/O too — the PLA only
+    //    NOTE: $34 (LORAM=0, HIRAM=0) would unmap I/O too — the PLA only
     //    enables I/O when at least one ROM select bit is set.
     poke(CPU_PORT, 0x35);
 
-    // 4. Relocate soft stack to freed KERNAL region ($E000-$FFF7).
+    // 4. Copy overlay code from its load address (in main RAM) to $D000-$DFFF.
+    //    Must happen while I/O is banked out so writes hit RAM, not I/O regs.
+    poke(CPU_PORT, 0x34); // bank out I/O
+    copy_overlay();
+    poke(CPU_PORT, 0x35); // bank I/O back in
+
+    // 5. Relocate soft stack to freed KERNAL region ($E000-$FFF7).
     //    MUST happen AFTER KERNAL is unmapped — otherwise reads from the
     //    stack area would return KERNAL ROM data instead of RAM.
     //    CRT init sets rc0:rc1 ($02:$03) = $D000. We move it to $FFF8
@@ -267,6 +273,42 @@ pub fn init_hardware() {
     poke(VIC_BORDER, COLOR_BLACK);
     // Clear screen
     clear_screen();
+}
+
+// ---------------------------------------------------------------------------
+// I/O banking — overlay code at $D000-$DFFF
+// ---------------------------------------------------------------------------
+
+extern "C" {
+    static __overlay_vma_start: u8;
+    static __overlay_vma_end: u8;
+    static __overlay_lma_start: u8;
+}
+
+/// Copy overlay code from its load address (in main RAM) to $D000-$DFFF.
+/// Caller must ensure I/O is banked out (CPU port $34) before calling.
+fn copy_overlay() {
+    unsafe {
+        let src = &__overlay_lma_start as *const u8;
+        let dst = &__overlay_vma_start as *const u8 as *mut u8;
+        let len = (&__overlay_vma_end as *const u8)
+            .offset_from(&__overlay_vma_start as *const u8) as usize;
+        core::ptr::copy_nonoverlapping(src, dst, len);
+    }
+}
+
+/// Bank out I/O — exposes RAM at $D000-$DFFF (overlay code).
+/// IRQ handlers are bank-aware: they save/restore $01 themselves,
+/// so raster IRQs keep firing (spinner, music) even while banked out.
+#[inline(always)]
+pub fn io_bank_out() {
+    poke(CPU_PORT, 0x34);           // LORAM=0, HIRAM=0 → all RAM
+}
+
+/// Bank I/O back in — restores VIC-II/SID/CIA access at $D000-$DFFF.
+#[inline(always)]
+pub fn io_bank_in() {
+    poke(CPU_PORT, 0x35);           // LORAM=1, HIRAM=0, CHAREN=1 → I/O visible
 }
 
 // ---------------------------------------------------------------------------
@@ -561,7 +603,7 @@ const SPRITE_BASE_ADDR: u16 = 0x0340;
 /// VIC-II sprite pointer value for first frame ($0340 / 64 = 13).
 const SPRITE_BASE_PTR: u8 = (SPRITE_BASE_ADDR / 64) as u8; // 13
 
-/// 6502 machine code for the spinner + footstep IRQ handler (88 bytes).
+/// 6502 machine code for the spinner + footstep IRQ handler (102 bytes).
 ///
 /// Cycles sprite 0's data pointer through 8 frames every 6th VBlank
 /// (~120ms per frame at 50Hz, full rotation ≈ 960ms).
@@ -572,6 +614,7 @@ const SPRITE_BASE_PTR: u8 = (SPRITE_BASE_ADDR / 64) as u8; // 13
 ///
 /// State at absolute addresses:
 ///   - $0330: V3 freq_hi mirror (descending pitch, write-only SID needs mirror)
+///   - $0331: saved CPU port (for I/O banking restore)
 ///   - $0334: sprite frame counter (decrements each VBlank, reloads to 6)
 ///   - $0335: sprite frame index (0-7)
 ///   - $0336: saved A register
@@ -579,52 +622,58 @@ const SPRITE_BASE_PTR: u8 = (SPRITE_BASE_ADDR / 64) as u8; // 13
 ///   - $033E: footstep frame counter (countdown to next step)
 ///   - $033F: steps remaining (0 = disabled)
 #[used]
-static SPINNER_HANDLER: [u8; 88] = [
-    // === Save registers ===
+static SPINNER_HANDLER: [u8; 102] = [
+    // === Save registers + bank I/O in ===
     0x8D, 0x36, 0x03,       // 00: STA $0336  (save A)
     0x8E, 0x37, 0x03,       // 03: STX $0337  (save X)
+    0xA5, 0x01,             // 06: LDA $01    (save CPU port)
+    0x8D, 0x31, 0x03,       // 08: STA $0331  (stash in RAM)
+    0xA9, 0x35,             // 0B: LDA #$35   (I/O visible)
+    0x85, 0x01,             // 0D: STA $01
 
     // === Spinner animation ===
-    0xCE, 0x34, 0x03,       // 06: DEC $0334  (frame counter)
-    0xD0, 0x16,             // 09: BNE +22 → .no_anim (0x21)
-    0xA9, 0x06,             // 0B: LDA #6     (reload counter)
-    0x8D, 0x34, 0x03,       // 0D: STA $0334
-    0xAD, 0x35, 0x03,       // 10: LDA $0335  (current frame)
-    0x18,                   // 13: CLC
-    0x69, 0x01,             // 14: ADC #1
-    0x29, 0x07,             // 16: AND #7     (wrap 0-7)
-    0x8D, 0x35, 0x03,       // 18: STA $0335
-    0x18,                   // 1B: CLC
-    0x69, 0x0D,             // 1C: ADC #13    (base pointer: $0340/64)
-    0x8D, 0xF8, 0x07,       // 1E: STA $07F8  (sprite 0 pointer)
+    0xCE, 0x34, 0x03,       // 0F: DEC $0334  (frame counter)
+    0xD0, 0x16,             // 12: BNE +22 → .no_anim (0x2A)
+    0xA9, 0x06,             // 14: LDA #6     (reload counter)
+    0x8D, 0x34, 0x03,       // 16: STA $0334
+    0xAD, 0x35, 0x03,       // 19: LDA $0335  (current frame)
+    0x18,                   // 1C: CLC
+    0x69, 0x01,             // 1D: ADC #1
+    0x29, 0x07,             // 1F: AND #7     (wrap 0-7)
+    0x8D, 0x35, 0x03,       // 21: STA $0335
+    0x18,                   // 24: CLC
+    0x69, 0x0D,             // 25: ADC #13    (base pointer: $0340/64)
+    0x8D, 0xF8, 0x07,       // 27: STA $07F8  (sprite 0 pointer)
 
     // === Footstep SFX (gated by $033F) ===
     // .no_anim:
-    0xAD, 0x3F, 0x03,       // 21: LDA $033F  (steps remaining)
-    0xF0, 0x23,             // 24: BEQ +35 → .ack (0x49)
-    0xCE, 0x3E, 0x03,       // 26: DEC $033E  (step frame counter)
-    0xD0, 0x1E,             // 29: BNE +30 → .ack (0x49)
-    0xA9, 0x12,             // 2B: LDA #18    (reload: 18 frames ≈ 0.36s)
-    0x8D, 0x3E, 0x03,       // 2D: STA $033E
-    0xA9, 0x80,             // 30: LDA #$80   (noise, gate OFF — retrigger)
-    0x8D, 0x12, 0xD4,       // 32: STA $D412  (V3 control)
-    0xAD, 0x30, 0x03,       // 35: LDA $0330  (freq_hi mirror)
-    0x38,                   // 38: SEC
-    0xE9, 0x02,             // 39: SBC #2     (descend pitch)
-    0x8D, 0x30, 0x03,       // 3B: STA $0330  (update mirror)
-    0x8D, 0x0F, 0xD4,       // 3E: STA $D40F  (V3 freq_hi)
-    0xA9, 0x81,             // 41: LDA #$81   (noise, gate ON)
-    0x8D, 0x12, 0xD4,       // 43: STA $D412  (V3 control)
-    0xCE, 0x3F, 0x03,       // 46: DEC $033F  (one fewer step)
+    0xAD, 0x3F, 0x03,       // 2A: LDA $033F  (steps remaining)
+    0xF0, 0x23,             // 2D: BEQ +35 → .ack (0x52)
+    0xCE, 0x3E, 0x03,       // 2F: DEC $033E  (step frame counter)
+    0xD0, 0x1E,             // 32: BNE +30 → .ack (0x52)
+    0xA9, 0x12,             // 34: LDA #18    (reload: 18 frames ≈ 0.36s)
+    0x8D, 0x3E, 0x03,       // 36: STA $033E
+    0xA9, 0x80,             // 39: LDA #$80   (noise, gate OFF — retrigger)
+    0x8D, 0x12, 0xD4,       // 3B: STA $D412  (V3 control)
+    0xAD, 0x30, 0x03,       // 3E: LDA $0330  (freq_hi mirror)
+    0x38,                   // 41: SEC
+    0xE9, 0x02,             // 42: SBC #2     (descend pitch)
+    0x8D, 0x30, 0x03,       // 44: STA $0330  (update mirror)
+    0x8D, 0x0F, 0xD4,       // 47: STA $D40F  (V3 freq_hi)
+    0xA9, 0x81,             // 4A: LDA #$81   (noise, gate ON)
+    0x8D, 0x12, 0xD4,       // 4C: STA $D412  (V3 control)
+    0xCE, 0x3F, 0x03,       // 4F: DEC $033F  (one fewer step)
 
-    // === Ack + restore ===
+    // === Ack + restore CPU port + restore regs ===
     // .ack:
-    0xA9, 0xFF,             // 49: LDA #$FF
-    0x8D, 0x19, 0xD0,       // 4B: STA $D019  (clear VIC-II IRQ)
-    0xAD, 0x0D, 0xDC,       // 4E: LDA $DC0D  (ack CIA)
-    0xAE, 0x37, 0x03,       // 51: LDX $0337  (restore X)
-    0xAD, 0x36, 0x03,       // 54: LDA $0336  (restore A)
-    0x40,                   // 57: RTI
+    0xA9, 0xFF,             // 52: LDA #$FF
+    0x8D, 0x19, 0xD0,       // 54: STA $D019  (clear VIC-II IRQ)
+    0xAD, 0x0D, 0xDC,       // 57: LDA $DC0D  (ack CIA)
+    0xAD, 0x31, 0x03,       // 5A: LDA $0331  (saved CPU port)
+    0x85, 0x01,             // 5D: STA $01    (restore banking state)
+    0xAE, 0x37, 0x03,       // 5F: LDX $0337  (restore X)
+    0xAD, 0x36, 0x03,       // 62: LDA $0336  (restore A)
+    0x40,                   // 65: RTI
 ];
 
 /// Start the sprite-based raster interrupt spinner.
@@ -1027,13 +1076,14 @@ const NOTE_TABLES: [u8; 288] = [
     NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,  NOTE_E3.1,   // 44:   │
 ];
 
-/// 6502 machine code for the combined music + shake IRQ handler (241 bytes).
+/// 6502 machine code for the combined music + shake IRQ handler (255 bytes).
 ///
 /// Runs every VBlank (50 Hz). Increments a frame counter ($033D) for
 /// wall-clock timing, handles screen shake ($0338), SFX holdoff voice
 /// reclaim ($033B/$033C), and 3-voice music stepping ($0339/$033A).
 ///
 /// State at absolute addresses:
+///   - $0331: saved CPU port (for I/O banking restore)
 ///   - $0336: saved A register (shared with spinner/shake)
 ///   - $0337: saved X register (shared with spinner/shake)
 ///   - $0338: shake frame counter (0 = inactive)
@@ -1045,17 +1095,21 @@ const NOTE_TABLES: [u8; 288] = [
 ///   - $0200-$025F: V2 frequency tables (2 × 48 bytes)
 ///   - $0340-$03FF: V3 + V1 frequency tables (4 × 48 bytes)
 #[used]
-static MUSIC_HANDLER: [u8; 241] = [
-    // === Save registers ===
+static MUSIC_HANDLER: [u8; 255] = [
+    // === Save registers + bank I/O in ===
     0x8D, 0x36, 0x03,       // 00: STA $0336      (save A)
     0x8E, 0x37, 0x03,       // 03: STX $0337      (save X)
+    0xA5, 0x01,             // 06: LDA $01        (save CPU port)
+    0x8D, 0x31, 0x03,       // 08: STA $0331      (stash in RAM)
+    0xA9, 0x35,             // 0B: LDA #$35       (I/O visible)
+    0x85, 0x01,             // 0D: STA $01
 
     // === Frame counter (for wall-clock music timing) ===
-    0xEE, 0x3D, 0x03,       // 06: INC $033D      (wrapping u8 frame counter)
+    0xEE, 0x3D, 0x03,       // 0F: INC $033D      (wrapping u8 frame counter)
 
     // === Shake section ===
-    0xAD, 0x38, 0x03,       // 09: LDA $0338      (shake counter)
-    0xF0, 0x13,              // 09: BEQ +19 → .no_shake (0x1E)
+    0xAD, 0x38, 0x03,       // 12: LDA $0338      (shake counter)
+    0xF0, 0x13,              // 15: BEQ +19 → .no_shake
     0x38,                    // 0B: SEC
     0xE9, 0x01,              // 0C: SBC #1         (counter--)
     0x8D, 0x38, 0x03,       // 0E: STA $0338
@@ -1165,17 +1219,19 @@ static MUSIC_HANDLER: [u8; 241] = [
     // .store_idx:
     0x8E, 0x3A, 0x03,       // DC: STX $033A
 
-    // === Ack + restore ===
+    // === Ack + restore CPU port + restore regs ===
     // .ack:
-    0xA9, 0xFF,              // DF: LDA #$FF
-    0x8D, 0x19, 0xD0,       // E1: STA $D019      (clear VIC-II IRQ)
-    0xAD, 0x0D, 0xDC,       // E4: LDA $DC0D      (ack CIA)
-    0xAE, 0x37, 0x03,       // E7: LDX $0337      (restore X)
-    0xAD, 0x36, 0x03,       // EA: LDA $0336      (restore A)
-    0x40,                    // ED: RTI
+    0xA9, 0xFF,              // E8: LDA #$FF
+    0x8D, 0x19, 0xD0,       // EA: STA $D019      (clear VIC-II IRQ)
+    0xAD, 0x0D, 0xDC,       // ED: LDA $DC0D      (ack CIA)
+    0xAD, 0x31, 0x03,       // F0: LDA $0331      (saved CPU port)
+    0x85, 0x01,             // F3: STA $01        (restore banking)
+    0xAE, 0x37, 0x03,       // F5: LDX $0337      (restore X)
+    0xAD, 0x36, 0x03,       // F8: LDA $0336      (restore A)
+    0x40,                    // FB: RTI
 ];
 
-/// Lightweight IRQ handler for silence periods (54 bytes).
+/// Lightweight IRQ handler for silence periods (78 bytes).
 ///
 /// Runs every VBlank while music is stopped. Keeps the frame counter,
 /// screen shake, and SFX holdoff countdown working so combat feedback
@@ -1184,17 +1240,21 @@ static MUSIC_HANDLER: [u8; 241] = [
 /// Holdoff just decrements to 0 without reclaiming — SFX's own ADSR
 /// release silences the voice naturally.
 #[used]
-static SILENCE_HANDLER: [u8; 64] = [
-    // === Save registers ===
+static SILENCE_HANDLER: [u8; 78] = [
+    // === Save registers + bank I/O in ===
     0x8D, 0x36, 0x03,       // 00: STA $0336      (save A)
     0x8E, 0x37, 0x03,       // 03: STX $0337      (save X)
+    0xA5, 0x01,             // 06: LDA $01        (save CPU port)
+    0x8D, 0x31, 0x03,       // 08: STA $0331      (stash in RAM)
+    0xA9, 0x35,             // 0B: LDA #$35       (I/O visible)
+    0x85, 0x01,             // 0D: STA $01
 
     // === Frame counter ===
-    0xEE, 0x3D, 0x03,       // 06: INC $033D
+    0xEE, 0x3D, 0x03,       // 0F: INC $033D
 
     // === Shake section (identical to music handler) ===
-    0xAD, 0x38, 0x03,       // 09: LDA $0338      (shake counter)
-    0xF0, 0x13,              // 0C: BEQ +19 → .no_shake (0x21)
+    0xAD, 0x38, 0x03,       // 12: LDA $0338      (shake counter)
+    0xF0, 0x13,              // 15: BEQ +19 → .no_shake
     0x38,                    // 0E: SEC
     0xE9, 0x01,              // 0F: SBC #1
     0x8D, 0x38, 0x03,       // 11: STA $0338
@@ -1217,14 +1277,16 @@ static SILENCE_HANDLER: [u8; 64] = [
     0xF0, 0x03,              // 2C: BEQ +3 → .ack (0x31)
     0xCE, 0x3C, 0x03,       // 2E: DEC $033C
 
-    // === Ack + restore ===
+    // === Ack + restore CPU port + restore regs ===
     // .ack:
-    0xA9, 0xFF,              // 31: LDA #$FF
-    0x8D, 0x19, 0xD0,       // 33: STA $D019      (clear VIC-II IRQ)
-    0xAD, 0x0D, 0xDC,       // 36: LDA $DC0D      (ack CIA)
-    0xAE, 0x37, 0x03,       // 39: LDX $0337      (restore X)
-    0xAD, 0x36, 0x03,       // 3C: LDA $0336      (restore A)
-    0x40,                    // 3F: RTI
+    0xA9, 0xFF,              // 3A: LDA #$FF
+    0x8D, 0x19, 0xD0,       // 3C: STA $D019      (clear VIC-II IRQ)
+    0xAD, 0x0D, 0xDC,       // 3F: LDA $DC0D      (ack CIA)
+    0xAD, 0x31, 0x03,       // 42: LDA $0331      (saved CPU port)
+    0x85, 0x01,             // 45: STA $01        (restore banking)
+    0xAE, 0x37, 0x03,       // 47: LDX $0337      (restore X)
+    0xAD, 0x36, 0x03,       // 4A: LDA $0336      (restore A)
+    0x40,                    // 4D: RTI
 ];
 
 /// Hardware-level music init: configure SID voices, copy note tables,

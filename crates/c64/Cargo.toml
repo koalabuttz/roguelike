@@ -8,7 +8,7 @@ description = "Commodore 64 port of the roguelike dungeon crawler"
 [workspace]  # standalone — not part of the parent workspace
 
 [dependencies]
-roguelike-core = { path = "../core", default-features = false }
+roguelike-core = { path = "../core", default-features = false, features = ["c64-overlay"] }
 
 [profile.release]
 opt-level = "s"   # optimize for size — "z" saves ~1.7 KB but causes codegen bugs (seed input breaks)

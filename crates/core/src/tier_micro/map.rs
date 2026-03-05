@@ -218,6 +218,7 @@ impl MicroMap {
     }
 
     /// Generate a dungeon. Returns the player start position.
+    #[cfg_attr(feature = "c64-overlay", link_section = ".overlay")]
     pub fn generate(&mut self, rng: &mut LfsrRng16) -> Pos {
         // Reset to all walls (TILE_WALL=0, so zero the packed array)
         let packed_size = ((self.width as usize) * (self.height as usize)).div_ceil(2);
@@ -279,6 +280,7 @@ impl MicroMap {
 
             self.rooms[self.room_count as usize] = new_room;
             self.room_count += 1;
+
         }
 
         self.place_stairs_down();

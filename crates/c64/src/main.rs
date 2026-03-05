@@ -63,10 +63,12 @@ fn read_cia_seed() -> u16 {
 /// Start a new game with the given seed and dimensions.
 /// Writes to the global STATE and returns a mutable reference.
 fn start_game(seed: u16, width: u8, height: u8) -> &'static mut MicroGameState {
+    c64::io_bank_out();
     unsafe {
         STATE.write(MicroGameState::new(seed, width, height));
-        STATE.assume_init_mut()
     }
+    c64::io_bank_in();
+    unsafe { STATE.assume_init_mut() }
 }
 
 /// Run the title menu. Returns the seed and dimensions for the new game.
@@ -317,6 +319,7 @@ fn run_autorun(state: &mut MicroGameState, dir: Direction) {
     let mut stepper = MicroAutorunStepper::new(dir);
     let mut last_msg_total;
 
+    c64::io_bank_out();
     let stop_reason = loop {
         last_msg_total = state.log.total();
         match stepper.next_step(state) {
@@ -324,6 +327,13 @@ fn run_autorun(state: &mut MicroGameState, dir: Direction) {
             MicroStepOutcome::Done(reason) => break reason,
         }
     };
+
+    // Ensure FOV is current (last step may have skipped it).
+    let pi = PLAYER_IDX as usize;
+    state
+        .fov
+        .compute_fov(state.entities.x[pi], state.entities.y[pi], &state.map);
+    c64::io_bank_in();
 
     // Log why autorun stopped (unless combat/death events already explain it).
     match stop_reason {
@@ -334,12 +344,6 @@ fn run_autorun(state: &mut MicroGameState, dir: Direction) {
             });
         }
     }
-
-    // Ensure FOV is current (last step may have skipped it).
-    let pi = PLAYER_IDX as usize;
-    state
-        .fov
-        .compute_fov(state.entities.x[pi], state.entities.y[pi], &state.map);
 
     // Combat feedback for the final step.
     let combat = detect_combat(state, last_msg_total);
@@ -431,7 +435,9 @@ pub extern "C" fn main() -> isize {
 
                 let old_depth = state.depth;
                 let msg_total = state.log.total();
+                c64::io_bank_out();
                 let result = state.step(cmd);
+                c64::io_bank_in();
 
                 if will_generate {
                     c64::spinner_stop();

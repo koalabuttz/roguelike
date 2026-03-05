@@ -10,6 +10,7 @@ std = ["dep:rand", "serde"]
 serde = ["dep:serde", "dep:serde_json"]
 data-files = ["dep:toml", "std"]
 dev-tools = ["std"]
+c64-overlay = []
 
 [dependencies]
 rand = { workspace = true, optional = true }

@@ -319,10 +319,16 @@ fn run_autorun(state: &mut MicroGameState, dir: Direction) {
     let mut stepper = MicroAutorunStepper::new(dir);
     let mut last_msg_total;
 
-    c64::io_bank_out();
+    // Bank I/O out per-step rather than for the entire loop.
+    // The stepper's step calls may invoke compute_fov (overlay at $D000),
+    // which needs I/O banked out. Banking per-step ensures I/O is restored
+    // between iterations so the loop works regardless of IRQ state.
     let stop_reason = loop {
         last_msg_total = state.log.total();
-        match stepper.next_step(state) {
+        c64::io_bank_out();
+        let outcome = stepper.next_step(state);
+        c64::io_bank_in();
+        match outcome {
             MicroStepOutcome::Continue => continue,
             MicroStepOutcome::Done(reason) => break reason,
         }
@@ -330,6 +336,7 @@ fn run_autorun(state: &mut MicroGameState, dir: Direction) {
 
     // Ensure FOV is current (last step may have skipped it).
     let pi = PLAYER_IDX as usize;
+    c64::io_bank_out();
     state
         .fov
         .compute_fov(state.entities.x[pi], state.entities.y[pi], &state.map);

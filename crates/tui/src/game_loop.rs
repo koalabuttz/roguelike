@@ -13,6 +13,7 @@ use roguelike_core::look::{LookAction, LookCursor};
 use roguelike_core::menu::{self, MenuAction};
 use roguelike_core::message_history::{MessageHistoryViewer, ViewerAction};
 use roguelike_core::platform::Renderer;
+use roguelike_core::rules::balance;
 use roguelike_core::seed_code;
 use roguelike_core::settings::{self, Platform, Settings};
 use roguelike_core::spectate::FrameSink;
@@ -157,7 +158,6 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
 
     let mut settings = saves.load_settings();
     let mut game_data = data::load_game_data();
-    let map_height = rows - 1 - settings.message_log_lines as i32;
     let mut game_state: Option<Box<dyn GameStep>> = None;
     let mut autosave_buf: Option<String> = None;
     let has_save = saves.has_save_for_title(settings.casual_mode);
@@ -199,7 +199,11 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                                 }
                             }
                         }
-                        match game_step::create_random_game(cols, map_height, &game_data) {
+                        match game_step::create_random_game(
+                            balance::STANDARD_MAP_WIDTH as i32,
+                            balance::STANDARD_MAP_HEIGHT as i32,
+                            &game_data,
+                        ) {
                             Ok(g) => {
                                 game_state = Some(g);
                                 autosave_buf = None;
@@ -225,11 +229,10 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                         )? {
                             Some(code) if !code.is_empty() => match seed_code::decode(&code) {
                                 Ok(params) => {
-                                    let h = rows - 1 - settings.message_log_lines as i32;
                                     match game_step::create_game(
                                         params.seed,
                                         params.width,
-                                        params.height.min(h),
+                                        params.height,
                                         params.preset,
                                         &game_data,
                                     ) {

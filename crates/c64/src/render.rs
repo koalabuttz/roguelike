@@ -1249,6 +1249,39 @@ fn render_end_screen(state: &MicroGameState, selected: u8, title: &[u8], title_c
     c64::draw_text(bx + 2, by + 4, b"Turns: ", c64::COLOR_GREY);
     c64::draw_number_u16(bx + 9, by + 4, state.turn_count, c64::COLOR_WHITE);
 
+    // Seed code: "{base36}-{W}x{H}" using only u16/u8 arithmetic.
+    // Avoids pulling in u64 division builtins (~6 KB on 6502).
+    c64::draw_text(bx + 2, by + 5, b"Seed: ", c64::COLOR_GREY);
+    let mut col = bx + 8;
+    // Base36-encode the u16 seed (max 4 digits: 0xFFFF = "1ekf")
+    {
+        const B36: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+        let mut buf = [0u8; 4];
+        let mut len: u8 = 0;
+        let mut s = state.seed;
+        if s == 0 {
+            buf[0] = b'0';
+            len = 1;
+        } else {
+            while s > 0 {
+                buf[len as usize] = B36[(s % 36) as usize];
+                s /= 36;
+                len += 1;
+            }
+        }
+        // Draw reversed
+        for i in 0..len {
+            c64::draw_char(col, by + 5, buf[(len - 1 - i) as usize], c64::COLOR_WHITE);
+            col += 1;
+        }
+    }
+    c64::draw_char(col, by + 5, b'-', c64::COLOR_GREY);
+    col += 1;
+    col += c64::draw_number(col, by + 5, state.map.width, c64::COLOR_WHITE);
+    c64::draw_char(col, by + 5, b'x', c64::COLOR_GREY);
+    col += 1;
+    c64::draw_number(col, by + 5, state.map.height, c64::COLOR_WHITE);
+
     let menu_items: [&[u8]; 2] = [b"Play Again", b"Title Screen"];
     draw_menu(&menu_items, selected, bx + 4, by + 6);
 }

@@ -134,7 +134,8 @@ pub const COMPACT_MAX_ROOMS: u8 = 24;
 pub const COMPACT_MAX_ENTITIES: u8 = 128;
 
 // Tier standard (Vita/PC) — uses the config constants above
-// (MAX_ROOMS, 80x40 default dimensions, MAX_ENTITIES = 1024)
+pub const STANDARD_MAP_WIDTH: u8 = 80;
+pub const STANDARD_MAP_HEIGHT: u8 = 40;
 
 #[cfg(test)]
 mod tests {

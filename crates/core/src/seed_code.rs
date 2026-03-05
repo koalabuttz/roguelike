@@ -1,4 +1,5 @@
 use crate::map::MapPreset;
+use crate::rules::balance;
 use crate::rules::seed_code as rules_seed;
 use crate::types::Coord;
 
@@ -13,8 +14,8 @@ pub struct SeedParams {
     pub preset: Option<MapPreset>,
 }
 
-const DEFAULT_WIDTH: Coord = 80;
-const DEFAULT_HEIGHT: Coord = 40;
+const DEFAULT_WIDTH: Coord = balance::STANDARD_MAP_WIDTH as Coord;
+const DEFAULT_HEIGHT: Coord = balance::STANDARD_MAP_HEIGHT as Coord;
 
 fn encode_base36(n: u64) -> String {
     let mut buf = [0u8; rules_seed::MAX_BASE36_LEN];

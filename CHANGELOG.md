@@ -32,6 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add item system to roguelike (#2)
 
 ### Fixed
+- Fix structural walls not rendering in terminal game (#75)
 - Fix C64 .noinit RAM overflow from corpse and look mode additions (#70)
 - Debug raster IRQ on C64 port - spinner corrupts game state during map generation (#60)
 - Add joystick edge detection with auto-repeat to prevent phantom input (#55)

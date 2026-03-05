@@ -129,13 +129,14 @@ impl RenderSource for GameState {
         let idx = self.map.idx(x, y);
         let kind = match self.map.tiles[idx] {
             Tile::Floor => TileKind::Floor,
+            Tile::Wall if self.map.structural[idx] => TileKind::Structural,
             Tile::Wall => TileKind::Wall,
             Tile::StairsDown => TileKind::StairsDown,
         };
         RenderTile {
             glyph: tile_rules::glyph(kind),
             fg: tile_rules::color(kind),
-            structural: self.map.structural[idx],
+            structural: kind == TileKind::Structural,
         }
     }
 
@@ -500,5 +501,62 @@ mod tests {
         let (depth, target) = mg.depth();
         assert_eq!(depth, 1);
         assert_eq!(target, roguelike_core::rules::balance::TARGET_DEPTH as Stat);
+    }
+
+    #[test]
+    fn standard_structural_walls_render_as_hash() {
+        let gs = test_standard_game();
+        let (map_w, map_h) = gs.map_size();
+        let mut found_structural = false;
+        for y in 0..map_h {
+            for x in 0..map_w {
+                let idx = gs.map.idx(x, y);
+                if gs.map.structural[idx] {
+                    let tile = RenderSource::tile_at(&gs, x, y);
+                    assert_eq!(
+                        tile.glyph, '#',
+                        "structural wall at ({x},{y}) should have '#' glyph, got '{}'",
+                        tile.glyph
+                    );
+                    assert!(
+                        tile.structural,
+                        "structural wall at ({x},{y}) should have structural=true"
+                    );
+                    found_structural = true;
+                }
+            }
+        }
+        assert!(
+            found_structural,
+            "map should have at least one structural wall"
+        );
+    }
+
+    #[test]
+    fn standard_non_structural_walls_render_as_space() {
+        let gs = test_standard_game();
+        let (map_w, map_h) = gs.map_size();
+        let mut found_non_structural = false;
+        for y in 0..map_h {
+            for x in 0..map_w {
+                let idx = gs.map.idx(x, y);
+                if gs.map.tiles[idx] == roguelike_core::map::Tile::Wall && !gs.map.structural[idx] {
+                    let tile = RenderSource::tile_at(&gs, x, y);
+                    assert_eq!(
+                        tile.glyph, ' ',
+                        "non-structural wall at ({x},{y}) should have ' ' glyph"
+                    );
+                    assert!(
+                        !tile.structural,
+                        "non-structural wall at ({x},{y}) should have structural=false"
+                    );
+                    found_non_structural = true;
+                }
+            }
+        }
+        assert!(
+            found_non_structural,
+            "map should have at least one non-structural wall"
+        );
     }
 }

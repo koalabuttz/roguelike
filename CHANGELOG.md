@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add wall-clock music timer via IRQ frame counter on C64 (#66)
+- Expand C64 RAM by moving .noinit to hiram and unmapping BASIC ROM (#71)
 - Add seed code display to C64 end screens (#74)
 - Add I/O banking overlay on C64 — frees 3.6KB by placing pure-computation functions under $D000-$DFFF with bank-aware IRQ handlers (#72)
 - Add corpse glyph rendering and look mode descriptions on C64 (#69)
@@ -44,6 +46,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix equipment stats not applied during monster attacks (#12)
 
 ### Changed
+- Add SID music to C64 port (#61)
 - Fix combat event detection cap missing events in rare multi-monster scenarios (#68)
 - Screen shake effect on enemy hit (#63)
 - Sprite-based loading spinner for C64 (#64)

@@ -287,6 +287,66 @@ pub fn read_seed_input(
     }
 }
 
+/// Inventory input (two-phase: browse + act).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum InventoryInput {
+    Up,
+    Down,
+    /// Direct keyboard action: U/E/D bypass the action bar.
+    Use,
+    Equip,
+    Drop,
+    /// Joystick fire or Return: enter/confirm action bar.
+    Confirm,
+    /// Left/right: cycle action bar selection.
+    Left,
+    Right,
+    Close,
+}
+
+/// Wait for inventory input from keyboard or joystick.
+/// Joystick uses edge + repeat for cursor, edge-only for fire.
+pub fn wait_for_inventory_input() -> InventoryInput {
+    loop {
+        c64::wait_next_frame();
+        c64::music_auto_tick();
+
+        let key = read_key();
+        if key != 0 {
+            match key {
+                KEY_W | KEY_UP => return InventoryInput::Up,
+                KEY_S | KEY_DOWN => return InventoryInput::Down,
+                KEY_LEFT => return InventoryInput::Left,
+                KEY_RIGHT => return InventoryInput::Right,
+                b'U' => return InventoryInput::Use,
+                b'D' => return InventoryInput::Drop,
+                KEY_RETURN | KEY_SPACE => return InventoryInput::Confirm,
+                KEY_RUNSTOP | KEY_I => return InventoryInput::Close,
+                _ => {
+                    // a-z slot jump: E is taken by Equip, so handle it last
+                    if key == b'E' {
+                        return InventoryInput::Equip;
+                    }
+                }
+            }
+        }
+
+        if let Some(bits) = joy_repeat() {
+            let (dir, fire) = decode_joy(bits);
+            if fire {
+                return InventoryInput::Confirm;
+            }
+            match dir {
+                Some(Direction::North) => return InventoryInput::Up,
+                Some(Direction::South) => return InventoryInput::Down,
+                Some(Direction::West) => return InventoryInput::Left,
+                Some(Direction::East) => return InventoryInput::Right,
+                _ => {}
+            }
+        }
+    }
+}
+
 /// Look mode input.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum LookInput {

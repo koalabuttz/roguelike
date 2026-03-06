@@ -15,7 +15,7 @@ mod input;
 
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
-use input::{LookInput, MenuInput};
+use input::{InventoryInput, LookInput, MenuInput};
 use roguelike_core::command::{Direction, GameCommand};
 use roguelike_core::rules::message::{Combatant, GameEvent};
 use roguelike_core::rules::{balance, seed_code};
@@ -310,61 +310,160 @@ fn run_look_mode(state: &MicroGameState) {
     }
 }
 
-/// Run the inventory modal. Cursor + keyboard to select and act on items.
+/// Run the inventory modal. Two-phase: Browse (cursor) + Act (action bar).
+/// Keyboard shortcuts U/E/D work directly in Browse mode.
+/// Joystick: fire enters Act mode, left/right cycles actions, fire confirms.
 fn run_inventory(state: &mut MicroGameState) {
+    use render::InvAction;
+
     let mut selected: u8 = 0;
-    render::render_inventory(state, selected);
+    // None = Browse mode, Some(idx) = Act mode with action bar selection
+    let mut action_sel: Option<u8> = None;
+
+    render::render_inventory(state, selected, None);
 
     loop {
-        c64::wait_next_frame();
-        c64::music_auto_tick();
+        let inp = input::wait_for_inventory_input();
 
-        let key = c64::scan_keyboard();
-        if key == 0 {
-            continue;
-        }
+        match inp {
+            InventoryInput::Close => return,
 
-        match key {
-            b'W' | c64::PETSCII_UP => {
-                if selected > 0 {
+            // --- Browse mode: cursor movement ---
+            InventoryInput::Up => {
+                if action_sel.is_some() {
+                    // In act mode, up exits back to browse
+                    action_sel = None;
+                } else if selected > 0 {
                     selected -= 1;
-                    render::render_inventory(state, selected);
                 }
             }
-            b'S' | c64::PETSCII_DOWN => {
-                let count = state.inventory.len() as u8;
-                if count > 0 && selected < count - 1 {
-                    selected += 1;
-                    render::render_inventory(state, selected);
-                }
-            }
-            b'U' | b'E' | b'D' => {
-                // Map cursor position to actual inventory slot index.
-                let slot_idx = state
-                    .inventory
-                    .iter()
-                    .nth(selected as usize)
-                    .map(|(i, _)| i as u8);
-                if let Some(idx) = slot_idx {
-                    let cmd = match key {
-                        b'U' => GameCommand::UseItem(idx),
-                        b'E' => GameCommand::EquipItem(idx),
-                        _ => GameCommand::DropItem(idx),
-                    };
-                    c64::io_bank_out();
-                    state.step(cmd);
-                    c64::io_bank_in();
-                    // Clamp selected if inventory shrank
+            InventoryInput::Down => {
+                if action_sel.is_some() {
+                    action_sel = None;
+                } else {
                     let count = state.inventory.len() as u8;
-                    if count > 0 && selected >= count {
-                        selected = count - 1;
+                    if count > 0 && selected < count - 1 {
+                        selected += 1;
                     }
-                    render::render_inventory(state, selected);
                 }
             }
-            c64::PETSCII_STOP | b'I' => return,
-            _ => {}
+
+            // --- Direct keyboard shortcuts (always work) ---
+            InventoryInput::Use => {
+                execute_inventory_action(state, selected, InvAction::Use);
+                action_sel = None;
+                clamp_selected(state, &mut selected);
+            }
+            InventoryInput::Equip => {
+                execute_inventory_action(state, selected, InvAction::Equip);
+                action_sel = None;
+                clamp_selected(state, &mut selected);
+            }
+            InventoryInput::Drop => {
+                execute_inventory_action(state, selected, InvAction::Drop);
+                action_sel = None;
+                clamp_selected(state, &mut selected);
+            }
+
+            // --- Action bar navigation ---
+            InventoryInput::Left => {
+                if let Some(ref mut sel) = action_sel {
+                    if *sel > 0 {
+                        *sel -= 1;
+                    }
+                }
+            }
+            InventoryInput::Right => {
+                if let Some(ref mut sel) = action_sel {
+                    let actions = current_actions(state, selected);
+                    let max = actions.len() as u8;
+                    if *sel + 1 < max {
+                        *sel += 1;
+                    }
+                }
+            }
+
+            // --- Confirm: enter Act mode or execute selected action ---
+            InventoryInput::Confirm => {
+                if state.inventory.len() == 0 {
+                    continue;
+                }
+                match action_sel {
+                    None => {
+                        // Enter Act mode with default action (index 0)
+                        action_sel = Some(0);
+                    }
+                    Some(sel) => {
+                        let actions = current_actions(state, selected);
+                        if (sel as usize) < actions.len() {
+                            let action = actions[sel as usize];
+                            if action == InvAction::Back {
+                                action_sel = None;
+                            } else {
+                                execute_inventory_action(state, selected, action);
+                                action_sel = None;
+                                clamp_selected(state, &mut selected);
+                            }
+                        }
+                    }
+                }
+            }
         }
+
+        // If inventory is empty after an action, exit
+        if state.inventory.len() == 0 && state.equipment.weapon.is_none() && state.equipment.armor.is_none() {
+            render::render_inventory(state, selected, None);
+            return;
+        }
+
+        // Build action bar for rendering
+        let bar = action_sel.map(|sel| {
+            let actions = current_actions(state, selected);
+            (actions, sel)
+        });
+        render::render_inventory(state, selected, bar);
+    }
+}
+
+/// Get the context-sensitive action list for the currently selected item.
+fn current_actions(state: &MicroGameState, selected: u8) -> &'static [render::InvAction] {
+    state
+        .inventory
+        .iter()
+        .nth(selected as usize)
+        .map(|(_, slot)| render::actions_for_kind(slot.kind))
+        .unwrap_or(&[render::InvAction::Back])
+}
+
+/// Execute an inventory action on the selected item.
+fn execute_inventory_action(
+    state: &mut MicroGameState,
+    selected: u8,
+    action: render::InvAction,
+) {
+    let slot_idx = state
+        .inventory
+        .iter()
+        .nth(selected as usize)
+        .map(|(i, _)| i as u8);
+    if let Some(idx) = slot_idx {
+        let cmd = match action {
+            render::InvAction::Use => GameCommand::UseItem(idx),
+            render::InvAction::Equip => GameCommand::EquipItem(idx),
+            render::InvAction::Drop => GameCommand::DropItem(idx),
+            render::InvAction::Back => return,
+        };
+        c64::io_bank_out();
+        state.step(cmd);
+        c64::io_bank_in();
+    }
+}
+
+/// Clamp the cursor position after inventory changes.
+fn clamp_selected(state: &MicroGameState, selected: &mut u8) {
+    let count = state.inventory.len() as u8;
+    if count > 0 && *selected >= count {
+        *selected = count - 1;
     }
 }
 

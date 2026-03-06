@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- C64: Two-phase inventory with action bar (#90)
 - Both tiers: Equipped-item indicators in inventory (#92)
 - Standard tier: Item coloring in inventory modal (#93)
 - Add Brogue-style inventory system (26-slot, stackable) (#78)

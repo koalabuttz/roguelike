@@ -1329,8 +1329,46 @@ pub fn render_title(selected: u8) {
     draw_menu(&menu_items, selected, 10, 10);
 }
 
+/// Inventory action bar actions.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum InvAction {
+    Use,
+    Equip,
+    Drop,
+    Back,
+}
+
+/// All actions for consumable items.
+const CONSUMABLE_ACTIONS: [InvAction; 3] = [InvAction::Use, InvAction::Drop, InvAction::Back];
+/// All actions for equipment items.
+const EQUIPMENT_ACTIONS: [InvAction; 3] = [InvAction::Equip, InvAction::Drop, InvAction::Back];
+
+/// Get the action list for an item kind.
+pub fn actions_for_kind(kind: items::ItemKind) -> &'static [InvAction] {
+    if items::is_consumable(kind) {
+        &CONSUMABLE_ACTIONS
+    } else {
+        &EQUIPMENT_ACTIONS
+    }
+}
+
+fn action_label(action: InvAction) -> &'static [u8] {
+    match action {
+        InvAction::Use => b"USE",
+        InvAction::Equip => b"EQUIP",
+        InvAction::Drop => b"DROP",
+        InvAction::Back => b"BACK",
+    }
+}
+
 /// Render the inventory overlay on top of the game screen.
-pub fn render_inventory(state: &MicroGameState, selected: u8) {
+/// `action_bar`: if Some, we're in Act mode — show the action bar with the
+/// given actions and selected index. If None, show the keyboard hint.
+pub fn render_inventory(
+    state: &MicroGameState,
+    selected: u8,
+    action_bar: Option<(&[InvAction], u8)>,
+) {
     render_all(state);
 
     let bx: u8 = 2;
@@ -1391,7 +1429,31 @@ pub fn render_inventory(state: &MicroGameState, selected: u8) {
         c64::draw_text(bx + 2, row, b"EMPTY", c64::COLOR_DGREY);
     }
 
-    c64::draw_text(bx + 2, by + bh - 1, b"U:USE E:EQUIP D:DROP", c64::COLOR_DGREY);
+    // Bottom bar: action bar (Act mode) or keyboard hints (Browse mode).
+    let bar_row = by + bh - 1;
+    match action_bar {
+        Some((actions, sel_action)) => {
+            let mut x = bx + 2;
+            for (i, &action) in actions.iter().enumerate() {
+                let label = action_label(action);
+                if i as u8 == sel_action {
+                    // Selected action: highlighted with bracket markers
+                    c64::draw_char(x, bar_row, b'[', c64::COLOR_YELLOW);
+                    x += 1;
+                    c64::draw_text(x, bar_row, label, c64::COLOR_YELLOW);
+                    x += label.len() as u8;
+                    c64::draw_char(x, bar_row, b']', c64::COLOR_YELLOW);
+                    x += 2;
+                } else {
+                    c64::draw_text(x, bar_row, label, c64::COLOR_DGREY);
+                    x += label.len() as u8 + 1;
+                }
+            }
+        }
+        None => {
+            c64::draw_text(bx + 2, bar_row, b"U:USE E:EQUIP D:DROP", c64::COLOR_DGREY);
+        }
+    }
 }
 
 /// Render the pause menu overlay on top of the game screen.

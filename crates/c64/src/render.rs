@@ -100,7 +100,6 @@ fn game_color_to_c64(gc: GameColor) -> u8 {
 }
 
 /// Map a raw tile value to (screen_code, color) for the given visibility.
-#[inline(always)]
 fn tile_sc_color(tile: u8, visible: bool) -> (u8, u8) {
     match tile {
         TILE_FLOOR => (SC_FLOOR, if visible { c64::COLOR_DGREY } else { c64::COLOR_BLUE }),
@@ -133,7 +132,6 @@ pub fn render_all(state: &MicroGameState) {
 }
 
 /// Extract a 4-bit packed tile from the tile array using a linear index.
-#[inline(always)]
 fn tile_at_index(tiles: &[u8], fi: usize) -> u8 {
     let byte = tiles[fi >> 1];
     if fi & 1 == 0 {
@@ -908,14 +906,12 @@ impl DiffState {
 }
 
 /// Set a bit in the viewport dirty bitfield.
-#[inline(always)]
 fn mark_dirty(dirty: &mut [u8; DIRTY_SIZE], sx: u8, sy: u8) {
     let idx = (sy as usize) * (VIEW_W as usize) + (sx as usize);
     dirty[idx >> 3] |= 1u8 << (idx & 7);
 }
 
 /// Mark a world-coordinate position dirty if it falls within the viewport.
-#[inline(always)]
 fn mark_dirty_world(dirty: &mut [u8; DIRTY_SIZE], vx: u8, vy: u8, wx: u8, wy: u8) {
     if wx >= vx && wx < vx + VIEW_W && wy >= vy && wy < vy + VIEW_H {
         mark_dirty(dirty, wx - vx, wy - vy);
@@ -1347,6 +1343,24 @@ pub fn render_inventory(state: &MicroGameState, selected: u8) {
 
     let mut row: u8 = by + 2;
 
+    // Equipped items section.
+    let has_equip = state.equipment.weapon.is_some() || state.equipment.armor.is_some();
+    if has_equip {
+        c64::draw_text(bx + 2, row, b"EQUIPPED:", c64::COLOR_DGREY);
+        row += 1;
+        if let Some(kind) = state.equipment.weapon {
+            c64::draw_text(bx + 3, row, b"W: ", c64::COLOR_GREEN);
+            c64::draw_text(bx + 6, row, items::name(kind).as_bytes(), c64::COLOR_GREEN);
+            row += 1;
+        }
+        if let Some(kind) = state.equipment.armor {
+            c64::draw_text(bx + 3, row, b"A: ", c64::COLOR_GREEN);
+            c64::draw_text(bx + 6, row, items::name(kind).as_bytes(), c64::COLOR_GREEN);
+            row += 1;
+        }
+        row += 1; // blank line separator
+    }
+
     let mut item_count: u8 = 0;
     for (i, slot) in state.inventory.iter() {
         if row >= by + bh - 2 {
@@ -1373,8 +1387,8 @@ pub fn render_inventory(state: &MicroGameState, selected: u8) {
         item_count += 1;
     }
 
-    if item_count == 0 {
-        c64::draw_text(bx + 2, by + 2, b"EMPTY", c64::COLOR_DGREY);
+    if item_count == 0 && !has_equip {
+        c64::draw_text(bx + 2, row, b"EMPTY", c64::COLOR_DGREY);
     }
 
     c64::draw_text(bx + 2, by + bh - 1, b"U:USE E:EQUIP D:DROP", c64::COLOR_DGREY);

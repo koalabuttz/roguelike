@@ -1,8 +1,9 @@
 // C64 hardware register definitions and low-level helpers.
 //
 // All access to VIC-II, SID, CIA, and memory-mapped I/O goes through this
-// module. Functions are #[inline(always)] so the compiler can emit direct
-// LDA/STA instructions instead of JSR overhead.
+// module. LTO decides inlining — #[inline(always)] is counterproductive on
+// rust-mos (cascading static stack bloat). #[inline(never)] on SID/hardware
+// functions prevents code duplication.
 
 #![allow(dead_code)] // Hardware registers are defined for completeness
 
@@ -97,12 +98,10 @@ pub const COLOR_LGREY: u8 = 15;
 
 // --- Low-level memory access ---
 
-#[inline(always)]
 pub fn poke(addr: *mut u8, val: u8) {
     unsafe { write_volatile(addr, val); }
 }
 
-#[inline(always)]
 pub fn peek(addr: *const u8) -> u8 {
     unsafe { read_volatile(addr) }
 }
@@ -110,7 +109,6 @@ pub fn peek(addr: *const u8) -> u8 {
 // --- Screen helpers ---
 
 /// Convert ASCII byte to C64 screen code.
-#[inline(always)]
 pub fn to_screen_code(ascii: u8) -> u8 {
     match ascii {
         b'@' => 0,
@@ -133,7 +131,6 @@ pub fn draw_text(x: u8, y: u8, text: &[u8], color: u8) {
 }
 
 /// Write a raw screen code with color at position.
-#[inline(always)]
 pub fn draw_sc(x: u8, y: u8, sc: u8, color: u8) {
     let offset = (y as usize) * 40 + (x as usize);
     unsafe {
@@ -144,7 +141,6 @@ pub fn draw_sc(x: u8, y: u8, sc: u8, color: u8) {
 
 /// Write a single ASCII character with color at position.
 /// Converts to C64 screen code internally.
-#[inline(always)]
 pub fn draw_char(x: u8, y: u8, ascii: u8, color: u8) {
     draw_sc(x, y, to_screen_code(ascii), color);
 }
@@ -175,7 +171,6 @@ pub fn clear_screen() {
 pub const VBLANK_SYNC: bool = true;
 
 /// Wait for vblank if `VBLANK_SYNC` is enabled; no-op otherwise.
-#[inline(always)]
 pub fn sync_frame() {
     if VBLANK_SYNC {
         wait_vblank();
@@ -306,13 +301,11 @@ fn copy_overlay() {
 /// Bank out I/O — exposes RAM at $D000-$DFFF (overlay code).
 /// IRQ handlers are bank-aware: they save/restore $01 themselves,
 /// so raster IRQs keep firing (spinner, music) even while banked out.
-#[inline(always)]
 pub fn io_bank_out() {
     poke(CPU_PORT, 0x34);           // LORAM=0, HIRAM=0 → all RAM
 }
 
 /// Bank I/O back in — restores VIC-II/SID/CIA access at $D000-$DFFF.
-#[inline(always)]
 pub fn io_bank_in() {
     poke(CPU_PORT, 0x35);           // LORAM=1, HIRAM=0, CHAREN=1 → I/O visible
 }
@@ -431,7 +424,6 @@ pub fn draw_number_u16(x: u8, y: u8, mut val: u16, color: u8) -> u8 {
 }
 
 /// Draw a decimal number (0-255) at position. Delegates to draw_number_u16.
-#[inline(always)]
 pub fn draw_number(x: u8, y: u8, val: u8, color: u8) -> u8 {
     draw_number_u16(x, y, val as u16, color)
 }

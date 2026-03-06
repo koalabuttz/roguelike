@@ -36,13 +36,11 @@ struct ScanJob {
 }
 
 /// Returns true if slope a/a_den < b/b_den (both denominators positive).
-#[inline(always)]
 fn slope_lt(a_num: i8, a_den: i8, b_num: i8, b_den: i8) -> bool {
     (a_num as i16) * (b_den as i16) < (b_num as i16) * (a_den as i16)
 }
 
 /// Returns true if slope a/a_den > b/b_den (both denominators positive).
-#[inline(always)]
 fn slope_gt(a_num: i8, a_den: i8, b_num: i8, b_den: i8) -> bool {
     (a_num as i16) * (b_den as i16) > (b_num as i16) * (a_den as i16)
 }

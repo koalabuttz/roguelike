@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Both tiers: Equipped-item indicators in inventory (#92)
 - Standard tier: Item coloring in inventory modal (#93)
 - Add Brogue-style inventory system (26-slot, stackable) (#78)
 - Add wall-clock music timer via IRQ frame counter on C64 (#66)
@@ -50,6 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix equipment stats not applied during monster attacks (#12)
 
 ### Changed
+- C64: Aggressive inlining to reclaim .noinit static stack space (#94)
 - Use per-item colors in C64 inventory rendering (#88)
 - Add inventory actions to MCP server (#85)
 - Add inventory overlay to C64 port (#84)

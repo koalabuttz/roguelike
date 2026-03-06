@@ -79,15 +79,6 @@ jobs:
         run: |
           mkdir -p dist
           cp crates/c64/target/mos-c64-none/release/roguelike-c64 dist/roguelike-c64.prg
-      - name: Size check
-        run: |
-          SIZE=$(stat -c%s dist/roguelike-c64.prg)
-          echo "PRG size: $SIZE bytes"
-          if [ "$SIZE" -gt 16384 ]; then
-            echo "::warning::C64 PRG exceeds 16 KB budget ($SIZE bytes)"
-          else
-            echo "OK: Within 16 KB budget"
-          fi
       - uses: actions/upload-artifact@v4
         with:
           name: binaries-c64

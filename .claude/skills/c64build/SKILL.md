@@ -11,7 +11,7 @@ Build the C64 roguelike port using the Docker rust-mos toolchain and optionally 
 
 - `/c64build` — Build only
 - `/c64build deploy` — Build and deploy to VICE
-- `/c64build size` — Build and show binary size breakdown
+- `/c64build size` — Build with linker map and show RAM/hiram usage
 
 ## Instructions
 
@@ -35,7 +35,7 @@ If the user asked for `size`:
 make -C crates/c64 size
 ```
 
-Reports the PRG size and checks against the 16 KB budget.
+Generates a linker map and reports per-section RAM/hiram usage. This is the primary way to check if the build fits in memory.
 
 ### Deploy to VICE
 
@@ -52,7 +52,7 @@ This copies the PRG to the shared ChromeOS downloads folder, then loads it into 
 
 - The C64 uses `no_std` — no heap, no `HashMap`, no `String`.
 - Screen codes are PETSCII, not ASCII. Check `crates/c64/src/render.rs` for the character mapping.
-- Memory is extremely tight (~141 bytes free in RAM). Check the linker map if builds fail with overflow.
+- Memory is tight (~4.5 KB free in RAM). Run `make -C crates/c64 size` to check per-section usage.
 - Each new function adds a static stack frame to `.noinit`. Minimize function count.
 - Never use `opt-level = "z"` — it causes codegen bugs with seed input on rust-mos.
 - Never use `core::mem::transmute` for function pointer trampolines — it corrupts imaginary register state.

@@ -68,8 +68,8 @@ SECTIONS {
      * gameplay, after init_hardware() unmaps KERNAL. */
     .noinit.state (NOLOAD) : { *(.noinit.state) } >hiram
 
-    /* Compiler-generated static stacks (~10 KB) stay in ram — too large
-     * for hiram's ~3.5 KB remaining after game state. */
+    /* Compiler-generated static stacks (~6 KB) stay in ram — too large
+     * for hiram's ~2.8 KB remaining after game state. */
     .noinit (NOLOAD) : { INCLUDE noinit-sections.ld } >ram
 }
 

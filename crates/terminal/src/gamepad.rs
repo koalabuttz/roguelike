@@ -64,7 +64,6 @@ mod raw_hid {
     pub const HID_BTN_RB: u8 = 0x20; // Right shoulder
 
     // buttons2 bits
-    #[cfg(test)] // only used in test iteration over buttons2
     pub const HID_BTN_SELECT: u8 = 0x01;
     pub const HID_BTN_START: u8 = 0x02;
 
@@ -432,6 +431,12 @@ mod inner {
         if hid_newly_pressed1(report, prev, HID_BTN_Y) {
             return Some(GameCommand::Look);
         }
+        if hid_newly_pressed1(report, prev, HID_BTN_RB) {
+            return Some(GameCommand::Pickup);
+        }
+        if hid_newly_pressed2(report, prev, HID_BTN_SELECT) {
+            return Some(GameCommand::OpenInventory);
+        }
         None
     }
 
@@ -649,6 +654,8 @@ mod inner {
                             Button::East | Button::Start => return Some(GameCommand::Quit),
                             Button::West => return Some(GameCommand::AutoExplore),
                             Button::North => return Some(GameCommand::Look),
+                            Button::RightTrigger => return Some(GameCommand::Pickup),
+                            Button::Select => return Some(GameCommand::OpenInventory),
                             _ => {}
                         },
                         EventType::AxisChanged(Axis::LeftStickX | Axis::LeftStickY, _, _) => {
@@ -1121,6 +1128,8 @@ mod tests {
                 Button::East | Button::Start => Some(GameCommand::Quit),
                 Button::West => Some(GameCommand::AutoExplore),
                 Button::North => Some(GameCommand::Look),
+                Button::RightTrigger => Some(GameCommand::Pickup),
+                Button::Select => Some(GameCommand::OpenInventory),
                 _ => None,
             }
         }
@@ -1163,6 +1172,14 @@ mod tests {
             assert_eq!(
                 face_button_to_game_cmd(Button::Start, false),
                 Some(GameCommand::Quit)
+            );
+            assert_eq!(
+                face_button_to_game_cmd(Button::RightTrigger, false),
+                Some(GameCommand::Pickup)
+            );
+            assert_eq!(
+                face_button_to_game_cmd(Button::Select, false),
+                Some(GameCommand::OpenInventory)
             );
         }
 
@@ -1480,6 +1497,13 @@ mod tests {
             assert_eq!(hid_face_to_game_cmd(&r, &p), Some(GameCommand::Look));
             let (r, p) = press2(HID_BTN_START);
             assert_eq!(hid_face_to_game_cmd(&r, &p), Some(GameCommand::Quit));
+            let (r, p) = press1(HID_BTN_RB);
+            assert_eq!(hid_face_to_game_cmd(&r, &p), Some(GameCommand::Pickup));
+            let (r, p) = press2(HID_BTN_SELECT);
+            assert_eq!(
+                hid_face_to_game_cmd(&r, &p),
+                Some(GameCommand::OpenInventory)
+            );
         }
 
         #[test]

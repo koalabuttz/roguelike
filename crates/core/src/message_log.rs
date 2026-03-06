@@ -104,6 +104,20 @@ pub fn format_event(event: GameEvent) -> String {
             SoundDistance::Far => "You hear a faint sound in the distance.".into(),
         },
         GameEvent::PlayerDeath => "You have died!".into(),
+        GameEvent::PickupItem { kind } => {
+            format!("You pick up the {}.", items::name(kind))
+        }
+        GameEvent::DropItem { kind } => {
+            format!("You drop the {}.", items::name(kind))
+        }
+        GameEvent::InventoryFull => "Your inventory is full.".into(),
+        GameEvent::ItemsHere { kind, count } => {
+            if count <= 1 {
+                format!("You see a {} here.", items::name(kind))
+            } else {
+                format!("You see {} {}s here.", count, items::name(kind))
+            }
+        }
         GameEvent::Autorun => "Running...".into(),
         GameEvent::AutorunStop { cause } => match cause {
             AutorunStopCause::WallReached => "Path blocked.".into(),
@@ -326,6 +340,48 @@ mod tests {
             }),
             "You hear a faint sound in the distance."
         );
+    }
+
+    #[test]
+    fn format_pickup_item() {
+        let msg = format_event(GameEvent::PickupItem {
+            kind: ItemKind::HealthPotion,
+        });
+        assert_eq!(msg, "You pick up the Health Potion.");
+    }
+
+    #[test]
+    fn format_drop_item() {
+        let msg = format_event(GameEvent::DropItem {
+            kind: ItemKind::ShortSword,
+        });
+        assert_eq!(msg, "You drop the Short Sword.");
+    }
+
+    #[test]
+    fn format_inventory_full() {
+        assert_eq!(
+            format_event(GameEvent::InventoryFull),
+            "Your inventory is full."
+        );
+    }
+
+    #[test]
+    fn format_items_here_single() {
+        let msg = format_event(GameEvent::ItemsHere {
+            kind: ItemKind::HealthPotion,
+            count: 1,
+        });
+        assert_eq!(msg, "You see a Health Potion here.");
+    }
+
+    #[test]
+    fn format_items_here_multiple() {
+        let msg = format_event(GameEvent::ItemsHere {
+            kind: ItemKind::HealthPotion,
+            count: 3,
+        });
+        assert_eq!(msg, "You see 3 Health Potions here.");
     }
 
     #[test]

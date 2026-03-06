@@ -737,6 +737,100 @@ pub fn render_observation<W: Write>(
     Ok(())
 }
 
+/// Render the inventory modal overlay.
+///
+/// `inventory` is the list of slot descriptions from `GameObservation.inventory`
+/// (e.g. `["a) Health Potion (x3)", "b) Short Sword [equipped]"]`).
+/// `selected` is the currently highlighted slot index (for action dispatch).
+/// `action_hint` shows what the next keypress will do (if a slot is selected).
+pub fn render_inventory<W: Write>(
+    w: &mut W,
+    inventory: &[String],
+    screen_width: Coord,
+    screen_height: Coord,
+    selected: Option<usize>,
+    action_hint: &str,
+) -> std::io::Result<()> {
+    let box_w = (screen_width as usize).min(40);
+    let box_h = (screen_height as usize).min(inventory.len() + 6).max(8);
+    let box_x = (screen_width as usize).saturating_sub(box_w) / 2;
+    let box_y = (screen_height as usize).saturating_sub(box_h) / 2;
+
+    // Draw box background.
+    let blank: String = " ".repeat(box_w);
+    for row in 0..box_h {
+        queue!(
+            w,
+            cursor::MoveTo(box_x as u16, (box_y + row) as u16),
+            SetForegroundColor(Color::White),
+            SetBackgroundColor(Color::DarkBlue),
+            style::Print(&blank)
+        )?;
+    }
+
+    // Title.
+    let title = "INVENTORY";
+    let title_x = box_x + (box_w.saturating_sub(title.len())) / 2;
+    queue!(
+        w,
+        cursor::MoveTo(title_x as u16, box_y as u16),
+        SetForegroundColor(Color::Cyan),
+        SetBackgroundColor(Color::DarkBlue),
+        style::Print(title)
+    )?;
+
+    // List items.
+    if inventory.is_empty() {
+        queue!(
+            w,
+            cursor::MoveTo((box_x + 2) as u16, (box_y + 2) as u16),
+            SetForegroundColor(Color::DarkGrey),
+            SetBackgroundColor(Color::DarkBlue),
+            style::Print("(empty)")
+        )?;
+    } else {
+        let max_items = box_h.saturating_sub(4);
+        for (i, item) in inventory.iter().take(max_items).enumerate() {
+            let row = box_y + 2 + i;
+            let fg = if selected == Some(i) {
+                Color::Yellow
+            } else {
+                Color::White
+            };
+            let display: String = format!(" {} ", item)
+                .chars()
+                .take(box_w.saturating_sub(2))
+                .collect();
+            queue!(
+                w,
+                cursor::MoveTo((box_x + 1) as u16, row as u16),
+                SetForegroundColor(fg),
+                SetBackgroundColor(Color::DarkBlue),
+                style::Print(display)
+            )?;
+        }
+    }
+
+    // Footer.
+    let footer_y = box_y + box_h - 1;
+    let footer: String = if action_hint.is_empty() {
+        "[a-z] select  [Esc] close".into()
+    } else {
+        action_hint.into()
+    };
+    let footer_x = box_x + (box_w.saturating_sub(footer.len())) / 2;
+    queue!(
+        w,
+        cursor::MoveTo(footer_x as u16, footer_y as u16),
+        SetForegroundColor(Color::DarkGrey),
+        SetBackgroundColor(Color::DarkBlue),
+        style::Print(footer)
+    )?;
+
+    w.flush()?;
+    Ok(())
+}
+
 #[cfg(all(debug_assertions, feature = "dev-tools"))]
 pub fn render_overlay<W: Write>(
     w: &mut W,

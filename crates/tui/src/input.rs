@@ -120,6 +120,8 @@ pub fn translate_key(key: KeyEvent, settings: &Settings) -> Option<GameCommand> 
     }
 
     match key.code {
+        KeyCode::Char('g') | KeyCode::Char(',') => Some(GameCommand::Pickup),
+        KeyCode::Char('i') => Some(GameCommand::OpenInventory),
         KeyCode::Char('o') => Some(GameCommand::AutoExplore),
         KeyCode::Char('>') => Some(GameCommand::Descend),
         KeyCode::Char('x') | KeyCode::Tab => Some(GameCommand::Look),
@@ -836,6 +838,33 @@ mod tests {
     fn look_unbound_key_returns_none() {
         let s = settings(true, true);
         assert_eq!(translate_look_key(press(KeyCode::Char('z')), &s), None);
+    }
+
+    #[test]
+    fn g_key_produces_pickup() {
+        let s = settings(true, true);
+        assert_eq!(
+            translate_key(press(KeyCode::Char('g')), &s),
+            Some(GameCommand::Pickup)
+        );
+    }
+
+    #[test]
+    fn comma_key_produces_pickup() {
+        let s = settings(true, true);
+        assert_eq!(
+            translate_key(press(KeyCode::Char(',')), &s),
+            Some(GameCommand::Pickup)
+        );
+    }
+
+    #[test]
+    fn i_key_produces_open_inventory() {
+        let s = settings(true, true);
+        assert_eq!(
+            translate_key(press(KeyCode::Char('i')), &s),
+            Some(GameCommand::OpenInventory)
+        );
     }
 
     #[test]

@@ -308,6 +308,7 @@ impl GameStep for MicroGameStateAdapter {
             kills: self.game.kills as i32,
             rooms_found: map.room_count as i32,
             explored_pct,
+            inventory: build_micro_inventory(&self.game.inventory),
             seed: self.seed as u64,
             seed_code,
             depth: self.game.depth as i32,
@@ -641,6 +642,21 @@ fn build_micro_visible_items(items: &ItemStore, fov: &MicroFov) -> Vec<ItemInfo>
         }
     }
     result
+}
+
+/// Build inventory display strings for a micro-tier Inventory.
+fn build_micro_inventory(inv: &crate::rules::items::Inventory) -> Vec<String> {
+    inv.iter()
+        .map(|(i, slot)| {
+            let letter = (b'a' + i as u8) as char;
+            let name = rules_items::name(slot.kind);
+            if slot.count > 1 {
+                format!("{}) {} (x{})", letter, name, slot.count)
+            } else {
+                format!("{}) {}", letter, name)
+            }
+        })
+        .collect()
 }
 
 /// Build item info list at a specific tile for look_at().

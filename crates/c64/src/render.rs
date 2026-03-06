@@ -736,6 +736,26 @@ fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
             copy_bytes(buf, 0, msg)
         }
         GameEvent::PlayerDeath => copy_bytes(buf, 0, b"You have died!"),
+        GameEvent::PickupItem { kind } => {
+            let p = copy_bytes(buf, 0, b"Got ");
+            copy_bytes(buf, p, items::name(kind).as_bytes())
+        }
+        GameEvent::DropItem { kind } => {
+            let p = copy_bytes(buf, 0, b"Drop ");
+            copy_bytes(buf, p, items::name(kind).as_bytes())
+        }
+        GameEvent::InventoryFull => copy_bytes(buf, 0, b"Inventory full!"),
+        GameEvent::ItemsHere { kind, count } => {
+            if count <= 1 {
+                let p = copy_bytes(buf, 0, b"See: ");
+                copy_bytes(buf, p, items::name(kind).as_bytes())
+            } else {
+                let p = copy_bytes(buf, 0, b"See ");
+                let p = copy_num(buf, p, count);
+                let p = copy_bytes(buf, p, b"x ");
+                copy_bytes(buf, p, items::name(kind).as_bytes())
+            }
+        }
         GameEvent::Autorun => copy_bytes(buf, 0, b"Running..."),
         GameEvent::AutorunStop { cause } => {
             use roguelike_core::rules::message::AutorunStopCause;
@@ -1306,6 +1326,51 @@ pub fn render_title(selected: u8) {
 
     let menu_items: [&[u8]; 2] = [b"NEW GAME", b"ENTER SEED"];
     draw_menu(&menu_items, selected, 10, 10);
+}
+
+/// Render the inventory overlay on top of the game screen.
+pub fn render_inventory(state: &MicroGameState, selected: u8) {
+    render_all(state);
+
+    let bx: u8 = 2;
+    let by: u8 = 1;
+    let bw: u8 = 36;
+    let bh: u8 = 23;
+
+    clear_rect(bx, by, bw, bh);
+    c64::draw_text(bx + 2, by, b"INVENTORY", c64::COLOR_CYAN);
+
+    let mut row: u8 = by + 2;
+    let mut item_count: u8 = 0;
+    for (i, slot) in state.inventory.iter() {
+        if row >= by + bh - 2 {
+            break;
+        }
+        let letter = b'A' + i as u8;
+        let col = bx + 2;
+        let color = if i as u8 == selected {
+            c64::COLOR_YELLOW
+        } else {
+            c64::COLOR_LGREY
+        };
+        c64::draw_char(col, row, letter, color);
+        c64::draw_char(col + 1, row, b')', color);
+        c64::draw_text(col + 3, row, items::name(slot.kind).as_bytes(), color);
+        if slot.count > 1 {
+            let name_len = items::name(slot.kind).len() as u8;
+            let p = col + 3 + name_len + 1;
+            c64::draw_char(p, row, b'X', c64::COLOR_GREY);
+            c64::draw_number(p + 1, row, slot.count, c64::COLOR_GREY);
+        }
+        row += 1;
+        item_count += 1;
+    }
+
+    if item_count == 0 {
+        c64::draw_text(bx + 2, by + 2, b"EMPTY", c64::COLOR_DGREY);
+    }
+
+    c64::draw_text(bx + 2, by + bh - 1, b"U:USE E:EQUIP D:DROP", c64::COLOR_DGREY);
 }
 
 /// Render the pause menu overlay on top of the game screen.

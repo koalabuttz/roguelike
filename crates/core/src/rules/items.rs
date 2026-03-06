@@ -136,6 +136,8 @@ pub const SPAWN_TABLE: [(ItemKind, u8); KIND_COUNT] = [
 // Compile-time guarantee: enum fits in a single byte on all tiers.
 const _: () = assert!(size_of::<ItemKind>() == 1);
 const _: () = assert!(size_of::<(ItemKind, u8)>() == 2);
+// InvSlot: 1-byte kind + 1-byte count = 2 bytes.
+const _: () = assert!(size_of::<InvSlot>() == 2);
 
 // ---------------------------------------------------------------------------
 // Type queries
@@ -206,6 +208,116 @@ pub fn is_better_armor(new: ItemKind, current: Option<ItemKind>) -> bool {
 pub struct Equipment {
     pub weapon: Option<ItemKind>,
     pub armor: Option<ItemKind>,
+}
+
+// ---------------------------------------------------------------------------
+// Inventory (shared across all tiers)
+// ---------------------------------------------------------------------------
+
+/// Maximum inventory slots (a-z). Shared across all tiers.
+pub const MAX_INVENTORY: usize = 26;
+
+/// A single inventory slot — one item kind with a count (stacks for consumables).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct InvSlot {
+    pub kind: ItemKind,
+    pub count: u8,
+}
+
+/// Brogue-style 26-slot inventory (a-z). Consumables stack, equipment doesn't.
+///
+/// 26 × `Option<InvSlot>` = 78 bytes — fits comfortably in micro tier hiram.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Inventory {
+    slots: [Option<InvSlot>; MAX_INVENTORY],
+}
+
+impl Default for Inventory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Inventory {
+    /// Create an empty inventory.
+    pub const fn new() -> Self {
+        Self {
+            slots: [None; MAX_INVENTORY],
+        }
+    }
+
+    /// Add an item. Consumables stack in existing slots; equipment takes
+    /// a new slot. Returns `false` if inventory is full.
+    pub fn add(&mut self, kind: ItemKind) -> bool {
+        // Try to stack consumables in an existing slot.
+        if is_consumable(kind) {
+            for slot in self.slots.iter_mut().flatten() {
+                if slot.kind == kind {
+                    slot.count = slot.count.saturating_add(1);
+                    return true;
+                }
+            }
+        }
+
+        // Find first empty slot.
+        for slot in &mut self.slots {
+            if slot.is_none() {
+                *slot = Some(InvSlot { kind, count: 1 });
+                return true;
+            }
+        }
+
+        false // full
+    }
+
+    /// Remove one item from a slot. Returns the kind removed, or `None` if
+    /// the slot is empty or out of range.
+    pub fn remove_one(&mut self, slot: usize) -> Option<ItemKind> {
+        if slot >= MAX_INVENTORY {
+            return None;
+        }
+        let entry = self.slots[slot].as_mut()?;
+        let kind = entry.kind;
+        if entry.count <= 1 {
+            self.slots[slot] = None;
+        } else {
+            entry.count -= 1;
+        }
+        Some(kind)
+    }
+
+    /// Read a slot by index.
+    pub fn get(&self, slot: usize) -> Option<&InvSlot> {
+        if slot >= MAX_INVENTORY {
+            return None;
+        }
+        self.slots[slot].as_ref()
+    }
+
+    /// Number of occupied slots.
+    pub fn len(&self) -> usize {
+        self.slots.iter().filter(|s| s.is_some()).count()
+    }
+
+    /// Whether the inventory is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Whether all 26 slots are occupied.
+    pub fn is_full(&self) -> bool {
+        self.slots.iter().all(|s| s.is_some())
+    }
+
+    /// Iterate over occupied slots as `(index, &InvSlot)`.
+    pub fn iter(&self) -> impl Iterator<Item = (usize, &InvSlot)> {
+        self.slots
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.as_ref().map(|slot| (i, slot)))
+    }
 }
 
 impl Equipment {
@@ -380,5 +492,114 @@ mod tests {
         };
         assert_eq!(eq.attack_bonus(), 3);
         assert_eq!(eq.defense_bonus(), 2);
+    }
+
+    // ── Inventory tests ─────────────────────────────────────────────
+
+    #[test]
+    fn inventory_add_to_empty() {
+        let mut inv = Inventory::new();
+        assert!(inv.add(ItemKind::HealthPotion));
+        assert_eq!(inv.get(0).unwrap().kind, ItemKind::HealthPotion);
+        assert_eq!(inv.get(0).unwrap().count, 1);
+    }
+
+    #[test]
+    fn inventory_consumable_stacks() {
+        let mut inv = Inventory::new();
+        inv.add(ItemKind::HealthPotion);
+        inv.add(ItemKind::HealthPotion);
+        assert_eq!(inv.len(), 1);
+        assert_eq!(inv.get(0).unwrap().count, 2);
+    }
+
+    #[test]
+    fn inventory_equipment_no_stack() {
+        let mut inv = Inventory::new();
+        inv.add(ItemKind::ShortSword);
+        inv.add(ItemKind::ShortSword);
+        assert_eq!(inv.len(), 2);
+        assert_eq!(inv.get(0).unwrap().count, 1);
+        assert_eq!(inv.get(1).unwrap().count, 1);
+    }
+
+    #[test]
+    fn inventory_remove_one_decrements() {
+        let mut inv = Inventory::new();
+        inv.add(ItemKind::HealthPotion);
+        inv.add(ItemKind::HealthPotion);
+        let removed = inv.remove_one(0);
+        assert_eq!(removed, Some(ItemKind::HealthPotion));
+        assert_eq!(inv.get(0).unwrap().count, 1);
+    }
+
+    #[test]
+    fn inventory_remove_last_clears_slot() {
+        let mut inv = Inventory::new();
+        inv.add(ItemKind::ShortSword);
+        let removed = inv.remove_one(0);
+        assert_eq!(removed, Some(ItemKind::ShortSword));
+        assert!(inv.get(0).is_none());
+        assert_eq!(inv.len(), 0);
+    }
+
+    #[test]
+    fn inventory_full_returns_false() {
+        let mut inv = Inventory::new();
+        for _ in 0..MAX_INVENTORY {
+            assert!(inv.add(ItemKind::ShortSword));
+        }
+        assert!(inv.is_full());
+        assert!(!inv.add(ItemKind::ShortSword));
+    }
+
+    #[test]
+    fn inventory_full_consumable_still_stacks() {
+        let mut inv = Inventory::new();
+        // Fill slot 0 with a potion, rest with swords.
+        inv.add(ItemKind::HealthPotion);
+        for _ in 1..MAX_INVENTORY {
+            inv.add(ItemKind::ShortSword);
+        }
+        assert!(inv.is_full());
+        // Adding another potion should stack into slot 0.
+        assert!(inv.add(ItemKind::HealthPotion));
+        assert_eq!(inv.get(0).unwrap().count, 2);
+    }
+
+    #[test]
+    fn inventory_len_counts_occupied() {
+        let mut inv = Inventory::new();
+        assert_eq!(inv.len(), 0);
+        assert!(inv.is_empty());
+        inv.add(ItemKind::HealthPotion);
+        assert_eq!(inv.len(), 1);
+        inv.add(ItemKind::ShortSword);
+        assert_eq!(inv.len(), 2);
+    }
+
+    #[test]
+    fn inventory_iter_yields_occupied() {
+        let mut inv = Inventory::new();
+        inv.add(ItemKind::HealthPotion);
+        inv.add(ItemKind::ShortSword);
+        let items: Vec<_> = inv.iter().collect();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].0, 0); // slot index
+        assert_eq!(items[0].1.kind, ItemKind::HealthPotion);
+        assert_eq!(items[1].0, 1);
+        assert_eq!(items[1].1.kind, ItemKind::ShortSword);
+    }
+
+    #[test]
+    fn inventory_remove_out_of_range() {
+        let mut inv = Inventory::new();
+        assert_eq!(inv.remove_one(30), None);
+    }
+
+    #[test]
+    fn inventory_remove_empty_slot() {
+        let mut inv = Inventory::new();
+        assert_eq!(inv.remove_one(0), None);
     }
 }

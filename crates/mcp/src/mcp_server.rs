@@ -610,10 +610,16 @@ impl RoguelikeMcpServer {
 {monsters}\
              \n\
              ## Items\n\
-             Items spawn on the ground in rooms. Walk over them to pick up:\n\
-             - Health Potion (!) — heals 10 HP. Stays on ground if you are at full HP.\n\
-             - Short Sword (/) — +3 ATK. Auto-equips if better than current weapon.\n\
-             - Leather Armor ([) — +2 DEF. Auto-equips if better than current armor.\n\
+             Items spawn on the ground in rooms. Walk over them to see what's there.\n\
+             - Use 'pickup' to pick up an item into your inventory (26 slots, a-z)\n\
+             - Consumables (potions) stack; equipment takes one slot each\n\
+             - Use 'use_item_X' to consume a potion from inventory slot X (a-z)\n\
+             - Use 'equip_item_X' to equip a weapon/armor from slot X\n\
+             - Use 'drop_item_X' to drop an item from slot X onto the ground\n\
+             - Your inventory is shown in observations when non-empty\n\
+             - Health Potion (!) — heals 10 HP\n\
+             - Short Sword (/) — +3 ATK\n\
+             - Leather Armor ([) — +2 DEF\n\
              Equipment bonuses are shown in observations as atk/def fields.\n\
              \n\
              ## Dungeon Depth & Win Condition\n\
@@ -629,7 +635,7 @@ impl RoguelikeMcpServer {
              - Remember where health potions are — save them for when you need them.\n\
              \n\
              ## Available Tools\n\
-             - **act** — move, wait, autorun, or auto_fight (see below)\n\
+             - **act** — move, wait, autorun, pickup, use/equip/drop items, or auto_fight\n\
              - **observe** — see current FOV, stats, and nearby entities. \
              Rarely needed since act, pathfind_to, auto_explore, and auto_fight \
              already return observations.\n\
@@ -728,6 +734,25 @@ pub fn parse_action(action: &str) -> Option<GameCommand> {
         "autorun_southwest" => Some(GameCommand::Autorun(SouthWest)),
         "wait" => Some(GameCommand::Wait),
         "descend" => Some(GameCommand::Descend),
+        "pickup" => Some(GameCommand::Pickup),
+        _ if action.starts_with("use_item_") => {
+            parse_slot_letter(action, "use_item_").map(GameCommand::UseItem)
+        }
+        _ if action.starts_with("drop_item_") => {
+            parse_slot_letter(action, "drop_item_").map(GameCommand::DropItem)
+        }
+        _ if action.starts_with("equip_item_") => {
+            parse_slot_letter(action, "equip_item_").map(GameCommand::EquipItem)
+        }
+        _ => None,
+    }
+}
+
+/// Parse a slot letter suffix (a-z) from an action string with the given prefix.
+fn parse_slot_letter(action: &str, prefix: &str) -> Option<u8> {
+    let letter = action.strip_prefix(prefix)?.as_bytes().first()?;
+    match letter {
+        b'a'..=b'z' => Some(letter - b'a'),
         _ => None,
     }
 }
@@ -1170,6 +1195,7 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            inventory: Default::default(),
             depth: 1,
             target_depth: 5,
             game_won: false,
@@ -1288,5 +1314,42 @@ mod tests {
         inject_exploration_graph_delta(&mut v2, Some(&gs), &mut hash, false);
         assert!(v2.get("exploration").is_some());
         assert!(v2.get("exploration_unchanged").is_none());
+    }
+
+    #[test]
+    fn parse_pickup_action() {
+        assert_eq!(parse_action("pickup"), Some(GameCommand::Pickup));
+    }
+
+    #[test]
+    fn parse_use_item_a() {
+        assert_eq!(parse_action("use_item_a"), Some(GameCommand::UseItem(0)));
+    }
+
+    #[test]
+    fn parse_use_item_z() {
+        assert_eq!(parse_action("use_item_z"), Some(GameCommand::UseItem(25)));
+    }
+
+    #[test]
+    fn parse_drop_item_b() {
+        assert_eq!(parse_action("drop_item_b"), Some(GameCommand::DropItem(1)));
+    }
+
+    #[test]
+    fn parse_equip_item_c() {
+        assert_eq!(
+            parse_action("equip_item_c"),
+            Some(GameCommand::EquipItem(2))
+        );
+    }
+
+    #[test]
+    fn parse_invalid_slot_letter() {
+        assert_eq!(parse_action("use_item_A"), None);
+        assert_eq!(parse_action("use_item_1"), None);
+        assert_eq!(parse_action("use_item_"), None);
+        assert_eq!(parse_action("drop_item_Z"), None);
+        assert_eq!(parse_action("equip_item_"), None);
     }
 }

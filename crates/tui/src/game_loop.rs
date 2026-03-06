@@ -372,6 +372,9 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                             app_state =
                                 AppState::Paused(menu::pause_menu(settings.casual_mode, platform));
                         }
+                        GameCommand::OpenInventory => {
+                            run_inventory_modal(game.as_mut(), renderer, input)?;
+                        }
                         GameCommand::Look => {
                             let look_opts = dev.look_options();
                             run_look_mode(
@@ -695,6 +698,79 @@ fn run_look_mode<W: Write>(
                 InputResult::NoCommand => {}
                 InputResult::Disconnected => return Ok(()),
             }
+        }
+    }
+}
+
+/// Run the inventory modal. Blocks until the user closes it.
+///
+/// Displays inventory contents from the game observation. The user selects
+/// a slot by letter (a-z), then presses u/e/d to use/equip/drop.
+fn run_inventory_modal<W: Write>(
+    game: &mut dyn GameStep,
+    renderer: &mut CrosstermRenderer<W>,
+    input: &mut dyn InputProvider,
+) -> io::Result<()> {
+    let (screen_w, screen_h) = renderer.screen_size();
+    let mut selected: Option<usize> = None;
+
+    loop {
+        let obs = game.observe();
+        let hint = match selected {
+            Some(idx) => {
+                let letter = (b'a' + idx as u8) as char;
+                format!("[u]se  [e]quip  [d]rop  slot '{}'  [Esc] back", letter)
+            }
+            None => String::new(),
+        };
+        render::render_inventory(
+            renderer.writer(),
+            &obs.inventory,
+            screen_w,
+            screen_h,
+            selected,
+            &hint,
+        )?;
+
+        match input.wait_for_key()? {
+            InputResult::Command(key) => match key.code {
+                KeyCode::Esc => {
+                    if selected.is_some() {
+                        selected = None;
+                    } else {
+                        return Ok(());
+                    }
+                }
+                KeyCode::Char('i') | KeyCode::Char('q') if selected.is_none() => {
+                    return Ok(());
+                }
+                KeyCode::Char(c @ 'a'..='z') if selected.is_none() => {
+                    let idx = (c as u8 - b'a') as usize;
+                    // Only select if the slot is occupied (check against inventory labels).
+                    let slot_exists = obs
+                        .inventory
+                        .iter()
+                        .any(|s| s.starts_with(&format!("{})", c)));
+                    if slot_exists {
+                        selected = Some(idx);
+                    }
+                }
+                KeyCode::Char('u') if selected.is_some() => {
+                    game.step(GameCommand::UseItem(selected.unwrap() as u8));
+                    selected = None;
+                }
+                KeyCode::Char('e') if selected.is_some() => {
+                    game.step(GameCommand::EquipItem(selected.unwrap() as u8));
+                    selected = None;
+                }
+                KeyCode::Char('d') if selected.is_some() => {
+                    game.step(GameCommand::DropItem(selected.unwrap() as u8));
+                    selected = None;
+                }
+                _ => {}
+            },
+            InputResult::NoCommand => {}
+            InputResult::Disconnected => return Ok(()),
         }
     }
 }

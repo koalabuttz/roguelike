@@ -49,6 +49,7 @@ enum AppState {
     Title,
     Playing,
     Looking,
+    Inventory,
     Paused,
     GameOver,
 }
@@ -309,6 +310,64 @@ fn run_look_mode(state: &MicroGameState) {
     }
 }
 
+/// Run the inventory modal. Cursor + keyboard to select and act on items.
+fn run_inventory(state: &mut MicroGameState) {
+    let mut selected: u8 = 0;
+    render::render_inventory(state, selected);
+
+    loop {
+        c64::wait_next_frame();
+        c64::music_auto_tick();
+
+        let key = c64::scan_keyboard();
+        if key == 0 {
+            continue;
+        }
+
+        match key {
+            b'W' | c64::PETSCII_UP => {
+                if selected > 0 {
+                    selected -= 1;
+                    render::render_inventory(state, selected);
+                }
+            }
+            b'S' | c64::PETSCII_DOWN => {
+                let count = state.inventory.len() as u8;
+                if count > 0 && selected < count - 1 {
+                    selected += 1;
+                    render::render_inventory(state, selected);
+                }
+            }
+            b'U' | b'E' | b'D' => {
+                // Map cursor position to actual inventory slot index.
+                let slot_idx = state
+                    .inventory
+                    .iter()
+                    .nth(selected as usize)
+                    .map(|(i, _)| i as u8);
+                if let Some(idx) = slot_idx {
+                    let cmd = match key {
+                        b'U' => GameCommand::UseItem(idx),
+                        b'E' => GameCommand::EquipItem(idx),
+                        _ => GameCommand::DropItem(idx),
+                    };
+                    c64::io_bank_out();
+                    state.step(cmd);
+                    c64::io_bank_in();
+                    // Clamp selected if inventory shrank
+                    let count = state.inventory.len() as u8;
+                    if count > 0 && selected >= count {
+                        selected = count - 1;
+                    }
+                    render::render_inventory(state, selected);
+                }
+            }
+            c64::PETSCII_STOP | b'I' => return,
+            _ => {}
+        }
+    }
+}
+
 /// Run autorun: skip to destination instantly, then render once.
 /// Combat SFX/shake fires if the final step involved combat.
 fn run_autorun(state: &mut MicroGameState, dir: Direction) {
@@ -412,6 +471,11 @@ pub extern "C" fn main() -> isize {
                     continue;
                 }
 
+                if cmd == GameCommand::OpenInventory {
+                    app_state = AppState::Inventory;
+                    continue;
+                }
+
                 if let GameCommand::Autorun(dir) = cmd {
                     run_autorun(state, dir);
                     // Full re-render after autorun to ensure clean state.
@@ -498,6 +562,14 @@ pub extern "C" fn main() -> isize {
             AppState::Looking => {
                 let state = unsafe { STATE.assume_init_mut() };
                 run_look_mode(state);
+                render::render_all(state);
+                let diff = unsafe { &mut DIFF };
+                diff.snapshot(state, render::viewport_pos(state));
+                app_state = AppState::Playing;
+            }
+            AppState::Inventory => {
+                let state = unsafe { STATE.assume_init_mut() };
+                run_inventory(state);
                 render::render_all(state);
                 let diff = unsafe { &mut DIFF };
                 diff.snapshot(state, render::viewport_pos(state));

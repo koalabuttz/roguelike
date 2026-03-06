@@ -105,6 +105,14 @@ pub enum GameEvent {
     SoundCue { distance: SoundDistance },
     /// The player died.
     PlayerDeath,
+    /// Player picked up an item from the ground.
+    PickupItem { kind: ItemKind },
+    /// Player dropped an item on the ground.
+    DropItem { kind: ItemKind },
+    /// Pickup failed — inventory is full.
+    InventoryFull,
+    /// Notification: item(s) on the ground at player position.
+    ItemsHere { kind: ItemKind, count: u8 },
     /// Autorun started.
     Autorun,
     /// Autorun finished — carries the stop reason.

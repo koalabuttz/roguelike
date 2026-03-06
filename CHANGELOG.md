@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add Brogue-style inventory system (26-slot, stackable) (#78)
 - Add wall-clock music timer via IRQ frame counter on C64 (#66)
 - Expand C64 RAM by moving .noinit to hiram and unmapping BASIC ROM (#71)
 - Add seed code display to C64 end screens (#74)
@@ -47,6 +48,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix equipment stats not applied during monster attacks (#12)
 
 ### Changed
+- Add inventory actions to MCP server (#85)
+- Add inventory overlay to C64 port (#84)
+- Add inventory modal UI to terminal frontend (#83)
+- Add inventory to standard tier (GameState) with pickup/use/drop/equip (#82)
+- Add inventory to micro tier (MicroGameState) with pickup/use/drop/equip (#81)
+- Add inventory-related GameCommand and GameEvent variants (#80)
+- Add Inventory struct and InvSlot to rules/items.rs with stacking logic (#79)
 - Add SID music to C64 port (#61)
 - Fix combat event detection cap missing events in rare multi-monster scenarios (#68)
 - Screen shake effect on enemy hit (#63)

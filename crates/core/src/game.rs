@@ -14,6 +14,7 @@ use crate::item::{self, Equipment, Item};
 use crate::map;
 use crate::message_log::MessageLog;
 use crate::pathfinding;
+use crate::rules::items::{self as rules_items, Inventory};
 use crate::rules::message::{GameEvent, SoundDistance};
 use crate::seed_code::{self, SeedParams};
 use crate::spawn;
@@ -102,6 +103,10 @@ pub struct GameObservation {
     pub explored_pct: Stat,
     pub seed: u64,
     pub seed_code: String,
+    // --- inventory ---
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
+    pub inventory: Vec<String>,
     // --- depth ---
     pub depth: Stat,
     pub target_depth: Stat,
@@ -391,6 +396,9 @@ pub struct GameState {
     /// Player's equipped items.
     #[serde(default)]
     pub equipment: Equipment,
+    /// Player's inventory (Brogue-style 26 slots, a-z).
+    #[serde(default)]
+    pub inventory: Inventory,
     /// Current dungeon depth (1-based).
     #[serde(default = "default_depth")]
     pub depth: Stat,
@@ -496,6 +504,7 @@ impl GameState {
             wandering_spawn_table: game_data.monsters.clone(),
             ground_items,
             equipment: Equipment::default(),
+            inventory: Inventory::new(),
             depth: 1,
             target_depth: cfg.target_depth,
             game_won: false,
@@ -580,6 +589,7 @@ impl GameState {
             wandering_spawn_table: game_data.monsters.clone(),
             ground_items,
             equipment: Equipment::default(),
+            inventory: Inventory::new(),
             depth: 1,
             target_depth: cfg.target_depth,
             game_won: false,
@@ -654,62 +664,141 @@ impl GameState {
         if self.map.is_walkable(new_x, new_y) {
             self.entities[0].x = new_x;
             self.entities[0].y = new_y;
-            self.try_pickup_items(new_x, new_y);
+            self.notify_items_here(new_x, new_y);
             return true;
         }
 
         false
     }
 
-    /// Attempt to pick up items at the player's position.
-    ///
-    /// Consumables apply immediately (potions heal if HP < max, else stay).
-    /// Equipment auto-equips if strictly better than current.
-    fn try_pickup_items(&mut self, x: Coord, y: Coord) {
-        // Process items in reverse so removal by index is safe.
-        let mut i = self.ground_items.len();
-        while i > 0 {
-            i -= 1;
-            if self.ground_items[i].x != x || self.ground_items[i].y != y {
-                continue;
+    /// Notify the player about items on the ground at their position.
+    fn notify_items_here(&mut self, x: Coord, y: Coord) {
+        // Collect distinct (kind, count) pairs at this position.
+        let mut counts = [0u8; rules_items::KIND_COUNT];
+        for item in &self.ground_items {
+            if item.x == x && item.y == y {
+                counts[item.kind as usize] += 1;
             }
-            let kind = self.ground_items[i].kind;
-
-            if item::is_consumable(kind) {
-                let heal = item::item_heal_amount(kind);
-                let player = &self.entities[0];
-                if heal > 0 && player.hp >= player.max_hp {
-                    // At full HP — leave potion on the ground.
-                    continue;
-                }
-                self.ground_items.remove(i);
-                if heal > 0 {
-                    let player = &mut self.entities[0];
-                    let healed = heal.min(player.max_hp - player.hp);
-                    player.hp += healed;
-                    self.log.add_event(GameEvent::DrinkPotion {
-                        kind,
-                        healed: healed as u8,
-                    });
-                }
-            } else if item::is_weapon(kind) {
-                if item::is_better_weapon(kind, self.equipment.weapon) {
-                    self.ground_items.remove(i);
-                    self.equipment.weapon = Some(kind);
-                    self.log.add_event(GameEvent::EquipWeapon {
-                        kind,
-                        bonus: item::item_attack_bonus(kind) as u8,
-                    });
-                }
-            } else if item::is_armor(kind) && item::is_better_armor(kind, self.equipment.armor) {
-                self.ground_items.remove(i);
-                self.equipment.armor = Some(kind);
-                self.log.add_event(GameEvent::EquipArmor {
-                    kind,
-                    bonus: item::item_defense_bonus(kind) as u8,
+        }
+        for (idx, &count) in counts.iter().enumerate() {
+            if count > 0 {
+                self.log.add_event(GameEvent::ItemsHere {
+                    kind: rules_items::ALL_KINDS[idx],
+                    count,
                 });
             }
         }
+    }
+
+    /// Pick up the first item at the player's position.
+    fn pickup_item(&mut self) -> bool {
+        let px = self.entities[0].x;
+        let py = self.entities[0].y;
+
+        let idx = self
+            .ground_items
+            .iter()
+            .position(|it| it.x == px && it.y == py);
+        let idx = match idx {
+            Some(i) => i,
+            None => return false, // nothing to pick up
+        };
+
+        let kind = self.ground_items[idx].kind;
+        if !self.inventory.add(kind) {
+            self.log.add_event(GameEvent::InventoryFull);
+            return true; // turn consumed even on failure
+        }
+        self.ground_items.remove(idx);
+        self.log.add_event(GameEvent::PickupItem { kind });
+        true
+    }
+
+    /// Use an item from inventory (consumables only).
+    fn use_item(&mut self, slot: u8) -> bool {
+        let inv_slot = match self.inventory.get(slot as usize) {
+            Some(s) => *s,
+            None => return false,
+        };
+
+        if rules_items::is_consumable(inv_slot.kind) {
+            let heal = rules_items::heal_amount(inv_slot.kind) as Stat;
+            if heal > 0 {
+                let player = &mut self.entities[0];
+                let healed = heal.min(player.max_hp.saturating_sub(player.hp));
+                player.hp = player.hp.saturating_add(healed);
+                self.inventory.remove_one(slot as usize);
+                self.log.add_event(GameEvent::DrinkPotion {
+                    kind: inv_slot.kind,
+                    healed: healed as u8,
+                });
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Drop an item from inventory onto the ground.
+    fn drop_item(&mut self, slot: u8) -> bool {
+        if let Some(kind) = self.inventory.remove_one(slot as usize) {
+            let px = self.entities[0].x;
+            let py = self.entities[0].y;
+            self.ground_items.push(Item { x: px, y: py, kind });
+            self.log.add_event(GameEvent::DropItem { kind });
+            return true;
+        }
+        false
+    }
+
+    /// Equip an item from inventory (weapon or armor).
+    fn equip_item(&mut self, slot: u8) -> bool {
+        let inv_slot = match self.inventory.get(slot as usize) {
+            Some(s) => *s,
+            None => return false,
+        };
+        let kind = inv_slot.kind;
+
+        if rules_items::is_weapon(kind) {
+            self.inventory.remove_one(slot as usize);
+            if let Some(old) = self.equipment.weapon {
+                self.inventory.add(old);
+            }
+            self.equipment.weapon = Some(kind);
+            self.log.add_event(GameEvent::EquipWeapon {
+                kind,
+                bonus: rules_items::attack_bonus(kind),
+            });
+            true
+        } else if rules_items::is_armor(kind) {
+            self.inventory.remove_one(slot as usize);
+            if let Some(old) = self.equipment.armor {
+                self.inventory.add(old);
+            }
+            self.equipment.armor = Some(kind);
+            self.log.add_event(GameEvent::EquipArmor {
+                kind,
+                bonus: rules_items::defense_bonus(kind),
+            });
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Build inventory display strings for `GameObservation`.
+    fn build_inventory_strings(&self) -> Vec<String> {
+        self.inventory
+            .iter()
+            .map(|(i, slot)| {
+                let letter = (b'a' + i as u8) as char;
+                let name = rules_items::name(slot.kind);
+                if slot.count > 1 {
+                    format!("{}) {} (x{})", letter, name, slot.count)
+                } else {
+                    format!("{}) {}", letter, name)
+                }
+            })
+            .collect()
     }
 
     /// Player's effective attack (base + equipment).
@@ -835,9 +924,14 @@ impl GameState {
             }
             GameCommand::Wait => true,
             GameCommand::Descend => self.descend(),
+            GameCommand::Pickup => self.pickup_item(),
+            GameCommand::UseItem(slot) => self.use_item(slot),
+            GameCommand::DropItem(slot) => self.drop_item(slot),
+            GameCommand::EquipItem(slot) => self.equip_item(slot),
             // Autorun, AutoExplore, Look, Help are handled at a higher level (main loop / MCP).
             GameCommand::Autorun(_)
             | GameCommand::AutoExplore
+            | GameCommand::OpenInventory
             | GameCommand::Look
             | GameCommand::Help
             | GameCommand::Quit => false,
@@ -1331,6 +1425,7 @@ impl GameState {
             kills,
             rooms_found,
             explored_pct,
+            inventory: self.build_inventory_strings(),
             seed: self.seed,
             seed_code: self.seed_code(),
             depth: self.depth,
@@ -1647,6 +1742,7 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            inventory: Default::default(),
             depth: 1,
             target_depth: 5,
             game_won: false,
@@ -1962,6 +2058,7 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            inventory: Default::default(),
             depth: 1,
             target_depth: 5,
             game_won: false,
@@ -2049,6 +2146,7 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            inventory: Default::default(),
             depth: 1,
             target_depth: 5,
             game_won: false,
@@ -2110,6 +2208,7 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            inventory: Default::default(),
             depth: 1,
             target_depth: 5,
             game_won: false,
@@ -2160,6 +2259,7 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            inventory: Default::default(),
             depth: 1,
             target_depth: 5,
             game_won: false,
@@ -2237,6 +2337,7 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            inventory: Default::default(),
             depth: 1,
             target_depth: 5,
             game_won: false,
@@ -2291,6 +2392,7 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            inventory: Default::default(),
             depth: 1,
             target_depth: 5,
             game_won: false,
@@ -2842,99 +2944,143 @@ mod tests {
         assert!(gs.start_auto_explore().is_err());
     }
 
-    // --- item pickup & equipment tests ---
+    // --- inventory & pickup tests ---
 
     #[test]
-    fn pickup_health_potion_when_injured() {
+    fn walk_over_item_notifies_only() {
+        let mut gs = test_game();
+        gs.ground_items.push(Item {
+            x: 6,
+            y: 5,
+            kind: ItemKind::HealthPotion,
+        });
+        gs.update_fov();
+        gs.step(GameCommand::Move(Direction::East));
+        // Item should still be on ground (no auto-pickup).
+        assert_eq!(gs.ground_items.len(), 1);
+        assert!(gs.inventory.is_empty());
+        // Should have notified about the item.
+        assert!(gs.log.recent(5).iter().any(|m| m.contains("You see")));
+    }
+
+    #[test]
+    fn pickup_adds_to_inventory() {
+        let mut gs = test_game();
+        gs.ground_items.push(Item {
+            x: 5,
+            y: 5,
+            kind: ItemKind::HealthPotion,
+        });
+        let result = gs.step(GameCommand::Pickup);
+        assert!(result.action_taken);
+        assert!(gs.ground_items.is_empty());
+        assert_eq!(gs.inventory.len(), 1);
+        assert_eq!(gs.inventory.get(0).unwrap().kind, ItemKind::HealthPotion);
+    }
+
+    #[test]
+    fn pickup_full_inventory_rejected() {
+        let mut gs = test_game();
+        for _ in 0..rules_items::MAX_INVENTORY {
+            gs.inventory.add(ItemKind::ShortSword);
+        }
+        gs.ground_items.push(Item {
+            x: 5,
+            y: 5,
+            kind: ItemKind::ShortSword,
+        });
+        let result = gs.step(GameCommand::Pickup);
+        assert!(result.action_taken); // turn consumed
+        assert_eq!(gs.ground_items.len(), 1); // item stays
+        assert!(gs.log.recent(5).iter().any(|m| m.contains("full")));
+    }
+
+    #[test]
+    fn use_potion_heals_from_inventory() {
         let mut gs = test_game();
         gs.entities[0].hp = 20; // injured (max 30)
-        gs.ground_items.push(Item {
-            x: 6,
-            y: 5,
-            kind: ItemKind::HealthPotion,
-        });
-        gs.update_fov();
-        gs.step(GameCommand::Move(Direction::East));
-        // Potion heals 10 HP → 30 (clamped to max)
+        gs.inventory.add(ItemKind::HealthPotion);
+        let result = gs.step(GameCommand::UseItem(0));
+        assert!(result.action_taken);
         assert_eq!(gs.entities[0].hp, 30);
-        assert!(gs.ground_items.is_empty());
-        assert!(gs.log.recent(5).iter().any(|m| m.contains("Health Potion")));
+        assert!(gs.inventory.is_empty());
     }
 
     #[test]
-    fn potion_stays_on_ground_at_full_hp() {
+    fn use_on_empty_slot_no_action() {
         let mut gs = test_game();
-        assert_eq!(gs.entities[0].hp, gs.entities[0].max_hp);
-        gs.ground_items.push(Item {
-            x: 6,
-            y: 5,
-            kind: ItemKind::HealthPotion,
-        });
-        gs.update_fov();
-        gs.step(GameCommand::Move(Direction::East));
-        // Potion should remain on the ground
+        let result = gs.step(GameCommand::UseItem(0));
+        assert!(!result.action_taken);
+    }
+
+    #[test]
+    fn drop_puts_item_on_ground() {
+        let mut gs = test_game();
+        gs.inventory.add(ItemKind::ShortSword);
+        let result = gs.step(GameCommand::DropItem(0));
+        assert!(result.action_taken);
+        assert!(gs.inventory.is_empty());
         assert_eq!(gs.ground_items.len(), 1);
-        assert_eq!(gs.entities[0].hp, gs.entities[0].max_hp);
+        assert_eq!(gs.ground_items[0].kind, ItemKind::ShortSword);
+        assert_eq!(gs.ground_items[0].x, gs.entities[0].x);
+        assert_eq!(gs.ground_items[0].y, gs.entities[0].y);
     }
 
     #[test]
-    fn pickup_weapon_auto_equips() {
+    fn equip_from_inventory() {
         let mut gs = test_game();
+        gs.inventory.add(ItemKind::ShortSword);
         assert!(gs.equipment.weapon.is_none());
-        gs.ground_items.push(Item {
-            x: 6,
-            y: 5,
-            kind: ItemKind::ShortSword,
-        });
-        gs.update_fov();
-        gs.step(GameCommand::Move(Direction::East));
+        let result = gs.step(GameCommand::EquipItem(0));
+        assert!(result.action_taken);
         assert_eq!(gs.equipment.weapon, Some(ItemKind::ShortSword));
-        assert!(gs.ground_items.is_empty());
-        assert!(gs.log.recent(5).iter().any(|m| m.contains("Short Sword")));
+        assert!(gs.inventory.is_empty());
     }
 
     #[test]
-    fn pickup_armor_auto_equips() {
-        let mut gs = test_game();
-        assert!(gs.equipment.armor.is_none());
-        gs.ground_items.push(Item {
-            x: 6,
-            y: 5,
-            kind: ItemKind::LeatherArmor,
-        });
-        gs.update_fov();
-        gs.step(GameCommand::Move(Direction::East));
-        assert_eq!(gs.equipment.armor, Some(ItemKind::LeatherArmor));
-        assert!(gs.ground_items.is_empty());
-    }
-
-    #[test]
-    fn same_weapon_not_picked_up() {
+    fn equip_swaps_old_to_inventory() {
         let mut gs = test_game();
         gs.equipment.weapon = Some(ItemKind::ShortSword);
-        gs.ground_items.push(Item {
-            x: 6,
-            y: 5,
-            kind: ItemKind::ShortSword,
-        });
-        gs.update_fov();
-        gs.step(GameCommand::Move(Direction::East));
-        // Same weapon is not strictly better, so stays on ground
-        assert_eq!(gs.ground_items.len(), 1);
+        gs.inventory.add(ItemKind::ShortSword); // second sword
+        let result = gs.step(GameCommand::EquipItem(0));
+        assert!(result.action_taken);
+        assert_eq!(gs.equipment.weapon, Some(ItemKind::ShortSword));
+        // Old weapon goes back into inventory.
+        assert_eq!(gs.inventory.len(), 1);
     }
 
     #[test]
-    fn same_armor_not_picked_up() {
+    fn equip_armor_from_inventory() {
         let mut gs = test_game();
-        gs.equipment.armor = Some(ItemKind::LeatherArmor);
-        gs.ground_items.push(Item {
-            x: 6,
-            y: 5,
-            kind: ItemKind::LeatherArmor,
-        });
+        gs.inventory.add(ItemKind::LeatherArmor);
+        assert!(gs.equipment.armor.is_none());
+        let result = gs.step(GameCommand::EquipItem(0));
+        assert!(result.action_taken);
+        assert_eq!(gs.equipment.armor, Some(ItemKind::LeatherArmor));
+        assert!(gs.inventory.is_empty());
+    }
+
+    #[test]
+    fn inventory_persists_across_descent() {
+        let mut gs = GameState::with_seed(80, 40, 42);
+        gs.inventory.add(ItemKind::HealthPotion);
+        gs.inventory.add(ItemKind::ShortSword);
+        // Find stairs and descend.
+        let stairs_pos = gs
+            .map
+            .tiles
+            .iter()
+            .enumerate()
+            .find(|(_, t)| **t == Tile::StairsDown)
+            .map(|(i, _)| (i as i32 % gs.map.width, i as i32 / gs.map.width))
+            .unwrap();
+        gs.entities[0].x = stairs_pos.0;
+        gs.entities[0].y = stairs_pos.1;
         gs.update_fov();
-        gs.step(GameCommand::Move(Direction::East));
-        assert_eq!(gs.ground_items.len(), 1);
+        gs.descend();
+        assert_eq!(gs.inventory.len(), 2);
+        assert_eq!(gs.inventory.get(0).unwrap().kind, ItemKind::HealthPotion);
+        assert_eq!(gs.inventory.get(1).unwrap().kind, ItemKind::ShortSword);
     }
 
     #[test]

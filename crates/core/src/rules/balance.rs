@@ -105,6 +105,7 @@ pub const SHORT_SWORD_SPAWN_WEIGHT: u8 = 30;
 pub const LEATHER_ARMOR_SPAWN_WEIGHT: u8 = 20;
 
 pub const MAX_ITEMS_PER_ROOM: u8 = 1;
+pub const MAX_INVENTORY: usize = super::items::MAX_INVENTORY;
 
 // ---------------------------------------------------------------------------
 // Per-tier map dimensions and entity caps

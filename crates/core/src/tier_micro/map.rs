@@ -280,7 +280,6 @@ impl MicroMap {
 
             self.rooms[self.room_count as usize] = new_room;
             self.room_count += 1;
-
         }
 
         self.place_stairs_down();

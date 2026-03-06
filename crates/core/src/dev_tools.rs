@@ -728,6 +728,7 @@ mod tests {
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
             equipment: Default::default(),
+            inventory: Default::default(),
             depth: 1,
             target_depth: 5,
             game_won: false,

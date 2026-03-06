@@ -14,6 +14,7 @@ use crate::item::{self, Equipment, Item};
 use crate::map;
 use crate::message_log::MessageLog;
 use crate::pathfinding;
+use crate::rules::color::GameColor;
 use crate::rules::items::{self as rules_items, Inventory};
 use crate::rules::message::{GameEvent, SoundDistance};
 use crate::seed_code::{self, SeedParams};
@@ -107,6 +108,10 @@ pub struct GameObservation {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     #[serde(default)]
     pub inventory: Vec<String>,
+    /// Per-slot item color for inventory rendering (parallel to `inventory`).
+    #[serde(skip)]
+    #[serde(default)]
+    pub inventory_colors: Vec<GameColor>,
     // --- depth ---
     pub depth: Stat,
     pub target_depth: Stat,
@@ -786,19 +791,20 @@ impl GameState {
     }
 
     /// Build inventory display strings for `GameObservation`.
-    fn build_inventory_strings(&self) -> Vec<String> {
-        self.inventory
-            .iter()
-            .map(|(i, slot)| {
-                let letter = (b'a' + i as u8) as char;
-                let name = rules_items::name(slot.kind);
-                if slot.count > 1 {
-                    format!("{}) {} (x{})", letter, name, slot.count)
-                } else {
-                    format!("{}) {}", letter, name)
-                }
-            })
-            .collect()
+    fn build_inventory_strings(&self) -> (Vec<String>, Vec<GameColor>) {
+        let mut strings = Vec::new();
+        let mut colors = Vec::new();
+        for (i, slot) in self.inventory.iter() {
+            let letter = (b'a' + i as u8) as char;
+            let name = rules_items::name(slot.kind);
+            if slot.count > 1 {
+                strings.push(format!("{}) {} (x{})", letter, name, slot.count));
+            } else {
+                strings.push(format!("{}) {}", letter, name));
+            }
+            colors.push(rules_items::color(slot.kind));
+        }
+        (strings, colors)
     }
 
     /// Player's effective attack (base + equipment).
@@ -1335,6 +1341,7 @@ impl GameState {
     /// glyphs overlaid, matching the terminal renderer's behavior.
     pub fn observe(&self) -> GameObservation {
         let player = &self.entities[0];
+        let (inv_strings, inv_colors) = self.build_inventory_strings();
 
         // Build ASCII map — only rows with visible content
         let mut map_lines = Vec::new();
@@ -1425,7 +1432,8 @@ impl GameState {
             kills,
             rooms_found,
             explored_pct,
-            inventory: self.build_inventory_strings(),
+            inventory: inv_strings,
+            inventory_colors: inv_colors,
             seed: self.seed,
             seed_code: self.seed_code(),
             depth: self.depth,

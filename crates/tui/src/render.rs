@@ -743,16 +743,26 @@ pub fn render_observation<W: Write>(
 /// (e.g. `["a) Health Potion (x3)", "b) Short Sword [equipped]"]`).
 /// `selected` is the currently highlighted slot index (for action dispatch).
 /// `action_hint` shows what the next keypress will do (if a slot is selected).
+#[allow(clippy::too_many_arguments)]
 pub fn render_inventory<W: Write>(
     w: &mut W,
     inventory: &[String],
+    inventory_colors: &[GameColor],
+    weapon: Option<&str>,
+    armor: Option<&str>,
     screen_width: Coord,
     screen_height: Coord,
     selected: Option<usize>,
     action_hint: &str,
 ) -> std::io::Result<()> {
+    // Count equipped items for box height calculation.
+    let equip_lines = weapon.is_some() as usize + armor.is_some() as usize;
+    let equip_section = if equip_lines > 0 { equip_lines + 1 } else { 0 }; // +1 for header
+
     let box_w = (screen_width as usize).min(40);
-    let box_h = (screen_height as usize).min(inventory.len() + 6).max(8);
+    let box_h = (screen_height as usize)
+        .min(inventory.len() + equip_section + 6)
+        .max(8);
     let box_x = (screen_width as usize).saturating_sub(box_w) / 2;
     let box_y = (screen_height as usize).saturating_sub(box_h) / 2;
 
@@ -779,23 +789,54 @@ pub fn render_inventory<W: Write>(
         style::Print(title)
     )?;
 
-    // List items.
-    if inventory.is_empty() {
+    let mut content_row = box_y + 2;
+
+    // Equipped items section (non-interactive).
+    if equip_lines > 0 {
         queue!(
             w,
-            cursor::MoveTo((box_x + 2) as u16, (box_y + 2) as u16),
+            cursor::MoveTo((box_x + 2) as u16, content_row as u16),
+            SetForegroundColor(Color::DarkGrey),
+            SetBackgroundColor(Color::DarkBlue),
+            style::Print("Equipped:")
+        )?;
+        content_row += 1;
+        for (label, name) in [("W: ", weapon), ("A: ", armor)] {
+            if let Some(name) = name {
+                let display = format!(" {}{}", label, name);
+                queue!(
+                    w,
+                    cursor::MoveTo((box_x + 1) as u16, content_row as u16),
+                    SetForegroundColor(Color::Green),
+                    SetBackgroundColor(Color::DarkBlue),
+                    style::Print(display)
+                )?;
+                content_row += 1;
+            }
+        }
+        content_row += 1; // blank line separator
+    }
+
+    // List items.
+    if inventory.is_empty() && equip_lines == 0 {
+        queue!(
+            w,
+            cursor::MoveTo((box_x + 2) as u16, content_row as u16),
             SetForegroundColor(Color::DarkGrey),
             SetBackgroundColor(Color::DarkBlue),
             style::Print("(empty)")
         )?;
     } else {
-        let max_items = box_h.saturating_sub(4);
+        let max_items = box_h.saturating_sub(content_row - box_y + 2);
         for (i, item) in inventory.iter().take(max_items).enumerate() {
-            let row = box_y + 2 + i;
+            let row = content_row + i;
             let fg = if selected == Some(i) {
                 Color::Yellow
             } else {
-                Color::White
+                inventory_colors
+                    .get(i)
+                    .map(|c| to_crossterm_color(*c))
+                    .unwrap_or(Color::White)
             };
             let display: String = format!(" {} ", item)
                 .chars()

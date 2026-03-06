@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Standard tier: Item coloring in inventory modal (#93)
 - Add Brogue-style inventory system (26-slot, stackable) (#78)
 - Add wall-clock music timer via IRQ frame counter on C64 (#66)
 - Expand C64 RAM by moving .noinit to hiram and unmapping BASIC ROM (#71)
@@ -33,6 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add item system to roguelike (#2)
 
 ### Fixed
+- C64: Show equip bonus in messages (#91)
 - Fix structural walls not rendering in terminal game (#75)
 - Fix C64 .noinit RAM overflow from corpse and look mode additions (#70)
 - Debug raster IRQ on C64 port - spinner corrupts game state during map generation (#60)
@@ -48,6 +50,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix equipment stats not applied during monster attacks (#12)
 
 ### Changed
+- Use per-item colors in C64 inventory rendering (#88)
 - Add inventory actions to MCP server (#85)
 - Add inventory overlay to C64 port (#84)
 - Add inventory modal UI to terminal frontend (#83)

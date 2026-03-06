@@ -726,6 +726,9 @@ fn run_inventory_modal<W: Write>(
         render::render_inventory(
             renderer.writer(),
             &obs.inventory,
+            &obs.inventory_colors,
+            obs.weapon.as_deref(),
+            obs.armor.as_deref(),
             screen_w,
             screen_h,
             selected,

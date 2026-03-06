@@ -712,13 +712,18 @@ fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
             let p = copy_num(buf, p, healed);
             copy_bytes(buf, p, b" HP")
         }
-        GameEvent::EquipWeapon { kind, bonus: _ } => {
+        GameEvent::EquipWeapon { kind, bonus } | GameEvent::EquipArmor { kind, bonus } => {
             let p = copy_bytes(buf, 0, b"Equip ");
-            copy_bytes(buf, p, items::name(kind).as_bytes())
-        }
-        GameEvent::EquipArmor { kind, bonus: _ } => {
-            let p = copy_bytes(buf, 0, b"Equip ");
-            copy_bytes(buf, p, items::name(kind).as_bytes())
+            let mut p = copy_bytes(buf, p, items::name(kind).as_bytes());
+            // Inline " +N" to avoid extra function calls (tight .noinit budget).
+            // Bonus values are single-digit (2-3) with current items.
+            if p < 37 {
+                buf[p] = b' ';
+                buf[p + 1] = b'+';
+                buf[p + 2] = b'0' + bonus;
+                p += 3;
+            }
+            p
         }
         GameEvent::NoStairs => copy_bytes(buf, 0, b"No stairs"),
         GameEvent::Descend { depth, target: _ } => {
@@ -1341,6 +1346,7 @@ pub fn render_inventory(state: &MicroGameState, selected: u8) {
     c64::draw_text(bx + 2, by, b"INVENTORY", c64::COLOR_CYAN);
 
     let mut row: u8 = by + 2;
+
     let mut item_count: u8 = 0;
     for (i, slot) in state.inventory.iter() {
         if row >= by + bh - 2 {
@@ -1348,14 +1354,15 @@ pub fn render_inventory(state: &MicroGameState, selected: u8) {
         }
         let letter = b'A' + i as u8;
         let col = bx + 2;
-        let color = if i as u8 == selected {
-            c64::COLOR_YELLOW
+        let item_color = game_color_to_c64(items::color(slot.kind));
+        let (label_color, name_color) = if i as u8 == selected {
+            (c64::COLOR_YELLOW, c64::COLOR_YELLOW)
         } else {
-            c64::COLOR_LGREY
+            (c64::COLOR_LGREY, item_color)
         };
-        c64::draw_char(col, row, letter, color);
-        c64::draw_char(col + 1, row, b')', color);
-        c64::draw_text(col + 3, row, items::name(slot.kind).as_bytes(), color);
+        c64::draw_char(col, row, letter, label_color);
+        c64::draw_char(col + 1, row, b')', label_color);
+        c64::draw_text(col + 3, row, items::name(slot.kind).as_bytes(), name_color);
         if slot.count > 1 {
             let name_len = items::name(slot.kind).len() as u8;
             let p = col + 3 + name_len + 1;

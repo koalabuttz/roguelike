@@ -15,6 +15,7 @@ use crate::game::{
 };
 use crate::map::MapPreset;
 use crate::message_log::format_event;
+use crate::rules::color::GameColor;
 use crate::rules::items as rules_items;
 use crate::rules::{balance, monster_table};
 use crate::seed_code::{self, SeedParams};
@@ -282,6 +283,8 @@ impl GameStep for MicroGameStateAdapter {
             preset: None,
         });
 
+        let (inv_strings, inv_colors) = build_micro_inventory(&self.game.inventory);
+
         GameObservation {
             player_hp: entities.hp[pi] as i32,
             player_max_hp: entities.max_hp[pi] as i32,
@@ -308,7 +311,8 @@ impl GameStep for MicroGameStateAdapter {
             kills: self.game.kills as i32,
             rooms_found: map.room_count as i32,
             explored_pct,
-            inventory: build_micro_inventory(&self.game.inventory),
+            inventory: inv_strings,
+            inventory_colors: inv_colors,
             seed: self.seed as u64,
             seed_code,
             depth: self.game.depth as i32,
@@ -644,19 +648,23 @@ fn build_micro_visible_items(items: &ItemStore, fov: &MicroFov) -> Vec<ItemInfo>
     result
 }
 
-/// Build inventory display strings for a micro-tier Inventory.
-fn build_micro_inventory(inv: &crate::rules::items::Inventory) -> Vec<String> {
-    inv.iter()
-        .map(|(i, slot)| {
-            let letter = (b'a' + i as u8) as char;
-            let name = rules_items::name(slot.kind);
-            if slot.count > 1 {
-                format!("{}) {} (x{})", letter, name, slot.count)
-            } else {
-                format!("{}) {}", letter, name)
-            }
-        })
-        .collect()
+/// Build inventory display strings and colors for a micro-tier Inventory.
+fn build_micro_inventory(
+    inv: &crate::rules::items::Inventory,
+) -> (Vec<String>, Vec<GameColor>) {
+    let mut strings = Vec::new();
+    let mut colors = Vec::new();
+    for (i, slot) in inv.iter() {
+        let letter = (b'a' + i as u8) as char;
+        let name = rules_items::name(slot.kind);
+        if slot.count > 1 {
+            strings.push(format!("{}) {} (x{})", letter, name, slot.count));
+        } else {
+            strings.push(format!("{}) {}", letter, name));
+        }
+        colors.push(rules_items::color(slot.kind));
+    }
+    (strings, colors)
 }
 
 /// Build item info list at a specific tile for look_at().

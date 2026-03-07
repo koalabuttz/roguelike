@@ -52,6 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix equipment stats not applied during monster attacks (#12)
 
 ### Changed
+- C64: Freeze when equipping item via keyboard in inventory (#98)
 - C64: Aggressive inlining to reclaim .noinit static stack space (#94)
 - Use per-item colors in C64 inventory rendering (#88)
 - Add inventory actions to MCP server (#85)

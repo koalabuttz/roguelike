@@ -177,11 +177,12 @@ pub fn sync_frame() {
     }
 }
 
-/// Wait for vertical blank (raster line 251+). Useful for timing and
-/// avoiding screen tearing during bulk writes.
+/// Wait for vertical blank. Uses $D011 bit 7 (raster MSB) to detect
+/// when the beam is past line 255 (vblank region). An exact-value check
+/// on $D012 can miss if the music IRQ steals cycles at the target line.
 pub fn wait_vblank() {
     unsafe {
-        while read_volatile(VIC_RASTER) != 251 {}
+        while (read_volatile(VIC_CTRL1) & 0x80) == 0 {}
     }
 }
 

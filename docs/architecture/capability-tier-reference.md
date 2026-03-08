@@ -84,7 +84,7 @@ roguelike/
 # Standard-tier code is gated behind `std`.
 [package]
 name = "roguelike-core"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 
 [features]
@@ -295,7 +295,7 @@ their own `map::generate()` with wider coordinate types and larger map sizes.
 
 ### 1.4 Platform Usage Patterns
 
-**C64 — thin frontend over `tier_micro` + `rules`:**
+**C64 — production frontend over `tier_micro` + `rules`:**
 
 ```rust
 // c64/src/main.rs (simplified)
@@ -317,12 +317,11 @@ fn main() {
 }
 ```
 
-The C64 crate is a thin frontend (~400 lines, 14.9 KB `.PRG`) — all game logic
-comes from `roguelike-core::tier_micro` and `roguelike-core::rules`. Only input
-handling (`input.rs`), rendering (`render.rs` — viewport scrolling,
-GameColor→C64 color mapping, GameEvent→PETSCII formatting), and the main loop
-are C64-specific. With llvm-mos's static stack allocation + LTO, `state` gets a
-fixed static address — field access uses absolute addressing.
+The C64 crate is a production frontend (~4,300 lines) — all game logic
+comes from `roguelike-core::tier_micro` and `roguelike-core::rules`.
+See [cross-platform architecture](../architecture/cross-platform.md) for the
+full feature list. With llvm-mos's static stack allocation + LTO, `state` gets
+a fixed static address — field access uses absolute addressing.
 
 **GBA — uses `tier_compact`:**
 
@@ -395,6 +394,7 @@ the `std` feature. The C64 uses `default-features = false` and only accesses
 | **Spawn mechanics** | Per-tier | Per-tier | `core/tier_*/spawn.rs`, `core/spawn.rs` | Per-tier spawn implementation |
 | **Balance constants** | All | **Rules** | `core/rules/balance.rs` | All HP/ATK/DEF/sight/spawn_weight/regen values |
 | **Item definitions** | All | **Rules** | `core/rules/items.rs` | Item type IDs, stat lookup tables (heal amount, ATK/DEF bonus, spawn weights) |
+| **Inventory** | All | **Rules** | `core/rules/items.rs` | `Inventory` struct (26-slot Brogue-style, slots a–z), `InvSlot` type with stacking; `MAX_INVENTORY = 26` |
 | **Enchantment config** | All | **Rules** | `core/rules/items.rs` | Max enchant level, enchantment stat bonus per level |
 | **Depth scaling** | All | **Rules** | `core/rules/balance.rs` | Monster stat scaling per floor, `min_depth` thresholds |
 | **Wandering spawn config** | All | **Rules** | `core/rules/balance.rs` | Spawn interval, delay, max active constants |
@@ -429,7 +429,7 @@ and platforms use the same constants directly. The module defines:
 - **Config constants**: regen interval, max monsters per room — `u8`
 - **Per-tier map dimensions**: micro (`64×48`, 12 rooms, 16 entities), compact (`128×96`, 24 rooms, 128 entities), standard (`80×40`) — `u8`
 - **Wandering spawn** (Phase 1): spawn interval (`40`), delay (`60`), max active (`5`) — `u8`
-- **Depth scaling** (Phase 2): target depth (`10`), HP per floor (`+1`), ATK per 2 floors (`+1`) — `u8`
+- **Depth scaling** (Phase 2): target depth (`5`), HP per floor (`+1`), ATK per 2 floors (`+1`) — `u8`
 - **Enchantment** (Phase 4): max enchant level (`5`), enchantment bonus per level (`+1`) — `u8`
 - **Mood thresholds** (Phase 5): flee (`-50`), disengage (`-20`), enrage (`80`), ally-dies/takes-hit/lands-hit/low-HP triggers — `i8`
 
@@ -462,9 +462,12 @@ Core's items module defines the `ItemKind` enum and stat lookup tables as
 builds on these for the full item system (inventory, floor items, equipment).
 
 The `ItemKind` enum and pure lookup functions (glyph, color, stat bonuses)
-are `no_std` compatible. The standard tier adds `Item` struct, `Equipment`,
-and `EquipSlot` types for the full inventory and equipment system
-(`crates/core/src/item.rs`, gated behind `std`).
+are `no_std` compatible. The `Inventory` struct (26-slot Brogue-style with
+letter-based slots a–z) and `InvSlot` type with stacking logic also live here,
+shared across all tiers. Both micro tier (`MicroGameState`) and standard tier
+(`GameState`) use the same `Inventory` struct for pickup, use, drop, and equip
+operations. The standard tier adds `Item` struct, `Equipment`, and `EquipSlot`
+types for the full equipment system (`crates/core/src/item.rs`, gated behind `std`).
 
 The `effective_attack()` and `effective_defense()` helpers in
 `roguelike_core::rules::damage` take base stats plus equipment bonuses and

@@ -70,13 +70,13 @@ Significant investment. May depend on earlier tiers being complete.
 | Predictable UI | 0 | Low | S | Design principle — follow always, not a standalone task. |
 | Visual audio alternatives | 0 | Low | S | Design rule for when audio is added. |
 | Animation effects | 0 | Low | M | Terminal animations are limited. |
-| Music | 0 | Low | M | Atmospheric but optional for a terminal game. |
+| Music (PC/terminal) | 0 | Low | M | Atmospheric but optional for a terminal game. C64 SID music is already implemented. |
 | Tileset support | 0 | Medium | L | Alternative renderer. |
 | Scripting | 0 | Medium | XL | Lua/Rhai embedding. Only if community content demands it. |
 | Map editor | 0 | Low | L | For hand-crafted content if needed. |
 | Game Boy Advance | 0 | Low | XL | Runs at tier compact (i16 coords, no_std). Compiles `core::rules` + `core::tier_micro` + `core::tier_compact` (compact is stubs until GBA work begins). Frontend crate needed. |
 | PS Vita | 0 | Low | L | Native ARM via vita-sdk; hardware buttons, OLED display, memory card saves. |
-| Commodore 64 | 0 | Low | XL | Runs at tier micro (u8 coords, u8 stats, fixed arrays, LFSR-16). C64 crate is a thin frontend using `core::tier_micro` + `core::rules`. Builds via rust-mos Docker. |
+| Commodore 64 (remaining) | 0 | Low | M | Core C64 port is complete and production — see Completed section. Remaining work: further hardware polish, potential cartridge support. |
 | C64 AT Protocol bridge | 0 | Low | L | Self-hostable Docker bridge connecting C64 (via Ultimate64 Ethernet) to PDS saves and spectating. External companion service, not a workspace crate. [Design doc.](platforms/c64-atproto-bridge.md) |
 
 ## Critical Path
@@ -136,7 +136,7 @@ Items that have been implemented, organized by original tier.
 | Save/load | Serde serialization, classic/casual modes, 5 save slots in casual. |
 | Message history | Ctrl+P, scrollable, gamepad LB/RB page up/down. |
 | Code of Conduct | One file. |
-| Items | Items on the ground, inventory, equipment (weapons/armor), consumables (potions, scrolls). Data-driven via `[[items]]` in `game.toml`. MCP support (pickup, use_item, equip actions). |
+| Items & Inventory | 26-slot inventory (a–z) with stacking, equipment (weapons/armor), consumables. Equipped-item indicators, item coloring. Data-driven via `[[items]]` in `game.toml`. MCP support (pickup, use, equip, drop). |
 | Stairs | Multi-level dungeons, `>` stairs, depth scaling, win condition at target depth. Descend preserves player stats/inventory. |
 
 ### Tier 2
@@ -179,7 +179,7 @@ Items that have been implemented, organized by original tier.
 | LLM playtesting | Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; dual backends, parallel execution, token optimization. [Docs.](tooling/llm-playtesting.md) |
 | CI balance check | GitHub Actions workflow runs headless presets on every gameplay change, diffs against cached baseline, posts verdict to workflow summary and PR comments. |
 | Capability tier system | `rules/` module (no_std pure game rules), `tier_micro/` (complete C64 game engine), `tier_compact/` stubs (GBA, deferred), `GameStep` trait (cross-tier interface), `RenderSource` trait (unified rendering), standard-tier code gated behind `std` feature. |
-| C64 thin frontend | C64 crate rewritten as thin frontend over `roguelike-core::tier_micro` + `roguelike-core::rules` (14.9 KB binary). |
+| C64 production frontend | C64 crate (~4,300 lines) over `core::tier_micro` + `core::rules`. SID music, two-phase inventory, screen shake, I/O banking, ROM unmapping. See [cross-platform architecture](architecture/cross-platform.md). |
 | Viewport scrolling | Player-centered viewport for maps larger than terminal, universal across tiers. |
 
 ### Tier 4

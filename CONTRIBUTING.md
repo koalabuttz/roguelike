@@ -108,7 +108,7 @@ Place functions based on **what they operate on**, not who calls them:
 - **Test coverage** — Add or update tests when adding features or changing behavior
 - **Tier-aware coding** — The capability tier system (micro/compact/standard) is implemented. Pure game rules live in `rules/` (no_std, always compiled), tier micro is in `tier_micro/` (complete no_std game engine for C64). When adding gameplay features to `core`:
   - Prefer **enums over strings** for game concepts (item types, effects, equipment slots) — these map to `u8` discriminants on constrained platforms
-  - Write **pure functions for rules** in `rules/` — if a calculation (damage, item effects) doesn't need `&self`, put it in `rules/` as a free/const function. See `rules::damage`, `rules::items`, `rules::monster_table` for examples.
+  - Write **pure functions for rules** in `rules/` — if a calculation (damage, item effects) doesn't need `&self`, put it in `rules/` as a free/const function. See `rules::damage`, `rules::items`, `rules::monster_table` for examples. The `Inventory` struct and `InvSlot` type also live in `rules/items.rs`, shared across all tiers.
   - Use **named constants for limits** (inventory size, max items per room) rather than hardcoded literals. Per-tier constants live in `rules::balance`.
   - Keep **balance data in `game.toml`** — constants in `rules::balance` are compiled-in defaults; `game.toml` can override them
 
@@ -124,7 +124,7 @@ The project has five levels of testing. Use the appropriate level for each type 
 | Golden replays | `cargo test -p roguelike-core --test golden_replays` | Deterministic replay regression — detects unintended gameplay changes |
 | Scenario tests | `cargo test -p roguelike-core --test scenarios` | Balance properties — e.g., "player survives 2 goblins", "troll kills weak player" |
 | Invariant tests | `cargo test -p roguelike-core --test invariants` | Property-based: random command sequences verify HP bounds, explored monotonicity, dead-stay-dead, save/load roundtrip |
-| MCP integration | `cargo test -p roguelike-mcp --test mcp_integration` | All 10 MCP tools: response schemas, error paths, session lifecycle |
+| MCP integration | `cargo test -p roguelike-mcp --test mcp_integration` | All MCP tools: response schemas, error paths, session lifecycle |
 | MCP property tests | `cargo test -p roguelike-mcp --test mcp_proptest` | Random MCP tool sequences verify game invariants hold through the JSON interface |
 | Benchmarks | `cargo bench -p roguelike-core` | Criterion benchmarks for FOV, pathfinding, game step, and exploration graph |
 
@@ -206,7 +206,7 @@ Run with `cargo test -p roguelike-core --test invariants`. These are most useful
 
 Two test files in `crates/mcp/tests/`:
 
-**`mcp_integration.rs`** — Deterministic tests calling MCP tool methods directly on `RoguelikeMcpServer`. Covers all 10 tools: response schemas, error paths (e.g., calling tools before `new_game`), session lifecycle (reset, save persistence across games), and edge cases (compact mode, invalid actions, auto\_fight metadata).
+**`mcp_integration.rs`** — Deterministic tests calling MCP tool methods directly on `RoguelikeMcpServer`. Covers all tools: response schemas, error paths (e.g., calling tools before `new_game`), session lifecycle (reset, save persistence across games), edge cases (compact mode, invalid actions, auto\_fight metadata), and inventory actions (pickup, use/equip/drop by slot letter).
 
 **`mcp_proptest.rs`** — Property-based tests generating random sequences of MCP tool calls. Verifies that the MCP session layer (mutex logic, JSON serialization, error handling) preserves game invariants through the JSON interface. Includes tests for random tool sequences, save/load roundtrips, and panic-freedom (intentionally skipping `new_game` to test error resilience).
 

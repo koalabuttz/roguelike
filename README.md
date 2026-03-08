@@ -30,7 +30,7 @@ The game adapts to your terminal size automatically.
 - `@` is you. Monsters appear as colored letters (`g`oblin, `o`rc, `T`roll).
 - Monsters have their own sight range and chase you when *they* see you (not when you see them). Trolls are dim-sighted and easy to sneak past; goblins are alert scouts.
 - New monsters spawn over time, creating time pressure — waiting to heal between fights means more enemies to deal with. Distance-based sound cues warn you when wandering monsters are nearby.
-- Items appear on the ground: potions (`!`), weapons (`/`), armor (`[`), scrolls (`?`). Pick them up with `g`, manage your inventory with `i`, and equip weapons/armor for stat bonuses.
+- Items appear on the ground: potions (`!`), weapons (`/`), armor (`[`), scrolls (`?`). Pick them up with `g` into a 26-slot Brogue-style inventory (slots a–z) managed with `i`. Consumables stack; equipment takes one slot each. Equip weapons/armor for stat bonuses — equipped items are marked in the inventory display.
 - Stairs (`>`) lead to deeper floors with tougher monsters. Reach the target depth to win.
 - `%` marks a corpse. Dead monsters stay on the map.
 - The HP bar, equipment, depth, and message log are at the bottom of the screen.
@@ -103,7 +103,7 @@ Configurable fields under `[config]`:
 | `max_autorun_steps` | 100 | Maximum steps per autorun command |
 | `regen_interval` | 3 | Turns between HP regeneration ticks |
 | `max_items_per_room` | 1 | Item cap per room |
-| `target_depth` | 10 | Win condition: reach this floor |
+| `target_depth` | 5 | Win condition: reach this floor |
 
 Wandering monster spawning is configured under `[wandering]` with tuning for spawn interval, spawn chance, grace period, idle acceleration, max active wandering monsters, and distance-based sound cue thresholds.
 
@@ -181,7 +181,7 @@ Frames are written atomically after every action. See the [spectator mode design
 ## Development
 
 ```sh
-cargo test --workspace               # All ~600 tests across all crates
+cargo test --workspace               # All ~860 tests across all crates
 cargo clippy --workspace -- -D warnings
 cargo fmt --all --check
 ```
@@ -205,7 +205,7 @@ crates/
   terminal/   roguelike-terminal: crossterm frontend (local play)
   ssh/        roguelike-ssh: SSH server frontend (multiplayer)
   mcp/        roguelike-mcp: MCP server (AI play)
-  c64/        roguelike-c64: C64 port (thin frontend over roguelike-core)
+  c64/        roguelike-c64: C64 frontend (production, no_std)
   libudev-sys-dlopen/  Drop-in libudev-sys replacement via dlopen
 tools/        Python analytics, visualization, and playtesting scripts
 ```
@@ -224,7 +224,7 @@ See [docs/roadmap.md](docs/roadmap.md) for the full breakdown with dependencies,
 - AT Protocol integration (Bluesky login, PDS saves)
 - Daily challenges and shared leaderboard
 
-**Completed highlights:** Items, inventory, and equipment; multi-level dungeons with stairs and a win condition; wandering monsters with time pressure and sound cues; capability tier system (micro/standard) with cross-tier GameStep and RenderSource traits; C64 thin frontend over roguelike-core; platform abstraction; save/load; A\* pathfinding; gamepad support; SSH multiplayer; MCP server for AI play; data-driven content with hot reload; full CI/CD with balance regression testing; seed sharing.
+**Completed highlights:** 26-slot inventory (a–z) with stacking and equipment; multi-level dungeons with stairs and a win condition; wandering monsters with time pressure and sound cues; capability tier system (micro/standard) with cross-tier GameStep and RenderSource traits; C64 production frontend with SID music, inventory, screen shake, and I/O banking; platform abstraction; save/load; A\* pathfinding; gamepad support; SSH multiplayer; MCP server for AI play; data-driven content with hot reload; full CI/CD with balance regression testing; seed sharing.
 
 ## David's Statement on AI Use
 

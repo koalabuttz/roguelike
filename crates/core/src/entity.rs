@@ -26,7 +26,6 @@ pub struct Entity {
     pub glyph: char,
     pub color: GameColor,
     pub name: String,
-    #[allow(dead_code)]
     pub kind: EntityKind,
     pub ai: AiBehavior,
     pub hp: Stat,

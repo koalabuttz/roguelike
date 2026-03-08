@@ -181,7 +181,7 @@ Frames are written atomically after every action. See the [spectator mode design
 ## Development
 
 ```sh
-cargo test --workspace               # All ~860 tests across all crates
+cargo test --workspace               # All ~960 tests across all crates
 cargo clippy --workspace -- -D warnings
 cargo fmt --all --check
 ```

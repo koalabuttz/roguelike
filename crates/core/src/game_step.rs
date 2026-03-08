@@ -649,9 +649,7 @@ fn build_micro_visible_items(items: &ItemStore, fov: &MicroFov) -> Vec<ItemInfo>
 }
 
 /// Build inventory display strings and colors for a micro-tier Inventory.
-fn build_micro_inventory(
-    inv: &crate::rules::items::Inventory,
-) -> (Vec<String>, Vec<GameColor>) {
+fn build_micro_inventory(inv: &crate::rules::items::Inventory) -> (Vec<String>, Vec<GameColor>) {
     let mut strings = Vec::new();
     let mut colors = Vec::new();
     for (i, slot) in inv.iter() {

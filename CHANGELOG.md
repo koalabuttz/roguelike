@@ -11,6 +11,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Both tiers: Equipped-item indicators in inventory (#92)
 - Standard tier: Item coloring in inventory modal (#93)
 - Add Brogue-style inventory system (26-slot, stackable) (#78)
+- Add Inventory struct and InvSlot to rules/items.rs with stacking logic (#79)
+- Add inventory-related GameCommand and GameEvent variants (#80)
+- Add inventory to micro tier (MicroGameState) with pickup/use/drop/equip (#81)
+- Add inventory to standard tier (GameState) with pickup/use/drop/equip (#82)
+- Add inventory modal UI to terminal frontend (#83)
+- Add inventory overlay to C64 port (#84)
+- Add inventory actions to MCP server (#85)
+- Use per-item colors in C64 inventory rendering (#88)
+- Add SID music to C64 port (#61)
+- Screen shake effect on enemy hit (#63)
+- Sprite-based loading spinner for C64 (#64)
 - Add wall-clock music timer via IRQ frame counter on C64 (#66)
 - Expand C64 RAM by moving .noinit to hiram and unmapping BASIC ROM (#71)
 - Add seed code display to C64 end screens (#74)
@@ -18,6 +29,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add corpse glyph rendering and look mode descriptions on C64 (#69)
 - Redesign SID music composition with sparse motivic lead and wider intervals (#65)
 - Refine lead voice timbre and register for less distracting ambient feel (#1)
+
+### Changed
+- C64: Aggressive inlining to reclaim .noinit static stack space (#94)
+
+### Fixed
+- C64: Freeze when equipping item via keyboard in inventory (#98)
+- C64: Show equip bonus in messages (#91)
+- Fix structural walls not rendering in terminal game (#75)
+- Fix C64 .noinit RAM overflow from corpse and look mode additions (#70)
+- Debug raster IRQ on C64 port - spinner corrupts game state during map generation (#60)
+- Add joystick edge detection with auto-repeat to prevent phantom input (#55)
+- Fix C64 I/O banking - CPU port value C unmaps I/O area causing frozen input (#54)
+- Fix combat event detection cap missing events in rare multi-monster scenarios (#68)
 
 ## [0.4.0] - 2026-02-27
 
@@ -36,12 +60,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add item system to roguelike (#2)
 
 ### Fixed
-- C64: Show equip bonus in messages (#91)
-- Fix structural walls not rendering in terminal game (#75)
-- Fix C64 .noinit RAM overflow from corpse and look mode additions (#70)
-- Debug raster IRQ on C64 port - spinner corrupts game state during map generation (#60)
-- Add joystick edge detection with auto-repeat to prevent phantom input (#55)
-- Fix C64 I/O banking - CPU port value C unmaps I/O area causing frozen input (#54)
 - Replace division with right-shift for idle acceleration in micro tier (#50)
 - Fix wandering spawn timing drift, extract depth scaling helper, add ambient sound constant (#49)
 - Fix nightly C64 Docker mount to include roguelike-core (#46)
@@ -52,20 +70,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix equipment stats not applied during monster attacks (#12)
 
 ### Changed
-- C64: Freeze when equipping item via keyboard in inventory (#98)
-- C64: Aggressive inlining to reclaim .noinit static stack space (#94)
-- Use per-item colors in C64 inventory rendering (#88)
-- Add inventory actions to MCP server (#85)
-- Add inventory overlay to C64 port (#84)
-- Add inventory modal UI to terminal frontend (#83)
-- Add inventory to standard tier (GameState) with pickup/use/drop/equip (#82)
-- Add inventory to micro tier (MicroGameState) with pickup/use/drop/equip (#81)
-- Add inventory-related GameCommand and GameEvent variants (#80)
-- Add Inventory struct and InvSlot to rules/items.rs with stacking logic (#79)
-- Add SID music to C64 port (#61)
-- Fix combat event detection cap missing events in rare multi-monster scenarios (#68)
-- Screen shake effect on enemy hit (#63)
-- Sprite-based loading spinner for C64 (#64)
 - Refactor TUI game loop to use dyn GameStep (#37)
 - Refactor MCP server to use dyn GameStep for tier-agnostic play (#36)
 - Refactor FrameSink to accept dyn GameStep instead of GameState (#35)

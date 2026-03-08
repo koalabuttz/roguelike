@@ -86,9 +86,9 @@ roguelike/
 │   │       ├── main.rs
 │   │       ├── mcp_server.rs
 │   │       └── spectate.rs  (file-based spectator, ROGUELIKE_SPECTATE_PATH)
-│   ├── c64/               roguelike-c64: C64 frontend (no_std, thin frontend over core)
+│   ├── c64/               roguelike-c64: C64 frontend (no_std, production)
 │   │   ├── Cargo.toml      depends on core (default-features = false); builds via rust-mos Docker, not a workspace member
-│   │   └── src/             Thin frontend: input, render, main (~400 lines, 14.9 KB .PRG). All game logic from core::tier_micro + core::rules.
+│   │   └── src/             C64 frontend: c64.rs, input.rs, render.rs, main.rs (~4,300 lines). SID music, two-phase inventory, screen shake, I/O banking. All game logic from core::tier_micro + core::rules.
 │   ├── libudev-sys-dlopen/ Drop-in libudev-sys replacement via dlopen (not a workspace member)
 │   ├── atproto/            (future: AT Protocol identity + PDS save storage)
 │   ├── web/                (future: WASM browser frontend)
@@ -126,7 +126,7 @@ The **saves** crate defines the `SaveBackend` trait for platforms with enough st
 
 The **tui** crate sits between `core`/`saves` and the terminal-based frontends (`terminal`, `ssh`). It provides the shared game loop, crossterm-based rendering, and the `InputProvider` trait. Both `terminal` and `ssh` implement these traits for their respective I/O mechanisms.
 
-The **c64** crate is a Commodore 64 frontend using [rust-mos](https://github.com/mrk-its/rust-mos) — a fork of the Rust compiler backed by the llvm-mos LLVM backend that compiles `no_std` Rust to MOS 6502 machine code. The crate is a thin frontend (~400 lines, 14.9 KB `.PRG`) that depends on `roguelike-core::tier_micro` and `roguelike-core::rules` for all game logic. Only input handling, rendering (viewport scrolling, GameColor→C64 color mapping, GameEvent→PETSCII formatting), and the main loop are C64-specific. See [C64 port proposal](../platforms/c64-port-proposal.md).
+The **c64** crate is a Commodore 64 frontend using [rust-mos](https://github.com/mrk-its/rust-mos) — a fork of the Rust compiler backed by the llvm-mos LLVM backend that compiles `no_std` Rust to MOS 6502 machine code. The crate (~4,300 lines) is a production frontend that depends on `roguelike-core::tier_micro` and `roguelike-core::rules` for all game logic. C64-specific features include: SID music via CIA timer IRQs, two-phase inventory with action bar and equip bonus display, screen shake on combat via VIC-II raster IRQ, I/O banking overlay (frees 3.6 KB by placing pure-computation functions under $D000–$DFFF), BASIC/KERNAL ROM unmapping for additional RAM, corpse glyph rendering, seed code display on end screens, sprite-based loading spinner, and joystick + keyboard input with edge detection. See [C64 port proposal](../platforms/c64-port-proposal.md).
 
 The **libudev-sys-dlopen** crate is a `[patch.crates-io]` replacement for `libudev-sys` that loads `libudev.so.1` via dlopen at runtime instead of linking at build time. This means Linux builds no longer require `libudev-dev` to compile — gamepad support loads when available, keyboard input works regardless.
 
@@ -160,7 +160,7 @@ Anything that talks to hardware or external services:
 - **Terminal crate**: local crossterm event polling, local filesystem saves, gamepad input (gilrs, optional), terminal lifecycle
 - **SSH crate**: russh server, lobby/accounts system, ANSI input parsing, per-user saves, SSH channel I/O
 - **MCP crate**: rmcp server, tokio runtime, JSON serialization of game state
-- **C64 crate** (POC complete, production planned): thin `no_std` frontend. See [C64 port proposal](../platforms/c64-port-proposal.md).
+- **C64 crate** (production): `no_std` frontend with SID music, inventory, screen shake, I/O banking. See [C64 port proposal](../platforms/c64-port-proposal.md).
 - **Atproto crate** (future): AT Protocol OAuth, PDS save backend. See [design doc](../design/atproto.md).
 - **Web crate** (future): WASM entry point, canvas rendering. See [design doc](../design/atproto.md#wasm-frontend).
 - **GBA crate** (future): GBA tile/sprite rendering, hardware saves. See [design doc](../platforms/gba-port.md).
@@ -226,7 +226,7 @@ All development happens on one branch:
 
 - **Capability tier hierarchy** — `no_std` support, per-tier types, shared `rules/` module, `tier_micro/` complete game engine, `GameStep` cross-tier trait, `RenderSource` unified rendering trait. See [capability tier reference](capability-tier-reference.md).
 - **Cross-platform seed system** — tier inference from seed numeric value (`seed <= 0xFFFF` → micro), base36 encode/decode, MCP seed_code param. See [capability tier reference](capability-tier-reference.md#19-seed-system-and-cross-platform-seeds).
-- **C64 thin frontend** — rewritten from standalone POC to thin frontend over `core::tier_micro` + `core::rules` (14.9 KB binary).
+- **C64 production frontend** — rewritten from standalone POC to production frontend (~4,300 lines) over `core::tier_micro` + `core::rules`.
 
 ## Architecture History
 
@@ -246,4 +246,4 @@ Key milestones in the cross-platform architecture:
 - Standard-tier code gated behind `std` feature — `#![cfg_attr(not(feature = "std"), no_std)]`
 - GameStep cross-tier trait — `game_step.rs` with MicroGameStateAdapter, create_game() factory
 - RenderSource unified rendering trait — `tui/render_source.rs` eliminates duplicate render code paths
-- C64 rewritten as thin frontend — depends on `core::tier_micro` + `core::rules`, 14.9 KB binary
+- C64 production frontend — depends on `core::tier_micro` + `core::rules`, ~4,300 lines with SID music, inventory, screen shake, I/O banking

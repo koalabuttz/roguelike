@@ -59,7 +59,7 @@ Playtest gate validation is pending — run LLM playtest sessions to measure sur
 
 ## Phase 2: Items & Inventory ✓
 
-**Complete.** Implemented with `item.rs` (ItemKind, Item, Equipment), data-driven `[[items]]` in `game.toml`, floor items (`HashMap<Pos, Vec<Item>>`), fixed-size inventory, equipment slots (weapon/armor), effective ATK/DEF from equipment, item spawning per room, MCP actions (pickup, use_item, equip), look mode item display, spectate frame item rendering, and comprehensive unit + scenario tests. Golden replays regenerated.
+**Complete.** Implemented with a 26-slot Brogue-style stackable inventory (`Inventory` struct and `InvSlot` in `rules/items.rs`, shared across all tiers, slots a–z). Features: `item.rs` (ItemKind, Item, Equipment), data-driven `[[items]]` in `game.toml`, floor items (`HashMap<Pos, Vec<Item>>`), equipment slots (weapon/armor), effective ATK/DEF from equipment, consumable stacking, equipped-item indicators, item coloring in both terminal and C64 inventory UIs, item spawning per room, MCP actions (pickup, use_item, equip_item, drop_item by slot letter), look mode item display, spectate frame item rendering, C64 two-phase inventory with action bar and equip bonus display, and comprehensive unit + scenario tests. Golden replays regenerated.
 
 ### Design (reference)
 
@@ -275,7 +275,7 @@ pub enum Tile {
 ```toml
 [config]
 # ... existing fields ...
-target_depth = 10               # Win condition: reach this floor
+target_depth = 5                # Win condition: reach this floor
 ```
 
 #### Win condition

@@ -17,13 +17,13 @@ Project documentation for the roguelike dungeon crawler.
 |----------|---------|--------|
 | [architecture/cross-platform.md](architecture/cross-platform.md) | Workspace layout, crate responsibilities, development workflow | Current |
 | [architecture/simulation.md](architecture/simulation.md) | Future design for emergent simulation (properties, events, CA) | Future design |
-| [architecture/capability-tier-reference.md](architecture/capability-tier-reference.md) | Cross-platform capability tier hierarchy: per-tier types, algorithms, sharing matrix, seed system, tier divergence | Reference (micro tier implemented) |
+| [architecture/capability-tier-reference.md](architecture/capability-tier-reference.md) | Cross-platform capability tier hierarchy: per-tier types, algorithms, sharing matrix, seed system, tier divergence | Reference (micro tier implemented, inventory shared across tiers) |
 
 ### Platforms
 
 | Document | Purpose | Status |
 |----------|---------|--------|
-| [platforms/c64-port-proposal.md](platforms/c64-port-proposal.md) | C64 port proposal: rust-mos toolchain, shared crate design, implementation plan | Implemented — C64 is thin frontend over core |
+| [platforms/c64-port-proposal.md](platforms/c64-port-proposal.md) | C64 port proposal: rust-mos toolchain, shared crate design, implementation plan | Implemented — C64 is production frontend over core |
 | [platforms/c64-platform-guide.md](platforms/c64-platform-guide.md) | C64-specific hardware guidance: module mapping, CIA multiplexing, static stack allocation, cycle budgets, 6502 code style | Reference |
 | [platforms/c64-demo-techniques-for-roguelike.md](platforms/c64-demo-techniques-for-roguelike.md) | VIC-II demo scene techniques evaluated for the roguelike C64 port | Reference |
 | [platforms/c64-display-mode-analysis.md](platforms/c64-display-mode-analysis.md) | VIC-II display mode evaluation: why standard character mode is optimal | Reference |
@@ -60,6 +60,7 @@ Project documentation for the roguelike dungeon crawler.
 | [reports/llm-playtest-session-2.md](reports/llm-playtest-session-2.md) | Session 2: HP regen added, autorun/navigation issues persisted | Historical |
 | [reports/llm-playtest-session-3.md](reports/llm-playtest-session-3.md) | Session 3: pathfind_to + frontiers, efficiency nearly doubled | Historical |
 | [reports/llm-playtest-session-4.md](reports/llm-playtest-session-4.md) | Session 4: auto_explore, MCP interface reached maturity | Historical |
+| [reports/llm-playtest-session-5.md](reports/llm-playtest-session-5.md) | Session 5: Item system verification (potions, swords, armor) | Historical |
 | [reports/dev-tools-session.md](reports/dev-tools-session.md) | Dev tooling session: debug console, map presets, replay, headless | Historical |
 
 ### Archive

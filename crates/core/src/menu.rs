@@ -30,6 +30,10 @@ pub enum MenuAction {
     ToggleShowKeybindHints,
     /// Toggle corpse rendering in the settings menu.
     ToggleShowCorpses,
+    /// Toggle kill counter in the status bar.
+    ToggleShowKills,
+    /// Toggle turn counter in the status bar.
+    ToggleShowTurnCount,
     /// Toggle vi-key movement in the settings menu.
     ToggleViKeys,
     /// Toggle numpad movement in the settings menu.
@@ -376,6 +380,32 @@ pub fn settings_menu(settings: &Settings, platform: Platform) -> Menu {
         items.push(MenuItem {
             label: label.to_string(),
             action: MenuAction::ToggleShowCorpses,
+            enabled: true,
+        });
+    }
+
+    if Setting::ShowKills.is_available(platform) {
+        let label = if settings.show_kills {
+            "Kill Count: On"
+        } else {
+            "Kill Count: Off"
+        };
+        items.push(MenuItem {
+            label: label.to_string(),
+            action: MenuAction::ToggleShowKills,
+            enabled: true,
+        });
+    }
+
+    if Setting::ShowTurnCount.is_available(platform) {
+        let label = if settings.show_turn_count {
+            "Turn Count: On"
+        } else {
+            "Turn Count: Off"
+        };
+        items.push(MenuItem {
+            label: label.to_string(),
+            action: MenuAction::ToggleShowTurnCount,
             enabled: true,
         });
     }

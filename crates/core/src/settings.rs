@@ -133,6 +133,8 @@ pub enum Setting {
     ShowCoordinates,
     ShowKeybindHints,
     ShowCorpses,
+    ShowKills,
+    ShowTurnCount,
     MessageLogLines,
     AnimationSpeed,
     ViKeys,
@@ -185,6 +187,8 @@ impl Setting {
                     | Setting::LeftHandLayout
                     | Setting::PlayerName
                     | Setting::Pronouns
+                    | Setting::ShowKills
+                    | Setting::ShowTurnCount
             ),
         }
     }
@@ -231,6 +235,10 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub show_corpses: bool,
     #[serde(default = "default_true")]
+    pub show_kills: bool,
+    #[serde(default = "default_true")]
+    pub show_turn_count: bool,
+    #[serde(default = "default_true")]
     pub vi_keys: bool,
     #[serde(default = "default_true")]
     pub numpad: bool,
@@ -265,6 +273,8 @@ impl Settings {
                 show_coordinates: false,
                 show_keybind_hints: true,
                 show_corpses: true,
+                show_kills: true,
+                show_turn_count: true,
                 vi_keys: true,
                 numpad: true,
                 autosave_frequency: 1,
@@ -281,6 +291,8 @@ impl Settings {
                 show_coordinates: false,
                 show_keybind_hints: false,
                 show_corpses: true,
+                show_kills: true,
+                show_turn_count: true,
                 vi_keys: false,
                 numpad: false,
                 autosave_frequency: 1,
@@ -297,6 +309,8 @@ impl Settings {
                 show_coordinates: false,
                 show_keybind_hints: true,
                 show_corpses: true,
+                show_kills: true,
+                show_turn_count: true,
                 vi_keys: false,
                 numpad: false,
                 autosave_frequency: 1,
@@ -313,6 +327,8 @@ impl Settings {
                 show_coordinates: false,
                 show_keybind_hints: true,
                 show_corpses: true,
+                show_kills: true,
+                show_turn_count: true,
                 vi_keys: false,
                 numpad: false,
                 autosave_frequency: 1,
@@ -329,6 +345,8 @@ impl Settings {
                 show_coordinates: false,
                 show_keybind_hints: true,
                 show_corpses: true,
+                show_kills: true,
+                show_turn_count: true,
                 vi_keys: false,
                 numpad: false,
                 autosave_frequency: 1,

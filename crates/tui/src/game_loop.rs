@@ -1141,6 +1141,8 @@ fn apply_settings_action<W: Write>(
             settings.show_keybind_hints = !settings.show_keybind_hints;
         }
         MenuAction::ToggleShowCorpses => settings.show_corpses = !settings.show_corpses,
+        MenuAction::ToggleShowKills => settings.show_kills = !settings.show_kills,
+        MenuAction::ToggleShowTurnCount => settings.show_turn_count = !settings.show_turn_count,
         MenuAction::ToggleViKeys => settings.vi_keys = !settings.vi_keys,
         MenuAction::ToggleNumpad => settings.numpad = !settings.numpad,
         MenuAction::CycleAnimationSpeed => {

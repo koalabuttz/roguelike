@@ -101,6 +101,12 @@ pub trait RenderSource {
     /// Recent messages for the message log (oldest first). Returns up to `n`.
     fn recent_messages(&self, n: usize) -> Vec<String>;
 
+    /// Number of monsters killed.
+    fn kills(&self) -> Stat;
+
+    /// Number of turns elapsed.
+    fn turn_count(&self) -> Stat;
+
     /// Whether the game is won.
     fn game_won(&self) -> bool;
 
@@ -208,6 +214,14 @@ impl RenderSource for GameState {
 
     fn recent_messages(&self, n: usize) -> Vec<String> {
         self.log.recent(n).iter().map(|s| s.to_string()).collect()
+    }
+
+    fn kills(&self) -> Stat {
+        self.kill_count()
+    }
+
+    fn turn_count(&self) -> Stat {
+        self.turn_count
     }
 
     fn game_won(&self) -> bool {
@@ -357,6 +371,14 @@ impl RenderSource for MicroGameStateAdapter {
         // Return at most n, oldest first.
         let skip = messages.len().saturating_sub(n);
         messages.into_iter().skip(skip).collect()
+    }
+
+    fn kills(&self) -> Stat {
+        self.game.kills as Stat
+    }
+
+    fn turn_count(&self) -> Stat {
+        self.game.turn_count as Stat
     }
 
     fn game_won(&self) -> bool {

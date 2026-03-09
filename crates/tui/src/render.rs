@@ -469,6 +469,18 @@ fn render_status_bar<W: Write>(
         format!(" | ATK:{} DEF:{}", atk_str, def_str)
     };
 
+    let kills_segment = if settings.show_kills {
+        format!(" | K:{}", source.kills())
+    } else {
+        String::new()
+    };
+
+    let turns_segment = if settings.show_turn_count {
+        format!(" | T:{}", source.turn_count())
+    } else {
+        String::new()
+    };
+
     let hint_segment = if settings.show_keybind_hints {
         " | hjkl/arrows: move | .: wait | Ctrl+P: log | q: quit"
     } else {
@@ -479,13 +491,15 @@ fn render_status_bar<W: Write>(
     let depth_segment = format!(" | Depth {}/{}", cur_depth, target_depth);
 
     let status = format!(
-        " HP [{}{}] {}/{}{}{}{}{}{}",
+        " HP [{}{}] {}/{}{}{}{}{}{}{}{}",
         bar_filled,
         bar_empty,
         hp,
         max_hp,
         equip_segment,
         depth_segment,
+        kills_segment,
+        turns_segment,
         coord_segment,
         explored_segment,
         hint_segment

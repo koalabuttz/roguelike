@@ -182,6 +182,10 @@ pub fn wait_for_input() -> GameCommand {
 
         let (key, shifted) = c64::scan_keyboard_shifted();
         if key != 0 {
+            // Shift+/ = ? → Help (checked before directions to avoid conflict)
+            if key == b'/' && shifted {
+                return GameCommand::Help;
+            }
             if let Some(dir) = key_to_direction(key) {
                 return if shifted {
                     GameCommand::Autorun(dir)

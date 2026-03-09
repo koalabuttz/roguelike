@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- C64: Add help screen overlay (#104)
 - Add unequip action for equipped items on both tiers (#99)
 - C64: Two-phase inventory with action bar (#90)
 - Both tiers: Equipped-item indicators in inventory (#92)

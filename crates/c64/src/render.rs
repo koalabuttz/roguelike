@@ -1554,6 +1554,59 @@ pub fn render_loading() {
     c64::draw_text(13, 10, b"GENERATING...", c64::COLOR_LGREY);
 }
 
+/// Render the help screen overlay. Full-screen, dismissed by any key.
+pub fn render_help() {
+    c64::clear_screen();
+    c64::fill_row(0, 0xC0, c64::COLOR_CYAN);
+
+    c64::draw_text(2, 1, b"CONTROLS", c64::COLOR_WHITE);
+    //                col 2          col 15
+    c64::draw_text(2, 3, b"WASD/ARROWS", c64::COLOR_LGREY);
+    c64::draw_text(15, 3, b"MOVE / ATTACK", c64::COLOR_DGREY);
+    c64::draw_text(2, 4, b"Q E Z C", c64::COLOR_LGREY);
+    c64::draw_text(15, 4, b"DIAGONAL MOVE", c64::COLOR_DGREY);
+    c64::draw_text(2, 5, b"SHIFT+DIR", c64::COLOR_LGREY);
+    c64::draw_text(15, 5, b"AUTORUN", c64::COLOR_DGREY);
+    c64::draw_text(2, 6, b"SPACE", c64::COLOR_LGREY);
+    c64::draw_text(15, 6, b"WAIT ONE TURN", c64::COLOR_DGREY);
+    c64::draw_text(2, 7, b"G", c64::COLOR_LGREY);
+    c64::draw_text(15, 7, b"PICKUP ITEM", c64::COLOR_DGREY);
+    c64::draw_text(2, 8, b"I", c64::COLOR_LGREY);
+    c64::draw_text(15, 8, b"INVENTORY", c64::COLOR_DGREY);
+    c64::draw_text(2, 9, b"X", c64::COLOR_LGREY);
+    c64::draw_text(15, 9, b"LOOK MODE", c64::COLOR_DGREY);
+    c64::draw_text(2, 10, b"RETURN", c64::COLOR_LGREY);
+    c64::draw_text(15, 10, b"DESCEND STAIRS", c64::COLOR_DGREY);
+    c64::draw_text(2, 11, b"RUN/STOP", c64::COLOR_LGREY);
+    c64::draw_text(15, 11, b"PAUSE MENU", c64::COLOR_DGREY);
+    c64::draw_text(2, 12, b"?", c64::COLOR_LGREY);
+    c64::draw_text(15, 12, b"THIS HELP", c64::COLOR_DGREY);
+
+    c64::draw_text(2, 13, b"JOYSTICK", c64::COLOR_LGREY);
+    c64::draw_text(15, 13, b"FIRE+DIR=AUTORUN", c64::COLOR_DGREY);
+
+    c64::draw_text(2, 15, b"COMBAT", c64::COLOR_WHITE);
+    c64::draw_text(2, 16, b"DMG = ATK - DEF (MIN 0)", c64::COLOR_LGREY);
+    c64::draw_text(2, 17, b"WALK INTO MONSTER TO ATTACK", c64::COLOR_LGREY);
+    c64::draw_text(2, 18, b"HP REGEN: 1 EVERY 3 TURNS", c64::COLOR_LGREY);
+
+    c64::draw_text(2, 20, b"MONSTERS", c64::COLOR_WHITE);
+    //             glyph  name         HP ATK DEF
+    c64::draw_text(5, 21, b"NAME      HP ATK DEF", c64::COLOR_DGREY);
+
+    // Goblin
+    c64::draw_char(2, 22, b'g', game_color_to_c64(monster_table::color(monster_table::MonsterKind::Goblin)));
+    c64::draw_text(5, 22, b"GOBLIN     6   3   0", c64::COLOR_LGREY);
+
+    // Orc
+    c64::draw_char(2, 23, b'o', game_color_to_c64(monster_table::color(monster_table::MonsterKind::Orc)));
+    c64::draw_text(5, 23, b"ORC       12   4   1", c64::COLOR_LGREY);
+
+    // Troll
+    c64::draw_char(2, 24, b'T', game_color_to_c64(monster_table::color(monster_table::MonsterKind::Troll)));
+    c64::draw_text(5, 24, b"TROLL     20   6   3", c64::COLOR_LGREY);
+}
+
 /// Render a brief error message overlay for invalid seed codes.
 pub fn render_seed_error() {
     let bx: u8 = 8;

@@ -346,7 +346,9 @@ const KEY_MATRIX: [[u8; 8]; 8] = [
     // PA5: +, P, L, -, ., :, @, ,
     [0, b'P', b'L', b'-', 0, 0, 0, 0],
     // PA6: pound, *, ;, HOME, RSHIFT, =, up-arrow, /
-    [0; 8],
+    // RSHIFT at PB4 maps to 0 (detected separately for shift state).
+    // Only / (PB7) is mapped — used for Shift+/ = ? (help).
+    [0, 0, 0, 0, 0, 0, 0, b'/'],
     // PA7: 1, left-arrow, CTRL, 2, SPACE, C=, Q, STOP
     [b'1', 0, 0, b'2', PETSCII_SPACE, 0, b'Q', PETSCII_STOP],
 ];

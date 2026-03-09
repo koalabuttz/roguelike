@@ -89,6 +89,12 @@ pub fn format_event(event: GameEvent) -> String {
         GameEvent::EquipArmor { kind, bonus } => {
             format!("You equip the {}. (+{} DEF)", items::name(kind), bonus)
         }
+        GameEvent::UnequipWeapon { kind } => {
+            format!("You unequip the {}.", items::name(kind))
+        }
+        GameEvent::UnequipArmor { kind } => {
+            format!("You unequip the {}.", items::name(kind))
+        }
         GameEvent::NoStairs => "There are no stairs here.".into(),
         GameEvent::Descend { depth, target } => {
             format!("You descend to depth {}/{}...", depth, target)
@@ -284,6 +290,22 @@ mod tests {
             bonus: 2,
         });
         assert_eq!(msg, "You equip the Leather Armor. (+2 DEF)");
+    }
+
+    #[test]
+    fn format_unequip_weapon() {
+        let msg = format_event(GameEvent::UnequipWeapon {
+            kind: ItemKind::ShortSword,
+        });
+        assert_eq!(msg, "You unequip the Short Sword.");
+    }
+
+    #[test]
+    fn format_unequip_armor() {
+        let msg = format_event(GameEvent::UnequipArmor {
+            kind: ItemKind::LeatherArmor,
+        });
+        assert_eq!(msg, "You unequip the Leather Armor.");
     }
 
     #[test]

@@ -93,6 +93,10 @@ pub enum GameEvent {
     EquipWeapon { kind: ItemKind, bonus: u8 },
     /// Player equipped armor.
     EquipArmor { kind: ItemKind, bonus: u8 },
+    /// Player unequipped a weapon.
+    UnequipWeapon { kind: ItemKind },
+    /// Player unequipped armor.
+    UnequipArmor { kind: ItemKind },
     /// Tried to descend but no stairs on this tile.
     NoStairs,
     /// Player descended to a new dungeon depth.

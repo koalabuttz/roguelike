@@ -615,6 +615,7 @@ impl RoguelikeMcpServer {
              - Consumables (potions) stack; equipment takes one slot each\n\
              - Use 'use_item_X' to consume a potion from inventory slot X (a-z)\n\
              - Use 'equip_item_X' to equip a weapon/armor from slot X\n\
+             - Use 'unequip_weapon' or 'unequip_armor' to unequip and return to inventory\n\
              - Use 'drop_item_X' to drop an item from slot X onto the ground\n\
              - Your inventory is shown in observations when non-empty\n\
              - Health Potion (!) — heals 10 HP\n\
@@ -744,6 +745,10 @@ pub fn parse_action(action: &str) -> Option<GameCommand> {
         _ if action.starts_with("equip_item_") => {
             parse_slot_letter(action, "equip_item_").map(GameCommand::EquipItem)
         }
+        "unequip_weapon" => Some(GameCommand::UnequipWeapon),
+        "unequip_armor" => Some(GameCommand::UnequipArmor),
+        "drop_equipped_weapon" => Some(GameCommand::DropEquippedWeapon),
+        "drop_equipped_armor" => Some(GameCommand::DropEquippedArmor),
         _ => None,
     }
 }
@@ -1341,6 +1346,22 @@ mod tests {
         assert_eq!(
             parse_action("equip_item_c"),
             Some(GameCommand::EquipItem(2))
+        );
+    }
+
+    #[test]
+    fn parse_unequip_weapon() {
+        assert_eq!(
+            parse_action("unequip_weapon"),
+            Some(GameCommand::UnequipWeapon)
+        );
+    }
+
+    #[test]
+    fn parse_unequip_armor() {
+        assert_eq!(
+            parse_action("unequip_armor"),
+            Some(GameCommand::UnequipArmor)
         );
     }
 

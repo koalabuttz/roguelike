@@ -158,6 +158,10 @@ impl MicroGameState {
             GameCommand::UseItem(slot) => self.use_item(slot),
             GameCommand::DropItem(slot) => self.drop_item(slot),
             GameCommand::EquipItem(slot) => self.equip_item(slot),
+            GameCommand::UnequipWeapon => self.unequip_weapon(),
+            GameCommand::UnequipArmor => self.unequip_armor(),
+            GameCommand::DropEquippedWeapon => self.drop_equipped_weapon(),
+            GameCommand::DropEquippedArmor => self.drop_equipped_armor(),
             // UI-only / unsupported variants — no action taken
             GameCommand::OpenInventory
             | GameCommand::Autorun(_)
@@ -440,6 +444,64 @@ impl MicroGameState {
                 kind,
                 bonus: rules_items::defense_bonus(kind),
             });
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Unequip the current weapon, returning it to inventory.
+    fn unequip_weapon(&mut self) -> bool {
+        if let Some(kind) = self.equipment.weapon {
+            if !self.inventory.add(kind) {
+                self.log.add(GameEvent::InventoryFull);
+                return false;
+            }
+            self.equipment.weapon = None;
+            self.log.add(GameEvent::UnequipWeapon { kind });
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Unequip the current armor, returning it to inventory.
+    fn unequip_armor(&mut self) -> bool {
+        if let Some(kind) = self.equipment.armor {
+            if !self.inventory.add(kind) {
+                self.log.add(GameEvent::InventoryFull);
+                return false;
+            }
+            self.equipment.armor = None;
+            self.log.add(GameEvent::UnequipArmor { kind });
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Drop an equipped weapon directly to the ground (bypasses inventory).
+    fn drop_equipped_weapon(&mut self) -> bool {
+        if let Some(kind) = self.equipment.weapon.take() {
+            let pi = PLAYER_IDX as usize;
+            let px = self.entities.x[pi];
+            let py = self.entities.y[pi];
+            self.items.spawn(px, py, kind);
+            self.log.add(GameEvent::DropItem { kind });
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Drop equipped armor directly to the ground (bypasses inventory).
+    fn drop_equipped_armor(&mut self) -> bool {
+        if let Some(kind) = self.equipment.armor.take() {
+            let pi = PLAYER_IDX as usize;
+            let px = self.entities.x[pi];
+            let py = self.entities.y[pi];
+            self.items.spawn(px, py, kind);
+            self.log.add(GameEvent::DropItem { kind });
             true
         } else {
             false
@@ -978,6 +1040,72 @@ mod tests {
         // Old weapon should be in inventory.
         assert_eq!(g.inventory.len(), 1);
         assert_eq!(g.inventory.get(0).unwrap().kind, ItemKind::ShortSword);
+    }
+
+    #[test]
+    fn unequip_weapon_returns_to_inventory() {
+        let mut g = MicroGameState::new_default(42);
+        g.equipment.weapon = Some(ItemKind::ShortSword);
+        assert!(g.inventory.is_empty());
+        let result = g.step(GameCommand::UnequipWeapon);
+        assert!(result.action_taken);
+        assert!(g.equipment.weapon.is_none());
+        assert_eq!(g.inventory.len(), 1);
+        assert_eq!(g.inventory.get(0).unwrap().kind, ItemKind::ShortSword);
+    }
+
+    #[test]
+    fn unequip_armor_returns_to_inventory() {
+        let mut g = MicroGameState::new_default(42);
+        g.equipment.armor = Some(ItemKind::LeatherArmor);
+        let result = g.step(GameCommand::UnequipArmor);
+        assert!(result.action_taken);
+        assert!(g.equipment.armor.is_none());
+        assert_eq!(g.inventory.len(), 1);
+        assert_eq!(g.inventory.get(0).unwrap().kind, ItemKind::LeatherArmor);
+    }
+
+    #[test]
+    fn unequip_nothing_no_action() {
+        let mut g = MicroGameState::new_default(42);
+        let result = g.step(GameCommand::UnequipWeapon);
+        assert!(!result.action_taken);
+        let result = g.step(GameCommand::UnequipArmor);
+        assert!(!result.action_taken);
+    }
+
+    #[test]
+    fn unequip_full_inventory_fails() {
+        let mut g = MicroGameState::new_default(42);
+        g.equipment.weapon = Some(ItemKind::ShortSword);
+        for _ in 0..26 {
+            g.inventory.add(ItemKind::ShortSword);
+        }
+        let result = g.step(GameCommand::UnequipWeapon);
+        assert!(!result.action_taken);
+        assert_eq!(g.equipment.weapon, Some(ItemKind::ShortSword));
+    }
+
+    #[test]
+    fn drop_equipped_weapon_to_ground() {
+        let mut g = MicroGameState::new_default(42);
+        g.equipment.weapon = Some(ItemKind::ShortSword);
+        let result = g.step(GameCommand::DropEquippedWeapon);
+        assert!(result.action_taken);
+        assert!(g.equipment.weapon.is_none());
+        assert!(g.inventory.is_empty());
+    }
+
+    #[test]
+    fn drop_equipped_with_full_inventory() {
+        let mut g = MicroGameState::new_default(42);
+        g.equipment.weapon = Some(ItemKind::ShortSword);
+        for _ in 0..26 {
+            g.inventory.add(ItemKind::ShortSword);
+        }
+        let result = g.step(GameCommand::DropEquippedWeapon);
+        assert!(result.action_taken);
+        assert!(g.equipment.weapon.is_none());
     }
 
     #[test]

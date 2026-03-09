@@ -323,6 +323,8 @@ fn run_inventory(state: &mut MicroGameState) {
     render::render_inventory(state, selected, None);
 
     loop {
+        let ec = render::equip_count(state);
+        let total = ec + state.inventory.len() as u8;
         let inp = input::wait_for_inventory_input();
 
         match inp {
@@ -340,27 +342,37 @@ fn run_inventory(state: &mut MicroGameState) {
             InventoryInput::Down => {
                 if action_sel.is_some() {
                     action_sel = None;
-                } else {
-                    let count = state.inventory.len() as u8;
-                    if count > 0 && selected < count - 1 {
-                        selected += 1;
-                    }
+                } else if total > 0 && selected < total - 1 {
+                    selected += 1;
                 }
             }
 
-            // --- Direct keyboard shortcuts (always work) ---
+            // --- Direct keyboard shortcuts (work on inventory items) ---
             InventoryInput::Use => {
-                execute_inventory_action(state, selected, InvAction::Use);
-                action_sel = None;
-                clamp_selected(state, &mut selected);
+                if selected >= ec {
+                    execute_inventory_action(state, selected - ec, InvAction::Use);
+                    action_sel = None;
+                    clamp_selected(state, &mut selected);
+                }
             }
             InventoryInput::Equip => {
-                execute_inventory_action(state, selected, InvAction::Equip);
-                action_sel = None;
-                clamp_selected(state, &mut selected);
+                if selected < ec {
+                    // Selected item is equipped — unequip it
+                    execute_equip_action(state, selected);
+                    action_sel = None;
+                    clamp_selected(state, &mut selected);
+                } else {
+                    execute_inventory_action(state, selected - ec, InvAction::Equip);
+                    action_sel = None;
+                    clamp_selected(state, &mut selected);
+                }
             }
             InventoryInput::Drop => {
-                execute_inventory_action(state, selected, InvAction::Drop);
+                if selected < ec {
+                    drop_equipped(state, selected);
+                } else {
+                    execute_inventory_action(state, selected - ec, InvAction::Drop);
+                }
                 action_sel = None;
                 clamp_selected(state, &mut selected);
             }
@@ -385,7 +397,7 @@ fn run_inventory(state: &mut MicroGameState) {
 
             // --- Confirm: enter Act mode or execute selected action ---
             InventoryInput::Confirm => {
-                if state.inventory.len() == 0 {
+                if total == 0 {
                     continue;
                 }
                 match action_sel {
@@ -399,8 +411,16 @@ fn run_inventory(state: &mut MicroGameState) {
                             let action = actions[sel as usize];
                             if action == InvAction::Back {
                                 action_sel = None;
+                            } else if selected < ec {
+                                match action {
+                                    InvAction::Unequip => execute_equip_action(state, selected),
+                                    InvAction::Drop => drop_equipped(state, selected),
+                                    _ => {}
+                                }
+                                action_sel = None;
+                                clamp_selected(state, &mut selected);
                             } else {
-                                execute_inventory_action(state, selected, action);
+                                execute_inventory_action(state, selected - ec, action);
                                 action_sel = None;
                                 clamp_selected(state, &mut selected);
                             }
@@ -427,31 +447,62 @@ fn run_inventory(state: &mut MicroGameState) {
 
 /// Get the context-sensitive action list for the currently selected item.
 fn current_actions(state: &MicroGameState, selected: u8) -> &'static [render::InvAction] {
-    state
-        .inventory
-        .iter()
-        .nth(selected as usize)
-        .map(|(_, slot)| render::actions_for_kind(slot.kind))
-        .unwrap_or(&[render::InvAction::Back])
+    let ec = render::equip_count(state);
+    if selected < ec {
+        render::actions_for_equipped()
+    } else {
+        state
+            .inventory
+            .iter()
+            .nth((selected - ec) as usize)
+            .map(|(_, slot)| render::actions_for_kind(slot.kind))
+            .unwrap_or(&[render::InvAction::Back])
+    }
 }
 
-/// Execute an inventory action on the selected item.
+/// Execute an unequip action on the selected equipped item.
+fn execute_equip_action(state: &mut MicroGameState, equip_sel: u8) {
+    // equip_sel 0 = weapon (if present), else armor.
+    // equip_sel 1 = armor (when weapon is also present).
+    let cmd = if state.equipment.weapon.is_some() && equip_sel == 0 {
+        GameCommand::UnequipWeapon
+    } else {
+        GameCommand::UnequipArmor
+    };
+    c64::io_bank_out();
+    state.step(cmd);
+    c64::io_bank_in();
+}
+
+/// Drop an equipped item directly to the ground (bypasses inventory).
+fn drop_equipped(state: &mut MicroGameState, equip_sel: u8) {
+    let cmd = if state.equipment.weapon.is_some() && equip_sel == 0 {
+        GameCommand::DropEquippedWeapon
+    } else {
+        GameCommand::DropEquippedArmor
+    };
+    c64::io_bank_out();
+    state.step(cmd);
+    c64::io_bank_in();
+}
+
+/// Execute an inventory action on a bag item (selected relative to inventory, not equip).
 fn execute_inventory_action(
     state: &mut MicroGameState,
-    selected: u8,
+    inv_selected: u8,
     action: render::InvAction,
 ) {
     let slot_idx = state
         .inventory
         .iter()
-        .nth(selected as usize)
+        .nth(inv_selected as usize)
         .map(|(i, _)| i as u8);
     if let Some(idx) = slot_idx {
         let cmd = match action {
             render::InvAction::Use => GameCommand::UseItem(idx),
             render::InvAction::Equip => GameCommand::EquipItem(idx),
             render::InvAction::Drop => GameCommand::DropItem(idx),
-            render::InvAction::Back => return,
+            render::InvAction::Unequip | render::InvAction::Back => return,
         };
         c64::io_bank_out();
         state.step(cmd);
@@ -461,9 +512,9 @@ fn execute_inventory_action(
 
 /// Clamp the cursor position after inventory changes.
 fn clamp_selected(state: &MicroGameState, selected: &mut u8) {
-    let count = state.inventory.len() as u8;
-    if count > 0 && *selected >= count {
-        *selected = count - 1;
+    let total = render::equip_count(state) + state.inventory.len() as u8;
+    if total > 0 && *selected >= total {
+        *selected = total - 1;
     }
 }
 

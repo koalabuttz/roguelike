@@ -723,6 +723,10 @@ fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
             }
             p
         }
+        GameEvent::UnequipWeapon { kind } | GameEvent::UnequipArmor { kind } => {
+            let p = copy_bytes(buf, 0, b"Unequip ");
+            copy_bytes(buf, p, items::name(kind).as_bytes())
+        }
         GameEvent::NoStairs => copy_bytes(buf, 0, b"No stairs"),
         GameEvent::Descend { depth, target: _ } => {
             let p = copy_bytes(buf, 0, b"Depth ");
@@ -1334,16 +1338,19 @@ pub fn render_title(selected: u8) {
 pub enum InvAction {
     Use,
     Equip,
+    Unequip,
     Drop,
     Back,
 }
 
 /// All actions for consumable items.
 const CONSUMABLE_ACTIONS: [InvAction; 3] = [InvAction::Use, InvAction::Drop, InvAction::Back];
-/// All actions for equipment items.
+/// All actions for equipment items in the bag (not yet equipped).
 const EQUIPMENT_ACTIONS: [InvAction; 3] = [InvAction::Equip, InvAction::Drop, InvAction::Back];
+/// Actions for currently equipped items.
+const EQUIPPED_ACTIONS: [InvAction; 3] = [InvAction::Unequip, InvAction::Drop, InvAction::Back];
 
-/// Get the action list for an item kind.
+/// Get the action list for an item kind (in inventory bag).
 pub fn actions_for_kind(kind: items::ItemKind) -> &'static [InvAction] {
     if items::is_consumable(kind) {
         &CONSUMABLE_ACTIONS
@@ -1352,16 +1359,30 @@ pub fn actions_for_kind(kind: items::ItemKind) -> &'static [InvAction] {
     }
 }
 
+/// Get the action list for a currently equipped item.
+pub fn actions_for_equipped() -> &'static [InvAction] {
+    &EQUIPPED_ACTIONS
+}
+
 fn action_label(action: InvAction) -> &'static [u8] {
     match action {
         InvAction::Use => b"USE",
         InvAction::Equip => b"EQUIP",
+        InvAction::Unequip => b"UNEQUIP",
         InvAction::Drop => b"DROP",
         InvAction::Back => b"BACK",
     }
 }
 
+/// Count selectable equipped items (0, 1, or 2).
+pub fn equip_count(state: &MicroGameState) -> u8 {
+    state.equipment.weapon.is_some() as u8 + state.equipment.armor.is_some() as u8
+}
+
 /// Render the inventory overlay on top of the game screen.
+///
+/// `selected` indexes into the combined list: equipped items (0..equip_count)
+/// then inventory items (equip_count..).
 /// `action_bar`: if Some, we're in Act mode — show the action bar with the
 /// given actions and selected index. If None, show the keyboard hint.
 pub fn render_inventory(
@@ -1380,34 +1401,48 @@ pub fn render_inventory(
     c64::draw_text(bx + 2, by, b"INVENTORY", c64::COLOR_CYAN);
 
     let mut row: u8 = by + 2;
+    let ec = equip_count(state);
 
-    // Equipped items section.
-    let has_equip = state.equipment.weapon.is_some() || state.equipment.armor.is_some();
-    if has_equip {
+    // Equipped items section — now selectable.
+    if ec > 0 {
         c64::draw_text(bx + 2, row, b"EQUIPPED:", c64::COLOR_DGREY);
         row += 1;
+        let mut equip_idx: u8 = 0;
         if let Some(kind) = state.equipment.weapon {
-            c64::draw_text(bx + 3, row, b"W: ", c64::COLOR_GREEN);
-            c64::draw_text(bx + 6, row, items::name(kind).as_bytes(), c64::COLOR_GREEN);
+            let color = if selected == equip_idx {
+                c64::COLOR_YELLOW
+            } else {
+                c64::COLOR_GREEN
+            };
+            c64::draw_text(bx + 3, row, b"W: ", color);
+            c64::draw_text(bx + 6, row, items::name(kind).as_bytes(), color);
             row += 1;
+            equip_idx += 1;
         }
         if let Some(kind) = state.equipment.armor {
-            c64::draw_text(bx + 3, row, b"A: ", c64::COLOR_GREEN);
-            c64::draw_text(bx + 6, row, items::name(kind).as_bytes(), c64::COLOR_GREEN);
+            let color = if selected == equip_idx {
+                c64::COLOR_YELLOW
+            } else {
+                c64::COLOR_GREEN
+            };
+            c64::draw_text(bx + 3, row, b"A: ", color);
+            c64::draw_text(bx + 6, row, items::name(kind).as_bytes(), color);
             row += 1;
         }
         row += 1; // blank line separator
     }
 
+    // Inventory bag items.
+    let inv_selected = selected.wrapping_sub(ec);
     let mut item_count: u8 = 0;
-    for (i, slot) in state.inventory.iter() {
+    for (idx, (i, slot)) in state.inventory.iter().enumerate() {
         if row >= by + bh - 2 {
             break;
         }
         let letter = b'A' + i as u8;
         let col = bx + 2;
         let item_color = game_color_to_c64(items::color(slot.kind));
-        let (label_color, name_color) = if i as u8 == selected {
+        let (label_color, name_color) = if idx as u8 == inv_selected {
             (c64::COLOR_YELLOW, c64::COLOR_YELLOW)
         } else {
             (c64::COLOR_LGREY, item_color)
@@ -1425,7 +1460,7 @@ pub fn render_inventory(
         item_count += 1;
     }
 
-    if item_count == 0 && !has_equip {
+    if item_count == 0 && ec == 0 {
         c64::draw_text(bx + 2, row, b"EMPTY", c64::COLOR_DGREY);
     }
 
@@ -1451,7 +1486,11 @@ pub fn render_inventory(
             }
         }
         None => {
-            c64::draw_text(bx + 2, bar_row, b"U:USE E:EQUIP D:DROP", c64::COLOR_DGREY);
+            if selected < ec {
+                c64::draw_text(bx + 2, bar_row, b"U:USE E:UNEQUIP D:DROP", c64::COLOR_DGREY);
+            } else {
+                c64::draw_text(bx + 2, bar_row, b"U:USE E:EQUIP D:DROP", c64::COLOR_DGREY);
+            }
         }
     }
 }

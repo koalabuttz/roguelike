@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add unequip action for equipped items on both tiers (#99)
 - C64: Two-phase inventory with action bar (#90)
 - Both tiers: Equipped-item indicators in inventory (#92)
 - Standard tier: Item coloring in inventory modal (#93)
@@ -31,10 +32,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Refine lead voice timbre and register for less distracting ambient feel (#1)
 
 ### Changed
+- Inventory UX polish (#89)
 - Fix docs audit branch issues (#100)
 - C64: Aggressive inlining to reclaim .noinit static stack space (#94)
 
 ### Fixed
+- Fix dropping equipped items on C64 inventory (#102)
 - C64: Freeze when equipping item via keyboard in inventory (#98)
 - C64: Show equip bonus in messages (#91)
 - Fix structural walls not rendering in terminal game (#75)

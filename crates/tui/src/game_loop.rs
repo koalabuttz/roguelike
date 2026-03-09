@@ -721,7 +721,16 @@ fn run_inventory_modal<W: Write>(
                 let letter = (b'a' + idx as u8) as char;
                 format!("[u]se  [e]quip  [d]rop  slot '{}'  [Esc] back", letter)
             }
-            None => String::new(),
+            None => {
+                let mut parts = Vec::new();
+                if obs.weapon.is_some() {
+                    parts.push("[W] unequip weapon");
+                }
+                if obs.armor.is_some() {
+                    parts.push("[A] unequip armor");
+                }
+                parts.join("  ")
+            }
         };
         render::render_inventory(
             renderer.writer(),
@@ -746,6 +755,12 @@ fn run_inventory_modal<W: Write>(
                 }
                 KeyCode::Char('i') | KeyCode::Char('q') if selected.is_none() => {
                     return Ok(());
+                }
+                KeyCode::Char('W') if selected.is_none() => {
+                    game.step(GameCommand::UnequipWeapon);
+                }
+                KeyCode::Char('A') if selected.is_none() => {
+                    game.step(GameCommand::UnequipArmor);
                 }
                 KeyCode::Char(c @ 'a'..='z') if selected.is_none() => {
                     let idx = (c as u8 - b'a') as usize;

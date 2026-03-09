@@ -790,6 +790,62 @@ impl GameState {
         }
     }
 
+    /// Unequip the current weapon, returning it to inventory.
+    fn unequip_weapon(&mut self) -> bool {
+        if let Some(kind) = self.equipment.weapon {
+            if !self.inventory.add(kind) {
+                self.log.add_event(GameEvent::InventoryFull);
+                return false;
+            }
+            self.equipment.weapon = None;
+            self.log.add_event(GameEvent::UnequipWeapon { kind });
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Unequip the current armor, returning it to inventory.
+    fn unequip_armor(&mut self) -> bool {
+        if let Some(kind) = self.equipment.armor {
+            if !self.inventory.add(kind) {
+                self.log.add_event(GameEvent::InventoryFull);
+                return false;
+            }
+            self.equipment.armor = None;
+            self.log.add_event(GameEvent::UnequipArmor { kind });
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Drop an equipped weapon directly to the ground (bypasses inventory).
+    fn drop_equipped_weapon(&mut self) -> bool {
+        if let Some(kind) = self.equipment.weapon.take() {
+            let px = self.entities[0].x;
+            let py = self.entities[0].y;
+            self.ground_items.push(Item { x: px, y: py, kind });
+            self.log.add_event(GameEvent::DropItem { kind });
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Drop equipped armor directly to the ground (bypasses inventory).
+    fn drop_equipped_armor(&mut self) -> bool {
+        if let Some(kind) = self.equipment.armor.take() {
+            let px = self.entities[0].x;
+            let py = self.entities[0].y;
+            self.ground_items.push(Item { x: px, y: py, kind });
+            self.log.add_event(GameEvent::DropItem { kind });
+            true
+        } else {
+            false
+        }
+    }
+
     /// Build inventory display strings for `GameObservation`.
     fn build_inventory_strings(&self) -> (Vec<String>, Vec<GameColor>) {
         let mut strings = Vec::new();
@@ -934,6 +990,10 @@ impl GameState {
             GameCommand::UseItem(slot) => self.use_item(slot),
             GameCommand::DropItem(slot) => self.drop_item(slot),
             GameCommand::EquipItem(slot) => self.equip_item(slot),
+            GameCommand::UnequipWeapon => self.unequip_weapon(),
+            GameCommand::UnequipArmor => self.unequip_armor(),
+            GameCommand::DropEquippedWeapon => self.drop_equipped_weapon(),
+            GameCommand::DropEquippedArmor => self.drop_equipped_armor(),
             // Autorun, AutoExplore, Look, Help are handled at a higher level (main loop / MCP).
             GameCommand::Autorun(_)
             | GameCommand::AutoExplore
@@ -3066,6 +3126,97 @@ mod tests {
         assert!(result.action_taken);
         assert_eq!(gs.equipment.armor, Some(ItemKind::LeatherArmor));
         assert!(gs.inventory.is_empty());
+    }
+
+    #[test]
+    fn unequip_weapon_returns_to_inventory() {
+        let mut gs = test_game();
+        gs.equipment.weapon = Some(ItemKind::ShortSword);
+        assert!(gs.inventory.is_empty());
+        let result = gs.step(GameCommand::UnequipWeapon);
+        assert!(result.action_taken);
+        assert!(gs.equipment.weapon.is_none());
+        assert_eq!(gs.inventory.len(), 1);
+        assert_eq!(gs.inventory.get(0).unwrap().kind, ItemKind::ShortSword);
+    }
+
+    #[test]
+    fn unequip_armor_returns_to_inventory() {
+        let mut gs = test_game();
+        gs.equipment.armor = Some(ItemKind::LeatherArmor);
+        let result = gs.step(GameCommand::UnequipArmor);
+        assert!(result.action_taken);
+        assert!(gs.equipment.armor.is_none());
+        assert_eq!(gs.inventory.len(), 1);
+        assert_eq!(gs.inventory.get(0).unwrap().kind, ItemKind::LeatherArmor);
+    }
+
+    #[test]
+    fn unequip_nothing_no_action() {
+        let mut gs = test_game();
+        let result = gs.step(GameCommand::UnequipWeapon);
+        assert!(!result.action_taken);
+        let result = gs.step(GameCommand::UnequipArmor);
+        assert!(!result.action_taken);
+    }
+
+    #[test]
+    fn unequip_weapon_full_inventory_fails() {
+        let mut gs = test_game();
+        gs.equipment.weapon = Some(ItemKind::ShortSword);
+        // Fill all 26 inventory slots.
+        for _ in 0..26 {
+            gs.inventory.add(ItemKind::ShortSword);
+        }
+        assert!(gs.inventory.is_full());
+        let result = gs.step(GameCommand::UnequipWeapon);
+        assert!(!result.action_taken);
+        // Weapon stays equipped.
+        assert_eq!(gs.equipment.weapon, Some(ItemKind::ShortSword));
+    }
+
+    #[test]
+    fn drop_equipped_weapon_to_ground() {
+        let mut gs = test_game();
+        gs.equipment.weapon = Some(ItemKind::ShortSword);
+        let result = gs.step(GameCommand::DropEquippedWeapon);
+        assert!(result.action_taken);
+        assert!(gs.equipment.weapon.is_none());
+        assert!(gs.inventory.is_empty()); // bypasses inventory
+        assert_eq!(gs.ground_items.len(), 1);
+        assert_eq!(gs.ground_items[0].kind, ItemKind::ShortSword);
+    }
+
+    #[test]
+    fn drop_equipped_armor_to_ground() {
+        let mut gs = test_game();
+        gs.equipment.armor = Some(ItemKind::LeatherArmor);
+        let result = gs.step(GameCommand::DropEquippedArmor);
+        assert!(result.action_taken);
+        assert!(gs.equipment.armor.is_none());
+        assert_eq!(gs.ground_items.len(), 1);
+        assert_eq!(gs.ground_items[0].kind, ItemKind::LeatherArmor);
+    }
+
+    #[test]
+    fn drop_equipped_works_with_full_inventory() {
+        let mut gs = test_game();
+        gs.equipment.weapon = Some(ItemKind::ShortSword);
+        for _ in 0..26 {
+            gs.inventory.add(ItemKind::ShortSword);
+        }
+        assert!(gs.inventory.is_full());
+        let result = gs.step(GameCommand::DropEquippedWeapon);
+        assert!(result.action_taken); // works even with full inventory
+        assert!(gs.equipment.weapon.is_none());
+        assert_eq!(gs.ground_items.len(), 1);
+    }
+
+    #[test]
+    fn drop_equipped_nothing_no_action() {
+        let mut gs = test_game();
+        let result = gs.step(GameCommand::DropEquippedWeapon);
+        assert!(!result.action_taken);
     }
 
     #[test]

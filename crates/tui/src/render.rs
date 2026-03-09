@@ -192,12 +192,24 @@ pub fn render<W: Write>(
     screen_height: Coord,
     settings: &Settings,
 ) -> std::io::Result<Viewport> {
+    render_focused(w, source, screen_width, screen_height, settings, None)
+}
+
+/// Like `render`, but centers the viewport on `focus` instead of the player.
+pub fn render_focused<W: Write>(
+    w: &mut W,
+    source: &dyn RenderSource,
+    screen_width: Coord,
+    screen_height: Coord,
+    settings: &Settings,
+    focus: Option<(Coord, Coord)>,
+) -> std::io::Result<Viewport> {
     let pal = settings.color_palette;
     let msg_lines = settings.message_log_lines as Coord;
     let (map_w, map_h) = source.map_size();
-    let (px, py) = source.player_pos();
+    let (fx, fy) = focus.unwrap_or_else(|| source.player_pos());
 
-    // Viewport: center on player when map exceeds screen.
+    // Viewport: center on focus point when map exceeds screen.
     let map_rows = (screen_height - 1 - msg_lines).max(0) as usize;
     let map_cols = screen_width.max(0) as usize;
 
@@ -205,7 +217,7 @@ pub fn render<W: Write>(
         0usize
     } else {
         let half = map_rows / 2;
-        let ideal = (py as usize).saturating_sub(half);
+        let ideal = (fy as usize).saturating_sub(half);
         ideal.min((map_h as usize) - map_rows)
     };
 
@@ -213,7 +225,7 @@ pub fn render<W: Write>(
         0usize
     } else {
         let half = map_cols / 2;
-        let ideal = (px as usize).saturating_sub(half);
+        let ideal = (fx as usize).saturating_sub(half);
         ideal.min((map_w as usize) - map_cols)
     };
 

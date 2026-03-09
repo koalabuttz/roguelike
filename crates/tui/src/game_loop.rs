@@ -112,10 +112,23 @@ fn render_game<W: Write>(
     rows: Coord,
     settings: &Settings,
 ) -> io::Result<Viewport> {
+    render_game_focused(w, game, cols, rows, settings, None)
+}
+
+/// Like `render_game`, but centers the viewport on `focus` instead of the
+/// player position. Used by look mode to track the cursor.
+fn render_game_focused<W: Write>(
+    w: &mut W,
+    game: &dyn GameStep,
+    cols: Coord,
+    rows: Coord,
+    settings: &Settings,
+    focus: Option<(Coord, Coord)>,
+) -> io::Result<Viewport> {
     if let Some(gs) = game.as_any().downcast_ref::<GameState>() {
-        render::render(w, gs, cols, rows, settings)
+        render::render_focused(w, gs, cols, rows, settings, focus)
     } else if let Some(adapter) = game.as_any().downcast_ref::<MicroGameStateAdapter>() {
-        render::render(w, adapter, cols, rows, settings)
+        render::render_focused(w, adapter, cols, rows, settings, focus)
     } else {
         // Unknown tier: fall back to observation-based render.
         render::render_observation(
@@ -650,9 +663,13 @@ fn run_look_mode<W: Write>(
 
     // Standard tier: LookCursor with map-bounds checking.
     // Other tiers: manual cursor movement (no bounds check).
+    // Both paths center the viewport on the cursor, so the player can
+    // pan across the entire explored map.
     if let Some(gs) = standard_state(game) {
         loop {
-            let vp = render::render(renderer.writer(), gs, cols, rows, settings)?;
+            let focus = (cursor.cursor_x, cursor.cursor_y);
+            let vp =
+                render::render_focused(renderer.writer(), gs, cols, rows, settings, Some(focus))?;
             let info = cursor.current_info_with(gs, look_opts);
             cursor.draw_overlay(
                 renderer,
@@ -675,7 +692,9 @@ fn run_look_mode<W: Write>(
         }
     } else {
         loop {
-            let vp = render_game(renderer.writer(), game, cols, rows, settings)?;
+            let focus = (cursor.cursor_x, cursor.cursor_y);
+            let vp =
+                render_game_focused(renderer.writer(), game, cols, rows, settings, Some(focus))?;
             let info = game.look_at(cursor.cursor_x, cursor.cursor_y);
             cursor.draw_overlay(
                 renderer,

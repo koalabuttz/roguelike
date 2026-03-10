@@ -340,14 +340,71 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                 dev.render_overlay(renderer.writer(), game.as_ref(), settings.color_palette)?;
 
                 if game.is_game_over() {
-                    // Game-over or victory: any input returns to title.
-                    let _ = input.wait_for_key()?;
-                    saves.delete_autosave();
-                    game_state = None;
-                    autosave_buf = None;
-                    let has_save = saves.has_save_for_title(settings.casual_mode);
-                    app_state =
-                        AppState::Title(menu::title_menu(has_save, settings.casual_mode, platform));
+                    // End-of-game menu: Play Again / Title Screen.
+                    let mut end_menu = menu::end_screen_menu(platform);
+                    loop {
+                        render::render_end_menu(
+                            renderer.writer(),
+                            &end_menu,
+                            cols,
+                            rows,
+                            settings.color_palette,
+                        )?;
+                        match input.wait_for_menu_command()? {
+                            InputResult::Command(cmd) => {
+                                if let Some(action) = end_menu.handle_input(cmd) {
+                                    match action {
+                                        MenuAction::PlayAgain => {
+                                            saves.delete_autosave();
+                                            match game_step::create_random_game(
+                                                balance::STANDARD_MAP_WIDTH as i32,
+                                                balance::STANDARD_MAP_HEIGHT as i32,
+                                                &game_data,
+                                            ) {
+                                                Ok(g) => {
+                                                    game_state = Some(g);
+                                                    autosave_buf = None;
+                                                    app_state = AppState::Playing;
+                                                }
+                                                Err(msg) => {
+                                                    run_error_dialog(&msg, renderer, input)?;
+                                                    game_state = None;
+                                                    autosave_buf = None;
+                                                    let has_save = saves
+                                                        .has_save_for_title(settings.casual_mode);
+                                                    app_state = AppState::Title(menu::title_menu(
+                                                        has_save,
+                                                        settings.casual_mode,
+                                                        platform,
+                                                    ));
+                                                }
+                                            }
+                                            break;
+                                        }
+                                        MenuAction::TitleScreen | MenuAction::Back => {
+                                            saves.delete_autosave();
+                                            game_state = None;
+                                            autosave_buf = None;
+                                            let has_save =
+                                                saves.has_save_for_title(settings.casual_mode);
+                                            app_state = AppState::Title(menu::title_menu(
+                                                has_save,
+                                                settings.casual_mode,
+                                                platform,
+                                            ));
+                                            break;
+                                        }
+                                        MenuAction::Lobby => {
+                                            return Ok(GameLoopResult::Lobby);
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            InputResult::NoCommand => {}
+                            InputResult::Disconnected => break 'app,
+                        }
+                    }
                     continue;
                 }
 
@@ -1148,7 +1205,6 @@ fn apply_settings_action<W: Write>(
         MenuAction::ToggleShowKeybindHints => {
             settings.show_keybind_hints = !settings.show_keybind_hints;
         }
-        MenuAction::ToggleShowCorpses => settings.show_corpses = !settings.show_corpses,
         MenuAction::ToggleShowKills => settings.show_kills = !settings.show_kills,
         MenuAction::ToggleShowTurnCount => settings.show_turn_count = !settings.show_turn_count,
         MenuAction::ToggleViKeys => settings.vi_keys = !settings.vi_keys,

@@ -28,8 +28,6 @@ pub enum MenuAction {
     ToggleShowCoordinates,
     /// Toggle keybind hints in the settings menu.
     ToggleShowKeybindHints,
-    /// Toggle corpse rendering in the settings menu.
-    ToggleShowCorpses,
     /// Toggle kill counter in the status bar.
     ToggleShowKills,
     /// Toggle turn counter in the status bar.
@@ -58,6 +56,8 @@ pub enum MenuAction {
     CyclePronouns,
     /// Return to the server lobby (SSH only).
     Lobby,
+    /// Start a new random game immediately (from end-of-game screen).
+    PlayAgain,
 }
 
 /// A single menu entry.
@@ -313,6 +313,30 @@ pub fn pause_menu(casual_mode: bool, platform: Platform) -> Menu {
     Menu::new("Paused", items)
 }
 
+/// Construct the end-of-game menu (shown on death or victory).
+pub fn end_screen_menu(platform: Platform) -> Menu {
+    let mut items = vec![
+        MenuItem {
+            label: "Play Again".to_string(),
+            action: MenuAction::PlayAgain,
+            enabled: true,
+        },
+        MenuItem {
+            label: "Title Screen".to_string(),
+            action: MenuAction::TitleScreen,
+            enabled: true,
+        },
+    ];
+    if platform == Platform::Ssh {
+        items.push(MenuItem {
+            label: "Lobby".to_string(),
+            action: MenuAction::Lobby,
+            enabled: true,
+        });
+    }
+    Menu::new("", items)
+}
+
 /// Construct the settings submenu.
 ///
 /// Shows only settings available on the current platform, with current values.
@@ -367,19 +391,6 @@ pub fn settings_menu(settings: &Settings, platform: Platform) -> Menu {
         items.push(MenuItem {
             label: label.to_string(),
             action: MenuAction::ToggleShowKeybindHints,
-            enabled: true,
-        });
-    }
-
-    if Setting::ShowCorpses.is_available(platform) {
-        let label = if settings.show_corpses {
-            "Show Corpses: On"
-        } else {
-            "Show Corpses: Off"
-        };
-        items.push(MenuItem {
-            label: label.to_string(),
-            action: MenuAction::ToggleShowCorpses,
             enabled: true,
         });
     }
@@ -1084,7 +1095,6 @@ mod tests {
         assert!(actions.contains(&MenuAction::ToggleShowExploredPct));
         assert!(actions.contains(&MenuAction::ToggleShowCoordinates));
         assert!(actions.contains(&MenuAction::ToggleShowKeybindHints));
-        assert!(actions.contains(&MenuAction::ToggleShowCorpses));
         assert!(actions.contains(&MenuAction::CycleColorPalette));
         assert!(actions.contains(&MenuAction::ToggleViKeys));
         assert!(actions.contains(&MenuAction::ToggleNumpad));

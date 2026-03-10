@@ -132,7 +132,6 @@ pub enum Setting {
     ShowExploredPct,
     ShowCoordinates,
     ShowKeybindHints,
-    ShowCorpses,
     ShowKills,
     ShowTurnCount,
     MessageLogLines,
@@ -233,8 +232,6 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub show_keybind_hints: bool,
     #[serde(default = "default_true")]
-    pub show_corpses: bool,
-    #[serde(default = "default_true")]
     pub show_kills: bool,
     #[serde(default = "default_true")]
     pub show_turn_count: bool,
@@ -272,7 +269,6 @@ impl Settings {
                 show_explored_pct: false,
                 show_coordinates: false,
                 show_keybind_hints: true,
-                show_corpses: true,
                 show_kills: true,
                 show_turn_count: true,
                 vi_keys: true,
@@ -290,7 +286,6 @@ impl Settings {
                 show_explored_pct: false,
                 show_coordinates: false,
                 show_keybind_hints: false,
-                show_corpses: true,
                 show_kills: true,
                 show_turn_count: true,
                 vi_keys: false,
@@ -308,7 +303,6 @@ impl Settings {
                 show_explored_pct: false,
                 show_coordinates: false,
                 show_keybind_hints: true,
-                show_corpses: true,
                 show_kills: true,
                 show_turn_count: true,
                 vi_keys: false,
@@ -326,7 +320,6 @@ impl Settings {
                 show_explored_pct: false,
                 show_coordinates: false,
                 show_keybind_hints: true,
-                show_corpses: true,
                 show_kills: true,
                 show_turn_count: true,
                 vi_keys: false,
@@ -344,7 +337,6 @@ impl Settings {
                 show_explored_pct: false,
                 show_coordinates: false,
                 show_keybind_hints: true,
-                show_corpses: true,
                 show_kills: true,
                 show_turn_count: true,
                 vi_keys: false,
@@ -400,7 +392,6 @@ mod tests {
         assert!(!s.show_explored_pct);
         assert!(!s.show_coordinates);
         assert!(s.show_keybind_hints);
-        assert!(s.show_corpses);
         assert!(s.vi_keys);
         assert!(s.numpad);
         assert_eq!(s.autosave_frequency, 1);
@@ -432,7 +423,6 @@ mod tests {
             Setting::ShowExploredPct,
             Setting::ShowCoordinates,
             Setting::ShowKeybindHints,
-            Setting::ShowCorpses,
             Setting::MessageLogLines,
             Setting::AnimationSpeed,
             Setting::ViKeys,
@@ -458,7 +448,6 @@ mod tests {
         assert_eq!(default.show_explored_pct, terminal.show_explored_pct);
         assert_eq!(default.show_coordinates, terminal.show_coordinates);
         assert_eq!(default.show_keybind_hints, terminal.show_keybind_hints);
-        assert_eq!(default.show_corpses, terminal.show_corpses);
         assert_eq!(default.vi_keys, terminal.vi_keys);
         assert_eq!(default.numpad, terminal.numpad);
         assert_eq!(default.autosave_frequency, terminal.autosave_frequency);
@@ -474,7 +463,6 @@ mod tests {
         assert!(!s.numpad);
         assert_eq!(s.animation_speed_ms, 50);
         assert!(s.show_keybind_hints);
-        assert!(s.show_corpses);
     }
 
     #[test]
@@ -636,7 +624,6 @@ mod tests {
             Setting::ShowExploredPct,
             Setting::ShowCoordinates,
             Setting::ShowKeybindHints,
-            Setting::ShowCorpses,
             Setting::MessageLogLines,
             Setting::AnimationSpeed,
             Setting::ViKeys,

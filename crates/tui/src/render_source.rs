@@ -272,7 +272,10 @@ impl RenderSource for MicroGameStateAdapter {
         let entities = &self.game.entities;
         let fov = &self.game.fov;
         for i in 0..entities.count as usize {
-            if entities.alive[i] && fov.is_visible(entities.x[i], entities.y[i]) {
+            if !fov.is_visible(entities.x[i], entities.y[i]) {
+                continue;
+            }
+            if entities.alive[i] {
                 let (glyph, fg) = if i == PLAYER_IDX as usize {
                     ('@', GameColor::Yellow)
                 } else if let Some(kind) = entities.kind[i] {
@@ -286,6 +289,15 @@ impl RenderSource for MicroGameStateAdapter {
                     glyph,
                     fg,
                     alive: true,
+                });
+            } else if i != PLAYER_IDX as usize {
+                // Dead monsters render as corpses.
+                f(RenderEntity {
+                    x: entities.x[i] as Coord,
+                    y: entities.y[i] as Coord,
+                    glyph: '%',
+                    fg: GameColor::DarkRed,
+                    alive: false,
                 });
             }
         }

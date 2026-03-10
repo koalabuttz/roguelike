@@ -1338,9 +1338,7 @@ pub fn render_victory(state: &MicroGameState, selected: u8) {
 pub fn render_title(selected: u8) {
     c64::clear_screen();
 
-    c64::draw_text(8, 4, b"ROGUELIKE DUNGEON", c64::COLOR_WHITE);
-    c64::draw_text(8, 5, b"CRAWLER", c64::COLOR_WHITE);
-    c64::draw_text(8, 7, b"C64 + RUST-MOS", c64::COLOR_LGREY);
+    c64::draw_text(4, 4, b"R O G U E L I K E", c64::COLOR_WHITE);
 
     let menu_items: [&[u8]; 2] = [b"NEW GAME", b"ENTER SEED"];
     draw_menu(&menu_items, selected, 10, 10);
@@ -1522,7 +1520,7 @@ pub fn render_pause(state: &MicroGameState, selected: u8) {
 
     c64::draw_text(bx + 2, by + 1, b"PAUSED", c64::COLOR_CYAN);
 
-    let menu_items: [&[u8]; 2] = [b"Resume", b"New Game"];
+    let menu_items: [&[u8]; 2] = [b"Resume", b"Title Screen"];
     draw_menu(&menu_items, selected, bx + 4, by + 3);
 }
 

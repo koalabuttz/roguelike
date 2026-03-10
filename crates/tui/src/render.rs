@@ -237,7 +237,7 @@ pub fn render_focused<W: Write>(
     };
     render_map(w, source, &vp, pal)?;
     render_items(w, source, &vp, pal)?;
-    render_entities(w, source, &vp, settings.show_corpses, pal)?;
+    render_entities(w, source, &vp, pal)?;
     render_status_bar(w, source, screen_width, screen_height, settings)?;
     render_message_log(w, source, screen_width, screen_height, settings)?;
 
@@ -358,7 +358,6 @@ fn render_entities<W: Write>(
     w: &mut W,
     source: &dyn RenderSource,
     vp: &ViewportRect,
-    show_corpses: bool,
     pal: ColorPalette,
 ) -> std::io::Result<()> {
     let bg = palette_color(GameColor::Black, pal);
@@ -374,7 +373,7 @@ fn render_entities<W: Write>(
     });
 
     // Corpses first (drawn under living entities).
-    if show_corpses {
+    {
         for e in entities.iter().filter(|e| !e.alive) {
             let screen_x = (e.x as usize - vp.x) as u16;
             let screen_y = (e.y as usize - vp.y) as u16;
@@ -585,11 +584,7 @@ fn render_message_log<W: Write>(
             style::Print(&msg)
         )?;
 
-        let stats_msg = format!(
-            "Kills: {}  Turns: {}",
-            source.kills(),
-            source.turn_count()
-        );
+        let stats_msg = format!("Kills: {}  Turns: {}", source.kills(), source.turn_count());
         let sx = (screen_width as usize).saturating_sub(stats_msg.len()) / 2;
         queue!(
             w,
@@ -607,16 +602,6 @@ fn render_message_log<W: Write>(
             SetForegroundColor(palette_color(GameColor::Grey, pal)),
             SetBackgroundColor(palette_color(GameColor::Black, pal)),
             style::Print(seed_msg)
-        )?;
-
-        let hint = "Press any key to exit.";
-        let hx = (screen_width as usize).saturating_sub(hint.len()) / 2;
-        queue!(
-            w,
-            cursor::MoveTo(hx as u16, (y + 4) as u16),
-            SetForegroundColor(palette_color(GameColor::Grey, pal)),
-            SetBackgroundColor(palette_color(GameColor::Black, pal)),
-            style::Print(hint)
         )?;
     }
 
@@ -759,10 +744,7 @@ pub fn render_observation<W: Write>(
             style::Print(msg)
         )?;
 
-        let stats_msg = format!(
-            "Kills: {}  Turns: {}",
-            obs.kills, obs.turn_count
-        );
+        let stats_msg = format!("Kills: {}  Turns: {}", obs.kills, obs.turn_count);
         let sx = (screen_width as usize).saturating_sub(stats_msg.len()) / 2;
         queue!(
             w,
@@ -781,18 +763,42 @@ pub fn render_observation<W: Write>(
             SetBackgroundColor(Color::Black),
             style::Print(seed_msg)
         )?;
-
-        let hint = "Press any key to exit.";
-        let hx = (screen_width as usize).saturating_sub(hint.len()) / 2;
-        queue!(
-            w,
-            cursor::MoveTo(hx as u16, (y + 4) as u16),
-            SetForegroundColor(Color::Grey),
-            SetBackgroundColor(Color::Black),
-            style::Print(hint)
-        )?;
     }
 
+    w.flush()?;
+    Ok(())
+}
+
+/// Render end-of-game menu items over the game-over overlay.
+///
+/// Draws "Play Again" / "Title Screen" (and optionally "Lobby") centered
+/// below the stats, at the same position "Press any key" used to occupy.
+pub fn render_end_menu<W: Write>(
+    w: &mut W,
+    menu: &roguelike_core::menu::Menu,
+    screen_width: Coord,
+    screen_height: Coord,
+    pal: ColorPalette,
+) -> std::io::Result<()> {
+    let y = screen_height / 2 - 1 + 4;
+    for (i, item) in menu.items.iter().enumerate() {
+        let is_selected = i == menu.selected;
+        let prefix = if is_selected { "> " } else { "  " };
+        let text = format!("{}{}", prefix, item.label);
+        let fg = if is_selected {
+            palette_color(GameColor::Yellow, pal)
+        } else {
+            palette_color(GameColor::White, pal)
+        };
+        let x = (screen_width as usize).saturating_sub(text.len()) / 2;
+        queue!(
+            w,
+            cursor::MoveTo(x as u16, (y + i as Coord) as u16),
+            SetForegroundColor(fg),
+            SetBackgroundColor(palette_color(GameColor::Black, pal)),
+            style::Print(text)
+        )?;
+    }
     w.flush()?;
     Ok(())
 }

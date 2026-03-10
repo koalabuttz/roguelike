@@ -27,6 +27,7 @@ pub enum GameCommand {
     Wait,
     Quit,
     Help,
+    MessageHistory,
 }
 
 impl GameCommand {

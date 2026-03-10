@@ -18,6 +18,7 @@ use roguelike_core::rules::message::{GameEvent, SoundDistance};
 use roguelike_core::rules::monster_table;
 use roguelike_core::tier_micro::game::MicroGameState;
 use roguelike_core::tier_micro::item_store::MAX_ITEMS;
+use roguelike_core::tier_micro::msglog::MSG_COUNT;
 use roguelike_core::tier_micro::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_STRUCTURAL, TILE_WALL};
 use roguelike_core::tier_micro::types::{MAX_BITFIELD_SIZE, MAX_ENTITIES, NO_ENTITY, PLAYER_IDX};
 
@@ -1625,6 +1626,55 @@ pub fn render_help() {
     // Troll
     c64::draw_char(2, 24, b'T', game_color_to_c64(monster_table::color(monster_table::MonsterKind::Troll)));
     c64::draw_text(5, 24, b"TROLL     20   6   3", c64::COLOR_LGREY);
+}
+
+/// Render the message history overlay. Shows all stored messages
+/// (oldest at top, newest at bottom). Dismissed by any key.
+pub fn render_message_history(state: &MicroGameState) {
+    c64::clear_screen();
+    c64::fill_row(0, 0xC0, c64::COLOR_CYAN);
+    c64::draw_text(2, 0, b"MESSAGE LOG", c64::COLOR_BLACK);
+
+    let mut buf = [b' '; 40];
+
+    // Count how many messages actually exist (log may not be full yet).
+    let mut count: u8 = 0;
+    while (count as usize) < MSG_COUNT {
+        if state.log.recent(count).is_none() {
+            break;
+        }
+        count += 1;
+    }
+
+    if count == 0 {
+        c64::draw_text(2, 2, b"NO MESSAGES YET", c64::COLOR_DGREY);
+    } else {
+        // Display messages oldest-first, starting at row 2.
+        // recent(count-1) is oldest, recent(0) is newest.
+        let mut row: u8 = 2;
+        let mut i = count;
+        while i > 0 {
+            i -= 1;
+            if let Some(event) = state.log.recent(i) {
+                format_event(event, &mut buf);
+                // Fade older messages, brightest for newest
+                let color = if i == 0 {
+                    c64::COLOR_WHITE
+                } else if i <= 2 {
+                    c64::COLOR_LGREY
+                } else {
+                    c64::COLOR_GREY
+                };
+                for col in 0..40u8 {
+                    c64::draw_char(col, row, buf[col as usize], color);
+                }
+                row += 1;
+            }
+        }
+    }
+
+    // Footer hint
+    c64::draw_text(2, 24, b"PRESS ANY KEY", c64::COLOR_DGREY);
 }
 
 /// Render a brief error message overlay for invalid seed codes.

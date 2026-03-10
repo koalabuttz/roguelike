@@ -1000,6 +1000,7 @@ impl GameState {
             | GameCommand::OpenInventory
             | GameCommand::Look
             | GameCommand::Help
+            | GameCommand::MessageHistory
             | GameCommand::Quit => false,
         }
     }

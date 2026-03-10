@@ -51,6 +51,7 @@ enum AppState {
     Looking,
     Inventory,
     Help,
+    MessageHistory,
     Paused,
     GameOver,
 }
@@ -632,6 +633,11 @@ pub extern "C" fn main() -> isize {
                     continue;
                 }
 
+                if cmd == GameCommand::MessageHistory {
+                    app_state = AppState::MessageHistory;
+                    continue;
+                }
+
                 if let GameCommand::Autorun(dir) = cmd {
                     run_autorun(state, dir);
                     // Full re-render after autorun to ensure clean state.
@@ -735,6 +741,15 @@ pub extern "C" fn main() -> isize {
                 render::render_help();
                 input::wait_for_menu_input(); // any key dismisses
                 let state = unsafe { STATE.assume_init_mut() };
+                render::render_all(state);
+                let diff = unsafe { &mut DIFF };
+                diff.snapshot(state, render::viewport_pos(state));
+                app_state = AppState::Playing;
+            }
+            AppState::MessageHistory => {
+                let state = unsafe { STATE.assume_init_mut() };
+                render::render_message_history(state);
+                input::wait_for_menu_input(); // any key dismisses
                 render::render_all(state);
                 let diff = unsafe { &mut DIFF };
                 diff.snapshot(state, render::viewport_pos(state));

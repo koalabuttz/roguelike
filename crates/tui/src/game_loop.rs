@@ -404,6 +404,14 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                             let lines = help::help_lines(&settings, &game_data);
                             run_message_history(&lines, renderer, input)?;
                         }
+                        GameCommand::MessageHistory => {
+                            if let Some(gs) = standard_state(game.as_ref()) {
+                                run_message_history(gs.log.all(), renderer, input)?;
+                            } else {
+                                let obs = game.observe();
+                                run_message_history(&obs.recent_messages, renderer, input)?;
+                            }
+                        }
                         GameCommand::Autorun(dir) => {
                             if standard_state(game.as_ref()).is_some() {
                                 let gs = standard_state_mut(game.as_mut()).unwrap();

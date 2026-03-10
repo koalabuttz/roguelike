@@ -58,12 +58,14 @@ fn key_to_direction(key: u8) -> Option<Direction> {
 /// Translate non-directional key to game command (unaffected by shift).
 const KEY_G: u8 = b'G';
 const KEY_I: u8 = b'I';
+const KEY_P: u8 = b'P';
 
 fn key_to_action(key: u8) -> Option<GameCommand> {
     match key {
         KEY_G             => Some(GameCommand::Pickup),
         KEY_I             => Some(GameCommand::OpenInventory),
         KEY_X             => Some(GameCommand::Look),
+        KEY_P             => Some(GameCommand::MessageHistory),
         KEY_SPACE         => Some(GameCommand::Wait),
         KEY_RETURN        => Some(GameCommand::Descend),
         KEY_RUNSTOP       => Some(GameCommand::Quit),

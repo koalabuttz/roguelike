@@ -168,6 +168,7 @@ impl MicroGameState {
             | GameCommand::AutoExplore
             | GameCommand::Look
             | GameCommand::Help
+            | GameCommand::MessageHistory
             | GameCommand::Quit
             | GameCommand::Descend => false,
         };

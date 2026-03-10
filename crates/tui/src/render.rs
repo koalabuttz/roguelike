@@ -560,55 +560,63 @@ fn render_message_log<W: Write>(
         )?;
     }
 
-    if source.game_won() {
-        let msg = "Victory! You conquered the dungeon! Press any key to exit.".to_string();
-        let x = (screen_width as usize).saturating_sub(msg.len()) / 2;
-        let y = screen_height / 2;
-        queue!(
-            w,
-            cursor::MoveTo(x as u16, y as u16),
-            SetForegroundColor(palette_color(GameColor::Yellow, pal)),
-            SetBackgroundColor(palette_color(GameColor::Black, pal)),
-            style::Print(&msg)
-        )?;
-
-        let seed_msg = format!("Seed: {}", source.seed_code());
-        let sx = (screen_width as usize).saturating_sub(seed_msg.len()) / 2;
-        queue!(
-            w,
-            cursor::MoveTo(sx as u16, (y + 1) as u16),
-            SetForegroundColor(palette_color(GameColor::Grey, pal)),
-            SetBackgroundColor(palette_color(GameColor::Black, pal)),
-            style::Print(seed_msg)
-        )?;
-    } else if source.game_over() {
-        let msg = if settings.player_name.is_empty() {
-            "You have been slain... Press any key to exit.".to_string()
+    if source.game_won() || source.game_over() {
+        let (msg, msg_color) = if source.game_won() {
+            let m = "Victory! You conquered the dungeon!".to_string();
+            (m, palette_color(GameColor::Yellow, pal))
+        } else if settings.player_name.is_empty() {
+            let m = "You have been slain...".to_string();
+            (m, palette_color(GameColor::Red, pal))
         } else {
-            format!(
-                "{} {} slain... Press any key to exit.",
+            let m = format!(
+                "{} {} slain...",
                 settings.player_name,
                 settings.pronouns.was_were()
-            )
+            );
+            (m, palette_color(GameColor::Red, pal))
         };
+        let y = screen_height / 2 - 1;
         let x = (screen_width as usize).saturating_sub(msg.len()) / 2;
-        let y = screen_height / 2;
         queue!(
             w,
             cursor::MoveTo(x as u16, y as u16),
-            SetForegroundColor(palette_color(GameColor::Red, pal)),
+            SetForegroundColor(msg_color),
             SetBackgroundColor(palette_color(GameColor::Black, pal)),
             style::Print(&msg)
+        )?;
+
+        let stats_msg = format!(
+            "Kills: {}  Turns: {}",
+            source.kills(),
+            source.turn_count()
+        );
+        let sx = (screen_width as usize).saturating_sub(stats_msg.len()) / 2;
+        queue!(
+            w,
+            cursor::MoveTo(sx as u16, (y + 1) as u16),
+            SetForegroundColor(palette_color(GameColor::White, pal)),
+            SetBackgroundColor(palette_color(GameColor::Black, pal)),
+            style::Print(stats_msg)
         )?;
 
         let seed_msg = format!("Seed: {}", source.seed_code());
         let sx = (screen_width as usize).saturating_sub(seed_msg.len()) / 2;
         queue!(
             w,
-            cursor::MoveTo(sx as u16, (y + 1) as u16),
+            cursor::MoveTo(sx as u16, (y + 2) as u16),
             SetForegroundColor(palette_color(GameColor::Grey, pal)),
             SetBackgroundColor(palette_color(GameColor::Black, pal)),
             style::Print(seed_msg)
+        )?;
+
+        let hint = "Press any key to exit.";
+        let hx = (screen_width as usize).saturating_sub(hint.len()) / 2;
+        queue!(
+            w,
+            cursor::MoveTo(hx as u16, (y + 4) as u16),
+            SetForegroundColor(palette_color(GameColor::Grey, pal)),
+            SetBackgroundColor(palette_color(GameColor::Black, pal)),
+            style::Print(hint)
         )?;
     }
 
@@ -735,27 +743,53 @@ pub fn render_observation<W: Write>(
     }
 
     // Game-over / victory overlay.
-    if obs.game_won {
-        let msg = "Victory! You conquered the dungeon! Press any key to exit.";
+    if obs.game_won || obs.game_over {
+        let (msg, msg_color) = if obs.game_won {
+            ("Victory! You conquered the dungeon!", Color::Yellow)
+        } else {
+            ("You have been slain...", Color::Red)
+        };
+        let y = screen_height / 2 - 1;
         let x = (screen_width as usize).saturating_sub(msg.len()) / 2;
-        let y = screen_height / 2;
         queue!(
             w,
             cursor::MoveTo(x as u16, y as u16),
-            SetForegroundColor(Color::Yellow),
+            SetForegroundColor(msg_color),
             SetBackgroundColor(Color::Black),
             style::Print(msg)
         )?;
-    } else if obs.game_over {
-        let msg = "You have been slain... Press any key to exit.";
-        let x = (screen_width as usize).saturating_sub(msg.len()) / 2;
-        let y = screen_height / 2;
+
+        let stats_msg = format!(
+            "Kills: {}  Turns: {}",
+            obs.kills, obs.turn_count
+        );
+        let sx = (screen_width as usize).saturating_sub(stats_msg.len()) / 2;
         queue!(
             w,
-            cursor::MoveTo(x as u16, y as u16),
-            SetForegroundColor(Color::Red),
+            cursor::MoveTo(sx as u16, (y + 1) as u16),
+            SetForegroundColor(Color::White),
             SetBackgroundColor(Color::Black),
-            style::Print(msg)
+            style::Print(stats_msg)
+        )?;
+
+        let seed_msg = format!("Seed: {}", obs.seed_code);
+        let sx = (screen_width as usize).saturating_sub(seed_msg.len()) / 2;
+        queue!(
+            w,
+            cursor::MoveTo(sx as u16, (y + 2) as u16),
+            SetForegroundColor(Color::Grey),
+            SetBackgroundColor(Color::Black),
+            style::Print(seed_msg)
+        )?;
+
+        let hint = "Press any key to exit.";
+        let hx = (screen_width as usize).saturating_sub(hint.len()) / 2;
+        queue!(
+            w,
+            cursor::MoveTo(hx as u16, (y + 4) as u16),
+            SetForegroundColor(Color::Grey),
+            SetBackgroundColor(Color::Black),
+            style::Print(hint)
         )?;
     }
 

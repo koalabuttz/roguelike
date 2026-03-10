@@ -5,7 +5,7 @@
 //
 // Layout:
 //   Rows 0-21:  Map viewport (40x22 tiles from the 64x48 map)
-//   Row 22:     Status bar (HP bar, kills, turns)
+//   Row 22:     Status bar (HP bar, ATK/DEF, depth, kills)
 //   Rows 23-24: Message log (2 most recent GameEvents, formatted to PETSCII)
 
 use core::ptr::write_volatile;
@@ -583,8 +583,8 @@ fn render_status_bar(state: &MicroGameState) {
     // "HP " label
     c64::draw_text(0, STATUS_ROW, b"HP ", c64::COLOR_WHITE);
 
-    // HP bar: 12 chars wide, filled proportionally
-    let bar_width: u8 = 12;
+    // HP bar: 8 chars wide, filled proportionally
+    let bar_width: u8 = 8;
     let filled = if max_hp > 0 {
         ((hp as u16) * (bar_width as u16) / (max_hp as u16)) as u8
     } else {
@@ -614,24 +614,44 @@ fn render_status_bar(state: &MicroGameState) {
     col += 1;
     col += c64::draw_number(col, STATUS_ROW, max_hp, c64::COLOR_WHITE);
 
-    // Depth indicator
+    // ATK stat (effective total = base + equipment)
     col += 1;
-    c64::draw_text(col, STATUS_ROW, b"D:", c64::COLOR_GREY);
-    col += 2;
+    c64::draw_char(col, STATUS_ROW, b'A', c64::COLOR_GREY);
+    col += 1;
+    let eff_atk = state.effective_attack();
+    col += c64::draw_number(col, STATUS_ROW, eff_atk, c64::COLOR_WHITE);
+
+    // DEF stat (effective total = base + equipment)
+    col += 1;
+    c64::draw_char(col, STATUS_ROW, b'D', c64::COLOR_GREY);
+    col += 1;
+    let eff_def = state.effective_defense();
+    col += c64::draw_number(col, STATUS_ROW, eff_def, c64::COLOR_WHITE);
+
+    // Depth indicator (using > glyph to avoid confusion with D for DEF)
+    col += 1;
+    c64::draw_char(col, STATUS_ROW, b'>', c64::COLOR_GREY);
+    col += 1;
     col += c64::draw_number(col, STATUS_ROW, state.depth, c64::COLOR_WHITE);
     c64::draw_char(col, STATUS_ROW, b'/', c64::COLOR_GREY);
     col += 1;
     col += c64::draw_number(col, STATUS_ROW, balance::TARGET_DEPTH, c64::COLOR_WHITE);
 
     // Kills counter
-    col += 1;
-    c64::draw_text(col, STATUS_ROW, b"K:", c64::COLOR_GREY);
-    col += 2;
-    c64::draw_number(col, STATUS_ROW, state.kills, c64::COLOR_WHITE);
+    if col + 3 < 40 {
+        col += 1;
+        c64::draw_text(col, STATUS_ROW, b"K:", c64::COLOR_GREY);
+        col += 2;
+        col += c64::draw_number(col, STATUS_ROW, state.kills, c64::COLOR_WHITE);
+    }
 
-    // Turn counter (right-aligned)
-    c64::draw_text(33, STATUS_ROW, b"T:", c64::COLOR_GREY);
-    c64::draw_number_u16(35, STATUS_ROW, state.turn_count, c64::COLOR_WHITE);
+    // Turn counter
+    if col + 3 < 40 {
+        col += 1;
+        c64::draw_text(col, STATUS_ROW, b"T:", c64::COLOR_GREY);
+        col += 2;
+        c64::draw_number_u16(col, STATUS_ROW, state.turn_count, c64::COLOR_WHITE);
+    }
 }
 
 // ---------------------------------------------------------------------------

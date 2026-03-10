@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add ATK/DEF stats to C64 status bar (#107)
+- Add ATK/DEF stats to C64 status bar (#107)
 - C64: Add help screen overlay (#104)
 - Add unequip action for equipped items on both tiers (#99)
 - C64: Two-phase inventory with action bar (#90)

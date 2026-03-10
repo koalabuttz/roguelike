@@ -9,7 +9,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 - Add kills, turns, and seed to standard tier game-over screen (#108)
 - Add ATK/DEF stats to C64 status bar (#107)
-- Add ATK/DEF stats to C64 status bar (#107)
 - C64: Add help screen overlay (#104)
 - Add unequip action for equipped items on both tiers (#99)
 - C64: Two-phase inventory with action bar (#90)
@@ -43,6 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - C64: Aggressive inlining to reclaim .noinit static stack space (#94)
 
 ### Fixed
+- Fix code review issues: CHANGELOG dupe, bestiary stats, status bar layout (#111)
 - Fix dropping equipped items on C64 inventory (#102)
 - C64: Freeze when equipping item via keyboard in inventory (#98)
 - C64: Show equip bonus in messages (#91)

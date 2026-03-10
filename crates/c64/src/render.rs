@@ -636,23 +636,15 @@ fn render_status_bar(state: &MicroGameState) {
     col += c64::draw_number(col, STATUS_ROW, state.depth, c64::COLOR_WHITE);
     c64::draw_char(col, STATUS_ROW, b'/', c64::COLOR_GREY);
     col += 1;
-    col += c64::draw_number(col, STATUS_ROW, balance::TARGET_DEPTH, c64::COLOR_WHITE);
+    c64::draw_number(col, STATUS_ROW, balance::TARGET_DEPTH, c64::COLOR_WHITE);
 
-    // Kills counter
-    if col + 3 < 40 {
-        col += 1;
-        c64::draw_text(col, STATUS_ROW, b"K:", c64::COLOR_GREY);
-        col += 2;
-        col += c64::draw_number(col, STATUS_ROW, state.kills, c64::COLOR_WHITE);
-    }
+    // Kills counter — fixed position so it never vanishes
+    c64::draw_char(30, STATUS_ROW, b'K', c64::COLOR_GREY);
+    c64::draw_number(31, STATUS_ROW, state.kills, c64::COLOR_WHITE);
 
-    // Turn counter
-    if col + 3 < 40 {
-        col += 1;
-        c64::draw_text(col, STATUS_ROW, b"T:", c64::COLOR_GREY);
-        col += 2;
-        c64::draw_number_u16(col, STATUS_ROW, state.turn_count, c64::COLOR_WHITE);
-    }
+    // Turn counter — fixed position
+    c64::draw_char(35, STATUS_ROW, b'T', c64::COLOR_GREY);
+    c64::draw_number_u16(36, STATUS_ROW, state.turn_count, c64::COLOR_WHITE);
 }
 
 // ---------------------------------------------------------------------------
@@ -1603,7 +1595,7 @@ fn help_page_controls() {
     c64::draw_text(15, 3, b"MOVE / ATTACK", c64::COLOR_DGREY);
     c64::draw_text(2, 4, b"Q E Z C", c64::COLOR_LGREY);
     c64::draw_text(15, 4, b"DIAGONAL MOVE", c64::COLOR_DGREY);
-    c64::draw_text(2, 5, b"SHIFT+DIR", c64::COLOR_LGREY);
+    c64::draw_text(2, 5, b"SHIFT/JOY+DIR", c64::COLOR_LGREY);
     c64::draw_text(15, 5, b"AUTORUN", c64::COLOR_DGREY);
     c64::draw_text(2, 6, b"SPACE", c64::COLOR_LGREY);
     c64::draw_text(15, 6, b"WAIT ONE TURN", c64::COLOR_DGREY);
@@ -1619,13 +1611,82 @@ fn help_page_controls() {
     c64::draw_text(15, 11, b"DESCEND STAIRS", c64::COLOR_DGREY);
     c64::draw_text(2, 12, b"RUN/STOP", c64::COLOR_LGREY);
     c64::draw_text(15, 12, b"PAUSE MENU", c64::COLOR_DGREY);
-    c64::draw_text(2, 13, b"? / JOY", c64::COLOR_LGREY);
-    c64::draw_text(15, 13, b"HELP / AUTORUN", c64::COLOR_DGREY);
+    c64::draw_text(2, 13, b"?", c64::COLOR_LGREY);
+    c64::draw_text(15, 13, b"HELP", c64::COLOR_DGREY);
+}
+
+/// Format a monster stats row at compile time: "NAME        HP ATK DEF"
+/// All stat values come from rules/ const fns — single source of truth.
+/// Returns a fixed-width byte array suitable for draw_text (no runtime overhead).
+const fn fmt_monster_row(name: &[u8], hp: u8, atk: u8, def: u8) -> [u8; 22] {
+    let mut buf = [b' '; 22];
+    // Name at position 0
+    let mut i = 0;
+    while i < name.len() && i < 10 {
+        buf[i] = name[i];
+        i += 1;
+    }
+    // HP at position 12 (right-aligned in 2 chars)
+    if hp >= 10 { buf[12] = b'0' + hp / 10; }
+    buf[13] = b'0' + hp % 10;
+    // ATK at position 16
+    if atk >= 10 { buf[16] = b'0' + atk / 10; }
+    buf[17] = b'0' + atk % 10;
+    // DEF at position 20
+    if def >= 10 { buf[20] = b'0' + def / 10; }
+    buf[21] = b'0' + def % 10;
+    buf
+}
+
+/// Format an item effect string at compile time: "NAME            EFFECT N"
+const fn fmt_item_row(name: &[u8], effect: &[u8], val: u8) -> [u8; 24] {
+    let mut buf = [b' '; 24];
+    let mut i = 0;
+    while i < name.len() && i < 14 {
+        buf[i] = name[i];
+        i += 1;
+    }
+    // Effect label at position 16
+    let mut j = 0;
+    while j < effect.len() && 16 + j < 23 {
+        buf[16 + j] = effect[j];
+        j += 1;
+    }
+    // Value after effect label
+    let pos = 16 + j;
+    if val >= 10 { buf[pos] = b'0' + val / 10; buf[pos + 1] = b'0' + val % 10; }
+    else { buf[pos] = b'0' + val; }
+    buf
 }
 
 /// Help page 2: Combat + Monsters + Items.
+/// Stats are baked from rules/ const fns at compile time — single source of truth,
+/// zero runtime overhead (identical binary to hardcoded strings).
 #[inline(never)]
 fn help_page_bestiary() {
+    use monster_table::MonsterKind;
+
+    // Compile-time stat rows — if balance changes, these update automatically.
+    const GOBLIN_ROW: [u8; 22] = fmt_monster_row(b"GOBLIN",
+        monster_table::max_hp(MonsterKind::Goblin),
+        monster_table::attack(MonsterKind::Goblin),
+        monster_table::defense(MonsterKind::Goblin));
+    const ORC_ROW: [u8; 22] = fmt_monster_row(b"ORC",
+        monster_table::max_hp(MonsterKind::Orc),
+        monster_table::attack(MonsterKind::Orc),
+        monster_table::defense(MonsterKind::Orc));
+    const TROLL_ROW: [u8; 22] = fmt_monster_row(b"TROLL",
+        monster_table::max_hp(MonsterKind::Troll),
+        monster_table::attack(MonsterKind::Troll),
+        monster_table::defense(MonsterKind::Troll));
+
+    const POTION_ROW: [u8; 24] = fmt_item_row(b"HEALTH POTION",
+        b"HEAL ", items::heal_amount(items::ItemKind::HealthPotion));
+    const SWORD_ROW: [u8; 24] = fmt_item_row(b"SHORT SWORD",
+        b"ATK +", items::attack_bonus(items::ItemKind::ShortSword));
+    const ARMOR_ROW: [u8; 24] = fmt_item_row(b"LEATHER ARMOR",
+        b"DEF +", items::defense_bonus(items::ItemKind::LeatherArmor));
+
     help_chrome(1);
 
     c64::draw_text(2, 1, b"COMBAT", c64::COLOR_WHITE);
@@ -1635,28 +1696,31 @@ fn help_page_bestiary() {
     c64::draw_text(2, 5, b"REACH DEPTH 5 TO WIN", c64::COLOR_LGREY);
 
     c64::draw_text(2, 7, b"MONSTERS", c64::COLOR_WHITE);
-    c64::draw_text(5, 8, b"NAME      HP ATK DEF", c64::COLOR_DGREY);
+    c64::draw_text(5, 8, b"NAME        HP ATK DEF", c64::COLOR_DGREY);
 
-    c64::draw_char(2, 9, b'g', game_color_to_c64(monster_table::color(monster_table::MonsterKind::Goblin)));
-    c64::draw_text(5, 9, b"GOBLIN     6   3   0", c64::COLOR_LGREY);
+    c64::draw_char(2, 9, monster_table::glyph(MonsterKind::Goblin) as u8,
+        game_color_to_c64(monster_table::color(MonsterKind::Goblin)));
+    c64::draw_text(5, 9, &GOBLIN_ROW, c64::COLOR_LGREY);
 
-    c64::draw_char(2, 10, b'o', game_color_to_c64(monster_table::color(monster_table::MonsterKind::Orc)));
-    c64::draw_text(5, 10, b"ORC       12   4   1", c64::COLOR_LGREY);
+    c64::draw_char(2, 10, monster_table::glyph(MonsterKind::Orc) as u8,
+        game_color_to_c64(monster_table::color(MonsterKind::Orc)));
+    c64::draw_text(5, 10, &ORC_ROW, c64::COLOR_LGREY);
 
-    c64::draw_char(2, 11, b'T', game_color_to_c64(monster_table::color(monster_table::MonsterKind::Troll)));
-    c64::draw_text(5, 11, b"TROLL     20   6   3", c64::COLOR_LGREY);
+    c64::draw_char(2, 11, monster_table::glyph(MonsterKind::Troll) as u8,
+        game_color_to_c64(monster_table::color(MonsterKind::Troll)));
+    c64::draw_text(5, 11, &TROLL_ROW, c64::COLOR_LGREY);
 
     c64::draw_text(2, 13, b"ITEMS", c64::COLOR_WHITE);
     c64::draw_text(5, 14, b"NAME            EFFECT", c64::COLOR_DGREY);
 
     c64::draw_char(2, 15, b'!', game_color_to_c64(items::color(items::ItemKind::HealthPotion)));
-    c64::draw_text(5, 15, b"HEALTH POTION   HEAL 10", c64::COLOR_LGREY);
+    c64::draw_text(5, 15, &POTION_ROW, c64::COLOR_LGREY);
 
     c64::draw_char(2, 16, b'/', game_color_to_c64(items::color(items::ItemKind::ShortSword)));
-    c64::draw_text(5, 16, b"SHORT SWORD     ATK +3", c64::COLOR_LGREY);
+    c64::draw_text(5, 16, &SWORD_ROW, c64::COLOR_LGREY);
 
     c64::draw_char(2, 17, b'[', game_color_to_c64(items::color(items::ItemKind::LeatherArmor)));
-    c64::draw_text(5, 17, b"LEATHER ARMOR   DEF +2", c64::COLOR_LGREY);
+    c64::draw_text(5, 17, &ARMOR_ROW, c64::COLOR_LGREY);
 }
 
 /// Render a help screen page. Called in a loop by the help page-flip handler.

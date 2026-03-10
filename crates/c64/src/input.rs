@@ -31,6 +31,8 @@ const KEY_DELETE: u8 = c64::PETSCII_DELETE;
 pub enum MenuInput {
     Up,
     Down,
+    Left,
+    Right,
     Select,
     Back,
 }
@@ -78,6 +80,8 @@ fn key_to_menu(key: u8) -> Option<MenuInput> {
     match key {
         KEY_W | KEY_UP => Some(MenuInput::Up),
         KEY_S | KEY_DOWN => Some(MenuInput::Down),
+        KEY_A | KEY_LEFT => Some(MenuInput::Left),
+        KEY_D | KEY_RIGHT => Some(MenuInput::Right),
         KEY_RETURN | KEY_SPACE => Some(MenuInput::Select),
         KEY_RUNSTOP => Some(MenuInput::Back),
         _ => None,
@@ -236,6 +240,8 @@ pub fn wait_for_menu_input() -> MenuInput {
             match dir {
                 Some(Direction::North) => return MenuInput::Up,
                 Some(Direction::South) => return MenuInput::Down,
+                Some(Direction::East) => return MenuInput::Right,
+                Some(Direction::West) => return MenuInput::Left,
                 _ => {}
             }
         }

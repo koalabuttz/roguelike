@@ -36,6 +36,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Refine lead voice timbre and register for less distracting ambient feel (#1)
 
 ### Changed
+- C64: scrollable multi-page help screen (#110)
+- C64: scrollable message history overlay (#109)
 - Inventory UX polish (#89)
 - Fix docs audit branch issues (#100)
 - C64: Aggressive inlining to reclaim .noinit static stack space (#94)

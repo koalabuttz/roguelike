@@ -113,6 +113,7 @@ fn run_title() -> (u16, u8, u8) {
             MenuInput::Back => {
                 // No back action on title — nowhere to go
             }
+            MenuInput::Left | MenuInput::Right => {}
         }
     }
 }
@@ -166,6 +167,7 @@ fn run_pause(state: &MicroGameState) -> AppState {
             MenuInput::Back => {
                 return AppState::Playing; // Back = Resume
             }
+            MenuInput::Left | MenuInput::Right => {}
         }
     }
 }
@@ -203,6 +205,7 @@ fn run_end_screen(state: &MicroGameState) -> AppState {
                 };
             }
             MenuInput::Back => {} // No back from end screen
+            MenuInput::Left | MenuInput::Right => {}
         }
     }
 }
@@ -520,6 +523,31 @@ fn clamp_selected(state: &MicroGameState, selected: &mut u8) {
     }
 }
 
+/// Run the multi-page help screen. Left/Right flips pages, Back/Select exits.
+fn run_help() {
+    let mut page: u8 = 0;
+    render::render_help_page(page);
+
+    loop {
+        match input::wait_for_menu_input() {
+            MenuInput::Right => {
+                if page + 1 < render::HELP_PAGES {
+                    page += 1;
+                    render::render_help_page(page);
+                }
+            }
+            MenuInput::Left => {
+                if page > 0 {
+                    page -= 1;
+                    render::render_help_page(page);
+                }
+            }
+            MenuInput::Back | MenuInput::Select => return,
+            MenuInput::Up | MenuInput::Down => {}
+        }
+    }
+}
+
 /// Run autorun: skip to destination instantly, then render once.
 /// Combat SFX/shake fires if the final step involved combat.
 fn run_autorun(state: &mut MicroGameState, dir: Direction) {
@@ -738,8 +766,7 @@ pub extern "C" fn main() -> isize {
                 app_state = AppState::Playing;
             }
             AppState::Help => {
-                render::render_help();
-                input::wait_for_menu_input(); // any key dismisses
+                run_help();
                 let state = unsafe { STATE.assume_init_mut() };
                 render::render_all(state);
                 let diff = unsafe { &mut DIFF };

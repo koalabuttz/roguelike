@@ -1575,13 +1575,30 @@ pub fn render_loading() {
     c64::draw_text(13, 10, b"GENERATING...", c64::COLOR_LGREY);
 }
 
-/// Render the help screen overlay. Full-screen, dismissed by any key.
-pub fn render_help() {
+/// Number of help pages.
+pub const HELP_PAGES: u8 = 2;
+
+/// Shared help header and footer. Called by each page function.
+fn help_chrome(page: u8) {
     c64::clear_screen();
     c64::fill_row(0, 0xC0, c64::COLOR_CYAN);
+    c64::draw_text(2, 0, b"HELP", c64::COLOR_BLACK);
+
+    // Page indicator: "1/2" right-aligned in header
+    c64::draw_char(35, 0, b'0' + page + 1, c64::COLOR_BLACK);
+    c64::draw_char(36, 0, b'/', c64::COLOR_BLACK);
+    c64::draw_char(37, 0, b'0' + HELP_PAGES, c64::COLOR_BLACK);
+
+    // Footer: navigation hint
+    c64::draw_text(2, 24, b"</>:PAGE  STOP:BACK", c64::COLOR_DGREY);
+}
+
+/// Help page 1: Controls.
+#[inline(never)]
+fn help_page_controls() {
+    help_chrome(0);
 
     c64::draw_text(2, 1, b"CONTROLS", c64::COLOR_WHITE);
-    //                col 2          col 15
     c64::draw_text(2, 3, b"WASD/ARROWS", c64::COLOR_LGREY);
     c64::draw_text(15, 3, b"MOVE / ATTACK", c64::COLOR_DGREY);
     c64::draw_text(2, 4, b"Q E Z C", c64::COLOR_LGREY);
@@ -1596,36 +1613,58 @@ pub fn render_help() {
     c64::draw_text(15, 8, b"INVENTORY", c64::COLOR_DGREY);
     c64::draw_text(2, 9, b"X", c64::COLOR_LGREY);
     c64::draw_text(15, 9, b"LOOK MODE", c64::COLOR_DGREY);
-    c64::draw_text(2, 10, b"RETURN", c64::COLOR_LGREY);
-    c64::draw_text(15, 10, b"DESCEND STAIRS", c64::COLOR_DGREY);
-    c64::draw_text(2, 11, b"RUN/STOP", c64::COLOR_LGREY);
-    c64::draw_text(15, 11, b"PAUSE MENU", c64::COLOR_DGREY);
-    c64::draw_text(2, 12, b"?", c64::COLOR_LGREY);
-    c64::draw_text(15, 12, b"THIS HELP", c64::COLOR_DGREY);
+    c64::draw_text(2, 10, b"P", c64::COLOR_LGREY);
+    c64::draw_text(15, 10, b"MESSAGE LOG", c64::COLOR_DGREY);
+    c64::draw_text(2, 11, b"RETURN", c64::COLOR_LGREY);
+    c64::draw_text(15, 11, b"DESCEND STAIRS", c64::COLOR_DGREY);
+    c64::draw_text(2, 12, b"RUN/STOP", c64::COLOR_LGREY);
+    c64::draw_text(15, 12, b"PAUSE MENU", c64::COLOR_DGREY);
+    c64::draw_text(2, 13, b"? / JOY", c64::COLOR_LGREY);
+    c64::draw_text(15, 13, b"HELP / AUTORUN", c64::COLOR_DGREY);
+}
 
-    c64::draw_text(2, 13, b"JOYSTICK", c64::COLOR_LGREY);
-    c64::draw_text(15, 13, b"FIRE+DIR=AUTORUN", c64::COLOR_DGREY);
+/// Help page 2: Combat + Monsters + Items.
+#[inline(never)]
+fn help_page_bestiary() {
+    help_chrome(1);
 
-    c64::draw_text(2, 15, b"COMBAT", c64::COLOR_WHITE);
-    c64::draw_text(2, 16, b"DMG = ATK - DEF (MIN 0)", c64::COLOR_LGREY);
-    c64::draw_text(2, 17, b"WALK INTO MONSTER TO ATTACK", c64::COLOR_LGREY);
-    c64::draw_text(2, 18, b"HP REGEN: 1 EVERY 3 TURNS", c64::COLOR_LGREY);
+    c64::draw_text(2, 1, b"COMBAT", c64::COLOR_WHITE);
+    c64::draw_text(2, 2, b"DMG = ATK - DEF (MIN 0)", c64::COLOR_LGREY);
+    c64::draw_text(2, 3, b"WALK INTO MONSTER TO ATTACK", c64::COLOR_LGREY);
+    c64::draw_text(2, 4, b"HP REGEN: 1 EVERY 3 TURNS", c64::COLOR_LGREY);
+    c64::draw_text(2, 5, b"REACH DEPTH 5 TO WIN", c64::COLOR_LGREY);
 
-    c64::draw_text(2, 20, b"MONSTERS", c64::COLOR_WHITE);
-    //             glyph  name         HP ATK DEF
-    c64::draw_text(5, 21, b"NAME      HP ATK DEF", c64::COLOR_DGREY);
+    c64::draw_text(2, 7, b"MONSTERS", c64::COLOR_WHITE);
+    c64::draw_text(5, 8, b"NAME      HP ATK DEF", c64::COLOR_DGREY);
 
-    // Goblin
-    c64::draw_char(2, 22, b'g', game_color_to_c64(monster_table::color(monster_table::MonsterKind::Goblin)));
-    c64::draw_text(5, 22, b"GOBLIN     6   3   0", c64::COLOR_LGREY);
+    c64::draw_char(2, 9, b'g', game_color_to_c64(monster_table::color(monster_table::MonsterKind::Goblin)));
+    c64::draw_text(5, 9, b"GOBLIN     6   3   0", c64::COLOR_LGREY);
 
-    // Orc
-    c64::draw_char(2, 23, b'o', game_color_to_c64(monster_table::color(monster_table::MonsterKind::Orc)));
-    c64::draw_text(5, 23, b"ORC       12   4   1", c64::COLOR_LGREY);
+    c64::draw_char(2, 10, b'o', game_color_to_c64(monster_table::color(monster_table::MonsterKind::Orc)));
+    c64::draw_text(5, 10, b"ORC       12   4   1", c64::COLOR_LGREY);
 
-    // Troll
-    c64::draw_char(2, 24, b'T', game_color_to_c64(monster_table::color(monster_table::MonsterKind::Troll)));
-    c64::draw_text(5, 24, b"TROLL     20   6   3", c64::COLOR_LGREY);
+    c64::draw_char(2, 11, b'T', game_color_to_c64(monster_table::color(monster_table::MonsterKind::Troll)));
+    c64::draw_text(5, 11, b"TROLL     20   6   3", c64::COLOR_LGREY);
+
+    c64::draw_text(2, 13, b"ITEMS", c64::COLOR_WHITE);
+    c64::draw_text(5, 14, b"NAME            EFFECT", c64::COLOR_DGREY);
+
+    c64::draw_char(2, 15, b'!', game_color_to_c64(items::color(items::ItemKind::HealthPotion)));
+    c64::draw_text(5, 15, b"HEALTH POTION   HEAL 10", c64::COLOR_LGREY);
+
+    c64::draw_char(2, 16, b'/', game_color_to_c64(items::color(items::ItemKind::ShortSword)));
+    c64::draw_text(5, 16, b"SHORT SWORD     ATK +3", c64::COLOR_LGREY);
+
+    c64::draw_char(2, 17, b'[', game_color_to_c64(items::color(items::ItemKind::LeatherArmor)));
+    c64::draw_text(5, 17, b"LEATHER ARMOR   DEF +2", c64::COLOR_LGREY);
+}
+
+/// Render a help screen page. Called in a loop by the help page-flip handler.
+pub fn render_help_page(page: u8) {
+    match page {
+        0 => help_page_controls(),
+        _ => help_page_bestiary(),
+    }
 }
 
 /// Render the message history overlay. Shows all stored messages

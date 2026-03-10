@@ -23,7 +23,7 @@ Always build from the project root using `make` in `crates/c64/`:
 make -C crates/c64 build
 ```
 
-This runs the Docker rust-mos image, patches the workspace edition 2024->2021 for compatibility, and restores it after build. The PRG output is at `target/mos-c64-none/release/roguelike-c64`.
+This runs the Docker rust-mos image, patches the workspace edition 2024->2021 for compatibility, and restores it after build. The PRG output is at `crates/c64/target/mos-c64-none/release/roguelike-c64` (note: the C64 crate has its own `target/` directory, NOT the workspace root `target/`).
 
 **NEVER use plain `cargo build` for the C64 target.** The C64 requires the rust-mos Docker toolchain.
 
@@ -42,7 +42,7 @@ Generates a linker map and reports per-section RAM/hiram usage. This is the prim
 If the user asked for `deploy`, after a successful build:
 
 ```bash
-cp target/mos-c64-none/release/roguelike-c64 /mnt/chromeos/MyFiles/Downloads/roguelike-builds/roguelike-c64.prg
+cp crates/c64/target/mos-c64-none/release/roguelike-c64 /mnt/chromeos/MyFiles/Downloads/roguelike-builds/roguelike-c64.prg
 printf 'l "\\\\tsclient\\Local Storage\\Download\\roguelike-builds\\roguelike-c64.prg" 0\n' | ncat -w 5 10.0.27.44 6510
 ```
 

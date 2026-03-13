@@ -1338,7 +1338,7 @@ pub fn render_victory(state: &MicroGameState, selected: u8) {
 pub fn render_title(selected: u8) {
     c64::clear_screen();
 
-    c64::draw_text(4, 4, b"R O G U E L I K E", c64::COLOR_WHITE);
+    c64::draw_text(11, 4, b"R O G U E L I K E", c64::COLOR_WHITE);
 
     let menu_items: [&[u8]; 2] = [b"NEW GAME", b"ENTER SEED"];
     draw_menu(&menu_items, selected, 10, 10);

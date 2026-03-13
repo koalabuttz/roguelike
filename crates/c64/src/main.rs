@@ -604,10 +604,18 @@ fn run_autorun(state: &mut MicroGameState, dir: Direction) {
     }
 }
 
+/// Thin wrapper — must have NO local state so the compiler allocates no
+/// static stacks here.  This guarantees init_hardware() (which copies
+/// the overlay from LMA to VMA $D000) runs before any static-stack
+/// addresses in the overlay LMA region are touched.
 #[no_mangle]
 pub extern "C" fn main() -> isize {
     c64::init_hardware();
+    game_loop()
+}
 
+#[inline(never)]
+fn game_loop() -> ! {
     let mut app_state = AppState::Title;
     let mut current_width: u8 = DEFAULT_MAP_WIDTH;
     let mut current_height: u8 = DEFAULT_MAP_HEIGHT;

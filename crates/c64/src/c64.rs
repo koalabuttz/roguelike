@@ -214,6 +214,7 @@ pub const CIA1_DDRB: *mut u8 = 0xDC03 as *mut u8; // Port B direction (keyboard 
 /// disable all interrupts and scan the keyboard matrix directly.
 /// KERNAL can be temporarily re-mapped for disk I/O (save games) by
 /// setting CPU port back to $37.
+#[inline(never)]
 pub fn init_hardware() {
     // Set up CIA1 data direction registers for keyboard/joystick scanning.
     poke(CIA1_DDRA, 0xFF); // Port A = all output (keyboard columns)

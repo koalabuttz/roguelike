@@ -592,7 +592,22 @@ fn run_autorun(state: &mut MicroGameState, dir: Direction) {
     }
 
     // Combat feedback for the final step.
-    let combat = detect_combat(state, last_msg_total);
+    apply_combat_feedback(state, last_msg_total);
+}
+
+/// Full render + diff snapshot. Deduplicates the render_all + snapshot
+/// sequence used after modal exits and state transitions.
+#[inline(never)]
+fn render_and_snapshot(state: &MicroGameState) {
+    render::render_all(state);
+    let diff = unsafe { &mut DIFF };
+    diff.snapshot(state, render::viewport_pos(state));
+}
+
+/// Apply combat screen effects (shake + SFX) based on recent log events.
+#[inline(never)]
+fn apply_combat_feedback(state: &MicroGameState, old_msg_total: u16) {
+    let combat = detect_combat(state, old_msg_total);
     if combat.player_attacked || combat.player_hurt {
         c64::shake_start();
     }
@@ -601,6 +616,38 @@ fn run_autorun(state: &mut MicroGameState, dir: Direction) {
     }
     if combat.player_hurt {
         c64::sfx_hurt();
+    }
+}
+
+/// Start a new game with spinner, render, and begin music.
+#[inline(never)]
+fn start_and_present_game(seed: u16, width: u8, height: u8) {
+    render::render_loading();
+    c64::spinner_start();
+    let state = start_game(seed, width, height);
+    c64::spinner_stop();
+    render_and_snapshot(state);
+    c64::music_start();
+}
+
+/// Post-step rendering: full redraw on descent, viewport scroll, or diff render.
+#[inline(never)]
+fn render_after_step(state: &MicroGameState, old_depth: u8) {
+    let diff = unsafe { &mut DIFF };
+    if state.depth != old_depth {
+        let vp = render::viewport_pos(state);
+        render::render_all(state);
+        diff.snapshot(state, vp);
+    } else {
+        let (old_vx, old_vy) = diff.viewport;
+        let (vx, vy) = render::viewport_pos_lazy(state, old_vx, old_vy);
+        if (vx, vy) != (old_vx, old_vy) {
+            render::render_viewport_scroll(state, diff, vx, vy, old_vx, old_vy);
+        } else {
+            render::draw_player_immediate(state, diff, vx, vy);
+            render::render_diff(state, diff, vx, vy);
+        }
+        diff.snapshot(state, (vx, vy));
     }
 }
 
@@ -627,14 +674,7 @@ fn game_loop() -> ! {
                 let (seed, w, h) = run_title();
                 current_width = w;
                 current_height = h;
-                render::render_loading();
-                c64::spinner_start();
-                let state = start_game(seed, w, h);
-                c64::spinner_stop();
-                render::render_all(state);
-                let diff = unsafe { &mut DIFF };
-                diff.snapshot(state, render::viewport_pos(state));
-                c64::music_start();
+                start_and_present_game(seed, w, h);
                 app_state = AppState::Playing;
             }
             AppState::Playing => {
@@ -678,9 +718,7 @@ fn game_loop() -> ! {
                 if let GameCommand::Autorun(dir) = cmd {
                     run_autorun(state, dir);
                     // Full re-render after autorun to ensure clean state.
-                    let diff = unsafe { &mut DIFF };
-                    render::render_all(state);
-                    diff.snapshot(state, render::viewport_pos(state));
+                    render_and_snapshot(state);
                     if state.is_terminal() {
                         c64::music_stop();
                         app_state = AppState::GameOver;
@@ -720,38 +758,9 @@ fn game_loop() -> ! {
 
                 // Combat feedback: screen shake + SID sound effects.
                 // IRQ-driven shake runs asynchronously during rendering.
-                let combat = detect_combat(state, msg_total);
-                if combat.player_attacked || combat.player_hurt {
-                    c64::shake_start();
-                }
-                if combat.player_attacked {
-                    c64::sfx_attack();
-                }
-                if combat.player_hurt {
-                    c64::sfx_hurt();
-                }
+                apply_combat_feedback(state, msg_total);
 
-                let diff = unsafe { &mut DIFF };
-                if state.depth != old_depth {
-                    // Descent — full redraw (entire level changed)
-                    let vp = render::viewport_pos(state);
-                    render::render_all(state);
-                    diff.snapshot(state, vp);
-                } else {
-                    // Dead-zone viewport: only scroll when near edge
-                    let (old_vx, old_vy) = diff.viewport;
-                    let (vx, vy) = render::viewport_pos_lazy(state, old_vx, old_vy);
-
-                    if (vx, vy) != (old_vx, old_vy) {
-                        // Viewport scrolled — memory-copy or sparse fallback
-                        render::render_viewport_scroll(state, diff, vx, vy, old_vx, old_vy);
-                    } else {
-                        // No scroll — player-first then dirty-cell diff
-                        render::draw_player_immediate(state, diff, vx, vy);
-                        render::render_diff(state, diff, vx, vy);
-                    }
-                    diff.snapshot(state, (vx, vy));
-                }
+                render_after_step(state, old_depth);
 
                 if state.is_terminal() {
                     c64::music_stop();
@@ -761,43 +770,33 @@ fn game_loop() -> ! {
             AppState::Looking => {
                 let state = unsafe { STATE.assume_init_mut() };
                 run_look_mode(state);
-                render::render_all(state);
-                let diff = unsafe { &mut DIFF };
-                diff.snapshot(state, render::viewport_pos(state));
+                render_and_snapshot(state);
                 app_state = AppState::Playing;
             }
             AppState::Inventory => {
                 let state = unsafe { STATE.assume_init_mut() };
                 run_inventory(state);
-                render::render_all(state);
-                let diff = unsafe { &mut DIFF };
-                diff.snapshot(state, render::viewport_pos(state));
+                render_and_snapshot(state);
                 app_state = AppState::Playing;
             }
             AppState::Help => {
                 run_help();
                 let state = unsafe { STATE.assume_init_mut() };
-                render::render_all(state);
-                let diff = unsafe { &mut DIFF };
-                diff.snapshot(state, render::viewport_pos(state));
+                render_and_snapshot(state);
                 app_state = AppState::Playing;
             }
             AppState::MessageHistory => {
                 let state = unsafe { STATE.assume_init_mut() };
                 render::render_message_history(state);
                 input::wait_for_menu_input(); // any key dismisses
-                render::render_all(state);
-                let diff = unsafe { &mut DIFF };
-                diff.snapshot(state, render::viewport_pos(state));
+                render_and_snapshot(state);
                 app_state = AppState::Playing;
             }
             AppState::Paused => {
                 let state = unsafe { STATE.assume_init_mut() };
                 match run_pause(state) {
                     AppState::Playing => {
-                        render::render_all(state);
-                        let diff = unsafe { &mut DIFF };
-                        diff.snapshot(state, render::viewport_pos(state));
+                        render_and_snapshot(state);
                         c64::music_start();
                         app_state = AppState::Playing;
                     }
@@ -812,15 +811,11 @@ fn game_loop() -> ! {
                 match run_end_screen(state) {
                     AppState::Playing => {
                         // Play Again — new random seed, same dimensions
-                        let seed = read_cia_seed();
-                        render::render_loading();
-                        c64::spinner_start();
-                        let state = start_game(seed, current_width, current_height);
-                        c64::spinner_stop();
-                        render::render_all(state);
-                        let diff = unsafe { &mut DIFF };
-                        diff.snapshot(state, render::viewport_pos(state));
-                        c64::music_start();
+                        start_and_present_game(
+                            read_cia_seed(),
+                            current_width,
+                            current_height,
+                        );
                         app_state = AppState::Playing;
                     }
                     AppState::Title => {

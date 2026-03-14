@@ -1,4 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+#![feature(const_mut_refs)]
 
 // --- Always compiled (no_std compatible) ---
 pub mod rules;

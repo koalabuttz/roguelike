@@ -244,19 +244,37 @@ pub const fn decode_micro_from_bytes(bytes: &[u8]) -> Result<MicroSeedParams, Se
         None => bytes.len(),
     };
 
-    // Use decode_from_bytes on the seed slice
-    // We need to manually slice since const fn can't use ranges freely
-    let seed_bytes = unsafe { core::slice::from_raw_parts(bytes.as_ptr(), seed_end) };
-    let seed_val = match decode_from_bytes(seed_bytes) {
-        Ok(v) => v,
-        Err(e) => return Err(e),
-    };
-
-    if seed_val > 0xFFFF {
-        return Err(SeedDecodeError::NotMicroTier);
+    // Decode base36 seed using u16 arithmetic directly.
+    // Avoids calling decode_from_bytes (u64) which pulls in __muldi3 (236B on 6502).
+    if seed_end == 0 {
+        return Err(SeedDecodeError::Empty);
     }
 
-    let seed = seed_val as u16;
+    let mut result: u16 = 0;
+    let mut j = 0;
+    while j < seed_end {
+        let b = bytes[j];
+        let digit: u16 = if b >= b'0' && b <= b'9' {
+            (b - b'0') as u16
+        } else if b >= b'a' && b <= b'z' {
+            (b - b'a') as u16 + 10
+        } else if b >= b'A' && b <= b'Z' {
+            (b - b'A') as u16 + 10
+        } else {
+            return Err(SeedDecodeError::InvalidChar(b));
+        };
+
+        let Some(r) = result.checked_mul(36) else {
+            return Err(SeedDecodeError::NotMicroTier);
+        };
+        let Some(r) = r.checked_add(digit) else {
+            return Err(SeedDecodeError::NotMicroTier);
+        };
+        result = r;
+        j += 1;
+    }
+
+    let seed = result;
 
     // Parse optional dimensions suffix
     let (width, height) = match dash_pos {

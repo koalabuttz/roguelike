@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Eliminate u64 multiply runtime from C64 seed decode (#125)
 - Add kills, turns, and seed to standard tier game-over screen (#108)
 - Add ATK/DEF stats to C64 status bar (#107)
 - C64: Add help screen overlay (#104)

@@ -50,7 +50,7 @@ SECTIONS {
     INCLUDE data.ld
     INCLUDE bss.ld
 
-    /* Overlay code (~3.6 KB) placed under I/O at $D000-$DFFF.
+    /* Overlay code (~3.5 KB) placed under I/O at $D000-$DFFF.
      * VMA is in ioram (where the code executes after being copied).
      * LMA is in ram at the current position (right after .bss).
      * Using AT(.) instead of AT> ram to avoid advancing the ram
@@ -62,10 +62,25 @@ SECTIONS {
         __overlay_vma_end = .;
     } > ioram
 
+    /* HIRAM executable code (~2.3 KB) at VMA $E000+.
+     * Rarely-used render functions (help pages, end screen, seed input,
+     * loading splash) are placed here to free main RAM .text space.
+     * LMA follows the overlay LMA in ram; both are overlapped by .noinit
+     * (NOLOAD), so neither costs additional RAM.
+     * HIRAM is always RAM (KERNAL unmapped), no banking needed.
+     * First byte is RTI ($40) — NMI/RESET/IRQ vectors point to $E000. */
+    __hiramcode_lma_start = LOADADDR(.overlay) + SIZEOF(.overlay);
+    .hiramcode : AT(__hiramcode_lma_start) {
+        __hiramcode_vma_start = .;
+        BYTE(0x40)
+        *(.hiramcode .hiramcode.*)
+        __hiramcode_vma_end = .;
+    } > hiram
+
     /* Game state (~4.5 KB) placed in freed KERNAL region.
-     * Must come BEFORE .noinit so the wildcard doesn't claim it.
-     * Safe: NOLOAD (not in the PRG) and only accessed during
-     * gameplay, after init_hardware() unmaps KERNAL. */
+     * Must come AFTER .hiramcode and BEFORE .noinit so the wildcard
+     * doesn't claim it.  Safe: NOLOAD (not in the PRG) and only
+     * accessed during gameplay, after init_hardware() unmaps KERNAL. */
     .noinit.state (NOLOAD) : { *(.noinit.state) } >hiram
 
     /* Compiler-generated static stacks (~6 KB) stay in ram — too large

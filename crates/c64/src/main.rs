@@ -605,11 +605,12 @@ fn run_autorun(state: &mut MicroGameState, dir: Direction) {
 }
 
 /// Thin wrapper — must have NO local state so the compiler allocates no
-/// static stacks here.  This guarantees init_hardware() (which copies
-/// the overlay from LMA to VMA $D000) runs before any static-stack
-/// addresses in the overlay LMA region are touched.
+/// static stacks here.  copy_code_to_ram() must run first: it copies
+/// overlay + HIRAM code from LMA to VMA before init_hardware()'s
+/// callee-save prologue can overwrite the LMA data in .noinit.
 #[no_mangle]
 pub extern "C" fn main() -> isize {
+    c64::copy_code_to_ram();
     c64::init_hardware();
     game_loop()
 }

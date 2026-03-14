@@ -254,19 +254,17 @@ pub fn init_hardware() {
     //    enables I/O when at least one ROM select bit is set.
     poke(CPU_PORT, 0x35);
 
-    // 4. Copy overlay code from its load address (in main RAM) to $D000-$DFFF.
-    //    Must happen while I/O is banked out so writes hit RAM, not I/O regs.
-    poke(CPU_PORT, 0x34); // bank out I/O
-    copy_overlay();
-    poke(CPU_PORT, 0x35); // bank I/O back in
+    // 4. Overlay + HIRAM code are already copied by copy_code_to_ram()
+    //    (called from main before init_hardware to avoid LMA corruption).
 
-    // 5. Relocate soft stack to freed KERNAL region ($E000-$FFF7).
-    //    MUST happen AFTER KERNAL is unmapped — otherwise reads from the
-    //    stack area would return KERNAL ROM data instead of RAM.
-    //    CRT init sets rc0:rc1 ($02:$03) = $D000. We move it to $FFF8
-    //    so the stack grows down into the 8 KB KERNAL region.
-    poke(0x02 as *mut u8, 0xF8); // rc0 (low byte)
-    poke(0x03 as *mut u8, 0xFF); // rc1 (high byte)
+    // 5. Relocate soft stack to top of main RAM ($CFFF).
+    //    CRT init sets rc0:rc1 ($02:$03) = $D000 (I/O region, unusable).
+    //    We move it to $CFFF — the top of the ram region. The stack grows
+    //    down into the ~1.4 KB gap between .noinit end and ram end.
+    //    HIRAM ($E000-$FFF7) is fully used by .hiramcode + .noinit.state,
+    //    so the soft stack cannot live there.
+    poke(0x02 as *mut u8, 0xFF); // rc0 (low byte)
+    poke(0x03 as *mut u8, 0xCF); // rc1 (high byte)
 
     // Initialize SID for sound effects
     sid_init();
@@ -286,6 +284,34 @@ extern "C" {
     static __overlay_vma_start: u8;
     static __overlay_vma_end: u8;
     static __overlay_lma_start: u8;
+    static __hiramcode_vma_start: u8;
+    static __hiramcode_vma_end: u8;
+    static __hiramcode_lma_start: u8;
+}
+
+/// Copy overlay + HIRAM code from load addresses to execution addresses.
+///
+/// **Must be called before init_hardware().**  The callee-save prologue of
+/// init_hardware spills imaginary registers to static storage at the start
+/// of .noinit — which overlaps the overlay LMA.  Doing the copies first
+/// ensures the LMA data is consumed before it can be corrupted.
+///
+/// Disables CIA/VIC interrupt sources so no IRQ can fire during the all-RAM
+/// banking window (CPU port $34), when the KERNAL handler is inaccessible.
+#[inline(never)]
+pub fn copy_code_to_ram() {
+    // Disable all interrupt sources and acknowledge pending.
+    poke(CIA1_ICR, 0x7F);
+    poke(CIA2_ICR, 0x7F);
+    poke(VIC_IRQ_MASK, 0x00);
+    let _ = peek(CIA1_ICR as *const u8);
+    let _ = peek(CIA2_ICR as *const u8);
+
+    // Bank out all ROMs and I/O — $D000 and $E000 become writable RAM.
+    poke(CPU_PORT, 0x34);
+    copy_overlay();       // LMA → $D000
+    copy_hiramcode();     // LMA → $E000
+    poke(CPU_PORT, 0x37); // restore default banking
 }
 
 /// Copy overlay code from its load address (in main RAM) to $D000-$DFFF.
@@ -296,6 +322,19 @@ fn copy_overlay() {
         let dst = &__overlay_vma_start as *const u8 as *mut u8;
         let len = (&__overlay_vma_end as *const u8)
             .offset_from(&__overlay_vma_start as *const u8) as usize;
+        core::ptr::copy_nonoverlapping(src, dst, len);
+    }
+}
+
+/// Copy HIRAM code from its load address (in main RAM) to $E000+.
+/// Rarely-used render functions are placed in HIRAM to free .text space.
+/// KERNAL must already be unmapped (CPU port bit 1 = 0) so $E000 is RAM.
+fn copy_hiramcode() {
+    unsafe {
+        let src = &__hiramcode_lma_start as *const u8;
+        let dst = &__hiramcode_vma_start as *const u8 as *mut u8;
+        let len = (&__hiramcode_vma_end as *const u8)
+            .offset_from(&__hiramcode_vma_start as *const u8) as usize;
         core::ptr::copy_nonoverlapping(src, dst, len);
     }
 }

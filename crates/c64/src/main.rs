@@ -40,8 +40,9 @@ fn panic(_info: &PanicInfo) -> ! {
 static mut STATE: MaybeUninit<MicroGameState> = MaybeUninit::uninit();
 
 /// Previous-frame snapshot for differential rendering (~810 bytes).
-/// Placed in freed KERNAL region alongside STATE.
-#[link_section = ".noinit.state"]
+/// Placed in main RAM (.noinit) to free HIRAM for cold render code.
+/// Only accessed during rendering (I/O visible), never during banked compute.
+#[link_section = ".noinit"]
 static mut DIFF: render::DiffState = render::DiffState::new();
 
 /// Application states for the main loop.

@@ -1398,6 +1398,8 @@ pub fn equip_count(state: &MicroGameState) -> u8 {
 /// then inventory items (equip_count..).
 /// `action_bar`: if Some, we're in Act mode — show the action bar with the
 /// given actions and selected index. If None, show the keyboard hint.
+#[link_section = ".hiramcode"]
+#[inline(never)]
 pub fn render_inventory(
     state: &MicroGameState,
     selected: u8,

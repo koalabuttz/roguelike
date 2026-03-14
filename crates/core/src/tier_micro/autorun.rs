@@ -126,7 +126,7 @@ impl MicroAutorunStepper {
         }
 
         // Decide whether this step computes FOV.
-        let do_fov = self.steps_taken % FOV_INTERVAL == 0;
+        let do_fov = self.steps_taken.is_multiple_of(FOV_INTERVAL);
 
         // Snapshot HP (always) and visible monsters (only on FOV steps).
         let hp_before = state.entities.hp[pi];

@@ -518,7 +518,7 @@ fn refresh_fov_area(
 
 /// Render ground items that are visible and within the viewport.
 fn render_items(state: &MicroGameState, vx: u8, vy: u8) {
-    for i in 0..state.items.count as usize {
+    for i in 0..(state.items.count as usize).min(MAX_ITEMS) {
         if !state.items.alive[i] {
             continue;
         }
@@ -543,7 +543,7 @@ fn render_items(state: &MicroGameState, vx: u8, vy: u8) {
 /// Dead non-player entities are drawn as corpse glyphs (%).
 /// Alive entities are drawn with their normal glyph/color.
 fn render_entities(state: &MicroGameState, vx: u8, vy: u8) {
-    for i in 0..state.entities.count {
+    for i in 0..(state.entities.count).min(MAX_ENTITIES as u8) {
         let idx = i as usize;
         let ex = state.entities.x[idx];
         let ey = state.entities.y[idx];
@@ -886,7 +886,7 @@ impl DiffState {
         self.fov_visible.copy_from_slice(vis);
 
         // Copy entity positions and pack alive flags
-        let ec = state.entities.count as usize;
+        let ec = (state.entities.count as usize).min(MAX_ENTITIES);
         self.entity_count = state.entities.count;
         self.entity_x[..ec].copy_from_slice(&state.entities.x[..ec]);
         self.entity_y[..ec].copy_from_slice(&state.entities.y[..ec]);
@@ -898,7 +898,7 @@ impl DiffState {
         }
 
         // Copy item positions and pack alive flags
-        let ic = state.items.count as usize;
+        let ic = (state.items.count as usize).min(MAX_ITEMS);
         self.item_count = state.items.count;
         self.item_x[..ic].copy_from_slice(&state.items.x[..ic]);
         self.item_y[..ic].copy_from_slice(&state.items.y[..ic]);
@@ -946,7 +946,7 @@ pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
     // that gained or lost visibility and need redrawing.
     let vis = state.fov.visible_bytes();
     let map_w = state.fov.width as usize;
-    let fov_bytes_used = (map_w * (state.fov.height as usize) + 7) / 8;
+    let fov_bytes_used = ((map_w * (state.fov.height as usize) + 7) / 8).min(MAX_BITFIELD_SIZE);
     for byte_idx in 0..fov_bytes_used {
         let diff = prev.fov_visible[byte_idx] ^ vis[byte_idx];
         if diff == 0 {
@@ -965,7 +965,7 @@ pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
 
     // --- 2. Entity position changes ---
     // Mark old positions of entities that moved, died, or were removed.
-    let prev_ec = prev.entity_count as usize;
+    let prev_ec = (prev.entity_count as usize).min(MAX_ENTITIES);
     for i in 0..prev_ec {
         if !prev.was_entity_alive(i) {
             continue;
@@ -984,7 +984,7 @@ pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
         }
     }
     // Mark new positions of entities that moved or were spawned.
-    for i in 0..state.entities.count as usize {
+    for i in 0..(state.entities.count as usize).min(MAX_ENTITIES) {
         if !state.entities.alive[i] {
             continue;
         }
@@ -1003,7 +1003,7 @@ pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
     }
 
     // --- 3. Item changes ---
-    let prev_ic = prev.item_count as usize;
+    let prev_ic = (prev.item_count as usize).min(MAX_ITEMS);
     for i in 0..prev_ic {
         if !prev.was_item_alive(i) {
             continue;
@@ -1021,7 +1021,7 @@ pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
             mark_dirty_world(&mut dirty, vx, vy, ox, oy);
         }
     }
-    for i in 0..state.items.count as usize {
+    for i in 0..(state.items.count as usize).min(MAX_ITEMS) {
         if !state.items.alive[i] {
             continue;
         }
@@ -1130,7 +1130,7 @@ pub fn restore_tile(state: &MicroGameState, vx: u8, vy: u8, wx: u8, wy: u8) {
 
     // 2. Item layer (only if visible)
     if visible {
-        for i in 0..state.items.count as usize {
+        for i in 0..(state.items.count as usize).min(MAX_ITEMS) {
             if state.items.alive[i] && state.items.x[i] == wx && state.items.y[i] == wy {
                 let kind = state.items.kind[i];
                 let glyph = items::glyph(kind) as u8;
@@ -1141,7 +1141,7 @@ pub fn restore_tile(state: &MicroGameState, vx: u8, vy: u8, wx: u8, wy: u8) {
         }
 
         // 3. Entity layer (alive entities + corpses occlude items)
-        for i in 0..state.entities.count {
+        for i in 0..(state.entities.count).min(MAX_ENTITIES as u8) {
             let idx = i as usize;
             if state.entities.x[idx] != wx || state.entities.y[idx] != wy {
                 continue;
@@ -1208,7 +1208,7 @@ pub fn render_look_status(state: &MicroGameState, cx: u8, cy: u8) {
                 }
             }
 
-            for i in 0..state.items.count as usize {
+            for i in 0..(state.items.count as usize).min(MAX_ITEMS) {
                 if state.items.alive[i] && state.items.x[i] == cx && state.items.y[i] == cy {
                     if p < 40 { buf[p] = b' '; p += 1; }
                     if p < 40 { buf[p] = b'['; p += 1; }

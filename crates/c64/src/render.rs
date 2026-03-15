@@ -882,16 +882,15 @@ impl DiffState {
         self.depth = state.depth;
 
         // Copy FOV visible bitfield
-        let vis = state.fov.visible_bytes();
-        self.fov_visible.copy_from_slice(vis);
+        self.fov_visible = *state.fov.visible_bytes();
 
         // Copy entity positions and pack alive flags
         let ec = (state.entities.count as usize).min(MAX_ENTITIES);
         self.entity_count = state.entities.count;
-        self.entity_x[..ec].copy_from_slice(&state.entities.x[..ec]);
-        self.entity_y[..ec].copy_from_slice(&state.entities.y[..ec]);
         self.entity_alive = [0; ENTITY_ALIVE_BYTES];
         for i in 0..ec {
+            self.entity_x[i] = state.entities.x[i];
+            self.entity_y[i] = state.entities.y[i];
             if state.entities.alive[i] {
                 self.entity_alive[i >> 3] |= 1u8 << (i & 7);
             }
@@ -900,10 +899,10 @@ impl DiffState {
         // Copy item positions and pack alive flags
         let ic = (state.items.count as usize).min(MAX_ITEMS);
         self.item_count = state.items.count;
-        self.item_x[..ic].copy_from_slice(&state.items.x[..ic]);
-        self.item_y[..ic].copy_from_slice(&state.items.y[..ic]);
         self.item_alive = [0; ITEM_ALIVE_BYTES];
         for i in 0..ic {
+            self.item_x[i] = state.items.x[i];
+            self.item_y[i] = state.items.y[i];
             if state.items.alive[i] {
                 self.item_alive[i >> 3] |= 1u8 << (i & 7);
             }

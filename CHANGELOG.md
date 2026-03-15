@@ -36,6 +36,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Refine lead voice timbre and register for less distracting ambient feel (#1)
 
 ### Changed
+- C64: eliminate __mulsi3 via subtraction-based u16 decimal formatting (#126)
 - C64: hiram code overlay for large functions (#96)
 - C64: scrollable multi-page help screen (#110)
 - C64: scrollable message history overlay (#109)

@@ -264,10 +264,16 @@ pub const fn decode_micro_from_bytes(bytes: &[u8]) -> Result<MicroSeedParams, Se
             return Err(SeedDecodeError::InvalidChar(b));
         };
 
-        let Some(r) = result.checked_mul(36) else {
+        // Manual overflow guard instead of checked_mul/checked_add.
+        // checked_mul(36) on u16 widens to u32 multiply (__mulsi3, 103B on 6502).
+        // 1820 * 36 = 65520; anything above 1820 overflows u16 after * 36.
+        if result > 1820 {
             return Err(SeedDecodeError::NotMicroTier);
-        };
-        let Some(r) = r.checked_add(digit) else {
+        }
+        result = result * 36;
+        // Max after multiply: 65520. Max digit: 35. 65520 + 35 = 65555 > 65535.
+        // So checked_add is still needed for the final digit.
+        let Some(r) = result.checked_add(digit) else {
             return Err(SeedDecodeError::NotMicroTier);
         };
         result = r;

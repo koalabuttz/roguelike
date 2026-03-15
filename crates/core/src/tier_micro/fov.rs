@@ -80,7 +80,7 @@ impl MicroFov {
     }
 
     fn bit_idx(&self, x: u8, y: u8) -> (usize, u8) {
-        let i = (y as usize) * (self.width as usize) + (x as usize);
+        let i = row_col_idx(y, x, self.width);
         (i / 8, 1u8 << (i % 8))
     }
 

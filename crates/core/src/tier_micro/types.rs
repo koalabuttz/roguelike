@@ -44,6 +44,26 @@ pub const MAX_BITFIELD_SIZE: usize = MAX_MAP_SIZE.div_ceil(8);
 /// Packed tile array size (4 bits per tile, 2 tiles per byte).
 pub const MAX_PACKED_MAP_SIZE: usize = MAX_MAP_SIZE.div_ceil(2);
 
+/// Compute `y * width + x` for map/bitfield indexing.
+///
+/// On C64 (feature `c64-overlay`), uses shift for the common width=64
+/// case and falls back to a normal multiply for custom-dimension seeds.
+#[inline]
+pub fn row_col_idx(y: u8, x: u8, width: u8) -> usize {
+    #[cfg(feature = "c64-overlay")]
+    {
+        if width == 64 {
+            ((y as usize) << 6) + (x as usize)
+        } else {
+            (y as usize) * (width as usize) + (x as usize)
+        }
+    }
+    #[cfg(not(feature = "c64-overlay"))]
+    {
+        (y as usize) * (width as usize) + (x as usize)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

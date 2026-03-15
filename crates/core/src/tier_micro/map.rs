@@ -84,7 +84,7 @@ impl MicroMap {
     }
 
     pub(crate) fn idx(&self, x: u8, y: u8) -> usize {
-        (y as usize) * (self.width as usize) + (x as usize)
+        row_col_idx(y, x, self.width)
     }
 
     pub fn in_bounds(&self, x: u8, y: u8) -> bool {

@@ -89,7 +89,8 @@ impl MicroFov {
             return false;
         }
         let (byte, bit) = self.bit_idx(x, y);
-        self.visible[byte] & bit != 0
+        // Safety: bounds checked above, so byte < MAX_BITFIELD_SIZE.
+        unsafe { *self.visible.get_unchecked(byte) & bit != 0 }
     }
 
     pub fn is_explored(&self, x: u8, y: u8) -> bool {
@@ -97,7 +98,8 @@ impl MicroFov {
             return false;
         }
         let (byte, bit) = self.bit_idx(x, y);
-        self.explored[byte] & bit != 0
+        // Safety: bounds checked above, so byte < MAX_BITFIELD_SIZE.
+        unsafe { *self.explored.get_unchecked(byte) & bit != 0 }
     }
 
     pub fn explored_floor_count(&self, map: &MicroMap) -> u16 {
@@ -114,8 +116,11 @@ impl MicroFov {
 
     fn mark_visible(&mut self, x: u8, y: u8) {
         let (byte, bit) = self.bit_idx(x, y);
-        self.visible[byte] |= bit;
-        self.explored[byte] |= bit;
+        // Safety: callers ensure x < width && y < height, so byte < MAX_BITFIELD_SIZE.
+        unsafe {
+            *self.visible.get_unchecked_mut(byte) |= bit;
+            *self.explored.get_unchecked_mut(byte) |= bit;
+        }
     }
 
     fn clear_visible(&mut self) {

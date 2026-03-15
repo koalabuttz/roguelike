@@ -97,7 +97,9 @@ impl MicroMap {
             return TILE_WALL;
         }
         let i = self.idx(x, y);
-        let byte = self.tiles[i / 2];
+        // Safety: in_bounds guarantees i < width*height <= MAX_MAP_SIZE,
+        // so i/2 < MAX_PACKED_MAP_SIZE = tiles.len().
+        let byte = unsafe { *self.tiles.get_unchecked(i / 2) };
         if i & 1 == 0 { byte & 0x0F } else { byte >> 4 }
     }
 
@@ -156,7 +158,8 @@ impl MicroMap {
     pub fn set_tile(&mut self, x: u8, y: u8, tile: u8) {
         if self.in_bounds(x, y) {
             let i = self.idx(x, y);
-            let byte = &mut self.tiles[i / 2];
+            // Safety: in_bounds guarantees i/2 < tiles.len().
+            let byte = unsafe { self.tiles.get_unchecked_mut(i / 2) };
             if i & 1 == 0 {
                 *byte = (*byte & 0xF0) | (tile & 0x0F);
             } else {

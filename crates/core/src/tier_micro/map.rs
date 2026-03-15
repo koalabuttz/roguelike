@@ -222,9 +222,7 @@ impl MicroMap {
     pub fn generate(&mut self, rng: &mut LfsrRng16) -> Pos {
         // Reset to all walls (TILE_WALL=0, so zero the packed array)
         let packed_size = ((self.width as usize) * (self.height as usize)).div_ceil(2);
-        for t in self.tiles[..packed_size].iter_mut() {
-            *t = 0;
-        }
+        self.tiles[..packed_size].fill(0);
         self.room_count = 0;
 
         let room_min = balance::MICRO_ROOM_SIZE_MIN;

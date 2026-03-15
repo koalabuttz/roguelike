@@ -575,6 +575,7 @@ fn render_entities(state: &MicroGameState, vx: u8, vy: u8) {
 }
 
 /// Render the status bar on row 22.
+#[inline(never)]
 fn render_status_bar(state: &MicroGameState) {
     c64::fill_row(STATUS_ROW, SC_SPACE, c64::COLOR_BLACK);
 
@@ -685,10 +686,9 @@ fn copy_num(buf: &mut [u8; 40], pos: usize, val: u8) -> usize {
 }
 
 /// Format a GameEvent into a 40-byte PETSCII buffer (space-padded).
+#[inline(never)]
 fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
-    for b in buf.iter_mut() {
-        *b = b' ';
-    }
+    *buf = [b' '; 40];
     let _ = match event {
         GameEvent::Attack {
             attacker,
@@ -793,6 +793,7 @@ fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
 }
 
 /// Render the 2 most recent messages on rows 23-24.
+#[inline(never)]
 pub(crate) fn render_messages(state: &MicroGameState) {
     let mut buf = [b' '; 40];
 
@@ -889,9 +890,7 @@ impl DiffState {
         self.entity_count = state.entities.count;
         self.entity_x[..ec].copy_from_slice(&state.entities.x[..ec]);
         self.entity_y[..ec].copy_from_slice(&state.entities.y[..ec]);
-        for b in self.entity_alive.iter_mut() {
-            *b = 0;
-        }
+        self.entity_alive = [0; ENTITY_ALIVE_BYTES];
         for i in 0..ec {
             if state.entities.alive[i] {
                 self.entity_alive[i >> 3] |= 1u8 << (i & 7);
@@ -903,9 +902,7 @@ impl DiffState {
         self.item_count = state.items.count;
         self.item_x[..ic].copy_from_slice(&state.items.x[..ic]);
         self.item_y[..ic].copy_from_slice(&state.items.y[..ic]);
-        for b in self.item_alive.iter_mut() {
-            *b = 0;
-        }
+        self.item_alive = [0; ITEM_ALIVE_BYTES];
         for i in 0..ic {
             if state.items.alive[i] {
                 self.item_alive[i >> 3] |= 1u8 << (i & 7);

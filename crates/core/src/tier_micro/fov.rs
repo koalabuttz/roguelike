@@ -119,9 +119,7 @@ impl MicroFov {
     }
 
     fn clear_visible(&mut self) {
-        for b in self.visible.iter_mut() {
-            *b = 0;
-        }
+        self.visible = [0; MAX_BITFIELD_SIZE];
     }
 
     /// Scan one octant using iterative shadowcasting with integer slopes.

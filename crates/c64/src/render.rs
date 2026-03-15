@@ -1270,7 +1270,7 @@ fn clear_rect(bx: u8, by: u8, bw: u8, bh: u8) {
 // ---------------------------------------------------------------------------
 
 /// Shared end-of-game screen (death or victory).
-#[link_section = ".hiramcode"]
+#[unsafe(link_section = ".hiramcode")]
 #[inline(never)]
 fn render_end_screen(state: &MicroGameState, selected: u8, title: &[u8], title_color: u8) {
     let bx: u8 = 8;
@@ -1398,7 +1398,7 @@ pub fn equip_count(state: &MicroGameState) -> u8 {
 /// then inventory items (equip_count..).
 /// `action_bar`: if Some, we're in Act mode — show the action bar with the
 /// given actions and selected index. If None, show the keyboard hint.
-#[link_section = ".hiramcode"]
+#[unsafe(link_section = ".hiramcode")]
 #[inline(never)]
 pub fn render_inventory(
     state: &MicroGameState,
@@ -1529,7 +1529,7 @@ pub fn render_pause(state: &MicroGameState, selected: u8) {
 }
 
 /// Render the seed code text input dialog.
-#[link_section = ".hiramcode"]
+#[unsafe(link_section = ".hiramcode")]
 #[inline(never)]
 pub fn render_seed_input(buf: &[u8], len: u8) {
     let bx: u8 = 5;
@@ -1565,7 +1565,7 @@ pub fn render_seed_input(buf: &[u8], len: u8) {
 }
 
 /// Render the loading screen shown during level generation.
-#[link_section = ".hiramcode"]
+#[unsafe(link_section = ".hiramcode")]
 #[inline(never)]
 pub fn render_loading() {
     c64::clear_screen();
@@ -1577,7 +1577,7 @@ pub fn render_loading() {
 pub const HELP_PAGES: u8 = 2;
 
 /// Shared help header and footer. Called by each page function.
-#[link_section = ".hiramcode"]
+#[unsafe(link_section = ".hiramcode")]
 #[inline(never)]
 fn help_chrome(page: u8) {
     c64::clear_screen();
@@ -1594,7 +1594,7 @@ fn help_chrome(page: u8) {
 }
 
 /// Help page 1: Controls.
-#[link_section = ".hiramcode"]
+#[unsafe(link_section = ".hiramcode")]
 #[inline(never)]
 fn help_page_controls() {
     help_chrome(0);
@@ -1671,7 +1671,7 @@ const fn fmt_item_row(name: &[u8], effect: &[u8], val: u8) -> [u8; 24] {
 /// Help page 2: Combat + Monsters + Items.
 /// Stats are baked from rules/ const fns at compile time — single source of truth,
 /// zero runtime overhead (identical binary to hardcoded strings).
-#[link_section = ".hiramcode"]
+#[unsafe(link_section = ".hiramcode")]
 #[inline(never)]
 fn help_page_bestiary() {
     use monster_table::MonsterKind;

@@ -280,7 +280,7 @@ pub fn init_hardware() {
 // I/O banking — overlay code at $D000-$DFFF
 // ---------------------------------------------------------------------------
 
-extern "C" {
+unsafe extern "C" {
     static __overlay_vma_start: u8;
     static __overlay_vma_end: u8;
     static __overlay_lma_start: u8;

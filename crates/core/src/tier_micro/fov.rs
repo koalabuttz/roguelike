@@ -235,7 +235,7 @@ impl MicroFov {
     }
 
     /// Compute field of view from (ox, oy). Clears previous visible set.
-    #[cfg_attr(feature = "c64-overlay", link_section = ".overlay")]
+    #[cfg_attr(feature = "c64-overlay", unsafe(link_section = ".overlay"))]
     pub fn compute_fov(&mut self, ox: u8, oy: u8, map: &MicroMap) {
         self.clear_visible();
         self.mark_visible(ox, oy);

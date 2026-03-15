@@ -36,13 +36,13 @@ fn panic(_info: &PanicInfo) -> ! {
 /// (256 bytes) but fine in main RAM. MaybeUninit avoids requiring Default.
 /// Explicit link_section keeps it in main ram so the linker can overflow
 /// smaller compiler-generated statics to the freed KERNAL region.
-#[link_section = ".noinit.state"]
+#[unsafe(link_section = ".noinit.state")]
 static mut STATE: MaybeUninit<MicroGameState> = MaybeUninit::uninit();
 
 /// Previous-frame snapshot for differential rendering (~810 bytes).
 /// Placed in main RAM (.noinit) to free HIRAM for cold render code.
 /// Only accessed during rendering (I/O visible), never during banked compute.
-#[link_section = ".noinit"]
+#[unsafe(link_section = ".noinit")]
 static mut DIFF: render::DiffState = render::DiffState::new();
 
 /// Application states for the main loop.
@@ -656,7 +656,7 @@ fn render_after_step(state: &MicroGameState, old_depth: u8) {
 /// static stacks here.  copy_code_to_ram() must run first: it copies
 /// overlay + HIRAM code from LMA to VMA before init_hardware()'s
 /// callee-save prologue can overwrite the LMA data in .noinit.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn main() -> isize {
     c64::copy_code_to_ram();
     c64::init_hardware();

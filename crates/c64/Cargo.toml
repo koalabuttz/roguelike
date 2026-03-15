@@ -1,7 +1,7 @@
 [package]
 name = "roguelike-c64"
 version = "0.4.0"
-edition = "2021"
+edition = "2024"
 license = "GPL-3.0-or-later"
 description = "Commodore 64 port of the roguelike dungeon crawler"
 

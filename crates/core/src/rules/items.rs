@@ -318,6 +318,21 @@ impl Inventory {
             .enumerate()
             .filter_map(|(i, s)| s.as_ref().map(|slot| (i, slot)))
     }
+
+    /// Get the n-th occupied slot (0-indexed among occupied slots).
+    /// Avoids a 473-byte `FilterMap::nth` monomorphization on 6502.
+    pub fn nth_occupied(&self, n: usize) -> Option<(usize, &InvSlot)> {
+        let mut count = 0usize;
+        for (i, slot) in self.slots.iter().enumerate() {
+            if let Some(s) = slot {
+                if count == n {
+                    return Some((i, s));
+                }
+                count += 1;
+            }
+        }
+        None
+    }
 }
 
 impl Equipment {

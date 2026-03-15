@@ -459,8 +459,7 @@ fn current_actions(state: &MicroGameState, selected: u8) -> &'static [render::In
     } else {
         state
             .inventory
-            .iter()
-            .nth((selected - ec) as usize)
+            .nth_occupied((selected - ec) as usize)
             .map(|(_, slot)| render::actions_for_kind(slot.kind))
             .unwrap_or(&[render::InvAction::Back])
     }
@@ -500,8 +499,7 @@ fn execute_inventory_action(
 ) {
     let slot_idx = state
         .inventory
-        .iter()
-        .nth(inv_selected as usize)
+        .nth_occupied(inv_selected as usize)
         .map(|(i, _)| i as u8);
     if let Some(idx) = slot_idx {
         let cmd = match action {

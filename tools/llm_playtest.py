@@ -23,6 +23,7 @@ Usage:
 import argparse
 import json
 import os
+import threading
 import shutil
 import subprocess
 import sys
@@ -166,6 +167,7 @@ TOOL_SCHEMAS = [
                 "width": {"type": "integer", "description": "Map width (default 80)"},
                 "height": {"type": "integer", "description": "Map height (default 40)"},
                 "seed": {"type": "integer", "description": "Random seed"},
+                "seed_code": {"type": "string", "description": "Seed code (e.g. '123-64x48')"},
                 "compact": {"type": "boolean", "description": "Omit ASCII map from responses"},
             },
         },
@@ -296,7 +298,7 @@ def _strip_maps_from_message(msg):
             pass
 
 
-def play_game_api(mcp_binary, model, seed, max_tool_calls=60):
+def play_game_api(mcp_binary, model, seed, max_tool_calls=60, seed_code=None):
     """Play a single game via the Anthropic API tool_use loop.
 
     Self-contained: creates its own McpClient and anthropic.Anthropic client.
@@ -311,8 +313,12 @@ def play_game_api(mcp_binary, model, seed, max_tool_calls=60):
         client.start()
         api_client = anthropic.Anthropic()
 
+        if seed_code:
+            seed_instruction = f"Play a new game with seed_code \"{seed_code}\". Start by calling new_game with that seed_code."
+        else:
+            seed_instruction = f"Play a new game with seed {seed}. Start by calling new_game with that seed."
         messages = [
-            {"role": "user", "content": f"Play a new game with seed {seed}. Start by calling new_game with that seed."},
+            {"role": "user", "content": seed_instruction},
         ]
 
         tool_calls = 0
@@ -468,7 +474,8 @@ _ALLOWED_MCP_TOOLS = [
 ]
 
 
-def play_game_claude_code(mcp_config_path, seed, max_budget=2.00):
+def play_game_claude_code(mcp_config_path, seed, max_budget=2.00, seed_code=None,
+                          model="opus", effort="medium"):
     """Play a single game via the Claude Code CLI.
 
     Spawns `claude -p` as a subprocess with MCP config, parses the JSON
@@ -477,14 +484,23 @@ def play_game_claude_code(mcp_config_path, seed, max_budget=2.00):
     analytics = pa.new_game_analytics(seed)
     analytics["llm_metrics"]["model"] = "claude-code"
 
-    user_prompt = (
-        f"Play a new game with seed {seed}. "
-        f"Start by calling new_game with that seed."
-    )
+    if seed_code:
+        user_prompt = (
+            f"Play a new game with seed_code \"{seed_code}\". "
+            f"Start by calling new_game with that seed_code."
+        )
+    else:
+        user_prompt = (
+            f"Play a new game with seed {seed}. "
+            f"Start by calling new_game with that seed."
+        )
 
     cmd = [
         "claude", "-p",
-        "--output-format", "json",
+        "--input-format", "stream-json",
+        "--output-format", "stream-json",
+        "--model", model,
+        "--effort", effort,
         "--system-prompt", SYSTEM_PROMPT,
         "--mcp-config", str(mcp_config_path),
         "--strict-mcp-config",
@@ -500,23 +516,92 @@ def play_game_claude_code(mcp_config_path, seed, max_budget=2.00):
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
     env["ROGUELIKE_SPECTATE_PATH"] = f"/tmp/roguelike-spectate-{seed}.txt"
 
+    # Stream stdout to a log file so we can peek at in-progress conversations.
+    log_dir = Path("tools/output/playtest_logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"game-{seed}.jsonl"
+
+    # Create a FIFO for injecting messages into the running game.
+    inject_path = Path(f"/tmp/roguelike-inject-{seed}.fifo")
     try:
-        proc = subprocess.run(
+        inject_path.unlink()
+    except FileNotFoundError:
+        pass
+    os.mkfifo(inject_path)
+
+    try:
+        proc = subprocess.Popen(
             cmd,
-            input=user_prompt,
-            capture_output=True,
-            text=True,
-            timeout=600,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=env,
         )
-        if proc.returncode != 0 and not proc.stdout.strip():
-            stderr_snippet = (proc.stderr or "")[:500]
+
+        # Send the initial prompt as stream-json (binary mode to avoid
+        # TextIOWrapper buffering that prevents delivery to the pipe).
+        initial_msg = json.dumps({
+            "type": "user",
+            "message": {"role": "user", "content": user_prompt},
+        })
+        proc.stdin.write((initial_msg + "\n").encode())
+        proc.stdin.flush()
+
+        # Watcher thread: reads lines from the FIFO and forwards them as
+        # stream-json user messages into the claude subprocess's stdin.
+        def _fifo_watcher():
+            while proc.poll() is None:
+                try:
+                    # Opening a FIFO blocks until a writer connects.
+                    with open(inject_path, "r") as fifo:
+                        for line in fifo:
+                            line = line.strip()
+                            if not line or proc.poll() is not None:
+                                continue
+                            msg = json.dumps({
+                                "type": "user",
+                                "message": {"role": "user", "content": line},
+                            })
+                            try:
+                                proc.stdin.write((msg + "\n").encode())
+                                proc.stdin.flush()
+                            except (BrokenPipeError, OSError):
+                                return
+                except OSError:
+                    # FIFO deleted or process ended.
+                    return
+
+        fifo_thread = threading.Thread(target=_fifo_watcher, daemon=True)
+        fifo_thread.start()
+
+        # Stream stdout to both a log file and an in-memory buffer.
+        # Close stdin when we see a "result" event — claude keeps the
+        # process alive waiting for more input even after budget/turn limits.
+        lines = []
+        with open(log_path, "wb") as log_f:
+            for raw_line in proc.stdout:
+                lines.append(raw_line)
+                log_f.write(raw_line)
+                log_f.flush()
+                if b'"type":"result"' in raw_line:
+                    try:
+                        proc.stdin.close()
+                    except OSError:
+                        pass
+                    break
+
+        proc.wait(timeout=30)
+        raw_output = b"".join(lines).decode("utf-8", errors="replace")
+
+        if proc.returncode != 0 and not raw_output.strip():
+            stderr_snippet = (proc.stderr.read() or b"").decode("utf-8", errors="replace")[:500]
             analytics["error"] = f"claude exited {proc.returncode}: {stderr_snippet}"
             analytics["game_over"] = True
             analytics["llm_metrics"]["strategy_notes"] = analytics["error"]
         else:
-            _parse_claude_code_output(proc.stdout, analytics)
+            _parse_claude_code_output(raw_output, analytics)
     except subprocess.TimeoutExpired:
+        proc.kill()
         analytics["error"] = "timeout"
         analytics["game_over"] = True
         analytics["llm_metrics"]["strategy_notes"] = "Game timed out (600s)"
@@ -524,32 +609,55 @@ def play_game_claude_code(mcp_config_path, seed, max_budget=2.00):
         analytics["error"] = str(e)
         analytics["game_over"] = True
         analytics["llm_metrics"]["strategy_notes"] = f"Error: {e}"
+    finally:
+        # Clean up the FIFO.
+        try:
+            inject_path.unlink()
+        except FileNotFoundError:
+            pass
 
     return analytics
 
 
 def _parse_claude_code_output(raw_output, analytics):
-    """Parse JSON output from ``claude -p --output-format json``.
+    """Parse output from ``claude -p --output-format stream-json``.
 
-    The output is a JSON array of message objects, each with a ``type``
-    field (system, assistant, user, result).  We extract tool_use blocks
+    Each line is a self-contained JSON object with a ``type`` field
+    (system, assistant, user, result).  We extract tool_use blocks
     (for counting), tool_result content (for game observations and fight
     analytics), and text blocks (for strategy notes).
+
+    Also supports the older ``json`` format (single JSON array) for
+    backward compatibility.
     """
     if not raw_output or not raw_output.strip():
         analytics["error"] = "empty output from claude"
         analytics["game_over"] = True
         return
 
-    try:
-        messages = json.loads(raw_output)
-    except json.JSONDecodeError as e:
-        analytics["error"] = f"JSON parse error: {e}"
-        analytics["game_over"] = True
-        return
+    # Try stream-json (line-delimited) first, fall back to single JSON array.
+    messages = []
+    stripped = raw_output.strip()
+    if stripped.startswith("["):
+        # Legacy json format — single array.
+        try:
+            messages = json.loads(stripped)
+        except json.JSONDecodeError as e:
+            analytics["error"] = f"JSON parse error: {e}"
+            analytics["game_over"] = True
+            return
+    else:
+        # stream-json — one JSON object per line.
+        for line in stripped.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                messages.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
 
     if not isinstance(messages, list):
-        # Might be a single result object — wrap it.
         messages = [messages]
 
     last_observation = {}
@@ -804,7 +912,8 @@ def main():
     )
     parser.add_argument("-n", "--games", type=int, default=10, help="Number of games (default: 10)")
     parser.add_argument("-m", "--model", default="claude-sonnet-4-20250514", help="Anthropic model ID (api backend)")
-    parser.add_argument("-s", "--seed", type=int, default=None, help="Starting seed (increments per game)")
+    parser.add_argument("-s", "--seed", default=None,
+                        help="Starting seed: integer or seed code (e.g. '123-64x48')")
     parser.add_argument("-o", "--output", default="tools/output/llm_playtest_results.json", help="Output JSON path")
     parser.add_argument("--backend", choices=["api", "claude-code"], default="api",
                         help="Backend to use (default: api)")
@@ -816,6 +925,10 @@ def main():
                         help="MCP config JSON for claude-code (auto-detected if omitted)")
     parser.add_argument("--max-budget", type=float, default=2.00,
                         help="Max USD per game for claude-code (default: 2.00)")
+    parser.add_argument("--cc-model", default="opus",
+                        help="Model for claude-code backend (default: opus)")
+    parser.add_argument("--cc-effort", default="medium", choices=["low", "medium", "high", "max"],
+                        help="Effort level for claude-code backend (default: medium)")
     parser.add_argument("--report", action="store_true", help="Run visualize.py after completion")
     parser.add_argument("--max-tool-calls", type=int, default=60, help="Max tool calls per game (api backend)")
     args = parser.parse_args()
@@ -845,40 +958,57 @@ def main():
             sys.exit(1)
         mcp_config = _resolve_mcp_config(args.mcp_config)
 
-    start_seed = args.seed if args.seed is not None else int(time.time()) % 100000
+    # Parse seed: could be an integer or a seed code like "123-64x48".
+    seed_suffix = None  # e.g. "-64x48" for seed codes with dimensions
+    if args.seed is None:
+        start_seed = int(time.time()) % 100000
+    elif "-" in args.seed:
+        # Seed code with suffix, e.g. "123-64x48"
+        parts = args.seed.split("-", 1)
+        start_seed = int(parts[0])
+        seed_suffix = "-" + parts[1]
+    else:
+        start_seed = int(args.seed)
 
     backend_label = args.backend
     if args.backend == "api":
         backend_label = f"api ({args.model})"
 
+    seed_display = f"{start_seed}{seed_suffix}" if seed_suffix else str(start_seed)
     print(f"LLM Playtest: {args.games} games, backend={backend_label}, "
-          f"start_seed={start_seed}, parallel={args.parallel}")
+          f"start_seed={seed_display}, parallel={args.parallel}")
     print(f"Output: {args.output}")
     print()
 
     # Build per-game argument lists.
     game_args_list = []
     for i in range(args.games):
-        seed = start_seed + i
+        seed_num = start_seed + i
+        seed_code = f"{seed_num}{seed_suffix}" if seed_suffix else None
+        seed_id = seed_code or seed_num  # for analytics tracking
         if args.backend == "api":
             game_args_list.append({
                 "mcp_binary": mcp_binary,
                 "model": args.model,
-                "seed": seed,
+                "seed": seed_id,
+                "seed_code": seed_code,
                 "max_tool_calls": args.max_tool_calls,
             })
         else:
             game_args_list.append({
                 "mcp_config_path": mcp_config,
-                "seed": seed,
+                "seed": seed_id,
+                "seed_code": seed_code,
                 "max_budget": args.max_budget,
+                "model": args.cc_model,
+                "effort": args.cc_effort,
             })
 
     play_fn = play_game_api if args.backend == "api" else play_game_claude_code
     meta = {
         "backend": args.backend,
         "model": args.model if args.backend == "api" else "claude-code",
-        "start_seed": start_seed,
+        "start_seed": seed_display,
         "games_requested": args.games,
         "games_completed": 0,
         "parallel": args.parallel,

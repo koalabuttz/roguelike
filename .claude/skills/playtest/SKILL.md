@@ -12,13 +12,14 @@ Run LLM-driven roguelike playtesting using `tools/llm_playtest.py` with the `cla
 - `/playtest` — Play 5 games (default)
 - `/playtest 10` — Play 10 games
 - `/playtest --seed 42` — Play 5 games starting from seed 42
+- `/playtest --seed 123-64x48` — Play 5 games on micro tier at native resolution
 - `/playtest 10 --seed 100 --parallel 4` — Play 10 games, 4 at a time
 
 ## Instructions
 
 1. Parse the user's arguments to determine count, seed, and parallelism:
    - First positional number → game count (default: 5)
-   - `--seed N` → starting seed
+   - `--seed N` or `--seed CODE-WxH` → starting seed or seed code
    - `--parallel N` → concurrent games (default: 2)
 
 2. Run the playtest script via Bash:

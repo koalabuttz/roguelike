@@ -65,11 +65,12 @@ fn read_cia_seed() -> u16 {
 }
 
 /// Start a new game with the given seed and dimensions.
-/// Writes to the global STATE and returns a mutable reference.
+/// Initializes directly into the global STATE to avoid a ~4.5 KB temporary
+/// on the static stack (rust-mos allocates large return values in .noinit).
 fn start_game(seed: u16, width: u8, height: u8) -> &'static mut MicroGameState {
     c64::io_bank_out();
     unsafe {
-        STATE.write(MicroGameState::new(seed, width, height));
+        MicroGameState::new_into(STATE.as_mut_ptr(), seed, width, height);
     }
     c64::io_bank_in();
     unsafe { STATE.assume_init_mut() }

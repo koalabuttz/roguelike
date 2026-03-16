@@ -61,44 +61,53 @@ pub struct MicroGameState {
 impl MicroGameState {
     /// Create a new game with the given seed and map dimensions.
     pub fn new(seed: u16, width: u8, height: u8) -> Self {
-        let mut rng = LfsrRng16::new(seed);
-        let mut map = MicroMap::new(width, height);
-        let (sx, sy) = map.generate(&mut rng);
-
-        let mut entities = EntityStore::new();
-        entities.spawn_player(sx, sy);
-        spawn::spawn_monsters(&mut entities, &map, &mut rng);
-
-        let mut items = ItemStore::new();
-        spawn::spawn_items(&mut items, &map, &mut rng);
-
-        let mut fov = MicroFov::new(width, height);
-        fov.compute_fov(sx, sy, &map);
-
-        let mut log = MicroMessageLog::new();
-        log.add(GameEvent::Welcome);
-
-        Self {
-            map,
-            fov,
-            entities,
-            items,
-            equipment: Equipment::default(),
-            inventory: Inventory::new(),
-            log,
-            rng,
-            seed,
-            turn_count: 0,
-            kills: 0,
-            depth: 1,
-            game_over: false,
-            game_won: false,
-            idle_count: 0,
-            wandering_spawned: 0,
-            regen_counter: balance::REGEN_INTERVAL,
-            wandering_counter: balance::WANDERING_GRACE_PERIOD - 1,
-            ambient_sound_counter: balance::WANDERING_AMBIENT_SOUND_INTERVAL - 1,
+        // Safety: new_into initializes all fields.
+        let mut state = core::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            Self::new_into(state.as_mut_ptr(), seed, width, height);
+            state.assume_init()
         }
+    }
+
+    /// Initialize a game directly at the given destination pointer.
+    /// Avoids allocating a temporary `MicroGameState` on the static stack,
+    /// which on rust-mos (6502) would cost ~4.5 KB of `.noinit`.
+    ///
+    /// # Safety
+    /// `dest` must point to valid, writable memory for one `MicroGameState`.
+    pub unsafe fn new_into(dest: *mut Self, seed: u16, width: u8, height: u8) {
+        // Safety: caller guarantees dest points to valid writable memory.
+        let s = unsafe { &mut *dest };
+        s.rng = LfsrRng16::new(seed);
+        s.map = MicroMap::new(width, height);
+        let (sx, sy) = s.map.generate(&mut s.rng);
+
+        s.entities = EntityStore::new();
+        s.entities.spawn_player(sx, sy);
+        spawn::spawn_monsters(&mut s.entities, &s.map, &mut s.rng);
+
+        s.items = ItemStore::new();
+        spawn::spawn_items(&mut s.items, &s.map, &mut s.rng);
+
+        s.fov = MicroFov::new(width, height);
+        s.fov.compute_fov(sx, sy, &s.map);
+
+        s.log = MicroMessageLog::new();
+        s.log.add(GameEvent::Welcome);
+
+        s.equipment = Equipment::default();
+        s.inventory = Inventory::new();
+        s.seed = seed;
+        s.turn_count = 0;
+        s.kills = 0;
+        s.depth = 1;
+        s.game_over = false;
+        s.game_won = false;
+        s.idle_count = 0;
+        s.wandering_spawned = 0;
+        s.regen_counter = balance::REGEN_INTERVAL;
+        s.wandering_counter = balance::WANDERING_GRACE_PERIOD - 1;
+        s.ambient_sound_counter = balance::WANDERING_AMBIENT_SOUND_INTERVAL - 1;
     }
 
     /// Returns true if the game has reached a terminal state (death or victory).

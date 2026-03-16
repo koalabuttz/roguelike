@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- C64: In-place game state init — free 7.8 KB by eliminating static stack temporaries
 - Eliminate u64 multiply runtime from C64 seed decode (#125)
 - Add kills, turns, and seed to standard tier game-over screen (#108)
 - Add ATK/DEF stats to C64 status bar (#107)
@@ -36,6 +37,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Refine lead voice timbre and register for less distracting ambient feel (#1)
 
 ### Changed
+- C64: Compress spinner sprite data — derive 3 frames via vflip at runtime
+- Integrate items into GameState (pickup, equipment, effective stats) (#5)
 - C64: eliminate __mulsi3 via subtraction-based u16 decimal formatting (#126)
 - C64: hiram code overlay for large functions (#96)
 - C64: scrollable multi-page help screen (#110)

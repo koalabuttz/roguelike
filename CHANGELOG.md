@@ -50,6 +50,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - C64: Aggressive inlining to reclaim .noinit static stack space (#94)
 
 ### Fixed
+- Investigate micro-tier item equip/use failure in MCP playtesting (#139)
 - Fix code review issues: CHANGELOG dupe, bestiary stats, status bar layout (#111)
 - Fix dropping equipped items on C64 inventory (#102)
 - C64: Freeze when equipping item via keyboard in inventory (#98)

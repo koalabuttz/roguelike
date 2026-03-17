@@ -274,7 +274,8 @@ impl RoguelikeMcpServer {
                      move_southeast, move_southwest, wait, descend, \
                      autorun_north, autorun_south, autorun_east, autorun_west, \
                      autorun_northeast, autorun_northwest, autorun_southeast, \
-                     autorun_southwest, auto_fight",
+                     autorun_southwest, auto_fight, pickup, use_item_X, \
+                     equip_item_X, drop_item_X (X = inventory slot a-z)",
                     params.action
                 ),
                 None,

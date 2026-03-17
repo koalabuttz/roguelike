@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add explored stairs coordinates to MCP observe response (#138)
+- Compress sprite data: derive 4 rotation frames at runtime (#131)
 - C64: In-place game state init — free 7.8 KB by eliminating static stack temporaries
 - Eliminate u64 multiply runtime from C64 seed decode (#125)
 - Add kills, turns, and seed to standard tier game-over screen (#108)

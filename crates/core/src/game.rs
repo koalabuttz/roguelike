@@ -51,6 +51,8 @@ pub enum AutorunStopReason {
     PathComplete,
     /// Safety cap on steps reached.
     MaxSteps,
+    /// Player stepped onto stairs.
+    StairsFound,
 }
 
 /// Result of an autorun sequence — multiple steps collapsed into one call.
@@ -116,6 +118,11 @@ pub struct GameObservation {
     pub depth: Stat,
     pub target_depth: Stat,
     pub game_won: bool,
+    // --- stairs ---
+    /// Explored stairs-down position, if known. Populated once the player
+    /// has explored the tile containing stairs (spatial memory analogue).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stairs: Option<(Coord, Coord)>,
 }
 
 /// Result of an auto-fight sequence — combat resolved in one call.
@@ -260,6 +267,16 @@ impl AutorunStepper {
                 if *index >= path.len() {
                     return self.finish(state, AutorunStopReason::PathComplete);
                 }
+            }
+        }
+
+        // Check: stepped onto stairs.
+        {
+            let px = state.entities[0].x;
+            let py = state.entities[0].y;
+            let idx = state.map.idx(px, py);
+            if state.map.tiles[idx] == map::Tile::StairsDown {
+                return self.finish(state, AutorunStopReason::StairsFound);
             }
         }
 
@@ -1472,6 +1489,13 @@ impl GameState {
             .count() as Stat;
         let explored_pct = self.explored_pct();
 
+        // Stairs position — report if the stairs tile has been explored.
+        let stairs = self
+            .explored
+            .iter()
+            .find(|&&(x, y)| self.map.tiles[self.map.idx(x, y)] == map::Tile::StairsDown)
+            .copied();
+
         GameObservation {
             player_hp: player.hp,
             player_max_hp: player.max_hp,
@@ -1500,6 +1524,7 @@ impl GameState {
             depth: self.depth,
             target_depth: self.target_depth,
             game_won: self.game_won,
+            stairs,
         }
     }
 

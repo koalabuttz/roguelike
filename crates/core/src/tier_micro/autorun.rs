@@ -7,6 +7,7 @@
 use super::entity::EntityStore;
 use super::fov::MicroFov;
 use super::game::MicroGameState;
+use super::map::TILE_STAIRS_DOWN;
 use super::types::{MAX_ENTITIES, PLAYER_IDX};
 use crate::command::{Direction, GameCommand};
 use crate::rules::balance;
@@ -28,6 +29,10 @@ pub enum MicroAutorunStop {
     CorridorBranches,
     /// Safety cap on steps reached.
     MaxSteps,
+    /// Pathfinding reached the destination tile.
+    PathComplete,
+    /// Player stepped onto stairs.
+    StairsFound,
 }
 
 impl MicroAutorunStop {
@@ -40,6 +45,8 @@ impl MicroAutorunStop {
             Self::GameOver => AutorunStopCause::GameOver,
             Self::CorridorBranches => AutorunStopCause::CorridorBranches,
             Self::MaxSteps => AutorunStopCause::MaxSteps,
+            Self::PathComplete => AutorunStopCause::PathComplete,
+            Self::StairsFound => AutorunStopCause::StairsFound,
         }
     }
 }
@@ -177,6 +184,151 @@ impl MicroAutorunStepper {
                 return MicroStepOutcome::Done(MicroAutorunStop::CorridorBranches);
             }
             return MicroStepOutcome::Done(MicroAutorunStop::WallReached);
+        }
+
+        // Check 8: stepped onto stairs.
+        if state.map.tile_at(px, py) == TILE_STAIRS_DOWN {
+            return MicroStepOutcome::Done(MicroAutorunStop::StairsFound);
+        }
+
+        MicroStepOutcome::Continue
+    }
+
+    fn snapshot_visible(&mut self, entities: &EntityStore, fov: &MicroFov) {
+        let mut i: usize = 1;
+        while i < entities.count as usize {
+            self.visible_before[i] =
+                entities.alive[i] && fov.is_visible(entities.x[i], entities.y[i]);
+            i += 1;
+        }
+    }
+
+    fn has_new_visible_monster(&self, entities: &EntityStore, fov: &MicroFov) -> bool {
+        let mut i: usize = 1;
+        while i < entities.count as usize {
+            if entities.alive[i]
+                && fov.is_visible(entities.x[i], entities.y[i])
+                && !self.visible_before[i]
+            {
+                return true;
+            }
+            i += 1;
+        }
+        false
+    }
+}
+
+// ── BFS-based pathfinding stepper ──────────────────────────────────
+
+use super::pathfinding::{self, BfsBuffers};
+
+/// Autorun stepper that follows a BFS path to a target tile.
+///
+/// Re-pathfinds each step (handles map changes from combat, spawns, etc.).
+/// Uses the same stop conditions as directional autorun: monster spotted,
+/// damage taken, game over, max steps.
+pub struct MicroBfsStepper {
+    pub tx: u8,
+    pub ty: u8,
+    steps_taken: u8,
+    max_steps: u8,
+    visible_before: [bool; MAX_ENTITIES],
+}
+
+impl MicroBfsStepper {
+    /// Create a new BFS stepper targeting (tx, ty).
+    pub fn new(tx: u8, ty: u8) -> Self {
+        Self {
+            tx,
+            ty,
+            steps_taken: 0,
+            max_steps: balance::MAX_AUTORUN_STEPS,
+            visible_before: [false; MAX_ENTITIES],
+        }
+    }
+
+    /// How many steps have been taken so far.
+    pub fn steps_taken(&self) -> u8 {
+        self.steps_taken
+    }
+
+    /// Execute one step toward the target.
+    pub fn next_step(
+        &mut self,
+        state: &mut MicroGameState,
+        buf: &mut BfsBuffers,
+    ) -> MicroStepOutcome {
+        let pi = PLAYER_IDX as usize;
+
+        // Check 1: max steps cap.
+        if self.steps_taken >= self.max_steps {
+            return MicroStepOutcome::Done(MicroAutorunStop::MaxSteps);
+        }
+
+        // Check 2: already at target.
+        if state.entities.x[pi] == self.tx && state.entities.y[pi] == self.ty {
+            return MicroStepOutcome::Done(MicroAutorunStop::PathComplete);
+        }
+
+        // Check 3: adjacent monster before stepping.
+        if has_adjacent_monster(&state.entities) {
+            return MicroStepOutcome::Done(MicroAutorunStop::MonsterSpotted);
+        }
+
+        // Find direction toward target via backward BFS.
+        let dir = match pathfinding::find_first_step(
+            state.entities.x[pi],
+            state.entities.y[pi],
+            self.tx,
+            self.ty,
+            &state.map,
+            &state.fov,
+            buf,
+        ) {
+            Some(d) => d,
+            None => return MicroStepOutcome::Done(MicroAutorunStop::PathComplete),
+        };
+
+        // Snapshot HP and visible monsters.
+        let hp_before = state.entities.hp[pi];
+        self.snapshot_visible(&state.entities, &state.fov);
+
+        // Execute the move.
+        let result = state.step(GameCommand::Move(dir));
+
+        if !result.action_taken {
+            return MicroStepOutcome::Done(MicroAutorunStop::WallReached);
+        }
+
+        self.steps_taken += 1;
+
+        // Check: game over.
+        if result.game_over {
+            return MicroStepOutcome::Done(MicroAutorunStop::GameOver);
+        }
+
+        // Check: damage taken.
+        if state.entities.hp[pi] < hp_before {
+            return MicroStepOutcome::Done(MicroAutorunStop::DamageTaken);
+        }
+
+        // Check: new monster spotted.
+        if self.has_new_visible_monster(&state.entities, &state.fov) {
+            return MicroStepOutcome::Done(MicroAutorunStop::MonsterSpotted);
+        }
+
+        // Check: reached target.
+        if state.entities.x[pi] == self.tx && state.entities.y[pi] == self.ty {
+            return MicroStepOutcome::Done(MicroAutorunStop::PathComplete);
+        }
+
+        // Check: stepped onto stairs.
+        if state
+            .map
+            .tile_at(state.entities.x[pi], state.entities.y[pi])
+            == TILE_STAIRS_DOWN
+        {
+            return MicroStepOutcome::Done(MicroAutorunStop::StairsFound);
         }
 
         MicroStepOutcome::Continue

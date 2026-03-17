@@ -21,6 +21,8 @@ pub enum AutorunStopCause {
     GameOver = 3,
     CorridorBranches = 4,
     MaxSteps = 5,
+    PathComplete = 6,
+    StairsFound = 7,
 }
 
 /// An actor in a game event — the player, a known monster type, or an

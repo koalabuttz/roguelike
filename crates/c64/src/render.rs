@@ -786,6 +786,8 @@ fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
                 AutorunStopCause::GameOver => b"You have died!",
                 AutorunStopCause::CorridorBranches => b"Path branches.",
                 AutorunStopCause::MaxSteps => b"You stop running.",
+                AutorunStopCause::PathComplete => b"Arrived.",
+                AutorunStopCause::StairsFound => b"Stairs here.",
             };
             copy_bytes(buf, 0, msg)
         }
@@ -1333,13 +1335,35 @@ pub fn render_victory(state: &MicroGameState, selected: u8) {
 }
 
 /// Render the title screen with menu.
-pub fn render_title(selected: u8) {
+pub fn render_title(selected: u8, has_save: bool) {
     c64::clear_screen();
 
     c64::draw_text(11, 4, b"R O G U E L I K E", c64::COLOR_WHITE);
 
-    let menu_items: [&[u8]; 2] = [b"NEW GAME", b"ENTER SEED"];
-    draw_menu(&menu_items, selected, 10, 10);
+    if has_save {
+        let menu_items: [&[u8]; 3] = [b"CONTINUE", b"NEW GAME", b"ENTER SEED"];
+        draw_menu(&menu_items, selected, 10, 10);
+    } else {
+        let menu_items: [&[u8]; 2] = [b"NEW GAME", b"ENTER SEED"];
+        draw_menu(&menu_items, selected, 10, 10);
+    }
+}
+
+/// Render "SAVING..." status overlay.
+pub fn render_saving() {
+    c64::draw_text(15, 12, b"SAVING...", c64::COLOR_YELLOW);
+}
+
+/// Render "LOADING..." status overlay.
+pub fn render_loading_save() {
+    c64::clear_screen();
+    c64::draw_text(15, 12, b"LOADING...", c64::COLOR_LGREY);
+}
+
+/// Render a save/load error message. Waits for a keypress (caller handles).
+pub fn render_save_error(msg: &[u8]) {
+    let x = (40u8.saturating_sub(msg.len() as u8)) / 2;
+    c64::draw_text(x, 14, msg, c64::COLOR_RED);
 }
 
 /// Inventory action bar actions.
@@ -1513,14 +1537,14 @@ pub fn render_pause(state: &MicroGameState, selected: u8) {
     let bx: u8 = 8;
     let by: u8 = 8;
     let bw: u8 = 24;
-    let bh: u8 = 7;
+    let bh: u8 = 9;
 
     clear_rect(bx, by, bw, bh);
     c64::fill_row(by, 0xC0, c64::COLOR_CYAN);
 
     c64::draw_text(bx + 2, by + 1, b"PAUSED", c64::COLOR_CYAN);
 
-    let menu_items: [&[u8]; 2] = [b"Resume", b"Title Screen"];
+    let menu_items: [&[u8]; 3] = [b"Resume", b"Save & Quit", b"Title Screen"];
     draw_menu(&menu_items, selected, bx + 4, by + 3);
 }
 

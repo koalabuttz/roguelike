@@ -132,6 +132,8 @@ pub fn format_event(event: GameEvent) -> String {
             AutorunStopCause::GameOver => "You have died!".into(),
             AutorunStopCause::CorridorBranches => "Path branches.".into(),
             AutorunStopCause::MaxSteps => "You stop running.".into(),
+            AutorunStopCause::PathComplete => "Arrived.".into(),
+            AutorunStopCause::StairsFound => "You see stairs here.".into(),
         },
     }
 }

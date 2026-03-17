@@ -10,8 +10,8 @@ use std::any::Any;
 use crate::command::{Direction, GameCommand};
 use crate::data::GameData;
 use crate::game::{
-    AutorunResult, AutorunStopReason, EntityInfo, GameObservation, GameState, ItemInfo,
-    StepOutcome, StepResult, TileInfo,
+    AutoExploreResult, AutoFightResult, AutorunResult, AutorunStopReason, EntityInfo,
+    GameObservation, GameState, ItemInfo, StepOutcome, StepResult, TileInfo,
 };
 use crate::map::MapPreset;
 use crate::message_log::format_event;
@@ -24,7 +24,7 @@ use crate::tier_micro::game::MicroGameState;
 use crate::tier_micro::item_store::ItemStore;
 use crate::tier_micro::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_STRUCTURAL, TILE_WALL};
 use crate::tier_micro::types::PLAYER_IDX;
-use crate::types::Stat;
+use crate::types::{Coord, Stat};
 
 /// Uniform interface for driving a game of any capability tier.
 ///
@@ -218,6 +218,135 @@ impl MicroGameStateAdapter {
         stepper.run_to_completion(self)
     }
 
+    /// Pathfind to (tx, ty) using BFS. Returns an `AutorunResult`.
+    pub fn pathfind_to(&mut self, tx: i32, ty: i32) -> Result<AutorunResult, String> {
+        if tx < 0 || ty < 0 || tx >= self.game.map.width as i32 || ty >= self.game.map.height as i32
+        {
+            return Err("Target is out of bounds".into());
+        }
+        let tx = tx as u8;
+        let ty = ty as u8;
+        if !self.game.fov.is_explored(tx, ty) {
+            return Err("Target tile has not been explored".into());
+        }
+        if !self.game.map.is_walkable(tx, ty) {
+            return Err("Target tile is not walkable".into());
+        }
+
+        let explored_before = self.game.fov.explored_floor_count(&self.game.map) as Stat;
+        let mut buf = crate::tier_micro::pathfinding::BfsBuffers::new();
+        let mut stepper = crate::tier_micro::autorun::MicroBfsStepper::new(tx, ty);
+        let mut all_messages = Vec::new();
+
+        loop {
+            use crate::tier_micro::autorun::MicroStepOutcome;
+            use crate::tier_micro::msglog::MSG_COUNT;
+
+            let msg_count_before = self.game.log.total();
+            let outcome = stepper.next_step(&mut self.game, &mut buf);
+
+            // Collect new messages.
+            let new_count = self.game.log.total();
+            let added = new_count
+                .wrapping_sub(msg_count_before)
+                .min(MSG_COUNT as u16) as u8;
+            for i in 0..added {
+                if let Some(evt) = self.game.log.recent(added - 1 - i) {
+                    all_messages.push(format_event(evt));
+                }
+            }
+
+            match outcome {
+                MicroStepOutcome::Continue => continue,
+                MicroStepOutcome::Done(stop) => {
+                    let explored_after = self.game.fov.explored_floor_count(&self.game.map) as Stat;
+                    return Ok(AutorunResult {
+                        steps_taken: stepper.steps_taken() as Stat,
+                        stop_reason: map_stop_reason(stop),
+                        messages: all_messages,
+                        new_tiles_revealed: explored_after - explored_before,
+                    });
+                }
+            }
+        }
+    }
+
+    /// Auto-explore: find nearest frontier via BFS, then walk to it.
+    pub fn auto_explore(&mut self) -> Result<AutoExploreResult, String> {
+        let pi = PLAYER_IDX as usize;
+        let px = self.game.entities.x[pi];
+        let py = self.game.entities.y[pi];
+
+        let mut buf = crate::tier_micro::pathfinding::BfsBuffers::new();
+
+        let (tx, ty) = crate::tier_micro::pathfinding::find_nearest_frontier(
+            px,
+            py,
+            &self.game.map,
+            &self.game.fov,
+            &mut buf,
+        )
+        .ok_or_else(|| "No unexplored areas reachable".to_string())?;
+
+        let movement = self.pathfind_to(tx as i32, ty as i32)?;
+
+        Ok(AutoExploreResult {
+            target_x: tx as Coord,
+            target_y: ty as Coord,
+            movement,
+        })
+    }
+
+    /// Count reachable frontier tiles (for MCP response).
+    pub fn frontier_count(&self) -> i32 {
+        let pi = PLAYER_IDX as usize;
+        let mut buf = crate::tier_micro::pathfinding::BfsBuffers::new();
+        crate::tier_micro::pathfinding::frontier_count(
+            self.game.entities.x[pi],
+            self.game.entities.y[pi],
+            &self.game.map,
+            &self.game.fov,
+            &mut buf,
+        ) as i32
+    }
+
+    /// Auto-fight: resolve adjacent combat in one call (micro tier).
+    pub fn auto_fight(&mut self) -> Result<AutoFightResult, String> {
+        use crate::tier_micro::msglog::MSG_COUNT;
+
+        let msg_count_before = self.game.log.total();
+
+        let result = self
+            .game
+            .auto_fight()
+            .ok_or_else(|| "No adjacent monster to fight.".to_string())?;
+
+        // Collect messages from the fight.
+        let new_count = self.game.log.total();
+        let added = new_count
+            .wrapping_sub(msg_count_before)
+            .min(MSG_COUNT as u16) as u8;
+        let mut messages = Vec::new();
+        for i in 0..added {
+            if let Some(evt) = self.game.log.recent(added - 1 - i) {
+                messages.push(format_event(evt));
+            }
+        }
+
+        let target_name = result
+            .target_kind
+            .map(|k| monster_table::name(k).to_string())
+            .unwrap_or_else(|| "Something".to_string());
+
+        Ok(AutoFightResult {
+            rounds: result.rounds as Stat,
+            target_name,
+            target_killed: result.target_killed,
+            player_hp_lost: result.player_hp_lost as Stat,
+            messages,
+        })
+    }
+
     /// The seed used to create this micro game.
     pub fn seed(&self) -> u16 {
         self.seed
@@ -318,6 +447,7 @@ impl GameStep for MicroGameStateAdapter {
             depth: self.game.depth as i32,
             target_depth: balance::TARGET_DEPTH as i32,
             game_won: self.game.game_won,
+            stairs: find_explored_stairs(map, fov),
         }
     }
 
@@ -456,6 +586,8 @@ fn map_stop_reason(stop: crate::tier_micro::autorun::MicroAutorunStop) -> Autoru
         MicroAutorunStop::GameOver => AutorunStopReason::GameOver,
         MicroAutorunStop::CorridorBranches => AutorunStopReason::CorridorBranches,
         MicroAutorunStop::MaxSteps => AutorunStopReason::MaxSteps,
+        MicroAutorunStop::PathComplete => AutorunStopReason::PathComplete,
+        MicroAutorunStop::StairsFound => AutorunStopReason::StairsFound,
     }
 }
 
@@ -508,6 +640,21 @@ impl MicroAutorunStepper {
 }
 
 // ── Micro adapter helpers ────────────────────────────────────────────
+
+/// Find explored stairs-down position on the micro-tier map, if any.
+fn find_explored_stairs(
+    map: &crate::tier_micro::map::MicroMap,
+    fov: &MicroFov,
+) -> Option<(Coord, Coord)> {
+    for y in 0..map.height {
+        for x in 0..map.width {
+            if fov.is_explored(x, y) && map.tile_at(x, y) == TILE_STAIRS_DOWN {
+                return Some((x as Coord, y as Coord));
+            }
+        }
+    }
+    None
+}
 
 fn tile_glyph(tile: u8) -> char {
     match tile {

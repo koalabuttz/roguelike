@@ -55,13 +55,6 @@ fn require_standard(game: &dyn GameStep) -> Result<&GameState, McpError> {
     })
 }
 
-/// Require a mutable standard-tier game, returning an MCP error if not.
-fn require_standard_mut(game: &mut dyn GameStep) -> Result<&mut GameState, McpError> {
-    standard_state_mut(game).ok_or_else(|| {
-        McpError::invalid_request("This operation requires a standard-tier game", None)
-    })
-}
-
 /// MCP server that wraps a roguelike game session.
 ///
 /// Holds an `Option<GameSession>` behind a mutex: `None` until `new_game` is
@@ -240,12 +233,26 @@ impl RoguelikeMcpServer {
 
         let compact = session.compact;
 
-        // Auto-fight: resolve adjacent combat in one call (standard tier only).
+        // Auto-fight: resolve adjacent combat in one call.
         if params.action == "auto_fight" {
-            let state = require_standard_mut(session.game.as_mut())?;
-            let fight_result = state
-                .auto_fight()
-                .map_err(|e| McpError::invalid_request(e, None))?;
+            let fight_result = if let Some(state) = standard_state_mut(session.game.as_mut()) {
+                state
+                    .auto_fight()
+                    .map_err(|e| McpError::invalid_request(e, None))?
+            } else if let Some(adapter) = session
+                .game
+                .as_any_mut()
+                .downcast_mut::<game_step::MicroGameStateAdapter>()
+            {
+                adapter
+                    .auto_fight()
+                    .map_err(|e| McpError::invalid_request(e, None))?
+            } else {
+                return Err(McpError::invalid_request(
+                    "Auto-fight not supported for this game tier",
+                    None,
+                ));
+            };
             let observation = session.game.observe();
             self.spectator.write_frame(&observation);
             let json = format_auto_fight_response(
@@ -421,11 +428,27 @@ impl RoguelikeMcpServer {
         }
 
         let compact = session.compact;
-        let state = require_standard_mut(session.game.as_mut())?;
-        let pathfind_result = state
-            .pathfind_to(params.x, params.y)
-            .map_err(|e| McpError::invalid_request(e, None))?;
-        let frontiers = state.frontier_tiles();
+        let pathfind_result = if let Some(state) = standard_state_mut(session.game.as_mut()) {
+            state
+                .pathfind_to(params.x, params.y)
+                .map_err(|e| McpError::invalid_request(e, None))?
+        } else if let Some(adapter) = session
+            .game
+            .as_any_mut()
+            .downcast_mut::<game_step::MicroGameStateAdapter>()
+        {
+            adapter
+                .pathfind_to(params.x, params.y)
+                .map_err(|e| McpError::invalid_request(e, None))?
+        } else {
+            return Err(McpError::invalid_request(
+                "Pathfinding not supported for this game tier",
+                None,
+            ));
+        };
+        let frontiers: Vec<Pos> = standard_state(session.game.as_ref())
+            .map(|s| s.frontier_tiles())
+            .unwrap_or_default();
         let observation = session.game.observe();
         self.spectator.write_frame(&observation);
         let json = format_response(
@@ -457,11 +480,29 @@ impl RoguelikeMcpServer {
         }
 
         let compact = session.compact;
-        let state = require_standard_mut(session.game.as_mut())?;
-        let explore_result = state
-            .auto_explore()
-            .map_err(|e| McpError::invalid_request(e, None))?;
-        let frontier_count = state.frontier_tiles().len() as i32;
+        let (explore_result, frontier_count) =
+            if let Some(state) = standard_state_mut(session.game.as_mut()) {
+                let result = state
+                    .auto_explore()
+                    .map_err(|e| McpError::invalid_request(e, None))?;
+                let fc = state.frontier_tiles().len() as i32;
+                (result, fc)
+            } else if let Some(adapter) = session
+                .game
+                .as_any_mut()
+                .downcast_mut::<game_step::MicroGameStateAdapter>()
+            {
+                let result = adapter
+                    .auto_explore()
+                    .map_err(|e| McpError::invalid_request(e, None))?;
+                let fc = adapter.frontier_count();
+                (result, fc)
+            } else {
+                return Err(McpError::invalid_request(
+                    "Auto-explore not supported for this game tier",
+                    None,
+                ));
+            };
         let observation = session.game.observe();
         self.spectator.write_frame(&observation);
         let json = format_auto_explore_response(

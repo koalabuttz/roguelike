@@ -187,6 +187,7 @@ def run_tui(stdscr):
     selected = 0
     input_buf = ""
     input_mode = False
+    broadcast_mode = False  # When True, Enter sends to all games.
     scroll_offset = 0
     mode = "map"  # "map" or "chat"
     status_msg = ""
@@ -368,7 +369,10 @@ def run_tui(stdscr):
             pass
 
         if input_mode:
-            prompt = f"Send to {games[selected]['seed'] if games else '?'}: "
+            if broadcast_mode:
+                prompt = "Broadcast to ALL: "
+            else:
+                prompt = f"Send to {games[selected]['seed'] if games else '?'}: "
             try:
                 stdscr.addnstr(h - 1, 0, prompt + input_buf, w - 1,
                                curses.color_pair(3) | curses.A_BOLD)
@@ -376,7 +380,7 @@ def run_tui(stdscr):
                 pass
             curses.curs_set(1)
         else:
-            help_text = "j/k:select  arrows:scroll  m:map  c:chat  i:inject  q:quit"
+            help_text = "j/k:select  arrows:scroll  m:map  c:chat  i:inject  a:broadcast  q:quit"
             if status_msg and time.time() < status_expire:
                 help_text = status_msg
             try:
@@ -399,22 +403,36 @@ def run_tui(stdscr):
         if input_mode:
             if ch == 27:  # Escape
                 input_mode = False
+                broadcast_mode = False
                 input_buf = ""
             elif ch in (10, 13):  # Enter
-                if input_buf.strip() and games and 0 <= selected < len(games):
-                    game = games[selected]
-                    if game["fifo_path"]:
-                        try:
-                            send_message(game["fifo_path"], input_buf.strip())
-                            status_msg = f"Sent to {game['seed']}"
-                            status_expire = time.time() + 3
-                        except OSError as e:
-                            status_msg = f"Error: {e}"
-                            status_expire = time.time() + 5
-                    else:
-                        status_msg = f"No FIFO for {game['seed']} (game ended?)"
+                if input_buf.strip() and games:
+                    if broadcast_mode:
+                        sent = 0
+                        for g in games:
+                            if g["fifo_path"]:
+                                try:
+                                    send_message(g["fifo_path"], input_buf.strip())
+                                    sent += 1
+                                except OSError:
+                                    pass
+                        status_msg = f"Broadcast to {sent}/{len(games)} games"
                         status_expire = time.time() + 3
+                    elif 0 <= selected < len(games):
+                        game = games[selected]
+                        if game["fifo_path"]:
+                            try:
+                                send_message(game["fifo_path"], input_buf.strip())
+                                status_msg = f"Sent to {game['seed']}"
+                                status_expire = time.time() + 3
+                            except OSError as e:
+                                status_msg = f"Error: {e}"
+                                status_expire = time.time() + 5
+                        else:
+                            status_msg = f"No FIFO for {game['seed']} (game ended?)"
+                            status_expire = time.time() + 3
                 input_mode = False
+                broadcast_mode = False
                 input_buf = ""
                 mode = "chat"  # Switch to chat to see response.
                 scroll_offset = 0  # Pin to bottom to see response.
@@ -448,13 +466,10 @@ def run_tui(stdscr):
                     status_msg = "No active FIFO for this game"
                     status_expire = time.time() + 3
             elif ch == ord("a"):
-                # Broadcast mode — type a message to send to all.
+                # Broadcast mode — message will be sent to all games on Enter.
                 input_mode = True
+                broadcast_mode = True
                 input_buf = ""
-                # Hack: we'll handle broadcast in the send logic.
-                # For now, just use regular inject and let user switch.
-                status_msg = "Type message (sends to selected game)"
-                status_expire = time.time() + 2
             elif ch == ord("1") and len(games) >= 1:
                 selected = 0
             elif ch == ord("2") and len(games) >= 2:

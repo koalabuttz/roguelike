@@ -18,7 +18,7 @@ use crate::rules::balance;
 use crate::rules::damage;
 use crate::rules::items::{self as rules_items, Equipment, Inventory};
 use crate::rules::message::{GameEvent, SoundDistance};
-use crate::rules::monster_table::AiBehavior;
+use crate::rules::monster_table::{AiBehavior, MonsterKind};
 
 /// Result of a single step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,12 +50,12 @@ pub struct MicroGameState {
     pub wandering_spawned: u8,
     /// Counts down each turn; triggers regen at zero and resets.
     /// Avoids modulo on 6502 where division is expensive.
-    regen_counter: u8,
+    pub(crate) regen_counter: u8,
     /// Counts down each turn; triggers wandering spawn check at zero.
     /// Uses the same decrement pattern as regen_counter to avoid modulo.
-    wandering_counter: u8,
+    pub(crate) wandering_counter: u8,
     /// Counts down each turn; triggers ambient sound check at zero.
-    ambient_sound_counter: u8,
+    pub(crate) ambient_sound_counter: u8,
 }
 
 impl MicroGameState {
@@ -694,6 +694,81 @@ impl MicroGameState {
             self.log.add(GameEvent::SoundCue { distance });
         }
     }
+
+    /// Fight the weakest adjacent monster to the death.
+    ///
+    /// Returns `None` if no adjacent monster exists. Each round calls
+    /// `step(Move(dir))`, so other monsters act and regen ticks.
+    pub fn auto_fight(&mut self) -> Option<MicroAutoFightResult> {
+        let pi = PLAYER_IDX as usize;
+        let px = self.entities.x[pi];
+        let py = self.entities.y[pi];
+
+        // Find weakest adjacent monster (lowest HP).
+        let mut best_idx: u8 = NO_ENTITY;
+        let mut best_hp: u8 = u8::MAX;
+        let mut i: u8 = 1;
+        while (i as usize) < self.entities.count as usize {
+            let idx = i as usize;
+            if self.entities.alive[idx] {
+                let dx = self.entities.x[idx].abs_diff(px);
+                let dy = self.entities.y[idx].abs_diff(py);
+                if dx <= 1 && dy <= 1 && self.entities.hp[idx] < best_hp {
+                    best_hp = self.entities.hp[idx];
+                    best_idx = i;
+                }
+            }
+            i += 1;
+        }
+
+        if best_idx == NO_ENTITY {
+            return None;
+        }
+
+        let hp_before = self.entities.hp[pi];
+        let target_kind = self.entities.kind[best_idx as usize];
+        let mut rounds: u8 = 0;
+
+        loop {
+            if !self.entities.alive[best_idx as usize] {
+                break;
+            }
+
+            // Recompute direction to target.
+            let tx = self.entities.x[best_idx as usize];
+            let ty = self.entities.y[best_idx as usize];
+            if tx.abs_diff(self.entities.x[pi]) > 1 || ty.abs_diff(self.entities.y[pi]) > 1 {
+                break; // Target moved out of melee range.
+            }
+
+            let ox = tx as i32 - self.entities.x[pi] as i32;
+            let oy = ty as i32 - self.entities.y[pi] as i32;
+            let cmd = GameCommand::move_or_wait(ox, oy);
+            let result = self.step(cmd);
+            rounds += 1;
+
+            if result.game_over {
+                break;
+            }
+        }
+
+        Some(MicroAutoFightResult {
+            rounds,
+            target_idx: best_idx,
+            target_kind,
+            target_killed: !self.entities.alive[best_idx as usize],
+            player_hp_lost: hp_before.saturating_sub(self.entities.hp[pi]),
+        })
+    }
+}
+
+/// Result of a micro-tier auto-fight (no_std, Copy).
+pub struct MicroAutoFightResult {
+    pub rounds: u8,
+    pub target_idx: u8,
+    pub target_kind: Option<MonsterKind>,
+    pub target_killed: bool,
+    pub player_hp_lost: u8,
 }
 
 #[cfg(test)]
@@ -1357,5 +1432,57 @@ mod tests {
             g.wandering_spawned, 0,
             "wandering_spawned should reset on descent"
         );
+    }
+
+    #[test]
+    fn auto_fight_kills_adjacent_monster() {
+        use crate::rules::monster_table::MonsterKind;
+        let mut g = MicroGameState::new_default(42);
+        let px = g.entities.x[0];
+        let py = g.entities.y[0];
+        // Spawn a goblin adjacent.
+        g.entities
+            .spawn_monster(MonsterKind::Goblin, px + 1, py, AiBehavior::Chase);
+        let result = g.auto_fight();
+        assert!(result.is_some(), "should find adjacent monster");
+        let r = result.unwrap();
+        assert!(r.rounds > 0);
+        assert!(r.target_killed);
+        assert_eq!(r.target_kind, Some(MonsterKind::Goblin));
+    }
+
+    #[test]
+    fn auto_fight_no_adjacent_returns_none() {
+        let mut g = MicroGameState::new_default(42);
+        // Clear all monsters far from player.
+        for i in 1..g.entities.count as usize {
+            g.entities.alive[i] = false;
+        }
+        assert!(g.auto_fight().is_none());
+    }
+
+    #[test]
+    fn auto_fight_picks_weakest() {
+        use crate::rules::monster_table::MonsterKind;
+        let mut g = MicroGameState::new_default(42);
+        let px = g.entities.x[0];
+        let py = g.entities.y[0];
+        // Clear existing monsters.
+        for i in 1..g.entities.count as usize {
+            g.entities.alive[i] = false;
+        }
+        // Spawn an orc (higher HP) and a goblin (lower HP) adjacent.
+        g.entities
+            .spawn_monster(MonsterKind::Orc, px + 1, py, AiBehavior::Chase);
+        g.entities.spawn_monster(
+            MonsterKind::Goblin,
+            px.wrapping_sub(1),
+            py,
+            AiBehavior::Chase,
+        );
+        let result = g.auto_fight().unwrap();
+        // Should have targeted the goblin (lower HP).
+        assert_eq!(result.target_kind, Some(MonsterKind::Goblin));
+        assert!(result.target_killed);
     }
 }

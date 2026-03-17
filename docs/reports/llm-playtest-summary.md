@@ -1,21 +1,23 @@
 # LLM Playtest Summary
 
-Consolidated findings from four playtest sessions (2026-02-13) where Claude Opus 4.6 played the roguelike via MCP tools. See individual session reports for full detail.
+Consolidated findings from six playtest sessions (2026-02-13 through 2026-03-17) where Claude Opus 4.6 played the roguelike via MCP tools. Sessions 1-5 used the standard tier; Session 6 used the micro tier (no_std, C64-compatible). See individual session reports for full detail.
 
 ## Cross-Session Efficiency
 
-| Metric | Session 1 | Session 2 | Session 3 | Session 4 |
-|--------|-----------|-----------|-----------|-----------|
-| Tool calls | ~80 | ~70 | ~35 | ~30 |
-| Wasted calls | ~40 (50%) | ~40 (57%) | ~2 (6%) | ~0 (0%) |
-| Explored | ~100% | 84% | 100% | 100% |
-| Kills | 7 | 5 | 11 | 4 |
-| Final HP | 2/30 | 30/30 | 30/30 | 30/30 |
-| Lowest HP | 2/30 | 24/30 | 24/30 | 27/30 |
-| Session end | Near-death | Stuck at 84% | Cleared | Cleared |
-| Primary tool | autorun | autorun | pathfind_to | auto_explore |
+| Metric | Session 1 | Session 2 | Session 3 | Session 4 | Session 5 | Session 6 |
+|--------|-----------|-----------|-----------|-----------|-----------|-----------|
+| Tier | Standard | Standard | Standard | Standard | Standard | **Micro** |
+| Tool calls | ~80 | ~70 | ~35 | ~30 | ~30 | **~150** |
+| Wasted calls | ~40 (50%) | ~40 (57%) | ~2 (6%) | ~0 (0%) | ~0 (0%) | **~0 (0%)** |
+| Floors | 1 | 1 | 1 | 1 | 1 | **5** |
+| Explored | ~100% | 84% | 100% | 100% | 100% | **100% (D1-4)** |
+| Kills (best) | 7 | 5 | 11 | 4 | 18 | **18** |
+| Final HP | 2/30 | 30/30 | 30/30 | 30/30 | 30/30 | **26/30** |
+| Items | No | No | No | No | Yes | **Yes** |
+| Session end | Near-death | Stuck at 84% | Cleared | Cleared | Cleared | Budget cap |
+| Primary tool | autorun | autorun | pathfind_to | auto_explore | auto_explore | **auto_explore** |
 
-Tool call waste dropped from 50-57% (Sessions 1-2) to 0% (Session 4) as MCP tools matured.
+Tool call waste dropped from 50-57% (Sessions 1-2) to 0% (Sessions 4-6). Session 6 has higher total calls because the game is 5 floors deep.
 
 ## Key Gameplay Findings
 
@@ -51,18 +53,23 @@ Flagged in all four sessions. After clearing the dungeon, the game simply contin
 | Omniscient info removed | 1 | `total_monsters`/`total_rooms` removed |
 | `auto_explore` tool | 3 | Frontier detection + pathfinding in one call |
 | `new_tiles_revealed` feedback | 3 | Added to pathfind/autorun/auto_explore responses |
+| Win condition (stairs/exit) | 1-4 | 5-floor dungeon with descend mechanic |
+| Guarantee troll spawns | 3, 4 | Trolls spawn reliably on depth 2+ |
+| Combat depth — items | 2-4 | Health Potions, Short Sword, Leather Armor |
+| Micro tier pathfinding | 6 | no_std BFS for auto_explore/pathfind_to/auto_fight |
+| Stairs discovery | 6 | StairsFound autorun stop + stairs coords in observe |
+| Item action discoverability | 6 | Error messages list all valid actions |
 
 ### Unresolved
 
 | Recommendation | Sessions | Priority |
 |---|---|---|
-| Win condition (stairs/exit) | 1, 2, 3, 4 | Critical |
-| Guarantee troll spawns | 3, 4 | High |
-| Increase monster density (~1-2/room) | 2, 3, 4 | High |
-| Rebalance regen (cap at 70% or stationary-only) | 3, 4 | High |
-| Combat depth (items, damage variance, abilities) | 2, 3, 4 | High |
-| Multi-entrance rooms / anti-chokepoint | 1, 2, 3 | Medium |
-| Room exit metadata in observations | 1, 2, 3, 4 | Low |
+| Mid-combat potion use | 6 | Medium |
+| Increase monster density (later floors) | 2-4, 6 | Medium |
+| Rebalance regen (cap at 70% or stationary-only) | 3, 4 | Medium |
+| Damage variance | 2-4 | Low |
+| Multi-entrance rooms / anti-chokepoint | 1-3 | Low |
+| Room exit metadata in observations | 1-4 | Low |
 
 ## MCP Design Principles Validated
 
@@ -78,3 +85,5 @@ Flagged in all four sessions. After clearing the dungeon, the game simply contin
 - [Session 2](llm-playtest-session-2.md) — HP regen added. Still suffered from autorun/navigation issues.
 - [Session 3](llm-playtest-session-3.md) — pathfind_to + frontier markers. Efficiency nearly doubled.
 - [Session 4](llm-playtest-session-4.md) — auto_explore. MCP interface reached maturity. Bottleneck shifted from interface to content.
+- [Session 5](llm-playtest-session-5.md) — Item system validation. Equipment creates meaningful troll gate.
+- [Session 6](llm-playtest-session-6.md) — Micro tier. BFS pathfinding, StairsFound, stairs coords, auto_fight. Reached depth 5.

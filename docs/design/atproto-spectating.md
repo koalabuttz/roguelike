@@ -17,7 +17,7 @@ This document builds on two existing designs:
 
 ## Non-Goals
 
-- **Replay storage.** Atproto spectating is live. Replay files (deterministic command logs) are a separate system. Old spectate records may be garbage-collected.
+- **Replay storage.** Atproto spectating is live. Replay files (deterministic command logs) are a separate system — see [Server-Attested Replays](#future-extension-server-attested-replays) for the design sketch. Old spectate records may be garbage-collected.
 - **Chat or interaction.** Spectators watch passively. Twitch-style chat or audience interaction is out of scope.
 - **Replacing the file-based spectator.** The `ROGUELIKE_SPECTATE_PATH` mechanism remains for local MCP spectating. Atproto spectating is an additional transport, not a replacement.
 - **Streaming video or tiles.** Frames are plain-text ASCII, matching the existing `render_frame()` output. Graphical spectating (canvas/tile-based) is a future layer on top.
@@ -713,6 +713,192 @@ Spectating doesn't add settings to the `Settings` struct in core — it's a per-
 | [atproto.md](atproto.md) | Spectating reuses the same atproto infrastructure: OAuth tokens, PDS client, DID resolution. `AtprotoFrameSink` shares the `PdsClient` with `PdsSaveBackend`. The spectate lexicons live alongside the save lexicons under the same namespace. |
 | [cross-platform.md](../architecture/cross-platform.md) | The `FrameSink` trait follows the same pattern as `Renderer` and `InputSource` — defined in core, implemented per-platform. Constrained platforms use `NullFrameSink`. (`SaveBackend` follows a different pattern — it lives in `crates/saves`, not core, since constrained platforms need different save mechanisms.) |
 | [simulation.md](../architecture/simulation.md) | As the simulation grows (tile state, events, richer AI), spectate frames naturally capture the richer game state through `render_frame()`. No spectating changes needed — the frame producer always reflects current `GameState`. |
+
+## Future Extension: Server-Attested Replays
+
+> **Status:** Design sketch. Depends on the command replay system (chainlink #135) and ATProto OAuth (atproto.md Phase 1).
+
+Spectating is live. Replays are recorded. This section describes how the SSH server can produce **cryptographically attested replay records** — command logs that carry a server signature proving they were produced by real-time human play, not uploaded via the API.
+
+### The Problem: Replay Authenticity
+
+A command replay (seed + command bytes) proves **correctness** — anyone can re-execute the commands and verify the claimed outcome (depth reached, kills, win/loss). But it does not prove **authenticity** — that a human actually played those commands in real-time.
+
+Since the game is deterministic, open-source, and single-player, an attacker can:
+
+1. **Solve programmatically.** Simulate the game tree, compute the optimal command sequence, post it as a "replay." The replay verifies correctly, but nobody played it.
+2. **Edit replays.** Play a real game, but fork from earlier save points on mistakes. Post only the polished version.
+3. **Craft commands directly.** Skip the game entirely — compute the byte array via the game engine as a library, post it to ATProto via the API. The PDS doesn't know or care where the bytes came from.
+
+ATProto's cryptographic properties (DID signatures, Merkle trees) prove *who* posted the record and *when*, but not *how the command bytes were generated*.
+
+### The Solution: SSH Server as Trusted Witness
+
+The SSH server (`crates/ssh/`) is a **trusted execution environment** — it runs the game logic server-side, the player cannot modify it, and the server observes every input in real-time:
+
+- The server controls the game binary (players connect to it, not the other way around)
+- Commands arrive over the SSH channel with server-measured timestamps
+- The player is authenticated (SSH login + optional ATProto identity)
+- The server can detect non-human timing patterns (sub-millisecond inputs, perfectly uniform intervals)
+
+When a game ends, the SSH server signs the replay with its own keypair:
+
+```
+attestation = sign(server_privkey, hash(seed ‖ commands ‖ timing ‖ player_did ‖ game_version))
+```
+
+This signature is a cryptographic claim: **"These commands were received in real-time from an authenticated SSH session on this server, playing game version X."** Anyone can verify it against the server's public key (published at the server's DID or a well-known endpoint).
+
+### Lexicon: `com.example.roguelike.replay.attestedRun`
+
+```json
+{
+  "lexicon": 1,
+  "id": "com.example.roguelike.replay.attestedRun",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "description": "A server-attested game replay. The server signature proves the commands were produced by real-time play on a trusted server, not generated or uploaded programmatically.",
+      "record": {
+        "type": "object",
+        "required": ["seed", "commands", "result", "gameVersion", "serverDid", "attestation", "createdAt"],
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "description": "16-bit game seed."
+          },
+          "mapWidth": { "type": "integer" },
+          "mapHeight": { "type": "integer" },
+          "commands": {
+            "type": "bytes",
+            "maxLength": 16384,
+            "description": "Command log. One byte per command (Direction 0-7, Wait=8, Descend=9, etc.)."
+          },
+          "timing": {
+            "type": "bytes",
+            "description": "Inter-command intervals in centiseconds (1 byte each, capped at 255 = 2.55s). Same length as commands. Enables timing analysis for anomaly detection."
+          },
+          "result": {
+            "type": "object",
+            "required": ["turns", "depth", "kills", "won"],
+            "properties": {
+              "turns": { "type": "integer" },
+              "depth": { "type": "integer" },
+              "kills": { "type": "integer" },
+              "won": { "type": "boolean" }
+            }
+          },
+          "gameVersion": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Game binary version hash. Replays only verify against the same version."
+          },
+          "serverDid": {
+            "type": "string",
+            "description": "DID of the SSH server that attested this replay. Verify the attestation signature against this server's public key."
+          },
+          "attestation": {
+            "type": "bytes",
+            "maxLength": 256,
+            "description": "Server signature over hash(seed ‖ commands ‖ timing ‖ playerDid ‖ gameVersion). ES256 (P-256 ECDSA)."
+          },
+          "challengeRef": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Optional reference to a challenge record that specified the seed. Proves the player didn't choose their own seed."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### Trust Model
+
+| Property | Unattested replay | Server-attested replay |
+|----------|:-:|:-:|
+| Proves correct outcome | Yes | Yes |
+| Proves human played in real-time | No | Yes (server witnessed inputs) |
+| Prevents solver/bot play | No | Yes (server controls execution) |
+| Prevents replay editing / save-scumming | No | Yes (server records sequentially) |
+| Prevents seed cherry-picking | Only with challenge seeds | Only with challenge seeds |
+| Works from C64 / terminal (local play) | Yes | No (no trusted observer) |
+| Works from SSH server | Yes | Yes |
+| Requires server infrastructure | No | Yes (server must sign + publish key) |
+
+The server doesn't need to be a Bluesky relay or AppView — it just needs a keypair and a way for verifiers to fetch the public key. The server's DID (in `serverDid`) is the lookup mechanism.
+
+### Challenge Seeds
+
+For competitive integrity, the seed should not be chosen by the player. A challenge record specifies the seed, and players reference it:
+
+```json
+{
+  "id": "com.example.roguelike.replay.challenge",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["seed", "mapWidth", "mapHeight", "gameVersion", "createdAt"],
+        "properties": {
+          "seed": { "type": "integer" },
+          "mapWidth": { "type": "integer" },
+          "mapHeight": { "type": "integer" },
+          "gameVersion": {
+            "type": "string",
+            "description": "Replays must match this version to be valid entries."
+          },
+          "name": {
+            "type": "string",
+            "maxGraphemes": 128,
+            "description": "Challenge name, e.g. 'Daily Challenge — March 17'."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Optional deadline for submissions."
+          },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}
+```
+
+Daily challenges could derive seeds from a public source (e.g., `seed = truncate_u16(SHA-256(date_string))`) so no trusted party is needed to post them. Anyone can independently compute the daily seed and verify a challenge record is honest.
+
+### What This Doesn't Solve
+
+- **Colluding servers.** A malicious server operator could sign bot-generated replays. Trust depends on the server's reputation — the same model as speedrun.com trusting specific platforms.
+- **Player assistance tools.** A human could use an overlay showing optimal moves while playing on the SSH server. The server sees human-speed, human-pattern inputs but the decisions are computer-assisted. Statistical anomaly detection (superhuman damage avoidance, optimal pathfinding) is the only mitigation, and it's heuristic.
+- **Local play attestation.** Terminal and C64 versions have no trusted observer. Replays from local play are inherently unattested. This is fine — local replays are for personal sharing and demo mode (#135), not competitive leaderboards.
+
+### Integration with SSH Server
+
+The SSH server already has the infrastructure:
+
+- **Authentication:** Player identity via SSH login + optional ATProto DID linkage (atproto.md)
+- **Command recording:** Add a command buffer to the session (same as `DevSession.command_log` but for production play)
+- **Timing:** Record `Instant::now()` delta between each command received on the SSH channel
+- **Signing:** Server keypair (the SSH host key could double for this, or a separate signing key)
+- **Publishing:** Reuses `PdsClient` from `AtprotoFrameSink` to post the attested replay to the player's PDS on game end
+
+The flow on game completion:
+
+1. Player dies or wins → game loop returns
+2. Session builds replay: seed + commands + timing + result
+3. Server signs the replay with its key
+4. If player has ATProto identity: post `attestedRun` record to player's PDS
+5. If no ATProto identity: offer to display the replay as a shareable seed code (fallback)
 
 ## References
 

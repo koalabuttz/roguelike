@@ -1,4 +1,4 @@
-DOCKER_IMAGE = ghcr.io/koalabuttz/rust-mos:54c694f07-4537158-1bd9e164b
+DOCKER_IMAGE = ghcr.io/koalabuttz/rust-mos:ac2fb2277-4537158-215f25be4
 DOCKER_PATH = /usr/local/rust-mos/bin:/usr/local/bin:/usr/bin:/bin
 PROJECT_ROOT = $(CURDIR)/../..
 WORKSPACE_TOML = $(PROJECT_ROOT)/Cargo.toml

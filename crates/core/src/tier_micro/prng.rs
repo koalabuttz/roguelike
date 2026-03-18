@@ -70,6 +70,14 @@ impl LfsrRng16 {
     pub const fn state(&self) -> u16 {
         self.state
     }
+
+    /// Restore RNG from a previously saved state.
+    /// Zero is guarded against (LFSR must never be zero).
+    pub const fn from_raw_state(raw: u16) -> Self {
+        Self {
+            state: if raw == 0 { 0xACE1 } else { raw },
+        }
+    }
 }
 
 #[cfg(test)]

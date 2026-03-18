@@ -79,6 +79,12 @@ impl MicroFov {
         &self.explored
     }
 
+    /// Mutable access to explored bitfield bytes. Used by save/load to
+    /// restore the explored state without recomputing.
+    pub fn explored_bytes_mut(&mut self) -> &mut [u8; MAX_BITFIELD_SIZE] {
+        &mut self.explored
+    }
+
     fn bit_idx(&self, x: u8, y: u8) -> (usize, u8) {
         let i = row_col_idx(y, x, self.width);
         (i / 8, 1u8 << (i % 8))

@@ -319,6 +319,14 @@ impl Inventory {
             .filter_map(|(i, s)| s.as_ref().map(|slot| (i, slot)))
     }
 
+    /// Set a slot directly by index. Used by save/load to restore
+    /// inventory state without going through the stacking logic of `add()`.
+    pub(crate) fn set_slot(&mut self, idx: usize, slot: Option<InvSlot>) {
+        if idx < MAX_INVENTORY {
+            self.slots[idx] = slot;
+        }
+    }
+
     /// Get the n-th occupied slot (0-indexed among occupied slots).
     /// Avoids a 473-byte `FilterMap::nth` monomorphization on 6502.
     pub fn nth_occupied(&self, n: usize) -> Option<(usize, &InvSlot)> {

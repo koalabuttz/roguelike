@@ -7,9 +7,11 @@
 
 #![no_std]
 #![no_main]
+#![feature(asm_experimental_arch)]
 #![allow(static_mut_refs)] // Single-threaded bare metal — static mut is safe
 
 mod c64;
+mod disk;
 mod render;
 mod input;
 
@@ -22,6 +24,7 @@ use roguelike_core::rules::{balance, seed_code};
 use roguelike_core::tier_micro::autorun::{MicroAutorunStop, MicroAutorunStepper, MicroStepOutcome};
 use roguelike_core::tier_micro::game::MicroGameState;
 use roguelike_core::tier_micro::map::TILE_STAIRS_DOWN;
+use roguelike_core::tier_micro::save;
 use roguelike_core::tier_micro::types::{DEFAULT_MAP_HEIGHT, DEFAULT_MAP_WIDTH, PLAYER_IDX};
 
 /// Panic handler — flash the border red (classic C64 crash indicator).
@@ -44,6 +47,13 @@ static mut STATE: MaybeUninit<MicroGameState> = MaybeUninit::uninit();
 /// Only accessed during rendering (I/O visible), never during banked compute.
 #[unsafe(link_section = ".noinit")]
 static mut DIFF: render::DiffState = render::DiffState::new();
+
+/// Scratch buffer for save/load serialization (~4 KB).
+/// Placed in main RAM so it's accessible while KERNAL is banked in.
+/// Only used during save/load operations — not during gameplay.
+const SAVE_BUF_SIZE: usize = 4096;
+#[unsafe(link_section = ".noinit")]
+static mut SAVE_BUF: [u8; SAVE_BUF_SIZE] = [0u8; SAVE_BUF_SIZE];
 
 /// Application states for the main loop.
 enum AppState {
@@ -76,45 +86,93 @@ fn start_game(seed: u16, width: u8, height: u8) -> &'static mut MicroGameState {
     unsafe { STATE.assume_init_mut() }
 }
 
-/// Run the title menu. Returns the seed and dimensions for the new game.
-fn run_title() -> (u16, u8, u8) {
+/// Title menu result.
+enum TitleResult {
+    /// Start a new game with these parameters.
+    NewGame(u16, u8, u8),
+    /// Load a saved game (already loaded into STATE).
+    Continue,
+}
+
+/// Title screen disk hint — tells run_title whether to probe for a save.
+#[derive(Clone, Copy)]
+enum SaveHint {
+    /// Check disk for a save file (cold start or unknown state).
+    CheckDisk,
+    /// Save data is already in SAVE_BUF at this size (just saved).
+    Preloaded(usize),
+    /// We know there's no save (just loaded + deleted it, or fresh game over).
+    NoSave,
+}
+
+/// Run the title menu.
+fn run_title(hint: SaveHint) -> TitleResult {
+    let preloaded_size = match hint {
+        SaveHint::Preloaded(size) => Some(size),
+        SaveHint::NoSave => None,
+        SaveHint::CheckDisk => {
+            let buf = unsafe { &mut SAVE_BUF };
+            disk::has_save_and_preload(buf)
+        }
+    };
+    let has_save = preloaded_size.is_some();
+    let max_item: u8 = if has_save { 2 } else { 1 };
     let mut selected: u8 = 0;
-    render::render_title(selected);
+    render::render_title(selected, has_save);
 
     loop {
         match input::wait_for_menu_input() {
             MenuInput::Up => {
                 if selected > 0 {
                     selected -= 1;
-                    render::render_title(selected);
+                    render::render_title(selected, has_save);
                 }
             }
             MenuInput::Down => {
-                if selected < 1 {
+                if selected < max_item {
                     selected += 1;
-                    render::render_title(selected);
+                    render::render_title(selected, has_save);
                 }
             }
             MenuInput::Select => {
-                match selected {
+                // Map selected index to action, accounting for "Continue"
+                // shifting the other items down.
+                let action = if has_save { selected } else { selected + 1 };
+                match action {
                     0 => {
-                        // New Game — random seed, default dims
-                        return (read_cia_seed(), DEFAULT_MAP_WIDTH, DEFAULT_MAP_HEIGHT);
+                        // Continue — deserialize preloaded save data
+                        if let Some(size) = preloaded_size {
+                            render::render_loading_save();
+                            match deserialize_save(size) {
+                                Some(_) => return TitleResult::Continue,
+                                None => {
+                                    render::render_save_error(b"LOAD FAILED");
+                                    input::wait_for_menu_input();
+                                    render::render_title(selected, has_save);
+                                }
+                            }
+                        }
                     }
                     1 => {
+                        // New Game — random seed, default dims
+                        return TitleResult::NewGame(
+                            read_cia_seed(),
+                            DEFAULT_MAP_WIDTH,
+                            DEFAULT_MAP_HEIGHT,
+                        );
+                    }
+                    2 => {
                         // Enter Seed
                         if let Some((seed, w, h)) = run_seed_input() {
-                            return (seed, w, h);
+                            return TitleResult::NewGame(seed, w, h);
                         }
                         // Cancelled — redraw title
-                        render::render_title(selected);
+                        render::render_title(selected, has_save);
                     }
                     _ => {}
                 }
             }
-            MenuInput::Back => {
-                // No back action on title — nowhere to go
-            }
+            MenuInput::Back => {}
             MenuInput::Left | MenuInput::Right => {}
         }
     }
@@ -141,8 +199,15 @@ fn run_seed_input() -> Option<(u16, u8, u8)> {
     }
 }
 
-/// Run the pause menu. Returns the next AppState.
-fn run_pause(state: &MicroGameState) -> AppState {
+/// Pause menu result.
+enum PauseResult {
+    Resume,
+    SaveAndQuit,
+    TitleScreen,
+}
+
+/// Run the pause menu. Returns the chosen action.
+fn run_pause(state: &MicroGameState) -> PauseResult {
     let mut selected: u8 = 0;
     render::render_pause(state, selected);
 
@@ -155,19 +220,20 @@ fn run_pause(state: &MicroGameState) -> AppState {
                 }
             }
             MenuInput::Down => {
-                if selected < 1 {
+                if selected < 2 {
                     selected += 1;
                     render::render_pause(state, selected);
                 }
             }
             MenuInput::Select => {
                 return match selected {
-                    0 => AppState::Playing, // Resume
-                    _ => AppState::Title,   // New Game → go to title
+                    0 => PauseResult::Resume,
+                    1 => PauseResult::SaveAndQuit,
+                    _ => PauseResult::TitleScreen,
                 };
             }
             MenuInput::Back => {
-                return AppState::Playing; // Back = Resume
+                return PauseResult::Resume;
             }
             MenuInput::Left | MenuInput::Right => {}
         }
@@ -651,6 +717,71 @@ fn render_after_step(state: &MicroGameState, old_depth: u8) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Save / Load
+// ---------------------------------------------------------------------------
+
+/// Save the current game state to disk. Returns the serialized size on
+/// success (data remains in SAVE_BUF for immediate re-use on title screen).
+#[inline(never)]
+fn save_game(state: &MicroGameState) -> Option<usize> {
+    let buf = unsafe { &mut SAVE_BUF };
+    let mut pos = 0;
+    save::serialize(state, &mut |b| {
+        if pos < SAVE_BUF_SIZE {
+            buf[pos] = b;
+            pos += 1;
+        }
+    });
+    if disk::save_buf_to_disk(&buf[..pos]) {
+        Some(pos)
+    } else {
+        None
+    }
+}
+
+/// Deserialize a preloaded save buffer into STATE. Called after
+/// has_save_and_preload() has already loaded data into SAVE_BUF.
+/// Scratches the save file on success (permadeath semantics).
+#[inline(never)]
+fn deserialize_save(size: usize) -> Option<&'static mut MicroGameState> {
+    let buf = unsafe { &SAVE_BUF };
+    let state = unsafe { &mut *STATE.as_mut_ptr() };
+    let mut pos = 0;
+    let result = save::deserialize(state, &mut || {
+        if pos < size {
+            let b = buf[pos];
+            pos += 1;
+            Some(b)
+        } else {
+            None
+        }
+    });
+
+    match result {
+        Ok(()) => {
+            // Sanity check — player must be within map bounds.
+            let pi = PLAYER_IDX as usize;
+            let px = state.entities.x[pi];
+            let py = state.entities.y[pi];
+            if px >= state.map.width || py >= state.map.height {
+                return None;
+            }
+
+            // Recompute FOV (visible bitfield is not saved).
+            c64::io_bank_out();
+            state.fov.compute_fov(px, py, &state.map);
+            c64::io_bank_in();
+            // Permadeath: delete the save file now that it's loaded.
+            disk::delete_save();
+            // Add a welcome-back message.
+            state.log.add(GameEvent::Welcome);
+            Some(state)
+        }
+        Err(_) => None,
+    }
+}
+
 /// Thin wrapper — must have NO local state so the compiler allocates no
 /// static stacks here.  copy_code_to_ram() must run first: it copies
 /// overlay + HIRAM code from LMA to VMA before init_hardware()'s
@@ -667,14 +798,26 @@ fn game_loop() -> ! {
     let mut app_state = AppState::Title;
     let mut current_width: u8 = DEFAULT_MAP_WIDTH;
     let mut current_height: u8 = DEFAULT_MAP_HEIGHT;
+    let mut save_hint = SaveHint::CheckDisk;
 
     loop {
         match app_state {
             AppState::Title => {
-                let (seed, w, h) = run_title();
-                current_width = w;
-                current_height = h;
-                start_and_present_game(seed, w, h);
+                match run_title(save_hint) {
+                    TitleResult::NewGame(seed, w, h) => {
+                        current_width = w;
+                        current_height = h;
+                        start_and_present_game(seed, w, h);
+                    }
+                    TitleResult::Continue => {
+                        // State already loaded by load_game() in run_title().
+                        let state = unsafe { STATE.assume_init_mut() };
+                        current_width = state.map.width;
+                        current_height = state.map.height;
+                        render_and_snapshot(state);
+                        c64::music_start();
+                    }
+                }
                 app_state = AppState::Playing;
             }
             AppState::Playing => {
@@ -795,15 +938,27 @@ fn game_loop() -> ! {
             AppState::Paused => {
                 let state = unsafe { STATE.assume_init_mut() };
                 match run_pause(state) {
-                    AppState::Playing => {
+                    PauseResult::Resume => {
                         render_and_snapshot(state);
                         c64::music_start();
                         app_state = AppState::Playing;
                     }
-                    AppState::Title => {
+                    PauseResult::SaveAndQuit => {
+                        render::render_saving();
+                        if let Some(size) = save_game(state) {
+                            save_hint = SaveHint::Preloaded(size);
+                            app_state = AppState::Title;
+                        } else {
+                            render::render_save_error(b"SAVE FAILED");
+                            input::wait_for_menu_input();
+                            // Return to pause menu on failure
+                            app_state = AppState::Paused;
+                        }
+                    }
+                    PauseResult::TitleScreen => {
+                        save_hint = SaveHint::NoSave;
                         app_state = AppState::Title;
                     }
-                    other => app_state = other,
                 }
             }
             AppState::GameOver => {
@@ -819,6 +974,7 @@ fn game_loop() -> ! {
                         app_state = AppState::Playing;
                     }
                     AppState::Title => {
+                        save_hint = SaveHint::NoSave;
                         app_state = AppState::Title;
                     }
                     other => app_state = other,

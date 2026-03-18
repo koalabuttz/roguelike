@@ -1,0 +1,7 @@
+[advisories]
+ignore = [
+    # rsa Marvin Attack (timing side-channel in RSA decryption).
+    # No fixed version available. Transitive dep: rsa → ssh-key → russh → roguelike-ssh.
+    # Low practical impact for a roguelike SSH server. Revisit when rsa crate patches.
+    "RUSTSEC-2023-0071",
+]

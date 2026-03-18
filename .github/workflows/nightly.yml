@@ -72,6 +72,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install VICE tools (c1541)
+        run: sudo apt-get update && sudo apt-get install -y vice
       - name: Build C64 PRG via rust-mos Docker
         run: |
           docker run --rm \
@@ -80,12 +82,15 @@ jobs:
             -e PATH=/usr/local/rust-mos/bin:/usr/local/bin:/usr/bin:/bin \
             -v "${{ github.workspace }}:/repo" \
             -w /repo/crates/c64 \
-            mrkits/rust-mos:13f2838f9-334fc98-8f3a80f8 \
+            ghcr.io/koalabuttz/rust-mos:ac2fb2277-4537158-215f25be4 \
             cargo build --release
-      - name: Rename binary
+      - name: Create .d64 disk image
         run: |
           mkdir -p dist
-          cp crates/c64/target/mos-c64-none/release/roguelike-c64 dist/roguelike-c64.prg
+          PRG=crates/c64/target/mos-c64-none/release/roguelike-c64
+          cp "$PRG" dist/roguelike-c64.prg
+          c1541 -format "roguelike,rg" d64 dist/roguelike-c64.d64 \
+            -write "$PRG" "roguelike"
       - uses: actions/upload-artifact@v4
         with:
           name: nightly-c64
@@ -193,6 +198,7 @@ jobs:
           | `mcp_server-*` | MCP server for LLM play |
           | `headless-*` | Automated playtesting runner |
           | `roguelike-c64.prg` | Commodore 64 PRG (VICE / real hardware) |
+          | `roguelike-c64.d64` | Commodore 64 disk image (VICE / 1541) |
 
           Verify: `sha256sum -c SHA256SUMS.txt`
           EOF

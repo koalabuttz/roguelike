@@ -1425,6 +1425,7 @@ mod tests {
         #[test]
         fn stick_normalization() {
             use super::super::inner::analog_to_direction;
+            use roguelike_core::command::Direction;
             // HID: 0x00 = full left/up, 0x80 = center, 0xFF = full right/down.
             // After normalization: X maps directly, Y is negated.
             // left_stick_x=0xFF → sx = (255-128)/128 = ~1.0 → right
@@ -1432,13 +1433,13 @@ mod tests {
             //   negated → sy = 1.0 → up → screen (0,-1)
             let sx = (0xFFu8 as f32 - 128.0) / 128.0;
             let sy = -((0x00u8 as f32 - 128.0) / 128.0);
-            assert_eq!(analog_to_direction(sx, sy), (1, -1)); // right + up = NE
+            assert_eq!(analog_to_direction(sx, sy), Direction::NorthEast); // right + up = NE
 
             // Full down: y=0xFF → sy_raw = (255-128)/128 ≈ 1.0,
             //   negated → sy = -1.0 → down → screen (0, 1)
             let sx = (0x80u8 as f32 - 128.0) / 128.0; // ~0
             let sy = -((0xFFu8 as f32 - 128.0) / 128.0);
-            assert_eq!(analog_to_direction(sx, sy), (0, 1)); // down
+            assert_eq!(analog_to_direction(sx, sy), Direction::South); // down
         }
     }
 

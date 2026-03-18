@@ -77,6 +77,19 @@ pub struct MicroAutorunStepper {
     steps_taken: u8,
     max_steps: u8,
     visible_before: [bool; MAX_ENTITIES],
+    stairs_visible_before: bool,
+}
+
+/// Check if any stairs tile is currently visible in the FOV.
+pub fn stairs_in_fov(map: &super::map::MicroMap, fov: &MicroFov) -> bool {
+    for y in 0..map.height {
+        for x in 0..map.width {
+            if fov.is_visible(x, y) && map.tile_at(x, y) == TILE_STAIRS_DOWN {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Check if any alive monster is adjacent (Chebyshev distance <= 1) to the player.
@@ -100,12 +113,13 @@ pub fn has_adjacent_monster(entities: &EntityStore) -> bool {
 
 impl MicroAutorunStepper {
     /// Create a new autorun stepper for the given direction.
-    pub fn new(dir: Direction) -> Self {
+    pub fn new(dir: Direction, stairs_already_visible: bool) -> Self {
         Self {
             dir,
             steps_taken: 0,
             max_steps: balance::MAX_AUTORUN_STEPS,
             visible_before: [false; MAX_ENTITIES],
+            stairs_visible_before: stairs_already_visible,
         }
     }
 
@@ -168,6 +182,11 @@ impl MicroAutorunStepper {
         // Check 6: new monster spotted (only on FOV steps).
         if do_fov && self.has_new_visible_monster(&state.entities, &state.fov) {
             return MicroStepOutcome::Done(MicroAutorunStop::MonsterSpotted);
+        }
+
+        // Check 6b: stairs newly visible in FOV (only on FOV steps).
+        if do_fov && !self.stairs_visible_before && stairs_in_fov(&state.map, &state.fov) {
+            return MicroStepOutcome::Done(MicroAutorunStop::StairsFound);
         }
 
         // Check 7: corridor branches — wall ahead with 2+ alternatives.
@@ -233,17 +252,19 @@ pub struct MicroBfsStepper {
     steps_taken: u8,
     max_steps: u8,
     visible_before: [bool; MAX_ENTITIES],
+    stairs_visible_before: bool,
 }
 
 impl MicroBfsStepper {
     /// Create a new BFS stepper targeting (tx, ty).
-    pub fn new(tx: u8, ty: u8) -> Self {
+    pub fn new(tx: u8, ty: u8, stairs_already_visible: bool) -> Self {
         Self {
             tx,
             ty,
             steps_taken: 0,
             max_steps: balance::MAX_AUTORUN_STEPS,
             visible_before: [false; MAX_ENTITIES],
+            stairs_visible_before: stairs_already_visible,
         }
     }
 
@@ -317,6 +338,11 @@ impl MicroBfsStepper {
             return MicroStepOutcome::Done(MicroAutorunStop::MonsterSpotted);
         }
 
+        // Check: stairs newly visible in FOV.
+        if !self.stairs_visible_before && stairs_in_fov(&state.map, &state.fov) {
+            return MicroStepOutcome::Done(MicroAutorunStop::StairsFound);
+        }
+
         // Check: reached target.
         if state.entities.x[pi] == self.tx && state.entities.y[pi] == self.ty {
             return MicroStepOutcome::Done(MicroAutorunStop::PathComplete);
@@ -366,7 +392,7 @@ mod tests {
 
     /// Helper: create a game and run autorun to completion, returning the stop reason.
     fn run_autorun(state: &mut MicroGameState, dir: Direction) -> MicroAutorunStop {
-        let mut stepper = MicroAutorunStepper::new(dir);
+        let mut stepper = MicroAutorunStepper::new(dir, stairs_in_fov(&state.map, &state.fov));
         loop {
             match stepper.next_step(state) {
                 MicroStepOutcome::Continue => continue,
@@ -394,7 +420,8 @@ mod tests {
     fn autorun_respects_max_steps() {
         // Use a large open map to maximize steps before wall.
         let mut state = MicroGameState::new(42, 80, 60);
-        let mut stepper = MicroAutorunStepper::new(Direction::East);
+        let mut stepper =
+            MicroAutorunStepper::new(Direction::East, stairs_in_fov(&state.map, &state.fov));
         let mut steps = 0u8;
         loop {
             match stepper.next_step(&mut state) {
@@ -457,10 +484,68 @@ mod tests {
             .entities
             .spawn_monster(MonsterKind::Goblin, px + 1, py, AiBehavior::Chase);
 
-        let mut stepper = MicroAutorunStepper::new(Direction::East);
+        let mut stepper =
+            MicroAutorunStepper::new(Direction::East, stairs_in_fov(&state.map, &state.fov));
         match stepper.next_step(&mut state) {
             MicroStepOutcome::Done(MicroAutorunStop::MonsterSpotted) => {}
             other => panic!("Expected MonsterSpotted, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn autorun_stops_when_stairs_enter_fov() {
+        use super::super::fov::MicroFov;
+        use super::super::map::{MicroMap, TILE_FLOOR, TILE_STAIRS_DOWN};
+
+        // Layout: long east-west corridor at y=10, with a room at x=15
+        // containing stairs. Player starts far west, runs east.
+        // When player gets close enough, stairs enter FOV.
+        let w: u8 = 30;
+        let h: u8 = 20;
+        let mut state = MicroGameState::new(42, w, h);
+        state.map = MicroMap::new(w, h);
+
+        // Carve east-west corridor at y=10.
+        for x in 1..w - 1 {
+            state.map.set_tile(x, 10, TILE_FLOOR);
+        }
+        // Carve a room at (14,7)-(17,13) — visible from corridor.
+        for y in 7..14 {
+            for x in 14..18 {
+                state.map.set_tile(x, y, TILE_FLOOR);
+            }
+        }
+        // Stairs inside the room at (16,8) — 2 tiles north of corridor.
+        state.map.set_tile(16, 8, TILE_STAIRS_DOWN);
+
+        // Player starts at (2,10), running east.
+        state.entities.x[0] = 2;
+        state.entities.y[0] = 10;
+        for i in 1..state.entities.count as usize {
+            state.entities.alive[i] = false;
+        }
+
+        state.fov = MicroFov::new(w, h);
+        state.fov.compute_fov(2, 10, &state.map);
+
+        // Stairs should NOT be visible from (2,10) — 14 tiles east.
+        assert!(
+            !state.fov.is_visible(16, 8),
+            "stairs should not be visible from starting position"
+        );
+
+        let reason = run_autorun(&mut state, Direction::East);
+        assert_eq!(
+            reason,
+            MicroAutorunStop::StairsFound,
+            "autorun should stop when stairs enter FOV"
+        );
+
+        // Player should be east of start but NOT on the stairs tile.
+        let px = state.entities.x[0];
+        let py = state.entities.y[0];
+        assert!(px > 2, "player should have moved east");
+        assert_eq!(py, 10, "player should still be in corridor");
+        assert_ne!((px, py), (16, 8), "player should not be on stairs tile");
     }
 }

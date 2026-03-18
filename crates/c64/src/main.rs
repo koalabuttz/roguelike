@@ -21,7 +21,7 @@ use input::{InventoryInput, LookInput, MenuInput};
 use roguelike_core::command::{Direction, GameCommand};
 use roguelike_core::rules::message::{Combatant, GameEvent};
 use roguelike_core::rules::{balance, seed_code};
-use roguelike_core::tier_micro::autorun::{MicroAutorunStop, MicroAutorunStepper, MicroStepOutcome};
+use roguelike_core::tier_micro::autorun::{MicroAutorunStop, MicroAutorunStepper, MicroStepOutcome, stairs_in_fov};
 use roguelike_core::tier_micro::game::MicroGameState;
 use roguelike_core::tier_micro::map::TILE_STAIRS_DOWN;
 use roguelike_core::tier_micro::save;
@@ -621,7 +621,7 @@ fn run_autorun(state: &mut MicroGameState, dir: Direction) {
     state.log.add(GameEvent::Autorun);
     render::render_messages(state);
 
-    let mut stepper = MicroAutorunStepper::new(dir);
+    let mut stepper = MicroAutorunStepper::new(dir, stairs_in_fov(&state.map, &state.fov));
     let mut last_msg_total;
 
     // Bank I/O out per-step rather than for the entire loop.

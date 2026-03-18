@@ -170,6 +170,7 @@ pub struct AutorunStepper {
     max_steps: Stat,
     all_messages: Vec<String>,
     explored_before: Stat,
+    stairs_visible_before: bool,
 }
 
 /// Result of a single stepper step.
@@ -247,6 +248,11 @@ impl AutorunStepper {
             .is_some()
         {
             return self.finish(state, AutorunStopReason::MonsterSpotted);
+        }
+
+        // Check 6b: stairs newly visible in FOV.
+        if !self.stairs_visible_before && state.stairs_in_visible() {
+            return self.finish(state, AutorunStopReason::StairsFound);
         }
 
         // Mode-specific post-step logic.
@@ -1247,6 +1253,13 @@ impl GameState {
         }
     }
 
+    /// Check if any stairs tile is currently visible.
+    fn stairs_in_visible(&self) -> bool {
+        self.visible
+            .iter()
+            .any(|&(x, y)| self.map.tiles[self.map.idx(x, y)] == map::Tile::StairsDown)
+    }
+
     /// Create a stepper for directional autorun.
     pub fn start_autorun(&self, dir: Direction) -> AutorunStepper {
         AutorunStepper {
@@ -1255,6 +1268,7 @@ impl GameState {
             max_steps: self.max_autorun_steps,
             all_messages: Vec::new(),
             explored_before: self.explored.len() as Stat,
+            stairs_visible_before: self.stairs_in_visible(),
         }
     }
 
@@ -1272,6 +1286,7 @@ impl GameState {
             max_steps: self.max_autorun_steps,
             all_messages: Vec::new(),
             explored_before: self.explored.len() as Stat,
+            stairs_visible_before: self.stairs_in_visible(),
         })
     }
 

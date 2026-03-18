@@ -206,7 +206,10 @@ impl MicroGameStateAdapter {
     /// Create a stepper for directional autorun (micro tier).
     pub fn start_autorun(&self, dir: Direction) -> MicroAutorunStepper {
         MicroAutorunStepper {
-            inner: crate::tier_micro::autorun::MicroAutorunStepper::new(dir),
+            inner: crate::tier_micro::autorun::MicroAutorunStepper::new(
+                dir,
+                crate::tier_micro::autorun::stairs_in_fov(&self.game.map, &self.game.fov),
+            ),
             all_messages: Vec::new(),
             explored_floor_before: self.game.fov.explored_floor_count(&self.game.map) as Stat,
         }
@@ -235,7 +238,11 @@ impl MicroGameStateAdapter {
 
         let explored_before = self.game.fov.explored_floor_count(&self.game.map) as Stat;
         let mut buf = crate::tier_micro::pathfinding::BfsBuffers::new();
-        let mut stepper = crate::tier_micro::autorun::MicroBfsStepper::new(tx, ty);
+        let mut stepper = crate::tier_micro::autorun::MicroBfsStepper::new(
+            tx,
+            ty,
+            crate::tier_micro::autorun::stairs_in_fov(&self.game.map, &self.game.fov),
+        );
         let mut all_messages = Vec::new();
 
         loop {

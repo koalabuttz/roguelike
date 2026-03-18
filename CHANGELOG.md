@@ -4,63 +4,68 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [0.5.0] - 2026-03-18
 
 ### Added
-- C64: structured binary save/load system (#134)
-- Add explored stairs coordinates to MCP observe response (#138)
-- Compress sprite data: derive 4 rotation frames at runtime (#131)
-- C64: In-place game state init — free 7.8 KB by eliminating static stack temporaries
-- Eliminate u64 multiply runtime from C64 seed decode (#125)
-- Add kills, turns, and seed to standard tier game-over screen (#108)
-- Add ATK/DEF stats to C64 status bar (#107)
-- C64: Add help screen overlay (#104)
-- Add unequip action for equipped items on both tiers (#99)
-- C64: Two-phase inventory with action bar (#90)
-- Both tiers: Equipped-item indicators in inventory (#92)
-- Standard tier: Item coloring in inventory modal (#93)
-- Add Brogue-style inventory system (26-slot, stackable) (#78)
-- Add Inventory struct and InvSlot to rules/items.rs with stacking logic (#79)
-- Add inventory-related GameCommand and GameEvent variants (#80)
-- Add inventory to micro tier (MicroGameState) with pickup/use/drop/equip (#81)
-- Add inventory to standard tier (GameState) with pickup/use/drop/equip (#82)
-- Add inventory modal UI to terminal frontend (#83)
-- Add inventory overlay to C64 port (#84)
-- Add inventory actions to MCP server (#85)
-- Use per-item colors in C64 inventory rendering (#88)
-- Add SID music to C64 port (#61)
-- Screen shake effect on enemy hit (#63)
-- Sprite-based loading spinner for C64 (#64)
-- Add wall-clock music timer via IRQ frame counter on C64 (#66)
-- Expand C64 RAM by moving .noinit to hiram and unmapping BASIC ROM (#71)
-- Add seed code display to C64 end screens (#74)
-- Add I/O banking overlay on C64 — frees 3.6KB by placing pure-computation functions under $D000-$DFFF with bank-aware IRQ handlers (#72)
-- Add corpse glyph rendering and look mode descriptions on C64 (#69)
-- Redesign SID music composition with sparse motivic lead and wider intervals (#65)
-- Refine lead voice timbre and register for less distracting ambient feel (#1)
+
+#### Gameplay
+- 26-slot Brogue-style inventory system with stacking consumables, equipment slots, pickup/drop/use/equip actions across all tiers (#78-#85)
+- Stop autorun when stairs enter FOV, not just when stepped on — matches DCSS/Brogue behavior (#142)
+- StairsFound autorun stop condition across all tiers and steppers
+- Explored stairs coordinates in observe() response — spatial memory analogue for LLM players (#138)
+- Unequip and drop-equipped actions for both tiers (#99)
+- Kill and turn counters in standard tier status bar (#106)
+- Kills, turns, and seed on standard tier game-over screen (#108)
+
+#### Micro Tier (no_std)
+- BFS pathfinding with fixed-size buffers (1.1 KB) — enables auto_explore and pathfind_to on micro tier (#137)
+- auto_fight for micro tier — weakest-adjacent fight-to-death loop
+- MicroBfsStepper for BFS-guided autorun with full stop conditions
+
+#### C64 Port
+- Save and load game to 1541 floppy disk via KERNAL SAVE/LOAD with inline asm (#134)
+- SID music: intermittent playback, fade in/out, combat SFX (#61, #65, #66)
+- Screen shake effect on combat via VIC-II raster IRQ (#63)
+- Sprite-based loading spinner (#64)
+- Two-phase inventory with action bar (#90)
+- Help screen overlay with multi-page navigation (#104, #110)
+- Message history overlay (#109)
+- ATK/DEF stats in status bar (#107)
+- Seed code display on end screens (#74)
+- I/O banking overlay — frees 3.6 KB by placing computation under $D000 (#72)
+- HIRAM expansion — game state at $E000, BASIC ROM unmapped (#71)
+- Corpse rendering and look mode descriptions (#69)
+- Per-item colors in inventory rendering (#88)
+
+#### MCP / LLM Playtesting
+- Route auto_explore, pathfind_to, auto_fight to both standard and micro tiers
+- Error message lists all valid actions including item commands (#139)
+- Playtest chat TUI with broadcast mode for injecting messages into running games
+
+#### CI / Tooling
+- .d64 disk image in nightly and release builds (#140)
+- Multi-arch Docker image (arm64 + amd64) for C64 builds
+- Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
-- C64: Compress spinner sprite data — derive 3 frames via vflip at runtime
-- Integrate items into GameState (pickup, equipment, effective stats) (#5)
+- C64: switch Docker image to koalabuttz/rust-mos on GHCR with MachineOutliner PH/PL fix — ~5-6 KB code size savings
+- C64: in-place game state init eliminates 7.8 KB static stack temporaries
 - C64: eliminate __mulsi3 via subtraction-based u16 decimal formatting (#126)
-- C64: hiram code overlay for large functions (#96)
-- C64: scrollable multi-page help screen (#110)
-- C64: scrollable message history overlay (#109)
-- Inventory UX polish (#89)
-- Fix docs audit branch issues (#100)
-- C64: Aggressive inlining to reclaim .noinit static stack space (#94)
+- C64: compress spinner sprite data — derive 3 frames via vflip at runtime
+- Inventory UX polish: equip bonus display, equipped indicators, item coloring (#89, #92, #93)
 
 ### Fixed
-- Investigate micro-tier item equip/use failure in MCP playtesting (#139)
+- Fix MCP error message omitting item actions from valid action list (#139)
+- Fix gamepad analog_to_direction tests to use Direction enum (#141)
 - Fix code review issues: CHANGELOG dupe, bestiary stats, status bar layout (#111)
 - Fix dropping equipped items on C64 inventory (#102)
-- C64: Freeze when equipping item via keyboard in inventory (#98)
-- C64: Show equip bonus in messages (#91)
+- Fix C64 freeze when equipping item via keyboard in inventory (#98)
+- Fix C64 equip bonus not shown in messages (#91)
 - Fix structural walls not rendering in terminal game (#75)
 - Fix C64 .noinit RAM overflow from corpse and look mode additions (#70)
-- Debug raster IRQ on C64 port - spinner corrupts game state during map generation (#60)
-- Add joystick edge detection with auto-repeat to prevent phantom input (#55)
-- Fix C64 I/O banking - CPU port value C unmaps I/O area causing frozen input (#54)
+- Fix raster IRQ on C64 — spinner corrupts game state during map generation (#60)
+- Fix joystick edge detection with auto-repeat to prevent phantom input (#55)
+- Fix C64 I/O banking — CPU port value $0C unmaps I/O area causing frozen input (#54)
 - Fix combat event detection cap missing events in rare multi-monster scenarios (#68)
 
 ## [0.4.0] - 2026-02-27

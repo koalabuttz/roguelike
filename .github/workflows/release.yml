@@ -75,7 +75,7 @@ jobs:
             -e PATH=/usr/local/rust-mos/bin:/usr/local/bin:/usr/bin:/bin \
             -v "${{ github.workspace }}:/repo" \
             -w /repo/crates/c64 \
-            ghcr.io/koalabuttz/rust-mos:ac2fb2277-4537158-215f25be4 \
+            ghcr.io/koalabuttz/rust-mos:ac2fb2277-4537158-4aaa40e16 \
             cargo build --release
       - name: Create .d64 disk image
         run: |

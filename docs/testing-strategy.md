@@ -21,7 +21,7 @@ per-feature test plans, see the individual phases in the
 | MCP integration | `cargo test -p roguelike-mcp --test mcp_integration` | All MCP tools: response schemas, error paths, session lifecycle |
 | MCP property tests | `cargo test -p roguelike-mcp --test mcp_proptest` | Random MCP tool sequences verify game invariants hold through the JSON interface |
 | Benchmarks | `cargo bench -p roguelike-core` | Criterion benchmarks for FOV, pathfinding, game step, and exploration graph |
-| All tests | `cargo test --workspace` | ~960 unit + integration tests across all crates |
+| All tests | `cargo test --workspace` | ~1006 unit + integration tests across all crates |
 
 ---
 

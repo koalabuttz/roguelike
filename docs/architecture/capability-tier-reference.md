@@ -59,6 +59,10 @@ roguelike/
           fov.rs      # Iterative shadowcasting FOV → bitfield (Bresenham LOS)
           ai.rs       # monster AI (micro tier)
           spawn.rs    # micro-tier spawn: weighted monster spawning to fixed arrays
+          item_store.rs # fixed-size item storage (floor items and inventory)
+          pathfinding.rs # BFS pathfinding with fixed-size buffers (1.1 KB)
+          autorun.rs  # MicroBfsStepper for BFS-guided autorun with stop conditions
+          save.rs     # Binary save/load for MicroGameState
           msglog.rs   # Circular buffer for GameEvent values (no string formatting)
         tier_compact/ # Stubs only until GBA port begins — no_std
           mod.rs
@@ -84,7 +88,7 @@ roguelike/
 # Standard-tier code is gated behind `std`.
 [package]
 name = "roguelike-core"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 
 [features]
@@ -93,6 +97,7 @@ std = ["dep:rand", "serde"]
 serde = ["dep:serde", "dep:serde_json"]
 data-files = ["dep:toml", "std"]
 dev-tools = ["std"]
+c64-overlay = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
@@ -411,6 +416,7 @@ the `std` feature. The C64 uses `default-features = false` and only accesses
 | **AI** | Per-tier | Per-tier | `core/tier_*/ai.rs`, `core/ai.rs` | Chase, wander, mood logic — same algorithms, tier-appropriate types |
 | **Game state** | Per-tier | Per-tier | `core/tier_*/game.rs` | `MicroGameState` / `CompactGameState` (stub) / `GameState` |
 | **FOV** | Per-tier | Per-tier | `core/tier_*/fov.rs` | micro: iterative shadowcasting → bitfield; compact: Bresenham → bitfield; standard: recursive shadowcasting (std) |
+| **BFS pathfinding** | micro | Per-tier | `core/tier_micro/pathfinding.rs` | Fixed-size buffers (1.1 KB), enables auto\_explore and pathfind\_to on micro tier |
 | A\* pathfinding | standard | **No** | PC only (`std`) | Requires heap (HashMap, BinaryHeap) |
 | Rendering | N/A | **No** | Separate impls | crossterm vs VIC-II vs GBA hardware |
 | Input handling | N/A | **No** | Separate impls | crossterm vs CIA keyboard/joystick vs GBA buttons |
@@ -486,7 +492,7 @@ Each tier defines its own types and algorithms:
 | Map | 64x48 | 128x96 | 80x40+ |
 | PRNG | LFSR-16 | LFSR-32 | ChaCha20 |
 | FOV | Iterative shadowcasting | Bresenham | Shadowcasting |
-| Pathfinding | Greedy chase | Greedy chase | A* |
+| Pathfinding | BFS (fixed buffers) | Greedy chase | A* |
 
 The compact tier will initially be stubs only — `tier_compact/types.rs` (type aliases) and `tier_compact/prng.rs` (`LfsrRng32`). Full implementation (game state, mapgen, entity storage) is deferred until the GBA port begins.
 
@@ -563,7 +569,7 @@ hardware constraints.
 | Aspect | Tier micro | Tier compact | Tier standard |
 |--------|-----------|-------------|--------------|
 | FOV | Iterative shadowcasting | Bresenham rays | Shadowcasting |
-| Pathfinding | Greedy chase | Greedy chase | A* |
+| Pathfinding | BFS (fixed buffers) | Greedy chase | A* |
 | Entity cap | 16 (fixed array) | 128 (fixed array) | 512-1024 (Vec) |
 | Messages | GameEvent enum (Copy) | GameEvent enum (Copy) | GameEvent → String formatting |
 | Map storage | Flat `[u8; W*H]` | Flat `[u8; W*H]` | `Vec<Vec<Tile>>` |

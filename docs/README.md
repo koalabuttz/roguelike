@@ -17,7 +17,7 @@ Project documentation for the roguelike dungeon crawler.
 |----------|---------|--------|
 | [architecture/cross-platform.md](architecture/cross-platform.md) | Workspace layout, crate responsibilities, development workflow | Current |
 | [architecture/simulation.md](architecture/simulation.md) | Future design for emergent simulation (properties, events, CA) | Future design |
-| [architecture/capability-tier-reference.md](architecture/capability-tier-reference.md) | Cross-platform capability tier hierarchy: per-tier types, algorithms, sharing matrix, seed system, tier divergence | Reference (micro tier implemented, inventory shared across tiers) |
+| [architecture/capability-tier-reference.md](architecture/capability-tier-reference.md) | Cross-platform capability tier hierarchy: per-tier types, algorithms, sharing matrix, seed system, tier divergence | Reference (micro tier complete: inventory, BFS pathfinding, save/load, autorun) |
 
 ### Platforms
 
@@ -55,12 +55,13 @@ Project documentation for the roguelike dungeon crawler.
 
 | Document | Purpose | Status |
 |----------|---------|--------|
-| [reports/llm-playtest-summary.md](reports/llm-playtest-summary.md) | Consolidated findings from all 4 LLM playtest sessions | Historical |
+| [reports/llm-playtest-summary.md](reports/llm-playtest-summary.md) | Consolidated findings from all 6 LLM playtest sessions | Historical |
 | [reports/llm-playtest-session-1.md](reports/llm-playtest-session-1.md) | Session 1: baseline, no healing, identified core MCP pain points | Historical |
 | [reports/llm-playtest-session-2.md](reports/llm-playtest-session-2.md) | Session 2: HP regen added, autorun/navigation issues persisted | Historical |
 | [reports/llm-playtest-session-3.md](reports/llm-playtest-session-3.md) | Session 3: pathfind_to + frontiers, efficiency nearly doubled | Historical |
 | [reports/llm-playtest-session-4.md](reports/llm-playtest-session-4.md) | Session 4: auto_explore, MCP interface reached maturity | Historical |
 | [reports/llm-playtest-session-5.md](reports/llm-playtest-session-5.md) | Session 5: Item system verification (potions, swords, armor) | Historical |
+| [reports/llm-playtest-session-6.md](reports/llm-playtest-session-6.md) | Session 6: Micro tier (BFS, StairsFound, auto_fight) | Historical |
 | [reports/dev-tools-session.md](reports/dev-tools-session.md) | Dev tooling session: debug console, map presets, replay, headless | Historical |
 
 ### Archive

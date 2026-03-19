@@ -53,7 +53,7 @@ These interactions mean balance tuning after Phase 4 will differ significantly f
 
 **Complete.** Implemented with `[wandering]` config in `game.toml`, `try_spawn_wandering()` in `game.rs`, `Wander` AI behavior in `entity.rs`, distance-based sound cues, idle acceleration, and grace period. The implementation exceeded the original proposal — it includes spawn chance, idle threshold/acceleration for camping detection, and multi-distance sound cues (`sound_far`, `sound_medium`, `sound_near`).
 
-Playtest gate validation is pending — run LLM playtest sessions to measure survival rate impact before proceeding to Phase 2.
+Playtest gate validated — LLM playtest sessions 5 and 6 confirmed the impact of wandering monsters and the item system on gameplay.
 
 ---
 

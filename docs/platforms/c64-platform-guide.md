@@ -37,29 +37,28 @@ core/src/tier_micro/ai.rs    →  used directly from core      Micro    LOS + gr
 core/src/tier_micro/spawn.rs →  used directly from core      Micro    spawn mechanics (placement)
 core/src/tier_micro/message.rs → used directly               Micro    GameEvent formatting
 
-C64-Specific Modules         →  C64 Module (Rust)            Size Est.  POC Actual
+C64-Specific Modules         →  C64 Module (Rust)            Status
 ───────────────────────────────────────────────────────────────────────────────────────
-(crossterm in tui/)          →  c64/src/render.rs            ~1.5 KB    239 lines
-                                 (VIC-II screen + color RAM writes)
+(crossterm in tui/)          →  c64/src/render.rs            Implemented
+                                 (VIC-II screen + color RAM writes, inventory, help, message history)
 
-(crossterm in tui/)          →  c64/src/input.rs             ~1 KB      179 lines
-                                 (Kernal keyboard buffer + CIA joystick Port 2)
+(crossterm in tui/)          →  c64/src/input.rs             Implemented
+                                 (Kernal keyboard buffer + CIA joystick Port 2, edge detection)
 
-(no PC equivalent)           →  c64/src/c64.rs               ~1 KB      172 lines
-                                 (C64 hardware registers — migrate to mos-hardware)
+(no PC equivalent)           →  c64/src/c64.rs               Implemented
+                                 (C64 hardware registers, SID, VIC-II, CIA, I/O banking)
 
-saves/src/lib.rs             →  c64/src/save.rs              ~0.8 KB    (pending)
-                                 (simplified: binary to floppy / UII+ HTTP)
+saves/src/lib.rs             →  c64/src/save.rs              Implemented
+                                 (binary save/load to 1541 floppy via KERNAL inline asm)
 
-(no sound on PC)             →  c64/src/sid.rs               ~1 KB      (pending)
-                                 (SID register writes via mos-hardware)
+(no sound on PC)             →  c64/src/sid.rs               Implemented
+                                 (SID music via CIA timer IRQs, fade in/out, combat SFX)
 
-(no PC equivalent)           →  c64/src/main.rs              ~0.5 KB    (thin)
-                                 (hardware init, game loop glue, C64 Renderer impl)
+(no PC equivalent)           →  c64/src/main.rs              Implemented
+                                 (hardware init, game loop, raster IRQ, screen shake, sprite spinner)
 ───────────────────────────────────────────────────────────────────────────────────────
-POC total:                       11 source files              1,898 lines = 13 KB
-Production estimate:             ~8 source files             ~1,200 lines (frontend only)
-  (well within 46 KB budget; core::tier_micro provides all game logic directly,
+Production total:                ~5,200 lines (frontend only)
+  (core::tier_micro provides all game logic directly,
    ensuring gameplay feature parity across platforms for micro-tier seeds)
 ```
 

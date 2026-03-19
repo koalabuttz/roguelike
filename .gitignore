@@ -3,6 +3,9 @@
 # Linker map files (generated during C64 memory analysis)
 crates/c64/map*.txt
 
+# VICE disassembly artifacts
+crates/c64/disasm.*
+
 # Editor / IDE
 .vscode/
 .idea/

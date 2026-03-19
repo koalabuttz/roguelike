@@ -178,8 +178,8 @@ Items that have been implemented, organized by original tier.
 | Parameter sweeps | Sweep across player stats (HP, ATK, DEF) to find balance boundaries; JSON config, structured output. |
 | LLM playtesting | Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; dual backends, parallel execution, token optimization. [Docs.](tooling/llm-playtesting.md) |
 | CI balance check | GitHub Actions workflow runs headless presets on every gameplay change, diffs against cached baseline, posts verdict to workflow summary and PR comments. |
-| Capability tier system | `rules/` module (no_std pure game rules), `tier_micro/` (complete C64 game engine), `tier_compact/` stubs (GBA, deferred), `GameStep` trait (cross-tier interface), `RenderSource` trait (unified rendering), standard-tier code gated behind `std` feature. |
-| C64 production frontend | C64 crate (~4,300 lines) over `core::tier_micro` + `core::rules`. SID music, two-phase inventory, screen shake, I/O banking, ROM unmapping. See [cross-platform architecture](architecture/cross-platform.md). |
+| Capability tier system | `rules/` module (no_std pure game rules), `tier_micro/` (complete C64 game engine with BFS pathfinding, auto\_fight, autorun with stop conditions, item storage, binary save/load), `tier_compact/` stubs (GBA, deferred), `GameStep` trait (cross-tier interface), `RenderSource` trait (unified rendering), standard-tier code gated behind `std` feature. |
+| C64 production frontend | C64 crate (~5,200 lines) over `core::tier_micro` + `core::rules`. SID music, floppy disk saves, two-phase inventory, screen shake, I/O banking, ROM unmapping, help screen, message history, ATK/DEF stats, seed code display, sprite-based loading spinner, corpse rendering. See [cross-platform architecture](architecture/cross-platform.md). |
 | Viewport scrolling | Player-centered viewport for maps larger than terminal, universal across tiers. |
 
 ### Tier 4

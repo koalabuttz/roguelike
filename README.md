@@ -181,7 +181,7 @@ Frames are written atomically after every action. See the [spectator mode design
 ## Development
 
 ```sh
-cargo test --workspace               # All ~960 tests across all crates
+cargo test --workspace               # All ~1006 tests across all crates
 cargo clippy --workspace -- -D warnings
 cargo fmt --all --check
 ```
@@ -224,7 +224,7 @@ See [docs/roadmap.md](docs/roadmap.md) for the full breakdown with dependencies,
 - AT Protocol integration (Bluesky login, PDS saves)
 - Daily challenges and shared leaderboard
 
-**Completed highlights:** 26-slot inventory (a–z) with stacking and equipment; multi-level dungeons with stairs and a win condition; wandering monsters with time pressure and sound cues; capability tier system (micro/standard) with cross-tier GameStep and RenderSource traits; C64 production frontend with SID music, inventory, screen shake, and I/O banking; platform abstraction; save/load; A\* pathfinding; gamepad support; SSH multiplayer; MCP server for AI play; data-driven content with hot reload; full CI/CD with balance regression testing; seed sharing.
+**Completed highlights:** 26-slot inventory (a–z) with stacking and equipment; multi-level dungeons with stairs and a win condition; wandering monsters with time pressure and sound cues; capability tier system (micro/standard) with cross-tier GameStep and RenderSource traits; C64 production frontend with SID music, floppy disk saves, inventory, screen shake, help screen, message history, and I/O banking; micro tier BFS pathfinding, auto\_fight, and autorun stop conditions; platform abstraction; save/load; A\* pathfinding; gamepad support; SSH multiplayer; MCP server for AI play; data-driven content with hot reload; full CI/CD with balance regression testing; seed sharing.
 
 ## David's Statement on AI Use
 

@@ -404,45 +404,57 @@ pub fn scan_keyboard() -> u8 {
 
 /// Scan the CIA1 keyboard matrix. Returns (key_code, shifted).
 /// key_code is 0 if no new key. shifted is true if either shift key is held.
+///
+/// Combines scanning, edge detection, and PREV_KEYS update in a single pass
+/// to avoid a temp array allocation and the memcpy to update PREV_KEYS.
 pub fn scan_keyboard_shifted() -> (u8, bool) {
-    let mut rows = [0u8; 8];
+    let mut result: u8 = 0;
+    let mut shifted = false;
 
-    // Scan all 8 rows
     for row in 0..8u8 {
         poke(CIA1_PA, !(1u8 << row));
-        // Double-read for CIA settle time
-        let _ = peek(CIA1_PB);
+        let _ = peek(CIA1_PB); // settle time
         let val = peek(CIA1_PB) ^ 0xFF; // invert: 1 = pressed
-        rows[row as usize] = val;
-    }
-    poke(CIA1_PA, 0xFF); // restore for joystick reads
 
-    // Check shift state: LSHIFT = PA1/PB7, RSHIFT = PA6/PB4
-    let shifted = (rows[1] & 0x80 != 0) || (rows[6] & 0x10 != 0);
+        // Shift detection: LSHIFT = row 1 bit 7, RSHIFT = row 6 bit 4
+        if row == 1 && val & 0x80 != 0 {
+            shifted = true;
+        }
+        if row == 6 && val & 0x10 != 0 {
+            shifted = true;
+        }
 
-    // Find first newly pressed key (edge detection)
-    let mut result: u8 = 0;
-    for row in 0..8u8 {
-        let prev = unsafe { PREV_KEYS[row as usize] };
-        let newly = rows[row as usize] & !prev;
-        if newly != 0 && result == 0 {
-            for col in 0..8u8 {
-                if newly & (1 << col) != 0 {
-                    let key = KEY_MATRIX[row as usize][col as usize];
-                    if key != 0 {
-                        result = match key {
-                            KEY_CRSR_VERT => if shifted { PETSCII_UP } else { PETSCII_DOWN },
-                            KEY_CRSR_HORIZ => if shifted { PETSCII_LEFT } else { PETSCII_RIGHT },
-                            _ => key,
-                        };
-                        break;
+        // Edge detection + key lookup (only if no key found yet)
+        if result == 0 {
+            let prev = unsafe { PREV_KEYS[row as usize] };
+            let newly = val & !prev;
+            if newly != 0 {
+                // Find which column triggered
+                let mut col = 0u8;
+                while col < 8 {
+                    if newly & (1 << col) != 0 {
+                        let key = KEY_MATRIX[row as usize][col as usize];
+                        if key != 0 {
+                            result = key;
+                            break;
+                        }
                     }
+                    col += 1;
                 }
             }
         }
+
+        unsafe { PREV_KEYS[row as usize] = val; }
+    }
+    poke(CIA1_PA, 0xFF); // restore for joystick reads
+
+    // Resolve shift-dependent keys
+    if result == KEY_CRSR_VERT {
+        result = if shifted { PETSCII_UP } else { PETSCII_DOWN };
+    } else if result == KEY_CRSR_HORIZ {
+        result = if shifted { PETSCII_LEFT } else { PETSCII_RIGHT };
     }
 
-    unsafe { PREV_KEYS = rows; }
     (result, shifted)
 }
 

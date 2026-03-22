@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.5.0] - 2026-03-18
 
 ### Added
+- Optimize C64 keyboard scanning with early exit and in-place edge detection (#147)
+- Optimize micro tier FOV slope comparison with lookup table (#146)
 
 #### Gameplay
 - 26-slot Brogue-style inventory system with stacking consumables, equipment slots, pickup/drop/use/equip actions across all tiers (#78-#85)
@@ -48,6 +50,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Comprehensive documentation sweep (#145)
 - C64: switch Docker image to koalabuttz/rust-mos on GHCR with MachineOutliner PH/PL fix — ~5-6 KB code size savings
 - C64: in-place game state init eliminates 7.8 KB static stack temporaries
 - C64: eliminate __mulsi3 via subtraction-based u16 decimal formatting (#126)

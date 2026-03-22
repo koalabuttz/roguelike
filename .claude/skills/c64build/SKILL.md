@@ -12,6 +12,7 @@ Build the C64 roguelike port using the Docker rust-mos toolchain and optionally 
 - `/c64build` — Build only
 - `/c64build deploy` — Build and deploy to VICE
 - `/c64build size` — Build with linker map and show RAM/hiram usage
+- `/c64build profile` — Build, then profile 50 turns via VICE (requires xdotool + $DISPLAY)
 
 ## Instructions
 
@@ -47,6 +48,20 @@ printf 'l "\\\\tsclient\\Local Storage\\Download\\roguelike-builds\\roguelike-c6
 ```
 
 This copies the PRG to the shared ChromeOS downloads folder, then loads it into VICE running on the Windows machine (10.0.27.44:6510) via the remote monitor protocol.
+
+### Profile
+
+If the user asked for `profile`:
+
+```bash
+make -C crates/c64 profile
+```
+
+Launches VICE with the text remote monitor and xdotool keyboard injection, plays 50 turns automatically, and reports per-function cycle counts using VICE's built-in profiler. Requires `x64sc`, `xdotool`, and `$DISPLAY`.
+
+Options via make variables: `PROFILE_TURNS=50`, `PROFILE_MODE=builtin` (or `mapgen` for map generation cost).
+
+Note: LTO inlines most game functions into `game_loop`. Only overlay functions (`compute_fov`, `generate`) survive as separate callable symbols. The built-in profiler tracks these via JSR/RTS regardless.
 
 ## Constraints
 

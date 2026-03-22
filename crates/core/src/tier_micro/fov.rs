@@ -35,14 +35,68 @@ struct ScanJob {
     end_den: i8,
 }
 
+// ---------------------------------------------------------------------------
+// Quarter-square multiplication table for fast slope comparison.
+//
+// On 6502, i16 multiply (__mulhi3) costs ~50-60 cycles. Each slope comparison
+// does two of them. The quarter-square identity replaces each multiply with
+// two table lookups and a subtract: a * b = QS[a+b] - QS[|a-b|].
+//
+// Table size = 2 * (1 + 2*MAX_FOV_RADIUS) + 1 entries of u16.
+// At MAX_FOV_RADIUS=16: 67 entries = 134 bytes.
+// ---------------------------------------------------------------------------
+
+/// Max slope operand value: 1 + 2 * MAX_FOV_RADIUS (from tile edge formulas).
+const MAX_SLOPE_VAL: usize = 1 + 2 * balance::MAX_FOV_RADIUS as usize;
+
+/// Quarter-square table: QS[x] = floor(x² / 4).
+/// Used for fast multiply: a * b = QS[a+b] - QS[|a-b|].
+const QS: [u16; 2 * MAX_SLOPE_VAL + 1] = {
+    let len = 2 * MAX_SLOPE_VAL + 1;
+    let mut t = [0u16; 2 * MAX_SLOPE_VAL + 1];
+    let mut i = 0;
+    while i < len {
+        t[i] = ((i * i) / 4) as u16;
+        i += 1;
+    }
+    t
+};
+
+const _: () = assert!(
+    balance::FOV_RADIUS <= balance::MAX_FOV_RADIUS,
+    "FOV_RADIUS exceeds MAX_FOV_RADIUS — increase MAX_FOV_RADIUS in rules/balance.rs"
+);
+
+/// Fast unsigned multiply via quarter-square lookup.
+/// Valid for a, b in 0..=MAX_SLOPE_VAL.
+fn fast_mul(a: u8, b: u8) -> u16 {
+    let sum = a as usize + b as usize;
+    let diff = if a >= b {
+        (a - b) as usize
+    } else {
+        (b - a) as usize
+    };
+    QS[sum] - QS[diff]
+}
+
+/// Signed cross-product for slope comparison: num * den where den > 0.
+/// Handles negative numerators (only -1 in practice) via branch + negate.
+fn signed_cross(num: i8, den: i8) -> i16 {
+    if num >= 0 {
+        fast_mul(num as u8, den as u8) as i16
+    } else {
+        -(fast_mul((-num) as u8, den as u8) as i16)
+    }
+}
+
 /// Returns true if slope a/a_den < b/b_den (both denominators positive).
 fn slope_lt(a_num: i8, a_den: i8, b_num: i8, b_den: i8) -> bool {
-    (a_num as i16) * (b_den as i16) < (b_num as i16) * (a_den as i16)
+    signed_cross(a_num, b_den) < signed_cross(b_num, a_den)
 }
 
 /// Returns true if slope a/a_den > b/b_den (both denominators positive).
 fn slope_gt(a_num: i8, a_den: i8, b_num: i8, b_den: i8) -> bool {
-    (a_num as i16) * (b_den as i16) > (b_num as i16) * (a_den as i16)
+    signed_cross(a_num, b_den) > signed_cross(b_num, a_den)
 }
 
 pub struct MicroFov {

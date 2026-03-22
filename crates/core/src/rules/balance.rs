@@ -49,6 +49,9 @@ pub const TROLL_GLYPH: char = 'T';
 // ---------------------------------------------------------------------------
 
 pub const FOV_RADIUS: u8 = 8;
+/// Upper bound on FOV radius for quarter-square lookup table sizing.
+/// Increase if adding potions/effects that expand sight beyond FOV_RADIUS.
+pub const MAX_FOV_RADIUS: u8 = 16;
 pub const MAX_ROOMS: u8 = 30;
 pub const ROOM_SIZE_MIN: u8 = 4;
 pub const ROOM_SIZE_MAX: u8 = 10;

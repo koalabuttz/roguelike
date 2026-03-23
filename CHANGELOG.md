@@ -50,6 +50,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Remove explored % from player-facing UI (#116)
 - Eliminate __udivhi3 calls and reduce scan_octant stack init overhead (#152)
 - C64: Lazy clear_visible in FOV — track dirty bytes instead of full memset (#151)
 - Eliminate remaining __ashlqi3 from keyboard scanner and pathfinding (#150)

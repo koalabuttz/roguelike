@@ -580,7 +580,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                         {
                             let slots = saves.load_all_slot_metadata();
                             let mut slot_menu =
-                                menu::save_slot_menu(&slots, settings.show_explored_pct);
+                                menu::save_slot_menu(&slots);
                             match run_menu(&mut slot_menu, renderer, input)? {
                                 Some(MenuAction::SelectSlot(slot)) => {
                                     let msg = saves.save_to_slot(gs, slot, &settings.player_name);
@@ -1040,7 +1040,7 @@ fn handle_load_game<W: Write>(
         let auto_meta = saves.load_autosave_metadata();
         let has_auto = saves.has_autosave();
         let mut load_menu =
-            menu::load_slot_menu(has_auto, &auto_meta, &slots, settings.show_explored_pct);
+            menu::load_slot_menu(has_auto, &auto_meta, &slots);
         match run_menu(&mut load_menu, renderer, input)? {
             Some(MenuAction::LoadGame) => {
                 // Load autosave (always standard tier).
@@ -1196,9 +1196,6 @@ fn apply_settings_action<W: Write>(
 ) -> bool {
     match action {
         MenuAction::ToggleCasualMode => settings.casual_mode = !settings.casual_mode,
-        MenuAction::ToggleShowExploredPct => {
-            settings.show_explored_pct = !settings.show_explored_pct;
-        }
         MenuAction::ToggleShowCoordinates => {
             settings.show_coordinates = !settings.show_coordinates;
         }

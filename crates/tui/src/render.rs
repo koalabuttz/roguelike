@@ -446,12 +446,6 @@ fn render_status_bar<W: Write>(
         String::new()
     };
 
-    let explored_segment = if settings.show_explored_pct {
-        format!(" | Explored: {}%", source.explored_pct())
-    } else {
-        String::new()
-    };
-
     let (base_atk, atk_bonus) = source.player_atk();
     let (base_def, def_bonus) = source.player_def();
     let equip_segment = {
@@ -490,7 +484,7 @@ fn render_status_bar<W: Write>(
     let depth_segment = format!(" | Depth {}/{}", cur_depth, target_depth);
 
     let status = format!(
-        " HP [{}{}] {}/{}{}{}{}{}{}{}{}",
+        " HP [{}{}] {}/{}{}{}{}{}{}{}",
         bar_filled,
         bar_empty,
         hp,
@@ -500,7 +494,6 @@ fn render_status_bar<W: Write>(
         kills_segment,
         turns_segment,
         coord_segment,
-        explored_segment,
         hint_segment
     );
     let truncated: String = status

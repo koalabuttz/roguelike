@@ -129,7 +129,6 @@ impl Pronouns {
 pub enum Setting {
     CasualMode,
     AutosaveFrequency,
-    ShowExploredPct,
     ShowCoordinates,
     ShowKeybindHints,
     ShowKills,
@@ -226,8 +225,6 @@ pub struct Settings {
     #[serde(default)]
     pub casual_mode: bool,
     #[serde(default)]
-    pub show_explored_pct: bool,
-    #[serde(default)]
     pub show_coordinates: bool,
     #[serde(default = "default_true")]
     pub show_keybind_hints: bool,
@@ -266,7 +263,6 @@ impl Settings {
         match platform {
             Platform::Terminal | Platform::Ssh => Settings {
                 casual_mode: false,
-                show_explored_pct: false,
                 show_coordinates: false,
                 show_keybind_hints: true,
                 show_kills: true,
@@ -283,7 +279,6 @@ impl Settings {
             },
             Platform::Mcp => Settings {
                 casual_mode: false,
-                show_explored_pct: false,
                 show_coordinates: false,
                 show_keybind_hints: false,
                 show_kills: true,
@@ -300,7 +295,6 @@ impl Settings {
             },
             Platform::Gba => Settings {
                 casual_mode: false,
-                show_explored_pct: false,
                 show_coordinates: false,
                 show_keybind_hints: true,
                 show_kills: true,
@@ -317,7 +311,6 @@ impl Settings {
             },
             Platform::Vita => Settings {
                 casual_mode: false,
-                show_explored_pct: false,
                 show_coordinates: false,
                 show_keybind_hints: true,
                 show_kills: true,
@@ -334,7 +327,6 @@ impl Settings {
             },
             Platform::C64 => Settings {
                 casual_mode: false,
-                show_explored_pct: false,
                 show_coordinates: false,
                 show_keybind_hints: true,
                 show_kills: true,
@@ -361,35 +353,23 @@ mod tests {
     fn default_settings_not_casual() {
         let settings = Settings::default();
         assert!(!settings.casual_mode);
-        assert!(!settings.show_explored_pct);
     }
 
     #[test]
     fn round_trip_serde() {
         let original = Settings {
             casual_mode: true,
-            show_explored_pct: true,
             ..Settings::default()
         };
         let json = serde_json::to_string(&original).unwrap();
         let loaded: Settings = serde_json::from_str(&json).unwrap();
         assert!(loaded.casual_mode);
-        assert!(loaded.show_explored_pct);
-    }
-
-    #[test]
-    fn missing_show_explored_pct_defaults_false() {
-        let json = r#"{"casual_mode": true}"#;
-        let loaded: Settings = serde_json::from_str(json).unwrap();
-        assert!(loaded.casual_mode);
-        assert!(!loaded.show_explored_pct);
     }
 
     #[test]
     fn terminal_defaults() {
         let s = Settings::defaults_for(Platform::Terminal);
         assert!(!s.casual_mode);
-        assert!(!s.show_explored_pct);
         assert!(!s.show_coordinates);
         assert!(s.show_keybind_hints);
         assert!(s.vi_keys);
@@ -420,7 +400,6 @@ mod tests {
         let all = [
             Setting::CasualMode,
             Setting::AutosaveFrequency,
-            Setting::ShowExploredPct,
             Setting::ShowCoordinates,
             Setting::ShowKeybindHints,
             Setting::MessageLogLines,
@@ -445,7 +424,6 @@ mod tests {
         let default = Settings::default();
         let terminal = Settings::defaults_for(Platform::Terminal);
         assert_eq!(default.casual_mode, terminal.casual_mode);
-        assert_eq!(default.show_explored_pct, terminal.show_explored_pct);
         assert_eq!(default.show_coordinates, terminal.show_coordinates);
         assert_eq!(default.show_keybind_hints, terminal.show_keybind_hints);
         assert_eq!(default.vi_keys, terminal.vi_keys);
@@ -621,7 +599,6 @@ mod tests {
         let all = [
             Setting::CasualMode,
             Setting::AutosaveFrequency,
-            Setting::ShowExploredPct,
             Setting::ShowCoordinates,
             Setting::ShowKeybindHints,
             Setting::MessageLogLines,

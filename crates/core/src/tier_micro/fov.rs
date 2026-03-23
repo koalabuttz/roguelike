@@ -198,7 +198,15 @@ impl MicroFov {
     }
 
     fn clear_visible(&mut self) {
-        self.visible = [0; MAX_BITFIELD_SIZE];
+        // Only clear bytes covering the actual map dimensions instead of the
+        // full MAX_BITFIELD_SIZE.  For 64×48 maps this zeros 384 bytes vs 600,
+        // saving ~36% of the __memset cost per FOV call.
+        let total_tiles = row_col_idx(self.height, 0, self.width);
+        let used = (total_tiles + 7) >> 3;
+        for i in 0..used {
+            // Safety: used <= MAX_BITFIELD_SIZE by construction.
+            unsafe { *self.visible.get_unchecked_mut(i) = 0; }
+        }
     }
 
     /// Scan one octant using iterative shadowcasting with integer slopes.

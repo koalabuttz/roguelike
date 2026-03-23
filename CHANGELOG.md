@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.5.0] - 2026-03-18
 
 ### Added
+- Update auto-pickup to grab all items, not just consumables (#154)
 - Auto-pickup toggle for consumables (#86)
 - Optimize C64 keyboard scanning with early exit and in-place edge detection (#147)
 - Optimize micro tier FOV slope comparison with lookup table (#146)

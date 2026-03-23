@@ -356,9 +356,9 @@ impl MicroGameState {
     /// When auto_pickup is enabled, consumables are picked up first.
     fn notify_items_here(&mut self, x: u8, y: u8) {
         if self.auto_pickup {
-            self.auto_pickup_consumables(x, y);
+            self.auto_pickup_items(x, y);
         }
-        // Notify about remaining items (equipment, or consumables if inventory was full).
+        // Notify about remaining items (if inventory was full).
         let mut counts = [0u8; rules_items::KIND_COUNT];
         for i in 0..self.items.count as usize {
             if self.items.alive[i] && self.items.x[i] == x && self.items.y[i] == y {
@@ -375,16 +375,12 @@ impl MicroGameState {
         }
     }
 
-    /// Auto-pickup all consumable items at (x, y).
-    fn auto_pickup_consumables(&mut self, x: u8, y: u8) {
+    /// Auto-pickup all items at (x, y).
+    fn auto_pickup_items(&mut self, x: u8, y: u8) {
         loop {
             let mut found: Option<u8> = None;
             for i in 0..self.items.count as usize {
-                if self.items.alive[i]
-                    && self.items.x[i] == x
-                    && self.items.y[i] == y
-                    && rules_items::is_consumable(self.items.kind[i])
-                {
+                if self.items.alive[i] && self.items.x[i] == x && self.items.y[i] == y {
                     found = Some(i as u8);
                     break;
                 }
@@ -1135,14 +1131,14 @@ mod tests {
     }
 
     #[test]
-    fn auto_pickup_ignores_equipment() {
+    fn auto_pickup_grabs_equipment() {
         let mut g = MicroGameState::new_default(42);
         g.items = ItemStore::new();
         g.auto_pickup = true;
         let dir = place_item_adjacent(&mut g, ItemKind::ShortSword);
         g.step(GameCommand::Move(dir));
-        assert!(g.inventory.is_empty());
-        assert!(g.items.alive[0], "sword should remain on ground");
+        assert_eq!(g.inventory.len(), 1);
+        assert_eq!(g.inventory.get(0).unwrap().kind, ItemKind::ShortSword);
     }
 
     #[test]

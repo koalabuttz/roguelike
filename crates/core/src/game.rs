@@ -708,9 +708,9 @@ impl GameState {
     /// When auto_pickup is enabled, consumables are picked up first.
     fn notify_items_here(&mut self, x: Coord, y: Coord) {
         if self.auto_pickup {
-            self.auto_pickup_consumables(x, y);
+            self.auto_pickup_items(x, y);
         }
-        // Notify about remaining items (equipment, or consumables if inventory was full).
+        // Notify about remaining items (if inventory was full).
         let mut counts = [0u8; rules_items::KIND_COUNT];
         for item in &self.ground_items {
             if item.x == x && item.y == y {
@@ -727,12 +727,13 @@ impl GameState {
         }
     }
 
-    /// Auto-pickup all consumable items at (x, y).
-    fn auto_pickup_consumables(&mut self, x: Coord, y: Coord) {
+    /// Auto-pickup all items at (x, y).
+    fn auto_pickup_items(&mut self, x: Coord, y: Coord) {
         loop {
-            let idx = self.ground_items.iter().position(|it| {
-                it.x == x && it.y == y && rules_items::is_consumable(it.kind)
-            });
+            let idx = self
+                .ground_items
+                .iter()
+                .position(|it| it.x == x && it.y == y);
             let Some(idx) = idx else { break };
             let kind = self.ground_items[idx].kind;
             if !self.inventory.add(kind) {
@@ -3154,7 +3155,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_pickup_ignores_equipment() {
+    fn auto_pickup_grabs_equipment() {
         let mut gs = test_game();
         gs.auto_pickup = true;
         gs.ground_items.push(Item {
@@ -3163,8 +3164,9 @@ mod tests {
             kind: ItemKind::ShortSword,
         });
         gs.step(GameCommand::Move(Direction::East));
-        assert_eq!(gs.ground_items.len(), 1); // sword stays
-        assert!(gs.inventory.is_empty());
+        assert!(gs.ground_items.is_empty());
+        assert_eq!(gs.inventory.len(), 1);
+        assert_eq!(gs.inventory.get(0).unwrap().kind, ItemKind::ShortSword);
     }
 
     #[test]

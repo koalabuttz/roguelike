@@ -9,12 +9,14 @@ Requires: x64sc (VICE 3.8+), xdotool, a display ($DISPLAY).
 
 Usage:
     python3 profile.py map.txt <prg> [--turns 50] [--mode coarse|builtin|mapgen]
+    python3 profile.py map.txt <prg> --seed 42 --runs 5   # median of 5 runs
 """
 
 import argparse
 import os
 import re
 import socket
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -325,24 +327,52 @@ def send_move(text_mon, kbd, key_name):
 # Profiling modes
 # ---------------------------------------------------------------------------
 
-def profile_builtin(text_mon, kbd, symbols, labels_file, n_turns, frame_budget, seed=None):
-    """Use VICE's built-in profiler for per-function cycle counts."""
-    resp = text_mon.send(f'load_labels "{labels_file}"')
-    print(f"  Labels loaded: {len(symbols)} symbols")
+def parse_flat_profile(resp):
+    """Parse labeled symbol cycle counts from VICE flat profile output.
 
-    print("  Navigating to gameplay...")
+    Returns dict of {symbol_name: (total, self)} for labeled symbols
+    (lines containing .symbol_name).
+    """
+    results = {}
+    for line in resp.splitlines():
+        # Match lines like: "  12,362,411   6.1%     2,632,927   1.3% .compute_fov"
+        m = re.match(
+            r"\s+([\d,]+)\s+[\d.]+%\s+([\d,]+)\s+[\d.]+%\s+\.(\w+)",
+            line,
+        )
+        if m:
+            total = int(m.group(1).replace(",", ""))
+            self_cyc = int(m.group(2).replace(",", ""))
+            name = m.group(3)
+            results[name] = (total, self_cyc)
+    return results
+
+
+def profile_builtin(text_mon, kbd, symbols, labels_file, n_turns, frame_budget,
+                    seed=None, quiet=False):
+    """Use VICE's built-in profiler for per-function cycle counts.
+
+    Returns parsed results dict {name: (total, self)} or None on failure.
+    """
+    resp = text_mon.send(f'load_labels "{labels_file}"')
+    if not quiet:
+        print(f"  Labels loaded: {len(symbols)} symbols")
+
+    if not quiet:
+        print("  Navigating to gameplay...")
     if not navigate_to_gameplay(text_mon, kbd, seed=seed):
-        return
+        return None
 
     # Start profiling
     text_mon.send("profile on")
-    print(f"  Profiling {n_turns} turns...")
+    if not quiet:
+        print(f"  Profiling {n_turns} turns...")
 
     for i in range(n_turns):
         key = MOVE_KEYS[i % len(MOVE_KEYS)]
         send_move(text_mon, kbd, key)
 
-        if (i + 1) % 10 == 0:
+        if not quiet and (i + 1) % 10 == 0:
             print(f"    {i + 1}/{n_turns}...")
 
     # Pause and stop profiling
@@ -350,24 +380,29 @@ def profile_builtin(text_mon, kbd, symbols, labels_file, n_turns, frame_budget, 
     text_mon.send("profile off")
 
     # Read flat profile
-    resp = text_mon.send("profile flat 30", timeout=10)
-    print()
-    print("=" * 60)
-    seed_info = f", seed={seed}" if seed else ", random seed"
-    print(f"VICE Built-in Profile: {n_turns} turns (PAL, {frame_budget:,} cyc/frame{seed_info})")
-    print("=" * 60)
-    # Strip the prompt from the end
-    resp_clean = re.sub(r"\(C:\$[0-9a-f]+\)\s*$", "", resp).strip()
-    print(resp_clean)
+    resp = text_mon.send("profile flat 50", timeout=10)
+    results = parse_flat_profile(resp)
 
-    # Per-function details for key functions
-    for sym in ["step_inner", "compute_fov", "render_after_step", "render_map"]:
-        if sym in symbols:
-            resp = text_mon.send(f"profile func .{sym}", timeout=5)
-            resp_clean = re.sub(r"\(C:\$[0-9a-f]+\)\s*$", "", resp).strip()
-            if "unknown" not in resp_clean.lower() and len(resp_clean) > 20:
-                print(f"\n--- {sym} ---")
-                print(resp_clean)
+    if not quiet:
+        print()
+        print("=" * 60)
+        seed_info = f", seed={seed}" if seed else ", random seed"
+        print(f"VICE Built-in Profile: {n_turns} turns (PAL, {frame_budget:,} cyc/frame{seed_info})")
+        print("=" * 60)
+        # Strip the prompt from the end
+        resp_clean = re.sub(r"\(C:\$[0-9a-f]+\)\s*$", "", resp).strip()
+        print(resp_clean)
+
+        # Per-function details for key functions
+        for sym in ["step_inner", "compute_fov", "render_after_step", "render_map"]:
+            if sym in symbols:
+                resp = text_mon.send(f"profile func .{sym}", timeout=5)
+                resp_clean = re.sub(r"\(C:\$[0-9a-f]+\)\s*$", "", resp).strip()
+                if "unknown" not in resp_clean.lower() and len(resp_clean) > 20:
+                    print(f"\n--- {sym} ---")
+                    print(resp_clean)
+
+    return results
 
 
 def profile_coarse(text_mon, kbd, symbols, n_turns, frame_budget):
@@ -468,6 +503,8 @@ def main():
                         help="Profiling mode (default: builtin)")
     parser.add_argument("--seed", type=str, default=None,
                         help="Base36 seed code for reproducible dungeons (default: random)")
+    parser.add_argument("--runs", type=int, default=1,
+                        help="Number of runs; reports median when >1 (default: 1)")
     args = parser.parse_args()
 
     check_prerequisites()
@@ -496,7 +533,48 @@ def main():
     labels_file = os.path.join(tempfile.gettempdir(), "roguelike-vice-labels.txt")
     generate_labels_file(symbols, labels_file)
 
-    # Launch VICE (with SDL2 window for xdotool input)
+    frame_budget = PAL_FRAME_CYCLES
+
+    if args.runs > 1 and args.mode == "builtin":
+        run_multi(args, symbols, labels_file, prg_path, frame_budget)
+    else:
+        run_single(args, symbols, labels_file, prg_path, frame_budget)
+
+    try:
+        os.unlink(labels_file)
+    except OSError:
+        pass
+
+
+def run_vice_session(prg_path, port, fn):
+    """Launch VICE, connect, find window, call fn(text_mon, kbd), shut down.
+
+    fn receives (text_mon, kbd) and should return a value.
+    """
+    vice = launch_vice(prg_path, port)
+    text_mon = VICETextMonitor(port=port)
+    kbd = XdotoolInput(vice.pid)
+    result = None
+
+    try:
+        time.sleep(4)
+        text_mon.connect()
+        kbd.find_window()
+        result = fn(text_mon, kbd)
+    finally:
+        text_mon.quit()
+        text_mon.close()
+        try:
+            vice.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            vice.kill()
+            vice.wait()
+
+    return result
+
+
+def run_single(args, symbols, labels_file, prg_path, frame_budget):
+    """Single profiling run (original behavior)."""
     print(f"\nLaunching VICE (warp, port {args.port})...")
     vice = launch_vice(prg_path, args.port)
 
@@ -509,8 +587,6 @@ def main():
         print("Connected to text monitor")
         kbd.find_window()
         print(f"Found VICE window: {kbd.window_id}\n")
-
-        frame_budget = PAL_FRAME_CYCLES
 
         if args.mode == "builtin":
             profile_builtin(text_mon, kbd, symbols, labels_file,
@@ -534,11 +610,74 @@ def main():
         except subprocess.TimeoutExpired:
             vice.kill()
             vice.wait()
-        try:
-            os.unlink(labels_file)
-        except OSError:
-            labels_file = None
         print("Done.")
+
+
+def run_multi(args, symbols, labels_file, prg_path, frame_budget):
+    """Run profiler multiple times and report median/spread."""
+    n_runs = args.runs
+    seed_info = f"seed={args.seed}" if args.seed else "random seed"
+    print(f"\nMulti-run profile: {n_runs} runs, {args.turns} turns each, {seed_info}")
+    print()
+
+    all_results = []
+
+    for run_idx in range(n_runs):
+        print(f"--- Run {run_idx + 1}/{n_runs} ---")
+        print(f"  Launching VICE (warp, port {args.port})...")
+
+        def do_profile(text_mon, kbd):
+            return profile_builtin(
+                text_mon, kbd, symbols, labels_file,
+                args.turns, frame_budget, seed=args.seed, quiet=True,
+            )
+
+        result = run_vice_session(prg_path, args.port, do_profile)
+
+        if result:
+            all_results.append(result)
+            # Show brief per-run summary
+            fov = result.get("compute_fov", (0, 0))[0]
+            render = result.get("render_after_step", (0, 0))[0]
+            step = result.get("step", (0, 0))[0]
+            print(f"  compute_fov={fov:,}  render={render:,}  step={step:,}")
+        else:
+            print("  FAILED — skipping")
+        print()
+
+    if len(all_results) < 2:
+        print("ERROR: Need at least 2 successful runs for statistics")
+        return
+
+    # Collect all symbol names across runs
+    all_names = set()
+    for r in all_results:
+        all_names.update(r.keys())
+
+    # Compute statistics for each symbol
+    KEY_SYMBOLS = ["game_loop", "step", "compute_fov", "render_after_step",
+                   "render_map", "render_entities", "render_items",
+                   "render_status_bar", "render_messages"]
+    display_names = [n for n in KEY_SYMBOLS if n in all_names]
+
+    print("=" * 72)
+    print(f"Median of {len(all_results)} runs ({args.turns} turns each, {seed_info})")
+    print("=" * 72)
+    print(f"  {'Function':25s} {'Median':>12s} {'Min':>12s} {'Max':>12s}  {'Spread':>6s}")
+    print("-" * 72)
+
+    for name in display_names:
+        totals = [r[name][0] for r in all_results if name in r]
+        if not totals:
+            continue
+        med = int(statistics.median(totals))
+        lo = min(totals)
+        hi = max(totals)
+        spread = ((hi - lo) / med * 100) if med > 0 else 0
+        print(f"  {name:25s} {med:12,} {lo:12,} {hi:12,}  ±{spread:.1f}%")
+
+    print()
+    print("Use these medians for A/B comparisons between builds.")
 
 
 if __name__ == "__main__":

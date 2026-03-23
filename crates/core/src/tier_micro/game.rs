@@ -156,6 +156,9 @@ impl MicroGameState {
             };
         }
 
+        let old_px = self.entities.x[PLAYER_IDX as usize];
+        let old_py = self.entities.y[PLAYER_IDX as usize];
+
         let is_wait = matches!(cmd, GameCommand::Wait);
         let action_taken = match cmd {
             GameCommand::Wait => true,
@@ -192,7 +195,9 @@ impl MicroGameState {
             if compute_fov {
                 let px = self.entities.x[PLAYER_IDX as usize];
                 let py = self.entities.y[PLAYER_IDX as usize];
-                self.fov.compute_fov(px, py, &self.map);
+                if px != old_px || py != old_py {
+                    self.fov.compute_fov(px, py, &self.map);
+                }
             }
 
             let player_def = self.effective_defense();

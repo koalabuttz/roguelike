@@ -20,7 +20,7 @@ use roguelike_core::tier_micro::game::MicroGameState;
 use roguelike_core::tier_micro::item_store::MAX_ITEMS;
 use roguelike_core::tier_micro::msglog::MSG_COUNT;
 use roguelike_core::tier_micro::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_STRUCTURAL, TILE_WALL};
-use roguelike_core::tier_micro::types::{MAX_BITFIELD_SIZE, MAX_ENTITIES, NO_ENTITY, PLAYER_IDX};
+use roguelike_core::tier_micro::types::{BIT, MAX_BITFIELD_SIZE, MAX_ENTITIES, NO_ENTITY, PLAYER_IDX};
 
 // Screen codes for map tiles
 const SC_SPACE: u8 = 0x20;
@@ -164,7 +164,7 @@ fn render_map(state: &MicroGameState, vx: u8, vy: u8) {
 
         for _sx in 0..VIEW_W as usize {
             let byte_idx = fi >> 3;
-            let bit = 1u8 << (fi & 7);
+            let bit = BIT[fi & 7];
 
             let (sc, color) = if vis[byte_idx] & bit != 0 {
                 tile_sc_color(tile_at_index(tiles, fi), true)
@@ -221,8 +221,8 @@ fn render_map_sparse(
         for _sx in 0..VIEW_W as usize {
             // If both old and new world tiles are unexplored, the screen cell
             // was black and stays black — skip the write.
-            let new_explored = exp[fi >> 3] & (1u8 << (fi & 7)) != 0;
-            let old_explored = exp[old_fi >> 3] & (1u8 << (old_fi & 7)) != 0;
+            let new_explored = exp[fi >> 3] & (BIT[fi & 7]) != 0;
+            let old_explored = exp[old_fi >> 3] & (BIT[old_fi & 7]) != 0;
 
             if !new_explored && !old_explored {
                 fi += 1;
@@ -232,7 +232,7 @@ fn render_map_sparse(
             }
 
             let byte_idx = fi >> 3;
-            let bit = 1u8 << (fi & 7);
+            let bit = BIT[fi & 7];
 
             let (sc, color) = if vis[byte_idx] & bit != 0 {
                 tile_sc_color(tile_at_index(tiles, fi), true)
@@ -362,7 +362,7 @@ fn render_edge_row(state: &MicroGameState, vx: u8, vy: u8, sy: u8) {
     for sx in 0..VIEW_W as usize {
         let fi = fi_base + sx;
         let byte_idx = fi >> 3;
-        let bit = 1u8 << (fi & 7);
+        let bit = BIT[fi & 7];
 
         let (sc, color) = if vis[byte_idx] & bit != 0 {
             tile_sc_color(tile_at_index(tiles, fi), true)
@@ -392,7 +392,7 @@ fn render_edge_col(state: &MicroGameState, vx: u8, vy: u8, sx: u8) {
         let fi = wy * map_w + (wx as usize);
         let si = sy * (VIEW_W as usize) + (sx as usize);
         let byte_idx = fi >> 3;
-        let bit = 1u8 << (fi & 7);
+        let bit = BIT[fi & 7];
 
         let (sc, color) = if vis[byte_idx] & bit != 0 {
             tile_sc_color(tile_at_index(tiles, fi), true)
@@ -493,7 +493,7 @@ fn refresh_fov_area(
 
         for _sx in 0..VIEW_W as usize {
             let byte_idx = fi >> 3;
-            let bit = 1u8 << (fi & 7);
+            let bit = BIT[fi & 7];
 
             let is_visible = vis[byte_idx] & bit != 0;
             let was_visible = prev.fov_visible[byte_idx] & bit != 0;
@@ -894,7 +894,7 @@ impl DiffState {
             self.entity_x[i] = state.entities.x[i];
             self.entity_y[i] = state.entities.y[i];
             if state.entities.alive[i] {
-                self.entity_alive[i >> 3] |= 1u8 << (i & 7);
+                self.entity_alive[i >> 3] |= BIT[i & 7];
             }
         }
 
@@ -906,24 +906,24 @@ impl DiffState {
             self.item_x[i] = state.items.x[i];
             self.item_y[i] = state.items.y[i];
             if state.items.alive[i] {
-                self.item_alive[i >> 3] |= 1u8 << (i & 7);
+                self.item_alive[i >> 3] |= BIT[i & 7];
             }
         }
     }
 
     fn was_entity_alive(&self, i: usize) -> bool {
-        self.entity_alive[i >> 3] & (1u8 << (i & 7)) != 0
+        self.entity_alive[i >> 3] & (BIT[i & 7]) != 0
     }
 
     fn was_item_alive(&self, i: usize) -> bool {
-        self.item_alive[i >> 3] & (1u8 << (i & 7)) != 0
+        self.item_alive[i >> 3] & (BIT[i & 7]) != 0
     }
 }
 
 /// Set a bit in the viewport dirty bitfield.
 fn mark_dirty(dirty: &mut [u8; DIRTY_SIZE], sx: u8, sy: u8) {
     let idx = (sy as usize) * (VIEW_W as usize) + (sx as usize);
-    dirty[idx >> 3] |= 1u8 << (idx & 7);
+    dirty[idx >> 3] |= BIT[idx & 7];
 }
 
 /// Mark a world-coordinate position dirty if it falls within the viewport.
@@ -954,12 +954,17 @@ pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
             continue;
         }
         for bit in 0..8u8 {
-            if diff & (1u8 << bit) == 0 {
+            if diff & (BIT[bit as usize]) == 0 {
                 continue;
             }
             let tile_idx = byte_idx * 8 + (bit as usize);
-            let wy = (tile_idx / map_w) as u8;
-            let wx = (tile_idx % map_w) as u8;
+            // Use shift/mask for the common width=64 case to avoid
+            // __udivhi3 (~100+ cycles per 16-bit divide on 6502).
+            let (wy, wx) = if map_w == 64 {
+                ((tile_idx >> 6) as u8, (tile_idx & 63) as u8)
+            } else {
+                ((tile_idx / map_w) as u8, (tile_idx % map_w) as u8)
+            };
             mark_dirty_world(&mut dirty, vx, vy, wx, wy);
         }
     }
@@ -1046,7 +1051,7 @@ pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
             continue;
         }
         for bit in 0..8u8 {
-            if dirty[byte_idx] & (1u8 << bit) == 0 {
+            if dirty[byte_idx] & (BIT[bit as usize]) == 0 {
                 continue;
             }
             let cell_idx = byte_idx * 8 + (bit as usize);

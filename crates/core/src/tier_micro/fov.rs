@@ -99,6 +99,20 @@ fn slope_gt(a_num: i8, a_den: i8, b_num: i8, b_den: i8) -> bool {
     signed_cross(a_num, b_den) > signed_cross(b_num, a_den)
 }
 
+/// Apply an octant transform multiplier (-1, 0, or 1) to a value.
+///
+/// Replaces `val * mult` which generates a `__mulqi3` call on 6502 (~27
+/// cycles).  A two-branch conditional is ~6-10 cycles.
+fn apply_octant(val: i8, mult: i8) -> i8 {
+    if mult == 1 {
+        val
+    } else if mult == -1 {
+        -val
+    } else {
+        0
+    }
+}
+
 pub struct MicroFov {
     visible: [u8; MAX_BITFIELD_SIZE],
     explored: [u8; MAX_BITFIELD_SIZE],
@@ -141,7 +155,7 @@ impl MicroFov {
 
     fn bit_idx(&self, x: u8, y: u8) -> (usize, u8) {
         let i = row_col_idx(y, x, self.width);
-        (i / 8, 1u8 << (i % 8))
+        (i >> 3, BIT[i & 7])
     }
 
     pub fn is_visible(&self, x: u8, y: u8) -> bool {
@@ -228,19 +242,29 @@ impl MicroFov {
             let mut next_start_num = start_num;
             let mut next_start_den = start_den;
 
-            'row_loop: for j in job.row..=FOV_RADIUS {
+            // Manual while loop avoids RangeInclusive::next iterator overhead.
+            let mut j = job.row;
+            'row_loop: while j <= FOV_RADIUS {
                 let dy = -(j as i8);
                 let mut blocked = false;
+
+                // Pre-compute row-invariant denominator terms outside the
+                // per-tile loop.  Uses self-add (j_i8 + j_i8) instead of
+                // `2 * j` to avoid __mulqi3 on 6502.
+                let j_i8 = j as i8;
+                let j2 = j_i8 + j_i8;
+                let l_den: i8 = j2 - 1;
+                let r_den: i8 = 1 + j2;
 
                 // Scan from dx=-j to dx=0 (matching the standard tier's
                 // top-to-bottom order for correct slope boundary tracking).
                 let mut dx = -(j as i8);
                 while dx <= 0 {
                     // Tile slope boundaries (positive-denominator convention).
-                    let l_num: i8 = 1 - 2 * dx;
-                    let l_den: i8 = 2 * (j as i8) - 1;
-                    let r_num: i8 = -1 - 2 * dx;
-                    let r_den: i8 = 1 + 2 * (j as i8);
+                    // Uses self-add for numerators to avoid __mulqi3.
+                    let dx2 = dx + dx;
+                    let l_num: i8 = 1 - dx2;
+                    let r_num: i8 = -1 - dx2;
 
                     if slope_lt(start_num, start_den, r_num, r_den) {
                         dx += 1;
@@ -250,8 +274,15 @@ impl MicroFov {
                         break;
                     }
 
-                    let map_x = (ox as i8) + dx * xx + dy * xy;
-                    let map_y = (oy as i8) + dx * yx + dy * yy;
+                    // Octant coordinate transform.  The multipliers xx/xy/yx/yy
+                    // are always -1, 0, or 1.  Branching avoids __mulqi3 (~27
+                    // cycles) for what is effectively a conditional negate.
+                    let map_x = (ox as i8)
+                        + apply_octant(dx, xx)
+                        + apply_octant(dy, xy);
+                    let map_y = (oy as i8)
+                        + apply_octant(dx, yx)
+                        + apply_octant(dy, yy);
 
                     let in_bounds = map_x >= 0 && map_x < w && map_y >= 0 && map_y < h;
 
@@ -293,6 +324,8 @@ impl MicroFov {
                 if blocked {
                     break 'row_loop;
                 }
+
+                j += 1;
             }
         }
     }

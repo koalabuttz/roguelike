@@ -44,6 +44,12 @@ pub const MAX_BITFIELD_SIZE: usize = MAX_MAP_SIZE.div_ceil(8);
 /// Packed tile array size (4 bits per tile, 2 tiles per byte).
 pub const MAX_PACKED_MAP_SIZE: usize = MAX_MAP_SIZE.div_ceil(2);
 
+/// Bit lookup table: `BIT[i]` = `1 << i` for i in 0..8.
+///
+/// Replaces `1u8 << (x & 7)` which generates a `__ashlqi3` runtime call on
+/// 6502 (~18 cycles). A table lookup is ~8 cycles (LDA abs,X).
+pub const BIT: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128];
+
 /// Compute `y * width + x` for map/bitfield indexing.
 ///
 /// On C64 (feature `c64-overlay`), uses shift for the common width=64

@@ -215,14 +215,17 @@ impl MicroFov {
     /// boundaries. When a wall is found, the sub-wedge beyond it is pushed
     /// to an explicit stack for later processing.
     #[allow(clippy::too_many_arguments)]
-    fn scan_octant(&mut self, ox: u8, oy: u8, map: &MicroMap, xx: i8, xy: i8, yx: i8, yy: i8) {
-        let mut stack = [ScanJob {
-            row: 0,
-            start_num: 0,
-            start_den: 1,
-            end_num: 0,
-            end_den: 1,
-        }; MAX_STACK];
+    fn scan_octant(
+        &mut self,
+        ox: u8,
+        oy: u8,
+        map: &MicroMap,
+        xx: i8,
+        xy: i8,
+        yx: i8,
+        yy: i8,
+        stack: &mut [ScanJob; MAX_STACK],
+    ) {
         let mut sp: usize = 1;
         stack[0] = ScanJob {
             row: 1,
@@ -344,6 +347,18 @@ impl MicroFov {
         self.clear_visible();
         self.mark_visible(ox, oy);
 
+        // Allocate the scan stack once and reuse across all 8 octants.
+        // Each octant only writes stack[0] + push/pop; stale data in
+        // higher slots is never read.  This saves 7 redundant 80-byte
+        // array initializations per compute_fov call.
+        let mut stack = [ScanJob {
+            row: 0,
+            start_num: 0,
+            start_den: 1,
+            end_num: 0,
+            end_den: 1,
+        }; MAX_STACK];
+
         for octant in 0..8usize {
             self.scan_octant(
                 ox,
@@ -353,6 +368,7 @@ impl MicroFov {
                 OCT_XY[octant],
                 OCT_YX[octant],
                 OCT_YY[octant],
+                &mut stack,
             );
         }
     }

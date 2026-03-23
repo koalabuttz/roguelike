@@ -1046,21 +1046,30 @@ pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
     }
 
     // --- 4. Render dirty cells ---
+    // Track sx/sy with running counters to avoid __udivhi3 (16-bit divide
+    // by 40 per cell).  Skip-8 on zero bytes advances counters cheaply.
+    let mut sx: u8 = 0;
+    let mut sy: u8 = 0;
     for byte_idx in 0..DIRTY_SIZE {
         if dirty[byte_idx] == 0 {
+            sx += 8;
+            if sx >= VIEW_W {
+                sx -= VIEW_W;
+                sy += 1;
+            }
+            if sy >= VIEW_H { break; }
             continue;
         }
         for bit in 0..8u8 {
-            if dirty[byte_idx] & (BIT[bit as usize]) == 0 {
-                continue;
+            if sy >= VIEW_H { break; }
+            if dirty[byte_idx] & (BIT[bit as usize]) != 0 {
+                restore_tile(state, vx, vy, sx + vx, sy + vy);
             }
-            let cell_idx = byte_idx * 8 + (bit as usize);
-            if cell_idx >= (VIEW_W as usize) * (VIEW_H as usize) {
-                break;
+            sx += 1;
+            if sx >= VIEW_W {
+                sx = 0;
+                sy += 1;
             }
-            let sx = (cell_idx % (VIEW_W as usize)) as u8;
-            let sy = (cell_idx / (VIEW_W as usize)) as u8;
-            restore_tile(state, vx, vy, sx + vx, sy + vy);
         }
     }
 

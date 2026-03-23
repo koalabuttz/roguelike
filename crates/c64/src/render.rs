@@ -800,6 +800,11 @@ fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
             };
             copy_bytes(buf, 0, msg)
         }
+        GameEvent::UseStrengthPotion { bonus } => {
+            let p = copy_bytes(buf, 0, b"+");
+            let p = copy_num(buf, p, bonus);
+            copy_bytes(buf, p, b" ATK")
+        }
     };
 }
 

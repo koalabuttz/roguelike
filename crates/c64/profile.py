@@ -42,6 +42,7 @@ GAME_SYMBOLS = {
 # xdotool key names for game input
 # VICE SDL2 uses positional keyboard mapping by default
 KEY_RETURN = "Return"
+KEY_DOWN = "Down"
 KEY_W = "w"
 KEY_A = "a"
 KEY_S = "s"
@@ -213,6 +214,20 @@ class XdotoolInput:
             capture_output=True,
         )
 
+    def type_text(self, text, delay_ms=80):
+        """Type a string character by character into the VICE window.
+
+        Uses xdotool type which simulates real keyboard input, including
+        proper keysym translation for digits and letters.
+        """
+        if not self.window_id:
+            raise RuntimeError("No window ID — call find_window() first")
+        subprocess.run(
+            ["xdotool", "type", "--window", self.window_id,
+             "--delay", str(delay_ms), text],
+            capture_output=True,
+        )
+
 
 # ---------------------------------------------------------------------------
 # VICE launcher
@@ -251,25 +266,41 @@ def check_prerequisites():
 # Navigation helpers
 # ---------------------------------------------------------------------------
 
-def navigate_to_gameplay(text_mon, kbd, wait_time=5):
+def navigate_to_gameplay(text_mon, kbd, seed=None, wait_time=5):
     """Navigate from title screen to gameplay.
 
-    Sends RETURN via xdotool to start a new game, waits for map generation.
+    If seed is None, sends RETURN to select "New Game" (random CIA seed).
+    If seed is a string, navigates to "Enter Seed" and types it (base36).
     """
     # Resume VICE so it can process keyboard events
     text_mon.resume()
     time.sleep(0.5)
 
-    # Send RETURN to select "New Game"
-    kbd.send_key(KEY_RETURN)
+    if seed is not None:
+        # Navigate to "Enter Seed" (second menu item when no save exists)
+        kbd.send_key(KEY_DOWN)
+        time.sleep(0.3)
+        kbd.send_key(KEY_RETURN)
+        time.sleep(1.0)
+
+        # Type seed code using xdotool type (simulates real typing)
+        kbd.type_text(seed)
+        time.sleep(0.3)
+
+        # Confirm seed entry
+        kbd.send_key(KEY_RETURN)
+        print(f"  Entered seed: {seed}")
+    else:
+        # Send RETURN to select "New Game"
+        kbd.send_key(KEY_RETURN)
 
     # Wait for map generation + first render (warp mode: fast)
     time.sleep(wait_time)
 
     # Pause and verify we're in gameplay
     resp = text_mon.send("screen")
-    if "new game" in resp:
-        print("  WARNING: Still on title screen after RETURN — retrying...")
+    if "new game" in resp or "enter seed" in resp.lower():
+        print("  WARNING: Still on title screen — retrying...")
         text_mon.resume()
         time.sleep(0.5)
         kbd.send_key(KEY_RETURN)
@@ -294,13 +325,13 @@ def send_move(text_mon, kbd, key_name):
 # Profiling modes
 # ---------------------------------------------------------------------------
 
-def profile_builtin(text_mon, kbd, symbols, labels_file, n_turns, frame_budget):
+def profile_builtin(text_mon, kbd, symbols, labels_file, n_turns, frame_budget, seed=None):
     """Use VICE's built-in profiler for per-function cycle counts."""
     resp = text_mon.send(f'load_labels "{labels_file}"')
     print(f"  Labels loaded: {len(symbols)} symbols")
 
     print("  Navigating to gameplay...")
-    if not navigate_to_gameplay(text_mon, kbd):
+    if not navigate_to_gameplay(text_mon, kbd, seed=seed):
         return
 
     # Start profiling
@@ -322,7 +353,8 @@ def profile_builtin(text_mon, kbd, symbols, labels_file, n_turns, frame_budget):
     resp = text_mon.send("profile flat 30", timeout=10)
     print()
     print("=" * 60)
-    print(f"VICE Built-in Profile: {n_turns} turns (PAL, {frame_budget:,} cyc/frame)")
+    seed_info = f", seed={seed}" if seed else ", random seed"
+    print(f"VICE Built-in Profile: {n_turns} turns (PAL, {frame_budget:,} cyc/frame{seed_info})")
     print("=" * 60)
     # Strip the prompt from the end
     resp_clean = re.sub(r"\(C:\$[0-9a-f]+\)\s*$", "", resp).strip()
@@ -351,7 +383,7 @@ def profile_coarse(text_mon, kbd, symbols, n_turns, frame_budget):
     print()
 
 
-def profile_mapgen(text_mon, kbd, symbols, frame_budget):
+def profile_mapgen(text_mon, kbd, symbols, frame_budget, seed=None):
     """Profile map generation cost."""
     gen_addr = symbols.get("generate", (None,))[0]
     step_addr = symbols.get("step_inner", (None,))[0]
@@ -369,10 +401,20 @@ def profile_mapgen(text_mon, kbd, symbols, frame_budget):
     text_mon.send(f"break exec ${gen_addr:04x}")
     text_mon.send(f"break exec ${fov_addr:04x}")
 
-    # Resume and send RETURN to start a new game
+    # Navigate to gameplay
     text_mon.resume()
     time.sleep(0.5)
-    kbd.send_key(KEY_RETURN)
+    if seed is not None:
+        kbd.send_key(KEY_DOWN)
+        time.sleep(0.3)
+        kbd.send_key(KEY_RETURN)
+        time.sleep(1.0)
+        kbd.type_text(seed)
+        time.sleep(0.3)
+        kbd.send_key(KEY_RETURN)
+        print(f"  Entered seed: {seed}")
+    else:
+        kbd.send_key(KEY_RETURN)
 
     print("  Waiting for map generation...")
 
@@ -424,6 +466,8 @@ def main():
     parser.add_argument("--mode", choices=["coarse", "builtin", "mapgen"],
                         default="builtin",
                         help="Profiling mode (default: builtin)")
+    parser.add_argument("--seed", type=str, default=None,
+                        help="Base36 seed code for reproducible dungeons (default: random)")
     args = parser.parse_args()
 
     check_prerequisites()
@@ -470,11 +514,11 @@ def main():
 
         if args.mode == "builtin":
             profile_builtin(text_mon, kbd, symbols, labels_file,
-                            args.turns, frame_budget)
+                            args.turns, frame_budget, seed=args.seed)
         elif args.mode == "coarse":
             profile_coarse(text_mon, kbd, symbols, args.turns, frame_budget)
         elif args.mode == "mapgen":
-            profile_mapgen(text_mon, kbd, symbols, frame_budget)
+            profile_mapgen(text_mon, kbd, symbols, frame_budget, seed=args.seed)
 
     except KeyboardInterrupt:
         print("\nInterrupted")

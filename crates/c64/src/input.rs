@@ -173,6 +173,52 @@ fn joy_edge() -> Option<u8> {
 }
 
 // ---------------------------------------------------------------------------
+// Keyboard — edge detection + auto-repeat
+// ---------------------------------------------------------------------------
+
+/// Frames before held key starts repeating (~200ms at 60 Hz).
+const KEY_INITIAL_DELAY: u8 = 12;
+/// Frames between repeats once held (~67ms at 60 Hz).
+const KEY_REPEAT_RATE: u8 = 4;
+
+/// Previous key code for repeat tracking (0 = no key held).
+static mut PREV_KEY: u8 = 0;
+/// Frames remaining before next key repeat fires.
+static mut KEY_DELAY: u8 = 0;
+
+/// Keyboard poll with edge detection and auto-repeat. Call once per frame.
+/// Returns (key_code, shifted) — same as `scan_keyboard_shifted()`.
+/// key_code is 0 if no key should fire this frame.
+fn key_repeat() -> (u8, bool) {
+    let (key, shifted) = c64::scan_keyboard_shifted();
+
+    if key == 0 {
+        unsafe {
+            PREV_KEY = 0;
+            KEY_DELAY = 0;
+        }
+        return (0, false);
+    }
+
+    unsafe {
+        if key != PREV_KEY {
+            // New key — fire immediately, start repeat countdown
+            PREV_KEY = key;
+            KEY_DELAY = KEY_INITIAL_DELAY;
+            return (key, shifted);
+        }
+
+        // Same key held — count down for repeat
+        if KEY_DELAY > 0 {
+            KEY_DELAY -= 1;
+            return (0, shifted);
+        }
+        KEY_DELAY = KEY_REPEAT_RATE;
+    }
+    (key, shifted)
+}
+
+// ---------------------------------------------------------------------------
 // Public input functions
 // ---------------------------------------------------------------------------
 
@@ -186,7 +232,7 @@ pub fn wait_for_input() -> GameCommand {
         c64::wait_next_frame();
         c64::music_auto_tick();
 
-        let (key, shifted) = c64::scan_keyboard_shifted();
+        let (key, shifted) = key_repeat();
         if key != 0 {
             // Shift+/ = ? → Help (checked before directions to avoid conflict)
             if key == b'/' && shifted {
@@ -323,7 +369,7 @@ pub fn wait_for_inventory_input() -> InventoryInput {
         c64::wait_next_frame();
         c64::music_auto_tick();
 
-        let key = read_key();
+        let (key, _) = key_repeat();
         if key != 0 {
             match key {
                 KEY_W | KEY_UP => return InventoryInput::Up,
@@ -373,7 +419,7 @@ pub fn wait_for_look_input() -> LookInput {
         c64::wait_next_frame();
         c64::music_auto_tick();
 
-        let key = read_key();
+        let (key, _) = key_repeat();
         if key != 0 {
             if let Some(dir) = key_to_direction(key) {
                 return LookInput::Move(dir);

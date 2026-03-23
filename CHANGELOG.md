@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.5.0] - 2026-03-18
 
 ### Added
+- Add input repeat/delay system to C64 frontend (#51)
 - DCSS-style monster health indicators in look mode (#105)
 - Update auto-pickup to grab all items, not just consumables (#154)
 - Auto-pickup toggle for consumables (#86)

@@ -402,6 +402,15 @@ pub fn scan_keyboard() -> u8 {
     scan_keyboard_shifted().0
 }
 
+/// Pre-computed inverted row-select masks for CIA1 keyboard scanning.
+/// `ROW_MASK[r]` = `!(1 << r)`, stored as const to avoid `__ashlqi3` + EOR
+/// at runtime (~18+2 cycles per call → ~4 cycles for LDA abs,X).
+const ROW_MASK: [u8; 8] = [!1, !2, !4, !8, !16, !32, !64, !128];
+
+/// Bit lookup table (mirrors `tier_micro::types::BIT`).
+/// Used for column detection in keyboard scanning.
+const BIT: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128];
+
 /// Scan the CIA1 keyboard matrix. Returns (key_code, shifted).
 /// key_code is 0 if no new key. shifted is true if either shift key is held.
 ///
@@ -412,7 +421,7 @@ pub fn scan_keyboard_shifted() -> (u8, bool) {
     let mut shifted = false;
 
     for row in 0..8u8 {
-        poke(CIA1_PA, !(1u8 << row));
+        poke(CIA1_PA, ROW_MASK[row as usize]);
         let _ = peek(CIA1_PB); // settle time
         let val = peek(CIA1_PB) ^ 0xFF; // invert: 1 = pressed
 
@@ -432,7 +441,7 @@ pub fn scan_keyboard_shifted() -> (u8, bool) {
                 // Find which column triggered
                 let mut col = 0u8;
                 while col < 8 {
-                    if newly & (1 << col) != 0 {
+                    if newly & BIT[col as usize] != 0 {
                         let key = KEY_MATRIX[row as usize][col as usize];
                         if key != 0 {
                             result = key;

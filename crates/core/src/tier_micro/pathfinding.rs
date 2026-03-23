@@ -46,12 +46,12 @@ impl BfsBuffers {
 
     fn mark_visited(&mut self, x: u8, y: u8, width: u8) {
         let idx = row_col_idx(y, x, width);
-        self.visited[idx / 8] |= 1u8 << (idx % 8);
+        self.visited[idx >> 3] |= BIT[idx & 7];
     }
 
     fn is_visited(&self, x: u8, y: u8, width: u8) -> bool {
         let idx = row_col_idx(y, x, width);
-        self.visited[idx / 8] & (1u8 << (idx % 8)) != 0
+        self.visited[idx >> 3] & BIT[idx & 7] != 0
     }
 }
 

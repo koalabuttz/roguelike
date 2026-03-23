@@ -50,6 +50,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Eliminate remaining __ashlqi3 from keyboard scanner and pathfinding (#150)
 - C64 profiler: multi-run averaging and benchmark mode (#149)
 - C64 FOV & render micro-optimizations (#148)
 - Comprehensive documentation sweep (#145)

@@ -427,6 +427,9 @@ pub struct GameState {
     /// Player's inventory (Brogue-style 26 slots, a-z).
     #[serde(default)]
     pub inventory: Inventory,
+    /// Auto-pickup consumable items when walking over them.
+    #[serde(default)]
+    pub auto_pickup: bool,
     /// Current dungeon depth (1-based).
     #[serde(default = "default_depth")]
     pub depth: Stat,
@@ -533,6 +536,7 @@ impl GameState {
             ground_items,
             equipment: Equipment::default(),
             inventory: Inventory::new(),
+            auto_pickup: false,
             depth: 1,
             target_depth: cfg.target_depth,
             game_won: false,
@@ -618,6 +622,7 @@ impl GameState {
             ground_items,
             equipment: Equipment::default(),
             inventory: Inventory::new(),
+            auto_pickup: false,
             depth: 1,
             target_depth: cfg.target_depth,
             game_won: false,
@@ -700,8 +705,12 @@ impl GameState {
     }
 
     /// Notify the player about items on the ground at their position.
+    /// When auto_pickup is enabled, consumables are picked up first.
     fn notify_items_here(&mut self, x: Coord, y: Coord) {
-        // Collect distinct (kind, count) pairs at this position.
+        if self.auto_pickup {
+            self.auto_pickup_consumables(x, y);
+        }
+        // Notify about remaining items (equipment, or consumables if inventory was full).
         let mut counts = [0u8; rules_items::KIND_COUNT];
         for item in &self.ground_items {
             if item.x == x && item.y == y {
@@ -715,6 +724,22 @@ impl GameState {
                     count,
                 });
             }
+        }
+    }
+
+    /// Auto-pickup all consumable items at (x, y).
+    fn auto_pickup_consumables(&mut self, x: Coord, y: Coord) {
+        loop {
+            let idx = self.ground_items.iter().position(|it| {
+                it.x == x && it.y == y && rules_items::is_consumable(it.kind)
+            });
+            let Some(idx) = idx else { break };
+            let kind = self.ground_items[idx].kind;
+            if !self.inventory.add(kind) {
+                break; // inventory full — remaining items get normal notifications
+            }
+            self.ground_items.remove(idx);
+            self.log.add_event(GameEvent::PickupItem { kind });
         }
     }
 
@@ -1852,6 +1877,7 @@ mod tests {
             ground_items: Vec::new(),
             equipment: Default::default(),
             inventory: Default::default(),
+            auto_pickup: false,
             depth: 1,
             target_depth: 5,
             game_won: false,
@@ -2168,6 +2194,7 @@ mod tests {
             ground_items: Vec::new(),
             equipment: Default::default(),
             inventory: Default::default(),
+            auto_pickup: false,
             depth: 1,
             target_depth: 5,
             game_won: false,
@@ -2256,6 +2283,7 @@ mod tests {
             ground_items: Vec::new(),
             equipment: Default::default(),
             inventory: Default::default(),
+            auto_pickup: false,
             depth: 1,
             target_depth: 5,
             game_won: false,
@@ -2318,6 +2346,7 @@ mod tests {
             ground_items: Vec::new(),
             equipment: Default::default(),
             inventory: Default::default(),
+            auto_pickup: false,
             depth: 1,
             target_depth: 5,
             game_won: false,
@@ -2369,6 +2398,7 @@ mod tests {
             ground_items: Vec::new(),
             equipment: Default::default(),
             inventory: Default::default(),
+            auto_pickup: false,
             depth: 1,
             target_depth: 5,
             game_won: false,
@@ -2447,6 +2477,7 @@ mod tests {
             ground_items: Vec::new(),
             equipment: Default::default(),
             inventory: Default::default(),
+            auto_pickup: false,
             depth: 1,
             target_depth: 5,
             game_won: false,
@@ -2502,6 +2533,7 @@ mod tests {
             ground_items: Vec::new(),
             equipment: Default::default(),
             inventory: Default::default(),
+            auto_pickup: false,
             depth: 1,
             target_depth: 5,
             game_won: false,
@@ -3102,6 +3134,78 @@ mod tests {
         assert!(result.action_taken); // turn consumed
         assert_eq!(gs.ground_items.len(), 1); // item stays
         assert!(gs.log.recent(5).iter().any(|m| m.contains("full")));
+    }
+
+    // --- auto-pickup tests ---
+
+    #[test]
+    fn auto_pickup_grabs_consumable() {
+        let mut gs = test_game();
+        gs.auto_pickup = true;
+        gs.ground_items.push(Item {
+            x: 6,
+            y: 5,
+            kind: ItemKind::HealthPotion,
+        });
+        gs.step(GameCommand::Move(Direction::East));
+        assert!(gs.ground_items.is_empty());
+        assert_eq!(gs.inventory.len(), 1);
+        assert_eq!(gs.inventory.get(0).unwrap().kind, ItemKind::HealthPotion);
+    }
+
+    #[test]
+    fn auto_pickup_ignores_equipment() {
+        let mut gs = test_game();
+        gs.auto_pickup = true;
+        gs.ground_items.push(Item {
+            x: 6,
+            y: 5,
+            kind: ItemKind::ShortSword,
+        });
+        gs.step(GameCommand::Move(Direction::East));
+        assert_eq!(gs.ground_items.len(), 1); // sword stays
+        assert!(gs.inventory.is_empty());
+    }
+
+    #[test]
+    fn auto_pickup_multiple_consumables() {
+        let mut gs = test_game();
+        gs.auto_pickup = true;
+        for _ in 0..3 {
+            gs.ground_items.push(Item {
+                x: 6,
+                y: 5,
+                kind: ItemKind::HealthPotion,
+            });
+        }
+        gs.step(GameCommand::Move(Direction::East));
+        assert!(gs.ground_items.is_empty());
+        assert_eq!(gs.inventory.len(), 1); // stacked
+        assert_eq!(gs.inventory.get(0).unwrap().count, 3);
+    }
+
+    #[test]
+    fn auto_pickup_stops_when_inventory_full() {
+        let mut gs = test_game();
+        gs.auto_pickup = true;
+        for _ in 0..rules_items::MAX_INVENTORY {
+            gs.inventory.add(ItemKind::ShortSword);
+        }
+        gs.ground_items.push(Item {
+            x: 6,
+            y: 5,
+            kind: ItemKind::HealthPotion,
+        });
+        gs.step(GameCommand::Move(Direction::East));
+        assert_eq!(gs.ground_items.len(), 1); // potion stays
+        // Should still notify about the item
+        assert!(gs.log.recent(5).iter().any(|m| m.contains("Health Potion")));
+    }
+
+    #[test]
+    fn auto_pickup_off_by_default() {
+        let gs = test_game();
+        assert!(!gs.auto_pickup);
     }
 
     #[test]

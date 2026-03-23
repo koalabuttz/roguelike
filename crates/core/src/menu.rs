@@ -20,6 +20,8 @@ pub enum MenuAction {
     Settings,
     /// Toggle casual/classic mode in the settings menu.
     ToggleCasualMode,
+    /// Toggle auto-pickup of consumable items.
+    ToggleAutoPickup,
     /// Return to the title screen from the pause menu.
     TitleScreen,
     /// Toggle coordinates display in the settings menu.
@@ -350,6 +352,19 @@ pub fn settings_menu(settings: &Settings, platform: Platform) -> Menu {
         items.push(MenuItem {
             label: label.to_string(),
             action: MenuAction::ToggleCasualMode,
+            enabled: true,
+        });
+    }
+
+    if Setting::AutoPickup.is_available(platform) {
+        let label = if settings.auto_pickup {
+            "Auto-Pickup: On"
+        } else {
+            "Auto-Pickup: Off"
+        };
+        items.push(MenuItem {
+            label: label.to_string(),
+            action: MenuAction::ToggleAutoPickup,
             enabled: true,
         });
     }
@@ -1052,6 +1067,7 @@ mod tests {
         let menu = settings_menu(&s, Platform::Terminal);
         let actions: Vec<_> = menu.items.iter().map(|i| i.action).collect();
         assert!(actions.contains(&MenuAction::ToggleCasualMode));
+        assert!(actions.contains(&MenuAction::ToggleAutoPickup));
         assert!(actions.contains(&MenuAction::ToggleShowCoordinates));
         assert!(actions.contains(&MenuAction::ToggleShowKeybindHints));
         assert!(actions.contains(&MenuAction::CycleColorPalette));

@@ -1243,6 +1243,7 @@ mod tests {
             ground_items: Vec::new(),
             equipment: Default::default(),
             inventory: Default::default(),
+            auto_pickup: false,
             depth: 1,
             target_depth: 5,
             game_won: false,

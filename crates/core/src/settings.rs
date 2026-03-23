@@ -141,6 +141,7 @@ pub enum Setting {
     LeftHandLayout,
     PlayerName,
     Pronouns,
+    AutoPickup,
 }
 
 impl Setting {
@@ -166,6 +167,7 @@ impl Setting {
                     | Setting::LeftHandLayout
                     | Setting::PlayerName
                     | Setting::Pronouns
+                    | Setting::AutoPickup
             ),
             Platform::Vita => !matches!(
                 self,
@@ -175,6 +177,7 @@ impl Setting {
                     | Setting::LeftHandLayout
                     | Setting::PlayerName
                     | Setting::Pronouns
+                    | Setting::AutoPickup
             ),
             Platform::C64 => !matches!(
                 self,
@@ -187,6 +190,7 @@ impl Setting {
                     | Setting::Pronouns
                     | Setting::ShowKills
                     | Setting::ShowTurnCount
+                    | Setting::AutoPickup
             ),
         }
     }
@@ -224,6 +228,8 @@ fn default_pronouns() -> Pronouns {
 pub struct Settings {
     #[serde(default)]
     pub casual_mode: bool,
+    #[serde(default)]
+    pub auto_pickup: bool,
     #[serde(default)]
     pub show_coordinates: bool,
     #[serde(default = "default_true")]
@@ -263,6 +269,7 @@ impl Settings {
         match platform {
             Platform::Terminal | Platform::Ssh => Settings {
                 casual_mode: false,
+                auto_pickup: false,
                 show_coordinates: false,
                 show_keybind_hints: true,
                 show_kills: true,
@@ -279,6 +286,7 @@ impl Settings {
             },
             Platform::Mcp => Settings {
                 casual_mode: false,
+                auto_pickup: false,
                 show_coordinates: false,
                 show_keybind_hints: false,
                 show_kills: true,
@@ -295,6 +303,7 @@ impl Settings {
             },
             Platform::Gba => Settings {
                 casual_mode: false,
+                auto_pickup: false,
                 show_coordinates: false,
                 show_keybind_hints: true,
                 show_kills: true,
@@ -311,6 +320,7 @@ impl Settings {
             },
             Platform::Vita => Settings {
                 casual_mode: false,
+                auto_pickup: false,
                 show_coordinates: false,
                 show_keybind_hints: true,
                 show_kills: true,
@@ -327,6 +337,7 @@ impl Settings {
             },
             Platform::C64 => Settings {
                 casual_mode: false,
+                auto_pickup: false,
                 show_coordinates: false,
                 show_keybind_hints: true,
                 show_kills: true,
@@ -410,6 +421,7 @@ mod tests {
             Setting::LeftHandLayout,
             Setting::PlayerName,
             Setting::Pronouns,
+            Setting::AutoPickup,
         ];
         for s in all {
             assert!(

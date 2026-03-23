@@ -322,6 +322,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
 
             AppState::Playing => {
                 let game = game_state.as_mut().expect("no game state while playing");
+                game.set_auto_pickup(settings.auto_pickup);
 
                 // Flush autosave buffer to disk (standard tier only).
                 if let Some(ref buf) = autosave_buf {
@@ -1196,6 +1197,7 @@ fn apply_settings_action<W: Write>(
 ) -> bool {
     match action {
         MenuAction::ToggleCasualMode => settings.casual_mode = !settings.casual_mode,
+        MenuAction::ToggleAutoPickup => settings.auto_pickup = !settings.auto_pickup,
         MenuAction::ToggleShowCoordinates => {
             settings.show_coordinates = !settings.show_coordinates;
         }

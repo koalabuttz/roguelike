@@ -58,6 +58,9 @@ pub trait GameStep: Send {
 
     /// Downcast to `&mut dyn Any` for tier-specific operations.
     fn as_any_mut(&mut self) -> &mut dyn Any;
+
+    /// Enable or disable auto-pickup of consumable items.
+    fn set_auto_pickup(&mut self, _enabled: bool) {}
 }
 
 // ── Standard tier ────────────────────────────────────────────────────
@@ -99,6 +102,10 @@ impl GameStep for GameState {
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+
+    fn set_auto_pickup(&mut self, enabled: bool) {
+        self.auto_pickup = enabled;
     }
 }
 
@@ -569,6 +576,10 @@ impl GameStep for MicroGameStateAdapter {
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+
+    fn set_auto_pickup(&mut self, enabled: bool) {
+        self.game.auto_pickup = enabled;
     }
 }
 

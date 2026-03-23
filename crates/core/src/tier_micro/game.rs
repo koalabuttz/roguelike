@@ -54,6 +54,8 @@ pub struct MicroGameState {
     /// Counts down each turn; triggers wandering spawn check at zero.
     /// Uses the same decrement pattern as regen_counter to avoid modulo.
     pub(crate) wandering_counter: u8,
+    /// Auto-pickup consumable items when walking over them (runtime setting, not saved).
+    pub auto_pickup: bool,
     /// Counts down each turn; triggers ambient sound check at zero.
     pub(crate) ambient_sound_counter: u8,
 }
@@ -108,6 +110,7 @@ impl MicroGameState {
         s.regen_counter = balance::REGEN_INTERVAL;
         s.wandering_counter = balance::WANDERING_GRACE_PERIOD - 1;
         s.ambient_sound_counter = balance::WANDERING_AMBIENT_SOUND_INTERVAL - 1;
+        s.auto_pickup = false;
     }
 
     /// Returns true if the game has reached a terminal state (death or victory).
@@ -350,9 +353,12 @@ impl MicroGameState {
     }
 
     /// Notify the player about items on the ground at their position.
+    /// When auto_pickup is enabled, consumables are picked up first.
     fn notify_items_here(&mut self, x: u8, y: u8) {
-        // Collect distinct (kind, count) pairs at this position.
-        // With only 3 item kinds, a fixed array suffices.
+        if self.auto_pickup {
+            self.auto_pickup_consumables(x, y);
+        }
+        // Notify about remaining items (equipment, or consumables if inventory was full).
         let mut counts = [0u8; rules_items::KIND_COUNT];
         for i in 0..self.items.count as usize {
             if self.items.alive[i] && self.items.x[i] == x && self.items.y[i] == y {
@@ -366,6 +372,30 @@ impl MicroGameState {
                     count,
                 });
             }
+        }
+    }
+
+    /// Auto-pickup all consumable items at (x, y).
+    fn auto_pickup_consumables(&mut self, x: u8, y: u8) {
+        loop {
+            let mut found: Option<u8> = None;
+            for i in 0..self.items.count as usize {
+                if self.items.alive[i]
+                    && self.items.x[i] == x
+                    && self.items.y[i] == y
+                    && rules_items::is_consumable(self.items.kind[i])
+                {
+                    found = Some(i as u8);
+                    break;
+                }
+            }
+            let Some(idx) = found else { break };
+            let kind = self.items.kind[idx as usize];
+            if !self.inventory.add(kind) {
+                break; // inventory full
+            }
+            self.items.remove(idx);
+            self.log.add(GameEvent::PickupItem { kind });
         }
     }
 
@@ -1066,6 +1096,104 @@ mod tests {
         assert!(result.action_taken); // turn consumed
         // Item should still be on ground.
         assert!(g.items.alive[0], "item should remain on ground");
+    }
+
+    // --- auto-pickup tests ---
+
+    /// Find a walkable direction from the player with no monster, spawn an item there.
+    /// Returns the direction to move and the (x, y) of the target tile.
+    fn place_item_adjacent(g: &mut MicroGameState, kind: ItemKind) -> Direction {
+        let dirs = [
+            Direction::East,
+            Direction::West,
+            Direction::North,
+            Direction::South,
+        ];
+        for dir in dirs {
+            let (dx, dy) = dir.to_offset();
+            let px = g.entities.x[0];
+            let py = g.entities.y[0];
+            let nx = (px as i8 + dx as i8) as u8;
+            let ny = (py as i8 + dy as i8) as u8;
+            if g.map.is_walkable(nx, ny) && g.entities.monster_at(nx, ny) == NO_ENTITY {
+                g.items.spawn(nx, ny, kind);
+                return dir;
+            }
+        }
+        panic!("no walkable adjacent tile found");
+    }
+
+    #[test]
+    fn auto_pickup_grabs_consumable() {
+        let mut g = MicroGameState::new_default(42);
+        g.items = ItemStore::new();
+        g.auto_pickup = true;
+        let dir = place_item_adjacent(&mut g, ItemKind::HealthPotion);
+        g.step(GameCommand::Move(dir));
+        assert!(g.inventory.len() == 1);
+        assert_eq!(g.inventory.get(0).unwrap().kind, ItemKind::HealthPotion);
+    }
+
+    #[test]
+    fn auto_pickup_ignores_equipment() {
+        let mut g = MicroGameState::new_default(42);
+        g.items = ItemStore::new();
+        g.auto_pickup = true;
+        let dir = place_item_adjacent(&mut g, ItemKind::ShortSword);
+        g.step(GameCommand::Move(dir));
+        assert!(g.inventory.is_empty());
+        assert!(g.items.alive[0], "sword should remain on ground");
+    }
+
+    #[test]
+    fn auto_pickup_multiple_consumables() {
+        let mut g = MicroGameState::new_default(42);
+        g.items = ItemStore::new();
+        g.auto_pickup = true;
+        // Place 3 potions at the same adjacent tile.
+        let dirs = [
+            Direction::East,
+            Direction::West,
+            Direction::North,
+            Direction::South,
+        ];
+        let mut chosen_dir = Direction::East;
+        for dir in dirs {
+            let (dx, dy) = dir.to_offset();
+            let px = g.entities.x[0];
+            let py = g.entities.y[0];
+            let nx = (px as i8 + dx as i8) as u8;
+            let ny = (py as i8 + dy as i8) as u8;
+            if g.map.is_walkable(nx, ny) && g.entities.monster_at(nx, ny) == NO_ENTITY {
+                g.items.spawn(nx, ny, ItemKind::HealthPotion);
+                g.items.spawn(nx, ny, ItemKind::HealthPotion);
+                g.items.spawn(nx, ny, ItemKind::HealthPotion);
+                chosen_dir = dir;
+                break;
+            }
+        }
+        g.step(GameCommand::Move(chosen_dir));
+        assert_eq!(g.inventory.len(), 1); // stacked
+        assert_eq!(g.inventory.get(0).unwrap().count, 3);
+    }
+
+    #[test]
+    fn auto_pickup_stops_when_inventory_full() {
+        let mut g = MicroGameState::new_default(42);
+        g.items = ItemStore::new();
+        g.auto_pickup = true;
+        for _ in 0..rules_items::MAX_INVENTORY {
+            g.inventory.add(ItemKind::ShortSword);
+        }
+        let dir = place_item_adjacent(&mut g, ItemKind::HealthPotion);
+        g.step(GameCommand::Move(dir));
+        assert!(g.items.alive[0], "potion should remain on ground");
+    }
+
+    #[test]
+    fn auto_pickup_off_by_default() {
+        let g = MicroGameState::new_default(42);
+        assert!(!g.auto_pickup);
     }
 
     #[test]

@@ -8,6 +8,7 @@ pub mod balance;
 pub mod color;
 pub mod damage;
 pub mod direction;
+pub mod health;
 pub mod items;
 pub mod message;
 pub mod monster_table;

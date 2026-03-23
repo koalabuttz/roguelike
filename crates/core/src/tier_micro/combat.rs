@@ -6,6 +6,7 @@ use super::entity::EntityStore;
 use super::msglog::MicroMessageLog;
 use super::types::*;
 use crate::rules::damage;
+use crate::rules::health;
 use crate::rules::message::{Combatant, GameEvent};
 
 fn combatant(entities: &EntityStore, idx: u8) -> Combatant {
@@ -37,6 +38,10 @@ pub fn melee_attack(
     let d = combatant(entities, defender);
 
     if dmg > 0 {
+        let old_tier = health::health_tier(
+            entities.hp[defender as usize],
+            entities.max_hp[defender as usize],
+        );
         let new_hp = entities.hp[defender as usize].saturating_sub(dmg);
         entities.hp[defender as usize] = new_hp;
         log.add(GameEvent::Attack {
@@ -44,6 +49,15 @@ pub fn melee_attack(
             defender: d,
             damage: dmg,
         });
+        if new_hp > 0 {
+            let new_tier = health::health_tier(new_hp, entities.max_hp[defender as usize]);
+            if new_tier != old_tier {
+                log.add(GameEvent::HealthStatus {
+                    who: d,
+                    tier: new_tier,
+                });
+            }
+        }
         if new_hp == 0 {
             entities.kill(defender);
             log.add(GameEvent::Kill {
@@ -117,16 +131,17 @@ mod tests {
         let atk = e.atk[0];
         let def = e.def[1];
         melee_attack(0, 1, atk, def, &mut e, &mut log);
-        match log.recent(0) {
-            Some(GameEvent::Attack {
-                attacker,
-                defender,
-                damage: _,
-            }) => {
-                assert_eq!(attacker, Combatant::Player);
-                assert_eq!(defender, Combatant::Monster(MonsterKind::Goblin));
-            }
-            other => panic!("expected Attack event, got {other:?}"),
-        }
+        // Attack may be followed by HealthStatus, so check both recent slots.
+        let found = (0..4).any(|i| {
+            matches!(
+                log.recent(i),
+                Some(GameEvent::Attack {
+                    attacker: Combatant::Player,
+                    defender: Combatant::Monster(MonsterKind::Goblin),
+                    ..
+                })
+            )
+        });
+        assert!(found, "expected Attack event in log");
     }
 }

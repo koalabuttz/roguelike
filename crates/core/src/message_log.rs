@@ -1,3 +1,4 @@
+use crate::rules::health;
 use crate::rules::items;
 use crate::rules::message::{AutorunStopCause, Combatant, GameEvent, SoundDistance};
 
@@ -63,19 +64,21 @@ pub fn format_event(event: GameEvent) -> String {
         GameEvent::Attack {
             attacker,
             defender,
-            damage,
-        } => format!(
-            "{} attacks {} for {} damage.",
-            attacker.name(),
-            defender.name(),
-            damage
-        ),
+            damage: _,
+        } => format!("{} hits {}.", attacker.name(), defender.name()),
         GameEvent::NoDamage { attacker, defender } => format!(
-            "{} attacks {} but does no damage.",
+            "{} attacks {} but deals no damage.",
             attacker.name(),
             defender.name()
         ),
         GameEvent::Kill { victim, .. } => format!("{} is dead!", victim.name()),
+        GameEvent::HealthStatus { who, tier } => {
+            let desc = health::health_description(tier);
+            match who {
+                Combatant::Player => format!("You are {}.", desc),
+                _ => format!("The {} is {}.", who.name(), desc),
+            }
+        }
         GameEvent::EntityNotice { who } => match who {
             Combatant::UnknownMonster => format!("{} notices you!", who.name()),
             _ => format!("The {} notices you!", who.name()),
@@ -230,7 +233,7 @@ mod tests {
             defender: Combatant::Monster(MonsterKind::Goblin),
             damage: 3,
         });
-        assert_eq!(msg, "Player attacks Goblin for 3 damage.");
+        assert_eq!(msg, "Player hits Goblin.");
     }
 
     #[test]
@@ -239,7 +242,7 @@ mod tests {
             attacker: Combatant::Monster(MonsterKind::Orc),
             defender: Combatant::Player,
         });
-        assert_eq!(msg, "Orc attacks Player but does no damage.");
+        assert_eq!(msg, "Orc attacks Player but deals no damage.");
     }
 
     #[test]

@@ -14,6 +14,7 @@ use crate::c64;
 use roguelike_core::rules::balance;
 use roguelike_core::rules::color::GameColor;
 use roguelike_core::rules::items;
+use roguelike_core::rules::health::{self, HealthTier};
 use roguelike_core::rules::message::{GameEvent, SoundDistance};
 use roguelike_core::rules::monster_table;
 use roguelike_core::tier_micro::game::MicroGameState;
@@ -693,13 +694,21 @@ fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
         GameEvent::Attack {
             attacker,
             defender,
-            damage,
+            damage: _,
         } => {
             let p = copy_bytes(buf, 0, attacker.name().as_bytes());
-            let p = copy_bytes(buf, p, b" hit ");
-            let p = copy_bytes(buf, p, defender.name().as_bytes());
-            let p = copy_bytes(buf, p, b" for ");
-            copy_num(buf, p, damage)
+            let p = copy_bytes(buf, p, b" hits ");
+            copy_bytes(buf, p, defender.name().as_bytes())
+        }
+        GameEvent::HealthStatus { who, tier } => {
+            let p = copy_bytes(buf, 0, who.name().as_bytes());
+            let desc: &[u8] = match tier {
+                HealthTier::Healthy => b": healthy",
+                HealthTier::Moderate => b": damaged",
+                HealthTier::Severe => b": wounded",
+                HealthTier::AlmostDead => b": dying!",
+            };
+            copy_bytes(buf, p, desc)
         }
         GameEvent::NoDamage {
             attacker,
@@ -1220,6 +1229,17 @@ pub fn render_look_status(state: &MicroGameState, cx: u8, cy: u8) {
                     p = copy_bytes(&mut buf, p, b"Player");
                 } else if let Some(kind) = state.entities.kind[eidx as usize] {
                     p = copy_bytes(&mut buf, p, monster_table::name(kind).as_bytes());
+                    let tier = health::health_tier(
+                        state.entities.hp[eidx as usize],
+                        state.entities.max_hp[eidx as usize],
+                    );
+                    let desc: &[u8] = match tier {
+                        HealthTier::Healthy => b"",
+                        HealthTier::Moderate => b" (damaged)",
+                        HealthTier::Severe => b" (wounded)",
+                        HealthTier::AlmostDead => b" (dying)",
+                    };
+                    p = copy_bytes(&mut buf, p, desc);
                 }
             }
 

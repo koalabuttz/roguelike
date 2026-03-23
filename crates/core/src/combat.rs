@@ -1,6 +1,7 @@
 use crate::entity::Entity;
 use crate::message_log::MessageLog;
 use crate::rules::damage as rules_damage;
+use crate::rules::health;
 use crate::rules::message::GameEvent;
 use crate::types::Stat;
 
@@ -24,12 +25,29 @@ pub fn melee_attack(
     let defender_c = entities[defender].combatant();
 
     if damage > 0 {
+        let old_tier = health::health_tier(
+            rules_damage::narrow(entities[defender].hp),
+            rules_damage::narrow(entities[defender].max_hp),
+        );
         entities[defender].hp -= damage;
         log.add_event(GameEvent::Attack {
             attacker: attacker_c,
             defender: defender_c,
             damage: damage as u8,
         });
+
+        if entities[defender].hp > 0 {
+            let new_tier = health::health_tier(
+                rules_damage::narrow(entities[defender].hp),
+                rules_damage::narrow(entities[defender].max_hp),
+            );
+            if new_tier != old_tier {
+                log.add_event(GameEvent::HealthStatus {
+                    who: defender_c,
+                    tier: new_tier,
+                });
+            }
+        }
 
         if entities[defender].hp <= 0 {
             entities[defender].alive = false;
@@ -85,7 +103,7 @@ mod tests {
         let mut log = MessageLog::new();
         melee_attack(&mut entities, 0, 1, 3, 3, &mut log);
         assert_eq!(entities[1].hp, 10);
-        assert!(log.recent(1)[0].contains("no damage"));
+        assert!(log.recent(1)[0].contains("deals no damage"));
     }
 
     #[test]
@@ -131,7 +149,7 @@ mod tests {
         // Both test entities lack monster_kind, so both map to Combatant::Player.
         let mut log = MessageLog::new();
         melee_attack(&mut entities, 0, 1, 5, 2, &mut log);
-        let msg = &log.recent(1)[0];
-        assert!(msg.contains("Player"));
+        // Check any recent message mentions "Player" (attack or health status).
+        assert!(log.recent(5).iter().any(|m| m.contains("Player")));
     }
 }

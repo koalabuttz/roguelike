@@ -1,6 +1,7 @@
 use crate::command::Direction;
 use crate::game::{GameState, LookOptions, TileInfo};
 use crate::platform::Renderer;
+use crate::rules::{damage, health};
 use crate::types::{Coord, GameColor};
 
 /// Result of handling a look-mode input event.
@@ -118,9 +119,11 @@ pub fn format_look_description(info: &TileInfo) -> String {
 
     let base = match &info.entity {
         Some(ent) if ent.alive => {
+            let tier = health::health_tier(damage::narrow(ent.hp), damage::narrow(ent.max_hp));
+            let desc = health::health_description(tier);
             format!(
-                "{} {} - {} ({}) HP:{}/{}",
-                coords, info.terrain, ent.name, ent.glyph, ent.hp, ent.max_hp
+                "{} {} - {} ({}) ({})",
+                coords, info.terrain, ent.name, ent.glyph, desc
             )
         }
         Some(ent) => {
@@ -264,7 +267,7 @@ mod tests {
         };
         assert_eq!(
             format_look_description(&info),
-            "(6,5) Floor - Goblin (g) HP:6/6"
+            "(6,5) Floor - Goblin (g) (healthy)"
         );
     }
 
@@ -356,7 +359,7 @@ mod tests {
         };
         assert_eq!(
             format_look_description(&info),
-            "(6,5) Floor - Goblin (g) HP:6/6 [Short Sword]"
+            "(6,5) Floor - Goblin (g) (healthy) [Short Sword]"
         );
     }
 

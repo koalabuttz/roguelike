@@ -7,6 +7,7 @@
 
 use core::mem::size_of;
 
+use super::health::HealthTier;
 use super::items::ItemKind;
 use super::monster_table::MonsterKind;
 
@@ -87,6 +88,9 @@ pub enum GameEvent {
         attacker: Combatant,
         victim: Combatant,
     },
+    /// A combatant crossed a health tier boundary (emitted after Attack,
+    /// only when the defender is still alive and tier changed).
+    HealthStatus { who: Combatant, tier: HealthTier },
     /// An entity noticed the player and switched to chase AI.
     EntityNotice { who: Combatant },
     /// Player consumed a potion.

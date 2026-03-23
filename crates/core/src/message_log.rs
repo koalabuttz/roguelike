@@ -128,6 +128,9 @@ pub fn format_event(event: GameEvent) -> String {
             }
         }
         GameEvent::Autorun => "Running...".into(),
+        GameEvent::UseStrengthPotion { bonus } => {
+            format!("You drink the Potion of Strength. (+{} ATK)", bonus)
+        }
         GameEvent::AutorunStop { cause } => match cause {
             AutorunStopCause::WallReached => "Path blocked.".into(),
             AutorunStopCause::MonsterSpotted => "Monster spotted!".into(),

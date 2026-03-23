@@ -132,6 +132,11 @@ fn encode_opt_item_kind(k: Option<ItemKind>) -> u8 {
         Some(ItemKind::HealthPotion) => 0,
         Some(ItemKind::ShortSword) => 1,
         Some(ItemKind::LeatherArmor) => 2,
+        Some(ItemKind::IronMace) => 3,
+        Some(ItemKind::LongSword) => 4,
+        Some(ItemKind::ChainMail) => 5,
+        Some(ItemKind::GreaterHealthPotion) => 6,
+        Some(ItemKind::StrengthPotion) => 7,
     }
 }
 
@@ -140,6 +145,11 @@ fn decode_opt_item_kind(b: u8) -> Option<ItemKind> {
         0 => Some(ItemKind::HealthPotion),
         1 => Some(ItemKind::ShortSword),
         2 => Some(ItemKind::LeatherArmor),
+        3 => Some(ItemKind::IronMace),
+        4 => Some(ItemKind::LongSword),
+        5 => Some(ItemKind::ChainMail),
+        6 => Some(ItemKind::GreaterHealthPotion),
+        7 => Some(ItemKind::StrengthPotion),
         _ => None,
     }
 }

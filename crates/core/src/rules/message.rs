@@ -127,6 +127,8 @@ pub enum GameEvent {
     Autorun,
     /// Autorun finished — carries the stop reason.
     AutorunStop { cause: AutorunStopCause },
+    /// Player consumed a stat-boosting potion.
+    UseStrengthPotion { bonus: u8 },
 }
 
 // Compile-time size checks — keep these small for constrained tiers.

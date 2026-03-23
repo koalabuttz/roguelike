@@ -99,13 +99,45 @@ const _: () = assert!(
 // Item balance
 // ---------------------------------------------------------------------------
 
+// Health Potion
 pub const HEALTH_POTION_HEAL: u8 = 10;
-pub const SHORT_SWORD_ATK_BONUS: u8 = 3;
-pub const LEATHER_ARMOR_DEF_BONUS: u8 = 2;
+pub const HEALTH_POTION_SPAWN_WEIGHT: u8 = 40;
+pub const HEALTH_POTION_MIN_DEPTH: u8 = 1;
 
-pub const HEALTH_POTION_SPAWN_WEIGHT: u8 = 50;
-pub const SHORT_SWORD_SPAWN_WEIGHT: u8 = 30;
-pub const LEATHER_ARMOR_SPAWN_WEIGHT: u8 = 20;
+// Short Sword
+pub const SHORT_SWORD_ATK_BONUS: u8 = 3;
+pub const SHORT_SWORD_SPAWN_WEIGHT: u8 = 20;
+pub const SHORT_SWORD_MIN_DEPTH: u8 = 1;
+
+// Leather Armor
+pub const LEATHER_ARMOR_DEF_BONUS: u8 = 2;
+pub const LEATHER_ARMOR_SPAWN_WEIGHT: u8 = 15;
+pub const LEATHER_ARMOR_MIN_DEPTH: u8 = 1;
+
+// Iron Mace
+pub const IRON_MACE_ATK_BONUS: u8 = 4;
+pub const IRON_MACE_SPAWN_WEIGHT: u8 = 12;
+pub const IRON_MACE_MIN_DEPTH: u8 = 2;
+
+// Long Sword
+pub const LONG_SWORD_ATK_BONUS: u8 = 5;
+pub const LONG_SWORD_SPAWN_WEIGHT: u8 = 8;
+pub const LONG_SWORD_MIN_DEPTH: u8 = 3;
+
+// Chain Mail
+pub const CHAIN_MAIL_DEF_BONUS: u8 = 4;
+pub const CHAIN_MAIL_SPAWN_WEIGHT: u8 = 8;
+pub const CHAIN_MAIL_MIN_DEPTH: u8 = 3;
+
+// Greater Health Potion
+pub const GREATER_HEALTH_POTION_HEAL: u8 = 20;
+pub const GREATER_HEALTH_POTION_SPAWN_WEIGHT: u8 = 15;
+pub const GREATER_HEALTH_POTION_MIN_DEPTH: u8 = 3;
+
+// Potion of Strength
+pub const STRENGTH_POTION_ATK_BOOST: u8 = 1;
+pub const STRENGTH_POTION_SPAWN_WEIGHT: u8 = 8;
+pub const STRENGTH_POTION_MIN_DEPTH: u8 = 2;
 
 pub const MAX_ITEMS_PER_ROOM: u8 = 1;
 pub const MAX_INVENTORY: usize = super::items::MAX_INVENTORY;
@@ -153,11 +185,15 @@ mod tests {
     }
 
     #[test]
-    fn item_spawn_weights_sum_to_100() {
-        let total = HEALTH_POTION_SPAWN_WEIGHT as u16
-            + SHORT_SWORD_SPAWN_WEIGHT as u16
-            + LEATHER_ARMOR_SPAWN_WEIGHT as u16;
-        assert_eq!(total, 100);
+    fn all_item_spawn_weights_positive() {
+        assert!(HEALTH_POTION_SPAWN_WEIGHT > 0);
+        assert!(SHORT_SWORD_SPAWN_WEIGHT > 0);
+        assert!(LEATHER_ARMOR_SPAWN_WEIGHT > 0);
+        assert!(IRON_MACE_SPAWN_WEIGHT > 0);
+        assert!(LONG_SWORD_SPAWN_WEIGHT > 0);
+        assert!(CHAIN_MAIL_SPAWN_WEIGHT > 0);
+        assert!(GREATER_HEALTH_POTION_SPAWN_WEIGHT > 0);
+        assert!(STRENGTH_POTION_SPAWN_WEIGHT > 0);
     }
 
     #[test]

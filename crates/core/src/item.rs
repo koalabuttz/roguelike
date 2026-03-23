@@ -77,6 +77,16 @@ pub fn is_armor(kind: ItemKind) -> bool {
     rules_items::is_armor(kind)
 }
 
+/// Minimum depth at which this item can spawn.
+pub fn item_min_depth(kind: ItemKind) -> u8 {
+    rules_items::min_depth(kind)
+}
+
+/// Permanent ATK boost granted when consumed. Returns 0 for non-boosting items.
+pub fn item_strength_boost(kind: ItemKind) -> Stat {
+    rules_items::strength_boost(kind) as Stat
+}
+
 /// Returns true if `new` is strictly better than `current` for the weapon slot.
 pub fn is_better_weapon(new: ItemKind, current: Option<ItemKind>) -> bool {
     rules_items::is_better_weapon(new, current)
@@ -93,6 +103,16 @@ pub fn spawn_table() -> Vec<(ItemKind, u32)> {
     rules_items::SPAWN_TABLE
         .iter()
         .filter(|(_, w)| *w > 0)
+        .map(|&(kind, w)| (kind, w as u32))
+        .collect()
+}
+
+/// Spawn table filtered by depth — only items whose `min_depth` ≤ `depth`.
+/// The spawner auto-normalizes weights, so no rebalancing needed.
+pub fn spawn_table_for_depth(depth: u8) -> Vec<(ItemKind, u32)> {
+    rules_items::SPAWN_TABLE
+        .iter()
+        .filter(|&&(kind, w)| w > 0 && rules_items::min_depth(kind) <= depth)
         .map(|&(kind, w)| (kind, w as u32))
         .collect()
 }
@@ -143,9 +163,9 @@ mod tests {
     #[test]
     fn spawn_table_has_all_items() {
         let table = spawn_table();
-        assert_eq!(table.len(), 3);
+        assert_eq!(table.len(), 8);
         let total: u32 = table.iter().map(|(_, w)| w).sum();
-        assert_eq!(total, 100); // 50 + 30 + 20
+        assert!(total > 0);
     }
 
     #[test]

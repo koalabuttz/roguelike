@@ -116,7 +116,10 @@ mod tests {
     #[test]
     fn descriptions() {
         assert_eq!(health_description(HealthTier::Healthy), "healthy");
-        assert_eq!(health_description(HealthTier::Moderate), "moderately damaged");
+        assert_eq!(
+            health_description(HealthTier::Moderate),
+            "moderately damaged"
+        );
         assert_eq!(health_description(HealthTier::Severe), "severely wounded");
         assert_eq!(health_description(HealthTier::AlmostDead), "almost dead");
     }

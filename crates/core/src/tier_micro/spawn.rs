@@ -51,15 +51,21 @@ pub fn spawn_monsters(entities: &mut EntityStore, map: &MicroMap, rng: &mut Lfsr
 // Item spawning
 // ---------------------------------------------------------------------------
 
-/// Pick a random item kind using the rules/ spawn weights.
-pub fn pick_item_kind(rng: &mut LfsrRng16) -> ItemKind {
+/// Pick a random item kind using the rules/ spawn weights, filtered by depth.
+pub fn pick_item_kind(rng: &mut LfsrRng16, depth: u8) -> ItemKind {
     let mut total: u8 = 0;
     for i in 0..ITEM_KIND_COUNT {
-        total = total.saturating_add(rules_items::SPAWN_TABLE[i].1);
+        let (kind, weight) = rules_items::SPAWN_TABLE[i];
+        if rules_items::min_depth(kind) <= depth {
+            total = total.saturating_add(weight);
+        }
     }
     let mut roll = rng.range_u8(0, total - 1);
     for i in 0..ITEM_KIND_COUNT {
         let (kind, weight) = rules_items::SPAWN_TABLE[i];
+        if rules_items::min_depth(kind) > depth {
+            continue;
+        }
         if roll < weight {
             return kind;
         }
@@ -69,7 +75,8 @@ pub fn pick_item_kind(rng: &mut LfsrRng16) -> ItemKind {
 }
 
 /// Spawn items in rooms (skip room 0 = player start, max 1 per room).
-pub fn spawn_items(items: &mut ItemStore, map: &MicroMap, rng: &mut LfsrRng16) {
+/// Only items with `min_depth <= depth` are eligible.
+pub fn spawn_items(items: &mut ItemStore, map: &MicroMap, depth: u8, rng: &mut LfsrRng16) {
     for ri in 1..map.room_count {
         let room = map.rooms[ri as usize];
         let count = rng.range_u8(0, balance::MAX_ITEMS_PER_ROOM);
@@ -79,7 +86,7 @@ pub fn spawn_items(items: &mut ItemStore, map: &MicroMap, rng: &mut LfsrRng16) {
             }
             let ix = rng.range_u8(room.x + 1, room.x + room.w - 1);
             let iy = rng.range_u8(room.y + 1, room.y + room.h - 1);
-            let kind = pick_item_kind(rng);
+            let kind = pick_item_kind(rng, depth);
             items.spawn(ix, iy, kind);
         }
     }
@@ -189,9 +196,16 @@ mod tests {
     fn pick_item_kind_returns_valid_kind() {
         let mut rng = LfsrRng16::new(42);
         for _ in 0..100 {
-            let kind = pick_item_kind(&mut rng);
+            let kind = pick_item_kind(&mut rng, 5);
             match kind {
-                ItemKind::HealthPotion | ItemKind::ShortSword | ItemKind::LeatherArmor => {}
+                ItemKind::HealthPotion
+                | ItemKind::ShortSword
+                | ItemKind::LeatherArmor
+                | ItemKind::IronMace
+                | ItemKind::LongSword
+                | ItemKind::ChainMail
+                | ItemKind::GreaterHealthPotion
+                | ItemKind::StrengthPotion => {}
             }
         }
     }
@@ -203,7 +217,7 @@ mod tests {
         map.generate(&mut rng);
 
         let mut items = ItemStore::new();
-        spawn_items(&mut items, &map, &mut rng);
+        spawn_items(&mut items, &map, 1, &mut rng);
         assert!(items.count > 0, "should have spawned at least one item");
     }
 
@@ -214,7 +228,7 @@ mod tests {
         let (sx, sy) = map.generate(&mut rng);
 
         let mut items = ItemStore::new();
-        spawn_items(&mut items, &map, &mut rng);
+        spawn_items(&mut items, &map, 1, &mut rng);
 
         // No item should be at the player start room center
         use crate::tier_micro::item_store::NO_ITEM;

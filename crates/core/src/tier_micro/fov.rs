@@ -205,7 +205,9 @@ impl MicroFov {
         let used = (total_tiles + 7) >> 3;
         for i in 0..used {
             // Safety: used <= MAX_BITFIELD_SIZE by construction.
-            unsafe { *self.visible.get_unchecked_mut(i) = 0; }
+            unsafe {
+                *self.visible.get_unchecked_mut(i) = 0;
+            }
         }
     }
 
@@ -288,12 +290,8 @@ impl MicroFov {
                     // Octant coordinate transform.  The multipliers xx/xy/yx/yy
                     // are always -1, 0, or 1.  Branching avoids __mulqi3 (~27
                     // cycles) for what is effectively a conditional negate.
-                    let map_x = (ox as i8)
-                        + apply_octant(dx, xx)
-                        + apply_octant(dy, xy);
-                    let map_y = (oy as i8)
-                        + apply_octant(dx, yx)
-                        + apply_octant(dy, yy);
+                    let map_x = (ox as i8) + apply_octant(dx, xx) + apply_octant(dy, xy);
+                    let map_y = (oy as i8) + apply_octant(dx, yx) + apply_octant(dy, yy);
 
                     let in_bounds = map_x >= 0 && map_x < w && map_y >= 0 && map_y < h;
 

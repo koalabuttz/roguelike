@@ -580,8 +580,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                             && let Some(gs) = standard_state(game.as_ref())
                         {
                             let slots = saves.load_all_slot_metadata();
-                            let mut slot_menu =
-                                menu::save_slot_menu(&slots);
+                            let mut slot_menu = menu::save_slot_menu(&slots);
                             match run_menu(&mut slot_menu, renderer, input)? {
                                 Some(MenuAction::SelectSlot(slot)) => {
                                     let msg = saves.save_to_slot(gs, slot, &settings.player_name);
@@ -1040,8 +1039,7 @@ fn handle_load_game<W: Write>(
         let slots = saves.load_all_slot_metadata();
         let auto_meta = saves.load_autosave_metadata();
         let has_auto = saves.has_autosave();
-        let mut load_menu =
-            menu::load_slot_menu(has_auto, &auto_meta, &slots);
+        let mut load_menu = menu::load_slot_menu(has_auto, &auto_meta, &slots);
         match run_menu(&mut load_menu, renderer, input)? {
             Some(MenuAction::LoadGame) => {
                 // Load autosave (always standard tier).

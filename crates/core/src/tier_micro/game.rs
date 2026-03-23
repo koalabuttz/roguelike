@@ -89,7 +89,7 @@ impl MicroGameState {
         spawn::spawn_monsters(&mut s.entities, &s.map, &mut s.rng);
 
         s.items = ItemStore::new();
-        spawn::spawn_items(&mut s.items, &s.map, &mut s.rng);
+        spawn::spawn_items(&mut s.items, &s.map, 1, &mut s.rng);
 
         s.fov = MicroFov::new(width, height);
         s.fov.compute_fov(sx, sy, &s.map);
@@ -282,7 +282,7 @@ impl MicroGameState {
         spawn::spawn_monsters(&mut self.entities, &self.map, &mut self.rng);
         spawn::apply_depth_scaling(&mut self.entities, self.depth);
         self.items = ItemStore::new();
-        spawn::spawn_items(&mut self.items, &self.map, &mut self.rng);
+        spawn::spawn_items(&mut self.items, &self.map, self.depth, &mut self.rng);
 
         // Reset FOV
         self.fov = MicroFov::new(w, h);
@@ -436,6 +436,14 @@ impl MicroGameState {
                     kind: inv_slot.kind,
                     healed,
                 });
+                return true;
+            }
+            let boost = rules_items::strength_boost(inv_slot.kind);
+            if boost > 0 {
+                let pi = PLAYER_IDX as usize;
+                self.entities.atk[pi] = self.entities.atk[pi].saturating_add(boost);
+                self.inventory.remove_one(slot as usize);
+                self.log.add(GameEvent::UseStrengthPotion { bonus: boost });
                 return true;
             }
         }
@@ -1439,8 +1447,11 @@ mod tests {
         let mut g = MicroGameState::new_default(42);
         let initial_count = g.entities.count;
 
-        // Run turns up to (but not including) the grace period.
-        for _ in 0..balance::WANDERING_GRACE_PERIOD {
+        // Run turns within the grace period. The wandering counter starts at
+        // GRACE_PERIOD - 1 and decrements each turn, so after GRACE_PERIOD - 1
+        // turns the counter reaches 0 but the last decrement still returns early.
+        // The GRACE_PERIOD-th turn would enter spawn logic, so we stop before it.
+        for _ in 0..balance::WANDERING_GRACE_PERIOD - 1 {
             if g.game_over {
                 break;
             }

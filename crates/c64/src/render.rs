@@ -1750,41 +1750,65 @@ fn help_page_bestiary() {
         b"ATK +", items::attack_bonus(items::ItemKind::ShortSword));
     const ARMOR_ROW: [u8; 24] = fmt_item_row(b"LEATHER ARMOR",
         b"DEF +", items::defense_bonus(items::ItemKind::LeatherArmor));
+    const MACE_ROW: [u8; 24] = fmt_item_row(b"IRON MACE",
+        b"ATK +", items::attack_bonus(items::ItemKind::IronMace));
+    const LSWORD_ROW: [u8; 24] = fmt_item_row(b"LONG SWORD",
+        b"ATK +", items::attack_bonus(items::ItemKind::LongSword));
+    const CHAIN_ROW: [u8; 24] = fmt_item_row(b"CHAIN MAIL",
+        b"DEF +", items::defense_bonus(items::ItemKind::ChainMail));
+    const GPOTION_ROW: [u8; 24] = fmt_item_row(b"GREATER POTION",
+        b"HEAL ", items::heal_amount(items::ItemKind::GreaterHealthPotion));
+    const SPOTION_ROW: [u8; 24] = fmt_item_row(b"STR POTION",
+        b"ATK +", items::strength_boost(items::ItemKind::StrengthPotion));
 
     help_chrome(1);
 
     c64::draw_text(2, 1, b"COMBAT", c64::COLOR_WHITE);
     c64::draw_text(2, 2, b"DMG = ATK - DEF (MIN 0)", c64::COLOR_LGREY);
     c64::draw_text(2, 3, b"WALK INTO MONSTER TO ATTACK", c64::COLOR_LGREY);
-    c64::draw_text(2, 4, b"HP REGEN: 1 EVERY 3 TURNS", c64::COLOR_LGREY);
-    c64::draw_text(2, 5, b"REACH DEPTH 5 TO WIN", c64::COLOR_LGREY);
+    c64::draw_text(2, 4, b"REACH DEPTH 5 TO WIN", c64::COLOR_LGREY);
 
-    c64::draw_text(2, 7, b"MONSTERS", c64::COLOR_WHITE);
-    c64::draw_text(5, 8, b"NAME        HP ATK DEF", c64::COLOR_DGREY);
+    c64::draw_text(2, 6, b"MONSTERS", c64::COLOR_WHITE);
+    c64::draw_text(5, 7, b"NAME        HP ATK DEF", c64::COLOR_DGREY);
 
-    c64::draw_char(2, 9, monster_table::glyph(MonsterKind::Goblin) as u8,
+    c64::draw_char(2, 8, monster_table::glyph(MonsterKind::Goblin) as u8,
         game_color_to_c64(monster_table::color(MonsterKind::Goblin)));
-    c64::draw_text(5, 9, &GOBLIN_ROW, c64::COLOR_LGREY);
+    c64::draw_text(5, 8, &GOBLIN_ROW, c64::COLOR_LGREY);
 
-    c64::draw_char(2, 10, monster_table::glyph(MonsterKind::Orc) as u8,
+    c64::draw_char(2, 9, monster_table::glyph(MonsterKind::Orc) as u8,
         game_color_to_c64(monster_table::color(MonsterKind::Orc)));
-    c64::draw_text(5, 10, &ORC_ROW, c64::COLOR_LGREY);
+    c64::draw_text(5, 9, &ORC_ROW, c64::COLOR_LGREY);
 
-    c64::draw_char(2, 11, monster_table::glyph(MonsterKind::Troll) as u8,
+    c64::draw_char(2, 10, monster_table::glyph(MonsterKind::Troll) as u8,
         game_color_to_c64(monster_table::color(MonsterKind::Troll)));
-    c64::draw_text(5, 11, &TROLL_ROW, c64::COLOR_LGREY);
+    c64::draw_text(5, 10, &TROLL_ROW, c64::COLOR_LGREY);
 
-    c64::draw_text(2, 13, b"ITEMS", c64::COLOR_WHITE);
-    c64::draw_text(5, 14, b"NAME            EFFECT", c64::COLOR_DGREY);
+    c64::draw_text(2, 12, b"ITEMS", c64::COLOR_WHITE);
+    c64::draw_text(5, 13, b"NAME            EFFECT", c64::COLOR_DGREY);
 
-    c64::draw_char(2, 15, b'!', game_color_to_c64(items::color(items::ItemKind::HealthPotion)));
-    c64::draw_text(5, 15, &POTION_ROW, c64::COLOR_LGREY);
+    c64::draw_char(2, 14, b'!', game_color_to_c64(items::color(items::ItemKind::HealthPotion)));
+    c64::draw_text(5, 14, &POTION_ROW, c64::COLOR_LGREY);
 
-    c64::draw_char(2, 16, b'/', game_color_to_c64(items::color(items::ItemKind::ShortSword)));
-    c64::draw_text(5, 16, &SWORD_ROW, c64::COLOR_LGREY);
+    c64::draw_char(2, 15, b'/', game_color_to_c64(items::color(items::ItemKind::ShortSword)));
+    c64::draw_text(5, 15, &SWORD_ROW, c64::COLOR_LGREY);
 
-    c64::draw_char(2, 17, b'[', game_color_to_c64(items::color(items::ItemKind::LeatherArmor)));
-    c64::draw_text(5, 17, &ARMOR_ROW, c64::COLOR_LGREY);
+    c64::draw_char(2, 16, b'[', game_color_to_c64(items::color(items::ItemKind::LeatherArmor)));
+    c64::draw_text(5, 16, &ARMOR_ROW, c64::COLOR_LGREY);
+
+    c64::draw_char(2, 17, b'/', game_color_to_c64(items::color(items::ItemKind::IronMace)));
+    c64::draw_text(5, 17, &MACE_ROW, c64::COLOR_LGREY);
+
+    c64::draw_char(2, 18, b'/', game_color_to_c64(items::color(items::ItemKind::LongSword)));
+    c64::draw_text(5, 18, &LSWORD_ROW, c64::COLOR_LGREY);
+
+    c64::draw_char(2, 19, b'[', game_color_to_c64(items::color(items::ItemKind::ChainMail)));
+    c64::draw_text(5, 19, &CHAIN_ROW, c64::COLOR_LGREY);
+
+    c64::draw_char(2, 20, b'!', game_color_to_c64(items::color(items::ItemKind::GreaterHealthPotion)));
+    c64::draw_text(5, 20, &GPOTION_ROW, c64::COLOR_LGREY);
+
+    c64::draw_char(2, 21, b'!', game_color_to_c64(items::color(items::ItemKind::StrengthPotion)));
+    c64::draw_text(5, 21, &SPOTION_ROW, c64::COLOR_LGREY);
 }
 
 /// Render a help screen page. Called in a loop by the help page-flip handler.

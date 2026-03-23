@@ -504,7 +504,7 @@ impl GameState {
         );
         entities.extend(monsters);
 
-        let ground_items = spawn::spawn_items(&map, item::MAX_ITEMS_PER_ROOM, &mut item_rng);
+        let ground_items = spawn::spawn_items(&map, item::MAX_ITEMS_PER_ROOM, 1, &mut item_rng);
 
         let visible = fov::compute_fov(&map, px, py, cfg.fov_radius);
         let explored = visible.clone();
@@ -592,7 +592,7 @@ impl GameState {
         );
         entities.extend(monsters);
 
-        let ground_items = spawn::spawn_items(&map, item::MAX_ITEMS_PER_ROOM, &mut item_rng);
+        let ground_items = spawn::spawn_items(&map, item::MAX_ITEMS_PER_ROOM, 1, &mut item_rng);
 
         let visible = fov::compute_fov(&map, px, py, cfg.fov_radius);
         let explored = visible.clone();
@@ -786,6 +786,14 @@ impl GameState {
                     kind: inv_slot.kind,
                     healed: healed as u8,
                 });
+                return true;
+            }
+            let boost = rules_items::strength_boost(inv_slot.kind);
+            if boost > 0 {
+                self.entities[0].attack += boost as Stat;
+                self.inventory.remove_one(slot as usize);
+                self.log
+                    .add_event(GameEvent::UseStrengthPotion { bonus: boost });
                 return true;
             }
         }
@@ -997,7 +1005,12 @@ impl GameState {
         }
 
         // Spawn items on new floor.
-        let ground_items = spawn::spawn_items(&new_map, item::MAX_ITEMS_PER_ROOM, &mut item_rng);
+        let ground_items = spawn::spawn_items(
+            &new_map,
+            item::MAX_ITEMS_PER_ROOM,
+            self.depth as u8,
+            &mut item_rng,
+        );
 
         // Preserve player entity with current HP/stats, move to new start.
         self.entities[0].x = new_px;

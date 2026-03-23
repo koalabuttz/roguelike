@@ -12,5 +12,6 @@ pub mod health;
 pub mod items;
 pub mod message;
 pub mod monster_table;
+pub mod properties;
 pub mod seed_code;
 pub mod tiles;

@@ -480,10 +480,20 @@ impl MicroGameState {
             return false;
         }
 
-        // Split one item from the target stack: remove it, re-insert with
-        // modified props (lands in a new slot if props differ from the stack).
-        self.inventory.remove_one(target_slot as usize);
-        self.inventory.add_with_props(target.kind, a_props);
+        // Update target: if single item or equipment, modify in place.
+        // Only split from a stack when count > 1 (needs a new slot).
+        if target.count <= 1 {
+            self.inventory.set_props(target_slot as usize, a_props);
+        } else {
+            // Stacked consumable — split one off into a new slot.
+            self.inventory.remove_one(target_slot as usize);
+            if !self.inventory.add_with_props(target.kind, a_props) {
+                // Inventory full — undo the removal, abort.
+                self.inventory.add_with_props(target.kind, target.props);
+                self.log.add(GameEvent::InventoryFull);
+                return false;
+            }
+        }
 
         // Source: consume one if consumable, otherwise update props in place.
         if rules_items::is_consumable(source.kind) {

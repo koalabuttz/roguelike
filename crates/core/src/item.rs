@@ -209,6 +209,7 @@ mod tests {
         let eq = Equipment {
             weapon: Some(ItemKind::ShortSword),
             armor: None,
+            ..Equipment::default()
         };
         assert_eq!(eq.attack_bonus(), 3);
         assert_eq!(eq.defense_bonus(), 0);
@@ -219,6 +220,7 @@ mod tests {
         let eq = Equipment {
             weapon: None,
             armor: Some(ItemKind::LeatherArmor),
+            ..Equipment::default()
         };
         assert_eq!(eq.attack_bonus(), 0);
         assert_eq!(eq.defense_bonus(), 2);
@@ -229,6 +231,7 @@ mod tests {
         let eq = Equipment {
             weapon: Some(ItemKind::ShortSword),
             armor: Some(ItemKind::LeatherArmor),
+            ..Equipment::default()
         };
         assert_eq!(eq.attack_bonus(), 3);
         assert_eq!(eq.defense_bonus(), 2);

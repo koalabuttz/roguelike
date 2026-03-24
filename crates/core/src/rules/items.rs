@@ -336,10 +336,9 @@ pub const fn from_snake_case(s: &str) -> Option<ItemKind> {
 /// the emergent property system. Properties are nibble-packed (16 × 4-bit
 /// values in 8 bytes).
 ///
-/// **Step 1:** These profiles exist as validated dead code. Combat still
-/// reads from `attack_bonus(kind)` etc. The profiles define what each item
-/// IS in property space, forcing the design decisions before the interaction
-/// engine exists.
+/// These profiles define what each item IS in property space. Combat reads
+/// stats via `attack_from_bag()` / `defense_from_bag()` (Step 3). The
+/// interaction engine modifies bags at runtime via `GameCommand::Combine`.
 pub const fn default_properties(kind: ItemKind) -> PropertyBag {
     let mut bag = properties::EMPTY;
     match kind {
@@ -394,18 +393,73 @@ pub const fn default_properties(kind: ItemKind) -> PropertyBag {
 }
 
 // ---------------------------------------------------------------------------
+// Property-based stat derivation
+// ---------------------------------------------------------------------------
+
+/// Compute attack bonus from a property bag.
+///
+/// Primary: max(SHARP, (HARD + HEAVY) / 2), halved with round-up.
+/// Elemental: max(HOT, COLD, VENOMOUS, CORROSIVE) / 4.
+///
+/// For default property bags this reproduces the hardcoded `attack_bonus(kind)`
+/// values exactly: ShortSword→3, IronMace→4, LongSword→5.
+pub const fn attack_from_bag(bag: &PropertyBag) -> u8 {
+    let sharp = properties::get(bag, properties::Property::Sharp);
+    let hard = properties::get(bag, properties::Property::Hard);
+    let heavy = properties::get(bag, properties::Property::Heavy);
+
+    // Primary: SHARP for edged weapons, (HARD+HEAVY)/2 for blunt
+    let blunt = (hard + heavy) / 2; // max 15, fits u8
+    let primary = if sharp >= blunt { sharp } else { blunt };
+    let base = primary.div_ceil(2);
+
+    // Elemental bonus: strongest elemental property / 4
+    let hot = properties::get(bag, properties::Property::Hot);
+    let cold = properties::get(bag, properties::Property::Cold);
+    let venomous = properties::get(bag, properties::Property::Venomous);
+    let corrosive = properties::get(bag, properties::Property::Corrosive);
+    let ab = if hot > cold { hot } else { cold };
+    let cd = if venomous > corrosive {
+        venomous
+    } else {
+        corrosive
+    };
+    let elem = (if ab > cd { ab } else { cd }) / 4;
+
+    base + elem
+}
+
+/// Compute defense bonus from a property bag.
+///
+/// HARD / 2, plain integer division.
+///
+/// For default property bags this reproduces the hardcoded `defense_bonus(kind)`
+/// values exactly: LeatherArmor→2, ChainMail→4.
+pub const fn defense_from_bag(bag: &PropertyBag) -> u8 {
+    properties::get(bag, properties::Property::Hard) / 2
+}
+
+// ---------------------------------------------------------------------------
 // Equipment (shared across all tiers)
 // ---------------------------------------------------------------------------
 
 /// Tracked equipment slots for the player.
 ///
 /// Pure data + bonus lookups — no coordinates, no allocation, `no_std`.
-/// Combat reads effective stats (base + equipment bonus) from these slots.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// Combat reads effective stats from equipped property bags (Step 3).
+/// The `weapon_props`/`armor_props` fields carry the per-instance property
+/// bag that was on the item when it was equipped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(default)
+)]
 pub struct Equipment {
     pub weapon: Option<ItemKind>,
     pub armor: Option<ItemKind>,
+    pub weapon_props: PropertyBag,
+    pub armor_props: PropertyBag,
 }
 
 // ---------------------------------------------------------------------------
@@ -571,15 +625,49 @@ impl Inventory {
     }
 }
 
+impl Default for Equipment {
+    fn default() -> Self {
+        Self {
+            weapon: None,
+            armor: None,
+            weapon_props: properties::EMPTY,
+            armor_props: properties::EMPTY,
+        }
+    }
+}
+
 impl Equipment {
-    /// Attack bonus from equipped weapon (u8 for tier portability).
+    /// Attack bonus from equipped weapon's property bag.
+    ///
+    /// Falls back to `attack_bonus(kind)` if the bag is empty (migration
+    /// from saves that predate the property system).
     pub fn attack_bonus(&self) -> u8 {
-        self.weapon.map_or(0, attack_bonus)
+        match self.weapon {
+            Some(kind) => {
+                if self.weapon_props == properties::EMPTY {
+                    attack_bonus(kind)
+                } else {
+                    attack_from_bag(&self.weapon_props)
+                }
+            }
+            None => 0,
+        }
     }
 
-    /// Defense bonus from equipped armor (u8 for tier portability).
+    /// Defense bonus from equipped armor's property bag.
+    ///
+    /// Falls back to `defense_bonus(kind)` if the bag is empty (migration).
     pub fn defense_bonus(&self) -> u8 {
-        self.armor.map_or(0, defense_bonus)
+        match self.armor {
+            Some(kind) => {
+                if self.armor_props == properties::EMPTY {
+                    defense_bonus(kind)
+                } else {
+                    defense_from_bag(&self.armor_props)
+                }
+            }
+            None => 0,
+        }
     }
 }
 
@@ -732,6 +820,7 @@ mod tests {
         let eq = Equipment {
             weapon: Some(ItemKind::ShortSword),
             armor: None,
+            ..Equipment::default()
         };
         assert_eq!(eq.attack_bonus(), 3);
         assert_eq!(eq.defense_bonus(), 0);
@@ -742,6 +831,7 @@ mod tests {
         let eq = Equipment {
             weapon: None,
             armor: Some(ItemKind::LeatherArmor),
+            ..Equipment::default()
         };
         assert_eq!(eq.attack_bonus(), 0);
         assert_eq!(eq.defense_bonus(), 2);
@@ -752,6 +842,7 @@ mod tests {
         let eq = Equipment {
             weapon: Some(ItemKind::ShortSword),
             armor: Some(ItemKind::LeatherArmor),
+            ..Equipment::default()
         };
         assert_eq!(eq.attack_bonus(), 3);
         assert_eq!(eq.defense_bonus(), 2);
@@ -948,6 +1039,7 @@ mod tests {
         let eq = Equipment {
             weapon: Some(ItemKind::LongSword),
             armor: None,
+            ..Equipment::default()
         };
         assert_eq!(eq.attack_bonus(), 5);
     }
@@ -957,6 +1049,7 @@ mod tests {
         let eq = Equipment {
             weapon: None,
             armor: Some(ItemKind::ChainMail),
+            ..Equipment::default()
         };
         assert_eq!(eq.defense_bonus(), 4);
     }
@@ -1037,6 +1130,96 @@ mod tests {
         for &kind in &ALL_KINDS {
             assert_eq!(default_properties(kind), default_properties(kind));
         }
+    }
+
+    // ── Property-based stat derivation tests ─────────────────────────
+
+    #[test]
+    fn attack_from_bag_matches_hardcoded_for_all_weapons() {
+        // The formula must reproduce the hardcoded attack_bonus values
+        // for default property bags — this anchors Step 3 to Step 1.
+        assert_eq!(
+            attack_from_bag(&default_properties(ItemKind::ShortSword)),
+            attack_bonus(ItemKind::ShortSword)
+        );
+        assert_eq!(
+            attack_from_bag(&default_properties(ItemKind::IronMace)),
+            attack_bonus(ItemKind::IronMace)
+        );
+        assert_eq!(
+            attack_from_bag(&default_properties(ItemKind::LongSword)),
+            attack_bonus(ItemKind::LongSword)
+        );
+    }
+
+    #[test]
+    fn defense_from_bag_matches_hardcoded_for_all_armors() {
+        assert_eq!(
+            defense_from_bag(&default_properties(ItemKind::LeatherArmor)),
+            defense_bonus(ItemKind::LeatherArmor)
+        );
+        assert_eq!(
+            defense_from_bag(&default_properties(ItemKind::ChainMail)),
+            defense_bonus(ItemKind::ChainMail)
+        );
+    }
+
+    #[test]
+    fn attack_from_bag_zero_for_empty_bag() {
+        assert_eq!(attack_from_bag(&properties::EMPTY), 0);
+    }
+
+    #[test]
+    fn defense_from_bag_zero_for_empty_bag() {
+        assert_eq!(defense_from_bag(&properties::EMPTY), 0);
+    }
+
+    #[test]
+    fn attack_from_bag_includes_elemental_bonus() {
+        // Fire-dipped ShortSword: base ATK 3 + HOT:7 → elemental 7/4=1 → total 4.
+        let mut bag = default_properties(ItemKind::ShortSword);
+        properties::set(&mut bag, properties::Property::Hot, 7);
+        assert_eq!(attack_from_bag(&bag), 4);
+    }
+
+    #[test]
+    fn equipment_reads_from_property_bag() {
+        // Equip with actual property bags — should use attack_from_bag.
+        let bag = default_properties(ItemKind::ShortSword);
+        let eq = Equipment {
+            weapon: Some(ItemKind::ShortSword),
+            weapon_props: bag,
+            armor: None,
+            armor_props: properties::EMPTY,
+        };
+        assert_eq!(eq.attack_bonus(), 3);
+    }
+
+    #[test]
+    fn equipment_modified_bag_changes_bonus() {
+        // A fire-dipped sword should give +1 ATK from elemental bonus.
+        let mut bag = default_properties(ItemKind::ShortSword);
+        properties::set(&mut bag, properties::Property::Hot, 7);
+        let eq = Equipment {
+            weapon: Some(ItemKind::ShortSword),
+            weapon_props: bag,
+            armor: None,
+            armor_props: properties::EMPTY,
+        };
+        assert_eq!(eq.attack_bonus(), 4); // 3 base + 1 elemental
+    }
+
+    #[test]
+    fn equipment_empty_bag_falls_back_to_const_fn() {
+        // Migration: old save with weapon but EMPTY bag → use hardcoded value.
+        let eq = Equipment {
+            weapon: Some(ItemKind::LongSword),
+            weapon_props: properties::EMPTY,
+            armor: Some(ItemKind::ChainMail),
+            armor_props: properties::EMPTY,
+        };
+        assert_eq!(eq.attack_bonus(), 5);
+        assert_eq!(eq.defense_bonus(), 4);
     }
 
     #[test]

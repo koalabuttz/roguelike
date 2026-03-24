@@ -333,9 +333,23 @@ pub fn serialize<F: FnMut(u8)>(state: &MicroGameState, emit: &mut F) -> usize {
         i += 1;
     }
 
-    // --- Equipment ---
+    // --- Equipment (kind + 8 bytes props per slot) ---
     wb!(encode_opt_item_kind(state.equipment.weapon));
+    {
+        let mut pi = 0;
+        while pi < 8 {
+            wb!(state.equipment.weapon_props[pi]);
+            pi += 1;
+        }
+    }
     wb!(encode_opt_item_kind(state.equipment.armor));
+    {
+        let mut pi = 0;
+        while pi < 8 {
+            wb!(state.equipment.armor_props[pi]);
+            pi += 1;
+        }
+    }
 
     // --- Inventory (26 fixed slots, 10 bytes each: kind + count + 8 props) ---
     i = 0;
@@ -551,10 +565,30 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
         i += 1;
     }
 
-    // --- Equipment ---
+    // --- Equipment (kind + 8 bytes props per slot) ---
+    let weapon = decode_opt_item_kind(rb!());
+    let mut weapon_props = crate::rules::properties::EMPTY;
+    {
+        let mut pi = 0;
+        while pi < 8 {
+            weapon_props[pi] = rb!();
+            pi += 1;
+        }
+    }
+    let armor = decode_opt_item_kind(rb!());
+    let mut armor_props = crate::rules::properties::EMPTY;
+    {
+        let mut pi = 0;
+        while pi < 8 {
+            armor_props[pi] = rb!();
+            pi += 1;
+        }
+    }
     state.equipment = Equipment {
-        weapon: decode_opt_item_kind(rb!()),
-        armor: decode_opt_item_kind(rb!()),
+        weapon,
+        armor,
+        weapon_props,
+        armor_props,
     };
 
     // --- Inventory (10 bytes per slot: kind + count + 8 props) ---
@@ -707,7 +741,9 @@ mod tests {
         state.inventory.add(ItemKind::ShortSword);
         state.equipment = Equipment {
             weapon: Some(ItemKind::ShortSword),
+            weapon_props: crate::rules::items::default_properties(ItemKind::ShortSword),
             armor: Some(ItemKind::LeatherArmor),
+            armor_props: crate::rules::items::default_properties(ItemKind::LeatherArmor),
         };
 
         let bytes = serialize_to_vec(&state);

@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.5.0] - 2026-03-18
 
 ### Added
+- Add dev text console for debug commands (#156)
+- Emergent item interaction engine (property system step 2) (#155)
+- Add more item types for deeper dungeon progression (#16)
+- Add more item types for deeper dungeon progression (#16)
 - Add input repeat/delay system to C64 frontend (#51)
 - DCSS-style monster health indicators in look mode (#105)
 - Update auto-pickup to grab all items, not just consumables (#154)
@@ -54,6 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Step 3: Combat reads from property bags (#157)
 - Remove explored % from player-facing UI (#116)
 - Eliminate __udivhi3 calls and reduce scan_octant stack init overhead (#152)
 - C64: Lazy clear_visible in FOV — track dirty bytes instead of full memset (#151)

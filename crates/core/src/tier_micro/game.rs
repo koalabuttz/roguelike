@@ -515,28 +515,33 @@ impl MicroGameState {
             None => return false,
         };
         let kind = inv_slot.kind;
+        let props = inv_slot.props;
 
         if rules_items::is_weapon(kind) {
             self.inventory.remove_one(slot as usize);
             // Swap old weapon into inventory if present.
             if let Some(old) = self.equipment.weapon {
-                self.inventory.add(old);
+                self.inventory
+                    .add_with_props(old, self.equipment.weapon_props);
             }
             self.equipment.weapon = Some(kind);
+            self.equipment.weapon_props = props;
             self.log.add(GameEvent::EquipWeapon {
                 kind,
-                bonus: rules_items::attack_bonus(kind),
+                bonus: rules_items::attack_from_bag(&props),
             });
             true
         } else if rules_items::is_armor(kind) {
             self.inventory.remove_one(slot as usize);
             if let Some(old) = self.equipment.armor {
-                self.inventory.add(old);
+                self.inventory
+                    .add_with_props(old, self.equipment.armor_props);
             }
             self.equipment.armor = Some(kind);
+            self.equipment.armor_props = props;
             self.log.add(GameEvent::EquipArmor {
                 kind,
-                bonus: rules_items::defense_bonus(kind),
+                bonus: rules_items::defense_from_bag(&props),
             });
             true
         } else {
@@ -547,11 +552,15 @@ impl MicroGameState {
     /// Unequip the current weapon, returning it to inventory.
     fn unequip_weapon(&mut self) -> bool {
         if let Some(kind) = self.equipment.weapon {
-            if !self.inventory.add(kind) {
+            if !self
+                .inventory
+                .add_with_props(kind, self.equipment.weapon_props)
+            {
                 self.log.add(GameEvent::InventoryFull);
                 return false;
             }
             self.equipment.weapon = None;
+            self.equipment.weapon_props = crate::rules::properties::EMPTY;
             self.log.add(GameEvent::UnequipWeapon { kind });
             true
         } else {
@@ -562,11 +571,15 @@ impl MicroGameState {
     /// Unequip the current armor, returning it to inventory.
     fn unequip_armor(&mut self) -> bool {
         if let Some(kind) = self.equipment.armor {
-            if !self.inventory.add(kind) {
+            if !self
+                .inventory
+                .add_with_props(kind, self.equipment.armor_props)
+            {
                 self.log.add(GameEvent::InventoryFull);
                 return false;
             }
             self.equipment.armor = None;
+            self.equipment.armor_props = crate::rules::properties::EMPTY;
             self.log.add(GameEvent::UnequipArmor { kind });
             true
         } else {
@@ -575,8 +588,10 @@ impl MicroGameState {
     }
 
     /// Drop an equipped weapon directly to the ground (bypasses inventory).
+    /// Note: ground ItemStore doesn't carry PropertyBags yet — bag is lost on drop.
     fn drop_equipped_weapon(&mut self) -> bool {
         if let Some(kind) = self.equipment.weapon.take() {
+            self.equipment.weapon_props = crate::rules::properties::EMPTY;
             let pi = PLAYER_IDX as usize;
             let px = self.entities.x[pi];
             let py = self.entities.y[pi];
@@ -589,8 +604,10 @@ impl MicroGameState {
     }
 
     /// Drop equipped armor directly to the ground (bypasses inventory).
+    /// Note: ground ItemStore doesn't carry PropertyBags yet — bag is lost on drop.
     fn drop_equipped_armor(&mut self) -> bool {
         if let Some(kind) = self.equipment.armor.take() {
+            self.equipment.armor_props = crate::rules::properties::EMPTY;
             let pi = PLAYER_IDX as usize;
             let px = self.entities.x[pi];
             let py = self.entities.y[pi];

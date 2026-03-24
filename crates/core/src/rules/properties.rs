@@ -4,16 +4,15 @@
 //! (4-bit values, range 0–15) packed into 8 bytes. This module defines
 //! the property enum, the `PropertyBag` type, and nibble access helpers.
 //!
-//! **Step 1 (current):** Properties are defined and assigned to items via
-//! `default_properties()` in `items.rs`, but nothing reads them at runtime.
-//! Combat still uses `const fn attack_bonus(kind)`. The property data exists
-//! as validated, tested dead code.
+//! **Step 1 (complete):** Properties defined and assigned via `default_properties()`
+//! in `items.rs`. Every item has a property profile.
 //!
-//! **Step 2 (future):** An interaction engine in `interactions.rs` will
-//! operate on property bags, producing emergent item behaviors.
+//! **Step 2 (complete):** Interaction engine in `interactions.rs` operates on
+//! property bags via `GameCommand::Combine`, producing emergent behaviors.
 //!
-//! **Step 3 (future):** Combat reads from property bags instead of
-//! `const fn(ItemKind)`.
+//! **Step 3 (complete):** `Equipment::attack_bonus()` and `defense_bonus()` read
+//! from property bags via `attack_from_bag()` / `defense_from_bag()`. Modified
+//! items now affect combat stats.
 
 use core::mem::size_of;
 

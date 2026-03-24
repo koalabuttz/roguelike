@@ -290,14 +290,40 @@ pub fn is_better_armor(new: ItemKind, current: Option<ItemKind>) -> bool {
 }
 
 /// Look up an `ItemKind` by snake_case name (e.g., "health_potion", "iron_mace").
-/// Case-insensitive. Matches against the display name with spaces→underscores.
-pub fn from_snake_case(s: &str) -> Option<ItemKind> {
-    let lower = s.to_ascii_lowercase();
-    for &kind in &ALL_KINDS {
-        let n = name(kind).to_ascii_lowercase().replace(' ', "_");
-        if n == lower {
-            return Some(kind);
+/// Case-insensitive. Matches display name with spaces→underscores. `no_std` compatible.
+pub const fn from_snake_case(s: &str) -> Option<ItemKind> {
+    let input = s.as_bytes();
+    let mut ki = 0;
+    while ki < KIND_COUNT {
+        let kind = ALL_KINDS[ki];
+        let display = name(kind).as_bytes();
+        if input.len() == display.len() {
+            let mut ok = true;
+            let mut ci = 0;
+            while ci < input.len() {
+                let a = if input[ci] >= b'A' && input[ci] <= b'Z' {
+                    input[ci] + 32
+                } else {
+                    input[ci]
+                };
+                let b = if display[ci] == b' ' {
+                    b'_'
+                } else if display[ci] >= b'A' && display[ci] <= b'Z' {
+                    display[ci] + 32
+                } else {
+                    display[ci]
+                };
+                if a != b {
+                    ok = false;
+                    break;
+                }
+                ci += 1;
+            }
+            if ok {
+                return Some(kind);
+            }
         }
+        ki += 1;
     }
     None
 }

@@ -25,6 +25,22 @@ const KEY_RIGHT: u8 = c64::PETSCII_RIGHT;
 const KEY_RETURN: u8 = c64::PETSCII_RETURN;
 const KEY_RUNSTOP: u8 = c64::PETSCII_STOP;
 const KEY_DELETE: u8 = c64::PETSCII_DELETE;
+#[cfg(debug_assertions)]
+const KEY_LEFTARROW: u8 = 0x5F; // ← key (top-left of C64 keyboard)
+
+// Dev console flag — set by wait_for_input when ← is pressed.
+#[cfg(debug_assertions)]
+static mut DEV_CONSOLE: bool = false;
+
+/// Check and clear the dev console request flag.
+#[cfg(debug_assertions)]
+pub fn dev_console_requested() -> bool {
+    unsafe {
+        let r = DEV_CONSOLE;
+        DEV_CONSOLE = false;
+        r
+    }
+}
 
 /// Menu navigation input.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -234,6 +250,11 @@ pub fn wait_for_input() -> GameCommand {
 
         let (key, shifted) = key_repeat();
         if key != 0 {
+            #[cfg(debug_assertions)]
+            if key == KEY_LEFTARROW {
+                unsafe { DEV_CONSOLE = true; }
+                return GameCommand::Wait;
+            }
             // Shift+/ = ? → Help (checked before directions to avoid conflict)
             if key == b'/' && shifted {
                 return GameCommand::Help;
@@ -333,6 +354,57 @@ pub fn read_seed_input(
                     b'0'..=b'9' => key,
                     b'-' => key,
                     _ => continue, // ignore non-alphanumeric
+                };
+
+                if (len as usize) < buf.len() {
+                    buf[len as usize] = ascii;
+                    len += 1;
+                    render_fn(&buf[..len as usize], len);
+                }
+            }
+        }
+    }
+}
+
+/// Read a console command string via keyboard input.
+///
+/// Accepts a-z, 0-9, space, underscore. Renders via callback after each keypress.
+/// Returns `Some(len)` on Enter, `None` on RUN/STOP.
+#[cfg(debug_assertions)]
+pub fn read_console_input(
+    buf: &mut [u8; 38],
+    mut render_fn: impl FnMut(&[u8], u8),
+) -> Option<u8> {
+    let mut len: u8 = 0;
+    render_fn(&buf[..0], 0);
+
+    loop {
+        let key = read_key();
+        if key == 0 {
+            continue;
+        }
+
+        match key {
+            KEY_RETURN => {
+                if len > 0 {
+                    return Some(len);
+                }
+            }
+            KEY_RUNSTOP => return None,
+            KEY_DELETE => {
+                if len > 0 {
+                    len -= 1;
+                    render_fn(&buf[..len as usize], len);
+                }
+            }
+            _ => {
+                let ascii = match key {
+                    b'A'..=b'Z' => key - b'A' + b'a',
+                    b'a'..=b'z' => key,
+                    b'0'..=b'9' => key,
+                    b' ' => key,
+                    b'_' => key,
+                    _ => continue,
                 };
 
                 if (len as usize) < buf.len() {

@@ -339,6 +339,15 @@ pub const fn from_snake_case(s: &str) -> Option<ItemKind> {
 /// These profiles define what each item IS in property space. Combat reads
 /// stats via `attack_from_bag()` / `defense_from_bag()` (Step 3). The
 /// interaction engine modifies bags at runtime via `GameCommand::Combine`.
+///
+/// **Balance invariant:** Equipment (non-consumable) items should NOT have
+/// elemental source properties (HOT, COLD, CORROSIVE, CURSED). These
+/// properties trigger interaction rules that modify the target item. Since
+/// non-consumables aren't consumed on combine, a player could repeatedly
+/// combine to max out target properties in ~4 turns (bounded only by the
+/// nibble cap of 15). Consumables are naturally rate-limited by scarcity.
+/// If adding non-consumable elemental items, consider a per-item cooldown
+/// or diminishing returns on repeated combines.
 pub const fn default_properties(kind: ItemKind) -> PropertyBag {
     let mut bag = properties::EMPTY;
     match kind {

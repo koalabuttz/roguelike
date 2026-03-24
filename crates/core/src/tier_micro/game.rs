@@ -494,15 +494,20 @@ impl MicroGameState {
         self.inventory.remove_one(target_slot as usize);
         if !self.inventory.add_with_props(target.kind, a_props) {
             // Inventory full — undo everything.
-            self.inventory.add_with_props(target.kind, target.props);
+            // These re-inserts must succeed: we just freed the slot(s).
+            let ok = self.inventory.add_with_props(target.kind, target.props);
+            debug_assert!(ok, "undo target re-insert must succeed");
             if rules_items::is_consumable(source.kind) {
-                self.inventory.add_with_props(source.kind, source.props);
+                let ok = self.inventory.add_with_props(source.kind, source.props);
+                debug_assert!(ok, "undo source re-insert must succeed");
             }
             self.log.add(GameEvent::InventoryFull);
             return false;
         }
 
         // Update non-consumable source props after target succeeded.
+        // source_slot is still valid: inventory uses fixed-position slots
+        // (no compaction on remove), so absolute indices are stable.
         if !rules_items::is_consumable(source.kind) {
             self.inventory.set_props(source_slot as usize, b_props);
         }

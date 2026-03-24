@@ -5,7 +5,14 @@ WORKSPACE_TOML = $(PROJECT_ROOT)/Cargo.toml
 DOCKER_RUN = sudo docker run --rm -e PATH=$(DOCKER_PATH) -v $(PROJECT_ROOT):/project -w /project/crates/c64 $(DOCKER_IMAGE)
 PRG = target/mos-c64-none/release/roguelike-c64
 
-.PHONY: build run clean size map profile
+.PHONY: build debug run clean size map profile
+
+# Dev console build — release optimizations + menu-driven dev tools via ← key.
+debug:
+	@sed -i.bak 's/edition = "2024"/edition = "2021"/' $(WORKSPACE_TOML)
+	@$(DOCKER_RUN) cargo build --release --features dev-console; rc=$$?; \
+		mv $(WORKSPACE_TOML).bak $(WORKSPACE_TOML); \
+		exit $$rc
 
 # Build with rust-mos Docker image.
 # Patches workspace edition to 2021 for rust-mos compatibility (restored after build).

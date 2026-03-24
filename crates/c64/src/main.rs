@@ -555,6 +555,17 @@ fn run_inventory(state: &mut MicroGameState) {
         };
         render::render_inventory(state, selected, bar);
 
+        // Dev: show property bag for selected inventory item
+        #[cfg(feature = "dev-console")]
+        {
+            let ec = render::equip_count(state);
+            if selected >= ec {
+                if let Some((_, slot)) = state.inventory.nth_occupied((selected - ec) as usize) {
+                    dev_show_props(&slot.props, 20);
+                }
+            }
+        }
+
         // Overlay combine hint on the bottom row when in combine mode
         if combine_target.is_some() {
             c64::draw_text(2, 24, b"COMBINE WITH?  STOP:CANCEL", c64::COLOR_WHITE);
@@ -652,198 +663,48 @@ fn clamp_selected(state: &MicroGameState, selected: &mut u8) {
     }
 }
 
-/// Dev console — text command input for debugging.
-#[cfg(debug_assertions)]
-fn run_dev_console(state: &mut MicroGameState) {
-    use roguelike_core::rules::items::{self as rules_items, ALL_KINDS};
-    use roguelike_core::rules::properties;
+/// Show a property bag on a screen row as compact hex nibbles.
+/// Header: `SHVS HCWM OVMV BCBC` (first letter of each property).
+/// Values: hex digit per property, dot for zero. ~40 bytes of code.
+#[cfg(feature = "dev-console")]
+fn dev_show_props(props: &[u8; 8], row: u8) {
+    // Static header: first letter of each property in index order
+    // Sharp Hard heaVy Swift | Hot Cold Wet Metal | Org Vnm Mag Vol | Brt Crs Bnd Csd
+    const HDR: &[u8; 40] = b"S H V S H C W M O V M V B C B C         ";
+    c64::draw_text(0, row, HDR, c64::COLOR_DGREY);
 
-    let mut cmd_buf = [0u8; 38];
-    let mut out_buf = [b' '; 40];
-    let mut out_len: usize = 0;
-
-    // Show initial help hint
-    let hint = b"DEV CONSOLE. TYPE help";
-    out_buf[..hint.len()].copy_from_slice(hint);
-    out_len = hint.len();
-    c64::draw_text(0, 24, &out_buf, c64::COLOR_DGREY);
-
-    loop {
-        // Draw current output on row 24
-        let mut display = [b' '; 40];
-        display[..out_len.min(40)].copy_from_slice(&out_buf[..out_len.min(40)]);
-        c64::draw_text(0, 24, &display, c64::COLOR_DGREY);
-
-        // Read a command line
-        let len = match input::read_console_input(&mut cmd_buf, |text, _len| {
-            let mut line = [b' '; 40];
-            line[0] = b'>';
-            line[1] = b' ';
-            let n = (text.len()).min(37);
-            line[2..2 + n].copy_from_slice(&text[..n]);
-            line[2 + n] = b'_';
-            c64::draw_text(0, 23, &line, c64::COLOR_WHITE);
-        }) {
-            Some(l) => l as usize,
-            None => return, // RUN/STOP exits
-        };
-
-        let input = &cmd_buf[..len];
-
-        // Parse first word
-        let mut word_end = 0;
-        while word_end < len && input[word_end] != b' ' {
-            word_end += 1;
-        }
-        let first = &input[..word_end];
-        let rest = if word_end + 1 < len {
-            &input[word_end + 1..]
-        } else {
-            &[]
-        };
-
-        // Reset output
-        out_buf = [b' '; 40];
-        out_len = 0;
-
-        if first == b"help" || first == b"?" {
-            let msg = b"spawn inspect set give_all items";
-            out_buf[..msg.len()].copy_from_slice(msg);
-            out_len = msg.len();
-        } else if first == b"give_all" {
-            let mut count = 0u8;
-            for &kind in &ALL_KINDS {
-                if state.inventory.add(kind) {
-                    count += 1;
-                }
-            }
-            let msg = b"Spawned ";
-            out_buf[..msg.len()].copy_from_slice(msg);
-            out_buf[msg.len()] = b'0' + count;
-            out_len = msg.len() + 1;
-        } else if first == b"items" {
-            // Show first few item names (40 chars limit)
-            out_len = 0;
-            for &kind in &ALL_KINDS {
-                let name = rules_items::name(kind).as_bytes();
-                if out_len + name.len() + 1 > 40 {
-                    break;
-                }
-                if out_len > 0 {
-                    out_buf[out_len] = b' ';
-                    out_len += 1;
-                }
-                let n = name.len().min(40 - out_len);
-                out_buf[out_len..out_len + n].copy_from_slice(&name[..n]);
-                out_len += n;
-            }
-        } else if first == b"spawn" {
-            if let Ok(rest_str) = core::str::from_utf8(rest) {
-                if let Some(kind) = rules_items::from_snake_case(rest_str) {
-                    if state.inventory.add(kind) {
-                        let name = rules_items::name(kind).as_bytes();
-                        let msg = b"Spawned ";
-                        out_buf[..msg.len()].copy_from_slice(msg);
-                        let n = name.len().min(32);
-                        out_buf[msg.len()..msg.len() + n].copy_from_slice(&name[..n]);
-                        out_len = msg.len() + n;
-                    } else {
-                        let msg = b"Inventory full";
-                        out_buf[..msg.len()].copy_from_slice(msg);
-                        out_len = msg.len();
-                    }
-                } else {
-                    let msg = b"Unknown item";
-                    out_buf[..msg.len()].copy_from_slice(msg);
-                    out_len = msg.len();
-                }
-            }
-        } else if first == b"inspect" || first == b"props" {
-            if !rest.is_empty() && rest[0] >= b'a' && rest[0] <= b'z' {
-                let slot = (rest[0] - b'a') as usize;
-                if let Some(s) = state.inventory.get(slot) {
-                    let name = rules_items::name(s.kind).as_bytes();
-                    let n = name.len().min(15);
-                    out_buf[..n].copy_from_slice(&name[..n]);
-                    out_buf[n] = b':';
-                    let prop_len = properties::format_bag(&s.props, &mut out_buf[n + 1..]);
-                    out_len = n + 1 + prop_len;
-                } else {
-                    let msg = b"Empty slot";
-                    out_buf[..msg.len()].copy_from_slice(msg);
-                    out_len = msg.len();
-                }
-            } else {
-                let msg = b"Usage: inspect a";
-                out_buf[..msg.len()].copy_from_slice(msg);
-                out_len = msg.len();
-            }
-        } else if first == b"set" {
-            // Parse: set <slot> <prop> <val>
-            if let Ok(rest_str) = core::str::from_utf8(rest) {
-                let parts: [&str; 3] = {
-                    let mut arr = [""; 3];
-                    let mut iter = rest_str.splitn(3, ' ');
-                    for a in &mut arr {
-                        if let Some(s) = iter.next() {
-                            *a = s;
-                        }
-                    }
-                    arr
-                };
-                let slot_ok = parts[0].len() == 1
-                    && parts[0].as_bytes()[0] >= b'a'
-                    && parts[0].as_bytes()[0] <= b'z';
-                if slot_ok {
-                    let slot = (parts[0].as_bytes()[0] - b'a') as usize;
-                    if let (Some(prop), Ok(val)) =
-                        (properties::from_name(parts[1]), parts[2].parse::<u8>())
-                    {
-                        if val <= 15 {
-                            if let Some(s) = state.inventory.get(slot) {
-                                let mut new_props = s.props;
-                                properties::set(&mut new_props, prop, val);
-                                state.inventory.set_props(slot, new_props);
-                                let short = properties::short_name(prop).as_bytes();
-                                let msg = b"Set ";
-                                out_buf[..msg.len()].copy_from_slice(msg);
-                                let mut p = msg.len();
-                                out_buf[p..p + short.len()].copy_from_slice(short);
-                                p += short.len();
-                                out_buf[p] = b':';
-                                p += 1;
-                                out_buf[p] = b'0' + val;
-                                out_len = p + 1;
-                            } else {
-                                let msg = b"Empty slot";
-                                out_buf[..msg.len()].copy_from_slice(msg);
-                                out_len = msg.len();
-                            }
-                        } else {
-                            let msg = b"Value 0-15";
-                            out_buf[..msg.len()].copy_from_slice(msg);
-                            out_len = msg.len();
-                        }
-                    } else {
-                        let msg = b"Usage: set a hot 8";
-                        out_buf[..msg.len()].copy_from_slice(msg);
-                        out_len = msg.len();
-                    }
-                } else {
-                    let msg = b"Usage: set a hot 8";
-                    out_buf[..msg.len()].copy_from_slice(msg);
-                    out_len = msg.len();
-                }
-            }
-        } else {
-            let msg = b"Unknown cmd. Try help";
-            out_buf[..msg.len()].copy_from_slice(msg);
-            out_len = msg.len();
-        }
-
-        // Clear prompt row for next input
-        c64::draw_text(0, 23, &[b' '; 40], c64::COLOR_WHITE);
+    let mut val_row = [b' '; 40];
+    for i in 0..8u8 {
+        let hi = props[i as usize] >> 4;
+        let lo = props[i as usize] & 0x0F;
+        let pos = (i * 4) as usize;
+        val_row[pos] = if hi == 0 { b'.' } else if hi < 10 { b'0' + hi } else { b'A' + hi - 10 };
+        val_row[pos + 2] = if lo == 0 { b'.' } else if lo < 10 { b'0' + lo } else { b'A' + lo - 10 };
     }
+    c64::draw_text(0, row + 1, &val_row, c64::COLOR_CYAN);
+}
+
+/// Dev console — menu-driven debug tools.
+///
+/// Top-level menu: Spawn Item / Inspect / Set Property / Give All.
+/// Submenus use cursor navigation — no text parsing, minimal code size.
+#[cfg(feature = "dev-console")]
+fn run_dev_console(state: &mut MicroGameState) {
+    use roguelike_core::rules::items::{self as rules_items, ALL_KINDS, KIND_COUNT};
+    use roguelike_core::rules::properties::{self, ALL_PROPERTIES, PROPERTY_COUNT};
+
+    // Immediate action: give all items + show confirmation.
+    let mut count = 0u8;
+    for &kind in &ALL_KINDS {
+        if state.inventory.add(kind) {
+            count += 1;
+        }
+    }
+    let mut msg = [b' '; 40];
+    let label = b"DEV: SPAWNED  ITEMS. OPEN INVENTORY.";
+    msg[..label.len()].copy_from_slice(label);
+    msg[14] = b'0' + count;
+    c64::draw_text(0, 24, &msg, c64::COLOR_GREEN);
 }
 
 /// Run the multi-page help screen. Left/Right flips pages, Back/Select exits.
@@ -1089,7 +950,7 @@ fn game_loop() -> ! {
 
                 let cmd = input::wait_for_input();
 
-                #[cfg(debug_assertions)]
+                #[cfg(feature = "dev-console")]
                 if input::dev_console_requested() {
                     run_dev_console(state);
                     render_and_snapshot(state);

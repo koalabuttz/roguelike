@@ -832,26 +832,26 @@ impl GameState {
             return false;
         }
 
-        // Update target: if single item or equipment, modify in place.
-        // Only split from a stack when count > 1 (needs a new slot).
-        if target.count <= 1 {
-            self.inventory.set_props(target_slot as usize, a_props);
-        } else {
-            // Stacked consumable — split one off into a new slot.
-            self.inventory.remove_one(target_slot as usize);
-            if !self.inventory.add_with_props(target.kind, a_props) {
-                // Inventory full — undo the removal, abort.
-                self.inventory.add_with_props(target.kind, target.props);
-                self.log.add_event(GameEvent::InventoryFull);
-                return false;
-            }
-        }
-
-        // Source: consume one if consumable, otherwise update props in place.
+        // Consume source first (if consumable) so it can't interfere with
+        // target re-insertion, and to free a slot for the split target.
         if rules_items::is_consumable(source.kind) {
             self.inventory.remove_one(source_slot as usize);
         } else {
             self.inventory.set_props(source_slot as usize, b_props);
+        }
+
+        // Remove target and re-add with modified props. This maintains the
+        // stacking invariant: if the modified props match an existing stack,
+        // it correctly merges instead of creating a duplicate.
+        self.inventory.remove_one(target_slot as usize);
+        if !self.inventory.add_with_props(target.kind, a_props) {
+            // Inventory full — undo everything.
+            self.inventory.add_with_props(target.kind, target.props);
+            if rules_items::is_consumable(source.kind) {
+                self.inventory.add_with_props(source.kind, source.props);
+            }
+            self.log.add_event(GameEvent::InventoryFull);
+            return false;
         }
 
         self.log.add_event(GameEvent::CombineItems {

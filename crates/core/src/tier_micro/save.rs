@@ -17,7 +17,7 @@
 //! Entities: count | 10 parallel arrays × count
 //! Items: count | 4 parallel arrays × count
 //! Equipment: weapon | armor (0xFF = None)
-//! Inventory: 26 × {kind, count} (0xFF = empty slot)
+//! Inventory: 26 × {kind, count, props[8]} (0xFF = empty slot, 10 bytes each)
 //! CRC-16 (2B): CCITT over all preceding bytes
 //! ```
 
@@ -37,7 +37,7 @@ use crate::rules::monster_table::{AiBehavior, MonsterKind};
 // ---------------------------------------------------------------------------
 
 pub const SAVE_MAGIC: [u8; 2] = *b"RG";
-pub const SAVE_VERSION: u8 = 1;
+pub const SAVE_VERSION: u8 = 2;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -337,17 +337,27 @@ pub fn serialize<F: FnMut(u8)>(state: &MicroGameState, emit: &mut F) -> usize {
     wb!(encode_opt_item_kind(state.equipment.weapon));
     wb!(encode_opt_item_kind(state.equipment.armor));
 
-    // --- Inventory (26 fixed slots) ---
+    // --- Inventory (26 fixed slots, 10 bytes each: kind + count + 8 props) ---
     i = 0;
     while i < MAX_INVENTORY {
         match state.inventory.get(i) {
             Some(slot) => {
                 wb!(encode_item_kind(slot.kind));
                 wb!(slot.count);
+                let mut pi = 0;
+                while pi < 8 {
+                    wb!(slot.props[pi]);
+                    pi += 1;
+                }
             }
             None => {
                 wb!(0xFF);
                 wb!(0);
+                let mut pi = 0;
+                while pi < 8 {
+                    wb!(0);
+                    pi += 1;
+                }
             }
         }
         i += 1;
@@ -547,18 +557,25 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
         armor: decode_opt_item_kind(rb!()),
     };
 
-    // --- Inventory ---
+    // --- Inventory (10 bytes per slot: kind + count + 8 props) ---
     state.inventory = Inventory::new();
     i = 0;
     while i < MAX_INVENTORY {
         let kind_byte = rb!();
         let count_byte = rb!();
+        let mut props = [0u8; 8];
+        let mut pi = 0;
+        while pi < 8 {
+            props[pi] = rb!();
+            pi += 1;
+        }
         if let Some(kind) = decode_opt_item_kind(kind_byte) {
             state.inventory.set_slot(
                 i,
                 Some(InvSlot {
                     kind,
                     count: count_byte,
+                    props,
                 }),
             );
         }

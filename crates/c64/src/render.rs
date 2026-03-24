@@ -805,6 +805,13 @@ fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
             let p = copy_num(buf, p, bonus);
             copy_bytes(buf, p, b" ATK")
         }
+        GameEvent::CombineItems { target, source } => {
+            let p = copy_bytes(buf, 0, b"Mix ");
+            let p = copy_bytes(buf, p, items::name(target).as_bytes());
+            let p = copy_bytes(buf, p, b"+");
+            copy_bytes(buf, p, items::name(source).as_bytes())
+        }
+        GameEvent::CombineNoEffect => copy_bytes(buf, 0, b"Nothing happens."),
     };
 }
 

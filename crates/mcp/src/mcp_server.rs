@@ -275,7 +275,7 @@ impl RoguelikeMcpServer {
                      autorun_north, autorun_south, autorun_east, autorun_west, \
                      autorun_northeast, autorun_northwest, autorun_southeast, \
                      autorun_southwest, auto_fight, pickup, use_item_X, \
-                     equip_item_X, drop_item_X (X = inventory slot a-z)",
+                     equip_item_X, drop_item_X, combine_X_Y (X,Y = inventory slots a-z)",
                     params.action
                 ),
                 None,
@@ -659,6 +659,9 @@ impl RoguelikeMcpServer {
              - Use 'equip_item_X' to equip a weapon/armor from slot X\n\
              - Use 'unequip_weapon' or 'unequip_armor' to unequip and return to inventory\n\
              - Use 'drop_item_X' to drop an item from slot X onto the ground\n\
+             - Use 'combine_X_Y' to combine item X (target) with item Y (source)\n\
+               Items have properties that interact: fire tempers metal, acid corrodes, etc.\n\
+               Consumable sources are consumed; equipment sources are kept.\n\
              - Your inventory is shown in observations when non-empty\n\
              - Health Potion (!) — heals 10 HP\n\
              - Short Sword (/) — +3 ATK\n\
@@ -791,6 +794,7 @@ pub fn parse_action(action: &str) -> Option<GameCommand> {
         "unequip_armor" => Some(GameCommand::UnequipArmor),
         "drop_equipped_weapon" => Some(GameCommand::DropEquippedWeapon),
         "drop_equipped_armor" => Some(GameCommand::DropEquippedArmor),
+        _ if action.starts_with("combine_") => parse_combine_slots(action),
         _ => None,
     }
 }
@@ -801,6 +805,26 @@ fn parse_slot_letter(action: &str, prefix: &str) -> Option<u8> {
     match letter {
         b'a'..=b'z' => Some(letter - b'a'),
         _ => None,
+    }
+}
+
+/// Parse `combine_X_Y` → `GameCommand::Combine(target, source)`.
+/// X is the target slot (a-z), Y is the source slot (a-z).
+fn parse_combine_slots(action: &str) -> Option<GameCommand> {
+    let rest = action.strip_prefix("combine_")?;
+    let bytes = rest.as_bytes();
+    if bytes.len() == 3 && bytes[1] == b'_' {
+        let target = match bytes[0] {
+            b'a'..=b'z' => bytes[0] - b'a',
+            _ => return None,
+        };
+        let source = match bytes[2] {
+            b'a'..=b'z' => bytes[2] - b'a',
+            _ => return None,
+        };
+        Some(GameCommand::Combine(target, source))
+    } else {
+        None
     }
 }
 

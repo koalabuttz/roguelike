@@ -129,6 +129,10 @@ pub enum GameEvent {
     AutorunStop { cause: AutorunStopCause },
     /// Player consumed a stat-boosting potion.
     UseStrengthPotion { bonus: u8 },
+    /// Player combined two items (applied source properties to target).
+    CombineItems { target: ItemKind, source: ItemKind },
+    /// Combine attempt produced no property changes.
+    CombineNoEffect,
 }
 
 // Compile-time size checks — keep these small for constrained tiers.

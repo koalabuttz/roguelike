@@ -15,6 +15,7 @@ use crate::map;
 use crate::message_log::MessageLog;
 use crate::pathfinding;
 use crate::rules::color::GameColor;
+use crate::rules::interactions;
 use crate::rules::items::{self as rules_items, Inventory};
 use crate::rules::message::{GameEvent, SoundDistance};
 use crate::seed_code::{self, SeedParams};
@@ -800,6 +801,53 @@ impl GameState {
         false
     }
 
+    /// Combine two inventory items: apply source's properties onto target.
+    /// Consumable sources are consumed; equipment sources are kept.
+    fn combine_items(&mut self, target_slot: u8, source_slot: u8) -> bool {
+        if target_slot == source_slot {
+            return false;
+        }
+        let target = match self.inventory.get(target_slot as usize) {
+            Some(s) => *s,
+            None => return false,
+        };
+        let source = match self.inventory.get(source_slot as usize) {
+            Some(s) => *s,
+            None => return false,
+        };
+
+        let mut a_props = target.props;
+        let mut b_props = source.props;
+        let mut effects = [interactions::Effect {
+            effect_type: interactions::EffectType::Glow,
+            intensity: 0,
+        }; interactions::MAX_EFFECTS];
+
+        let _effect_count = interactions::interact(&mut a_props, &mut b_props, &mut effects);
+
+        // Check if any properties actually changed.
+        if a_props == target.props && b_props == source.props {
+            self.log.add_event(GameEvent::CombineNoEffect);
+            return false;
+        }
+
+        // Write modified props back to inventory.
+        self.inventory.set_props(target_slot as usize, a_props);
+        self.inventory.set_props(source_slot as usize, b_props);
+
+        // Consume source if it's a consumable.
+        if rules_items::is_consumable(source.kind) {
+            self.inventory.remove_one(source_slot as usize);
+        }
+
+        self.log.add_event(GameEvent::CombineItems {
+            target: target.kind,
+            source: source.kind,
+        });
+
+        true
+    }
+
     /// Drop an item from inventory onto the ground.
     fn drop_item(&mut self, slot: u8) -> bool {
         if let Some(kind) = self.inventory.remove_one(slot as usize) {
@@ -1056,6 +1104,7 @@ impl GameState {
             GameCommand::UnequipArmor => self.unequip_armor(),
             GameCommand::DropEquippedWeapon => self.drop_equipped_weapon(),
             GameCommand::DropEquippedArmor => self.drop_equipped_armor(),
+            GameCommand::Combine(target, source) => self.combine_items(target, source),
             // Autorun, AutoExplore, Look, Help are handled at a higher level (main loop / MCP).
             GameCommand::Autorun(_)
             | GameCommand::AutoExplore

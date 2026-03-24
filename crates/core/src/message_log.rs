@@ -131,6 +131,14 @@ pub fn format_event(event: GameEvent) -> String {
         GameEvent::UseStrengthPotion { bonus } => {
             format!("You drink the Potion of Strength. (+{} ATK)", bonus)
         }
+        GameEvent::CombineItems { target, source } => {
+            format!(
+                "You combine the {} with the {}.",
+                items::name(target),
+                items::name(source)
+            )
+        }
+        GameEvent::CombineNoEffect => "Nothing happens.".into(),
         GameEvent::AutorunStop { cause } => match cause {
             AutorunStopCause::WallReached => "Path blocked.".into(),
             AutorunStopCause::MonsterSpotted => "Monster spotted!".into(),

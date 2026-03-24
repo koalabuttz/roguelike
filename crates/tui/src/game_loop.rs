@@ -797,23 +797,34 @@ fn run_inventory_modal<W: Write>(
 ) -> io::Result<()> {
     let (screen_w, screen_h) = renderer.screen_size();
     let mut selected: Option<usize> = None;
+    // Combine mode: after pressing 'c' on a selected slot, this holds the
+    // target slot index. The next letter press selects the source.
+    let mut combine_target: Option<usize> = None;
 
     loop {
         let obs = game.observe();
-        let hint = match selected {
-            Some(idx) => {
-                let letter = (b'a' + idx as u8) as char;
-                format!("[u]se  [e]quip  [d]rop  slot '{}'  [Esc] back", letter)
-            }
-            None => {
-                let mut parts = Vec::new();
-                if obs.weapon.is_some() {
-                    parts.push("[W] unequip weapon");
+        let hint = if let Some(idx) = combine_target {
+            let letter = (b'a' + idx as u8) as char;
+            format!("Combine '{}' with? (a-z)  [Esc] cancel", letter)
+        } else {
+            match selected {
+                Some(idx) => {
+                    let letter = (b'a' + idx as u8) as char;
+                    format!(
+                        "[u]se  [e]quip  [d]rop  [c]ombine  slot '{}'  [Esc] back",
+                        letter
+                    )
                 }
-                if obs.armor.is_some() {
-                    parts.push("[A] unequip armor");
+                None => {
+                    let mut parts = Vec::new();
+                    if obs.weapon.is_some() {
+                        parts.push("[W] unequip weapon");
+                    }
+                    if obs.armor.is_some() {
+                        parts.push("[A] unequip armor");
+                    }
+                    parts.join("  ")
                 }
-                parts.join("  ")
             }
         };
         render::render_inventory(
@@ -831,7 +842,9 @@ fn run_inventory_modal<W: Write>(
         match input.wait_for_key()? {
             InputResult::Command(key) => match key.code {
                 KeyCode::Esc => {
-                    if selected.is_some() {
+                    if combine_target.is_some() {
+                        combine_target = None;
+                    } else if selected.is_some() {
                         selected = None;
                     } else {
                         return Ok(());
@@ -845,6 +858,20 @@ fn run_inventory_modal<W: Write>(
                 }
                 KeyCode::Char('A') if selected.is_none() => {
                     game.step(GameCommand::UnequipArmor);
+                }
+                KeyCode::Char(c @ 'a'..='z') if combine_target.is_some() => {
+                    // In combine mode: this letter selects the source item.
+                    let source_idx = (c as u8 - b'a') as usize;
+                    let target_idx = combine_target.unwrap();
+                    let source_exists = obs
+                        .inventory
+                        .iter()
+                        .any(|s| s.starts_with(&format!("{})", c)));
+                    if source_exists && source_idx != target_idx {
+                        game.step(GameCommand::Combine(target_idx as u8, source_idx as u8));
+                    }
+                    combine_target = None;
+                    selected = None;
                 }
                 KeyCode::Char(c @ 'a'..='z') if selected.is_none() => {
                     let idx = (c as u8 - b'a') as usize;
@@ -867,6 +894,11 @@ fn run_inventory_modal<W: Write>(
                 }
                 KeyCode::Char('d') if selected.is_some() => {
                     game.step(GameCommand::DropItem(selected.unwrap() as u8));
+                    selected = None;
+                }
+                KeyCode::Char('c') if selected.is_some() => {
+                    // Enter combine mode: next letter selects the source.
+                    combine_target = selected;
                     selected = None;
                 }
                 _ => {}

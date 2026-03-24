@@ -22,6 +22,8 @@ pub enum GameCommand {
     UnequipArmor,
     DropEquippedWeapon,
     DropEquippedArmor,
+    /// Combine two inventory items: apply source (second) onto target (first).
+    Combine(u8, u8),
     OpenInventory,
     Look,
     Wait,

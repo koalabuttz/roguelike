@@ -16,6 +16,7 @@ use super::types::*;
 use crate::command::GameCommand;
 use crate::rules::balance;
 use crate::rules::damage;
+use crate::rules::interactions;
 use crate::rules::items::{self as rules_items, Equipment, Inventory};
 use crate::rules::message::{GameEvent, SoundDistance};
 use crate::rules::monster_table::{AiBehavior, MonsterKind};
@@ -177,6 +178,7 @@ impl MicroGameState {
             GameCommand::UnequipArmor => self.unequip_armor(),
             GameCommand::DropEquippedWeapon => self.drop_equipped_weapon(),
             GameCommand::DropEquippedArmor => self.drop_equipped_armor(),
+            GameCommand::Combine(target, source) => self.combine_items(target, source),
             // UI-only / unsupported variants — no action taken
             GameCommand::OpenInventory
             | GameCommand::Autorun(_)
@@ -448,6 +450,49 @@ impl MicroGameState {
             }
         }
         false
+    }
+
+    /// Combine two inventory items: apply source's properties onto target.
+    fn combine_items(&mut self, target_slot: u8, source_slot: u8) -> bool {
+        if target_slot == source_slot {
+            return false;
+        }
+        let target = match self.inventory.get(target_slot as usize) {
+            Some(s) => *s,
+            None => return false,
+        };
+        let source = match self.inventory.get(source_slot as usize) {
+            Some(s) => *s,
+            None => return false,
+        };
+
+        let mut a_props = target.props;
+        let mut b_props = source.props;
+        let mut effects = [interactions::Effect {
+            effect_type: interactions::EffectType::Glow,
+            intensity: 0,
+        }; interactions::MAX_EFFECTS];
+
+        let _effect_count = interactions::interact(&mut a_props, &mut b_props, &mut effects);
+
+        if a_props == target.props && b_props == source.props {
+            self.log.add(GameEvent::CombineNoEffect);
+            return false;
+        }
+
+        self.inventory.set_props(target_slot as usize, a_props);
+        self.inventory.set_props(source_slot as usize, b_props);
+
+        if rules_items::is_consumable(source.kind) {
+            self.inventory.remove_one(source_slot as usize);
+        }
+
+        self.log.add(GameEvent::CombineItems {
+            target: target.kind,
+            source: source.kind,
+        });
+
+        true
     }
 
     /// Drop an item from inventory onto the ground.

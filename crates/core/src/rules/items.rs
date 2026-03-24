@@ -215,8 +215,8 @@ pub const SPAWN_TABLE: [(ItemKind, u8); KIND_COUNT] = [
 // Compile-time guarantee: enum fits in a single byte on all tiers.
 const _: () = assert!(size_of::<ItemKind>() == 1);
 const _: () = assert!(size_of::<(ItemKind, u8)>() == 2);
-// InvSlot: 1-byte kind + 1-byte count = 2 bytes.
-const _: () = assert!(size_of::<InvSlot>() == 2);
+// InvSlot: 1-byte kind + 1-byte count + 8-byte property bag = 10 bytes.
+const _: () = assert!(size_of::<InvSlot>() == 10);
 
 // ---------------------------------------------------------------------------
 // Type queries
@@ -376,17 +376,23 @@ pub struct Equipment {
 /// Maximum inventory slots (a-z). Shared across all tiers.
 pub const MAX_INVENTORY: usize = 26;
 
-/// A single inventory slot — one item kind with a count (stacks for consumables).
+/// A single inventory slot — item kind, stack count, and per-instance property bag.
+///
+/// Properties are initialized from `default_properties(kind)` on pickup and can
+/// diverge through interactions. Two items stack only if they share the same kind
+/// AND the same property bag.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InvSlot {
     pub kind: ItemKind,
     pub count: u8,
+    pub props: PropertyBag,
 }
 
-/// Brogue-style 26-slot inventory (a-z). Consumables stack, equipment doesn't.
+/// Brogue-style 26-slot inventory (a-z). Consumables stack (same kind + same
+/// property bag), equipment takes individual slots.
 ///
-/// 26 × `Option<InvSlot>` = 78 bytes — fits comfortably in micro tier hiram.
+/// 26 × `Option<InvSlot>` = 286 bytes with property bags.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Inventory {
@@ -407,13 +413,22 @@ impl Inventory {
         }
     }
 
-    /// Add an item. Consumables stack in existing slots; equipment takes
-    /// a new slot. Returns `false` if inventory is full.
+    /// Add an item with default properties. Consumables stack in existing
+    /// slots if they share the same kind AND same property bag; equipment
+    /// takes a new slot. Returns `false` if inventory is full.
     pub fn add(&mut self, kind: ItemKind) -> bool {
-        // Try to stack consumables in an existing slot.
+        let props = default_properties(kind);
+        self.add_with_props(kind, props)
+    }
+
+    /// Add an item with specific properties. Used when picking up items
+    /// that already have modified property bags (e.g., from the ground
+    /// after environmental interactions).
+    pub fn add_with_props(&mut self, kind: ItemKind, props: PropertyBag) -> bool {
+        // Try to stack consumables in an existing slot with matching props.
         if is_consumable(kind) {
             for slot in self.slots.iter_mut().flatten() {
-                if slot.kind == kind {
+                if slot.kind == kind && slot.props == props {
                     slot.count = slot.count.saturating_add(1);
                     return true;
                 }
@@ -423,7 +438,11 @@ impl Inventory {
         // Find first empty slot.
         for slot in &mut self.slots {
             if slot.is_none() {
-                *slot = Some(InvSlot { kind, count: 1 });
+                *slot = Some(InvSlot {
+                    kind,
+                    count: 1,
+                    props,
+                });
                 return true;
             }
         }
@@ -483,6 +502,16 @@ impl Inventory {
     pub(crate) fn set_slot(&mut self, idx: usize, slot: Option<InvSlot>) {
         if idx < MAX_INVENTORY {
             self.slots[idx] = slot;
+        }
+    }
+
+    /// Update the property bag of an occupied slot. Used by the combine
+    /// system to write back modified properties after an interaction.
+    pub fn set_props(&mut self, idx: usize, props: PropertyBag) {
+        if idx < MAX_INVENTORY
+            && let Some(slot) = &mut self.slots[idx]
+        {
+            slot.props = props;
         }
     }
 

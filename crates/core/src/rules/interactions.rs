@@ -762,20 +762,18 @@ mod tests {
     // ── Fuzz-style invariant tests ───────────────────────────────────
 
     #[test]
-    fn no_property_exceeds_15() {
-        // Test many random-ish property bag combinations.
+    fn fuzz_interact_no_panic_bounded_effects() {
+        // Exercise interact on 200 diverse property bag combinations.
+        // Main invariants: no panics, effect count bounded, and
+        // individual properties never exceed 15 (verified via get()).
         for seed in 0u16..200 {
             let mut a = properties::EMPTY;
             let mut b = properties::EMPTY;
-            // Fill with pseudo-random values based on seed.
+            // Fill with pseudo-random bytes — any u8 is a valid PropertyBag
+            // byte (two nibbles packed), so no clamping needed.
             for i in 0..8 {
                 a[i] = ((seed.wrapping_mul(31).wrapping_add(i as u16 * 7)) & 0xFF) as u8;
                 b[i] = ((seed.wrapping_mul(17).wrapping_add(i as u16 * 13)) & 0xFF) as u8;
-            }
-            // Clamp to valid nibbles (0-15 per nibble).
-            for i in 0..8 {
-                a[i] = (a[i] & 0xF0) | (a[i] & 0x0F);
-                b[i] = (b[i] & 0xF0) | (b[i] & 0x0F);
             }
 
             let mut effects = [Effect {
@@ -784,13 +782,14 @@ mod tests {
             }; MAX_EFFECTS];
             let count = interact(&mut a, &mut b, &mut effects);
 
-            // Verify all nibbles are still 0-15 (the nibble format guarantees
-            // this by construction, but verify interact doesn't corrupt).
-            for i in 0..8 {
-                assert!(a[i] >> 4 <= 15);
-                assert!(a[i] & 0x0F <= 15);
-                assert!(b[i] >> 4 <= 15);
-                assert!(b[i] & 0x0F <= 15);
+            // Verify every property reads back as 0–15 via the get() API.
+            // This catches any corruption where interact writes raw bytes
+            // that don't round-trip through the nibble encoding.
+            for &prop in &properties::ALL_PROPERTIES {
+                let va = properties::get(&a, prop);
+                let vb = properties::get(&b, prop);
+                assert!(va <= 15, "seed {seed}: bag a {:?} = {va}", prop);
+                assert!(vb <= 15, "seed {seed}: bag b {:?} = {vb}", prop);
             }
             assert!((count as usize) <= MAX_EFFECTS);
         }

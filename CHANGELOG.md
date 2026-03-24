@@ -58,6 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Fix tautological fuzz test assertions and use .contains() in test code (#158)
 - Step 3: Combat reads from property bags (#157)
 - Remove explored % from player-facing UI (#116)
 - Eliminate __udivhi3 calls and reduce scan_octant stack init overhead (#152)

@@ -3946,7 +3946,7 @@ mod tests {
     #[test]
     fn generated_map_has_stairs() {
         let gs = GameState::with_seed(80, 40, 42);
-        let has_stairs = gs.map.tiles.iter().any(|t| *t == Tile::StairsDown);
+        let has_stairs = gs.map.tiles.contains(&Tile::StairsDown);
         assert!(has_stairs, "Generated map should have stairs down");
     }
 
@@ -3989,7 +3989,7 @@ mod tests {
             "Map should change after descend"
         );
         // New map should also have stairs.
-        let has_stairs = gs.map.tiles.iter().any(|t| *t == Tile::StairsDown);
+        let has_stairs = gs.map.tiles.contains(&Tile::StairsDown);
         assert!(has_stairs, "New floor should have stairs down");
     }
 

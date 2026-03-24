@@ -17,6 +17,9 @@ pub fn pick_monster_kind(rng: &mut LfsrRng16) -> MonsterKind {
     for &w in &SPAWN_WEIGHTS[..KIND_COUNT] {
         total = total.saturating_add(w);
     }
+    if total == 0 {
+        return SPAWN_KINDS[0];
+    }
     let mut roll = rng.range_u8(0, total - 1);
     for i in 0..KIND_COUNT {
         if roll < SPAWN_WEIGHTS[i] {
@@ -59,6 +62,9 @@ pub fn pick_item_kind(rng: &mut LfsrRng16, depth: u8) -> ItemKind {
         if rules_items::min_depth(kind) <= depth {
             total = total.saturating_add(weight);
         }
+    }
+    if total == 0 {
+        return rules_items::SPAWN_TABLE[0].0;
     }
     let mut roll = rng.range_u8(0, total - 1);
     for i in 0..ITEM_KIND_COUNT {

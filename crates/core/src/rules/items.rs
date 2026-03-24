@@ -638,35 +638,37 @@ impl Default for Equipment {
 
 impl Equipment {
     /// Attack bonus from equipped weapon's property bag.
-    ///
-    /// Falls back to `attack_bonus(kind)` if the bag is empty (migration
-    /// from saves that predate the property system).
     pub fn attack_bonus(&self) -> u8 {
-        match self.weapon {
-            Some(kind) => {
-                if self.weapon_props == properties::EMPTY {
-                    attack_bonus(kind)
-                } else {
-                    attack_from_bag(&self.weapon_props)
-                }
-            }
-            None => 0,
+        if self.weapon.is_some() {
+            attack_from_bag(&self.weapon_props)
+        } else {
+            0
         }
     }
 
     /// Defense bonus from equipped armor's property bag.
-    ///
-    /// Falls back to `defense_bonus(kind)` if the bag is empty (migration).
     pub fn defense_bonus(&self) -> u8 {
-        match self.armor {
-            Some(kind) => {
-                if self.armor_props == properties::EMPTY {
-                    defense_bonus(kind)
-                } else {
-                    defense_from_bag(&self.armor_props)
-                }
+        if self.armor.is_some() {
+            defense_from_bag(&self.armor_props)
+        } else {
+            0
+        }
+    }
+
+    /// Populate empty property bags from default_properties for each occupied
+    /// slot. Called after deserialization to migrate saves that predate the
+    /// property system (bags default to EMPTY via serde/binary format).
+    #[allow(clippy::collapsible_if)]
+    pub fn fixup_empty_bags(&mut self) {
+        if let Some(kind) = self.weapon {
+            if self.weapon_props == properties::EMPTY {
+                self.weapon_props = default_properties(kind);
             }
-            None => 0,
+        }
+        if let Some(kind) = self.armor {
+            if self.armor_props == properties::EMPTY {
+                self.armor_props = default_properties(kind);
+            }
         }
     }
 }
@@ -819,8 +821,9 @@ mod tests {
     fn equipment_weapon_bonus() {
         let eq = Equipment {
             weapon: Some(ItemKind::ShortSword),
+            weapon_props: default_properties(ItemKind::ShortSword),
             armor: None,
-            ..Equipment::default()
+            armor_props: properties::EMPTY,
         };
         assert_eq!(eq.attack_bonus(), 3);
         assert_eq!(eq.defense_bonus(), 0);
@@ -830,8 +833,9 @@ mod tests {
     fn equipment_armor_bonus() {
         let eq = Equipment {
             weapon: None,
+            weapon_props: properties::EMPTY,
             armor: Some(ItemKind::LeatherArmor),
-            ..Equipment::default()
+            armor_props: default_properties(ItemKind::LeatherArmor),
         };
         assert_eq!(eq.attack_bonus(), 0);
         assert_eq!(eq.defense_bonus(), 2);
@@ -841,8 +845,9 @@ mod tests {
     fn equipment_both_slots() {
         let eq = Equipment {
             weapon: Some(ItemKind::ShortSword),
+            weapon_props: default_properties(ItemKind::ShortSword),
             armor: Some(ItemKind::LeatherArmor),
-            ..Equipment::default()
+            armor_props: default_properties(ItemKind::LeatherArmor),
         };
         assert_eq!(eq.attack_bonus(), 3);
         assert_eq!(eq.defense_bonus(), 2);
@@ -1038,8 +1043,9 @@ mod tests {
     fn equipment_long_sword_bonus() {
         let eq = Equipment {
             weapon: Some(ItemKind::LongSword),
+            weapon_props: default_properties(ItemKind::LongSword),
             armor: None,
-            ..Equipment::default()
+            armor_props: properties::EMPTY,
         };
         assert_eq!(eq.attack_bonus(), 5);
     }
@@ -1048,8 +1054,9 @@ mod tests {
     fn equipment_chain_mail_bonus() {
         let eq = Equipment {
             weapon: None,
+            weapon_props: properties::EMPTY,
             armor: Some(ItemKind::ChainMail),
-            ..Equipment::default()
+            armor_props: default_properties(ItemKind::ChainMail),
         };
         assert_eq!(eq.defense_bonus(), 4);
     }
@@ -1210,14 +1217,27 @@ mod tests {
     }
 
     #[test]
-    fn equipment_empty_bag_falls_back_to_const_fn() {
-        // Migration: old save with weapon but EMPTY bag → use hardcoded value.
+    fn equipment_empty_bag_gives_zero_without_fixup() {
+        // EMPTY bag with occupied slot → 0 stats (no fallback).
         let eq = Equipment {
             weapon: Some(ItemKind::LongSword),
             weapon_props: properties::EMPTY,
             armor: Some(ItemKind::ChainMail),
             armor_props: properties::EMPTY,
         };
+        assert_eq!(eq.attack_bonus(), 0);
+        assert_eq!(eq.defense_bonus(), 0);
+    }
+
+    #[test]
+    fn fixup_empty_bags_populates_defaults() {
+        let mut eq = Equipment {
+            weapon: Some(ItemKind::LongSword),
+            weapon_props: properties::EMPTY,
+            armor: Some(ItemKind::ChainMail),
+            armor_props: properties::EMPTY,
+        };
+        eq.fixup_empty_bags();
         assert_eq!(eq.attack_bonus(), 5);
         assert_eq!(eq.defense_bonus(), 4);
     }

@@ -74,6 +74,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Inventory UX polish: equip bonus display, equipped indicators, item coloring (#89, #92, #93)
 
 ### Fixed
+- Fix review findings: combine-stack, EMPTY-bag fallback, dev console off-by-one, spawn guard (#159)
 - Fix MCP error message omitting item actions from valid action list (#139)
 - Fix gamepad analog_to_direction tests to use Direction enum (#141)
 - Fix code review issues: CHANGELOG dupe, bestiary stats, status bar layout (#111)

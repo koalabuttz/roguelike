@@ -480,11 +480,16 @@ impl MicroGameState {
             return false;
         }
 
-        self.inventory.set_props(target_slot as usize, a_props);
-        self.inventory.set_props(source_slot as usize, b_props);
+        // Split one item from the target stack: remove it, re-insert with
+        // modified props (lands in a new slot if props differ from the stack).
+        self.inventory.remove_one(target_slot as usize);
+        self.inventory.add_with_props(target.kind, a_props);
 
+        // Source: consume one if consumable, otherwise update props in place.
         if rules_items::is_consumable(source.kind) {
             self.inventory.remove_one(source_slot as usize);
+        } else {
+            self.inventory.set_props(source_slot as usize, b_props);
         }
 
         self.log.add(GameEvent::CombineItems {
@@ -1445,6 +1450,7 @@ mod tests {
         assert_eq!(g.effective_attack(), base);
 
         g.equipment.weapon = Some(ItemKind::ShortSword);
+        g.equipment.weapon_props = rules_items::default_properties(ItemKind::ShortSword);
         assert_eq!(
             g.effective_attack(),
             base + rules_items::attack_bonus(ItemKind::ShortSword)
@@ -1458,6 +1464,7 @@ mod tests {
         assert_eq!(g.effective_defense(), base);
 
         g.equipment.armor = Some(ItemKind::LeatherArmor);
+        g.equipment.armor_props = rules_items::default_properties(ItemKind::LeatherArmor);
         assert_eq!(
             g.effective_defense(),
             base + rules_items::defense_bonus(ItemKind::LeatherArmor)

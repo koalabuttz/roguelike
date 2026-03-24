@@ -703,7 +703,7 @@ fn run_dev_console(state: &mut MicroGameState) {
     let mut msg = [b' '; 40];
     let label = b"DEV: SPAWNED  ITEMS. OPEN INVENTORY.";
     msg[..label.len()].copy_from_slice(label);
-    msg[14] = b'0' + count;
+    msg[13] = b'0' + count;
     c64::draw_text(0, 24, &msg, c64::COLOR_GREEN);
 }
 

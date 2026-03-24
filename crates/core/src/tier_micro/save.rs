@@ -590,6 +590,8 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
         weapon_props,
         armor_props,
     };
+    // Migrate old saves that lack property bags.
+    state.equipment.fixup_empty_bags();
 
     // --- Inventory (10 bytes per slot: kind + count + 8 props) ---
     state.inventory = Inventory::new();

@@ -803,6 +803,7 @@ impl GameState {
 
     /// Combine two inventory items: apply source's properties onto target.
     /// Consumable sources are consumed; equipment sources are kept.
+    /// Stacked items are split: only one item from each stack participates.
     fn combine_items(&mut self, target_slot: u8, source_slot: u8) -> bool {
         if target_slot == source_slot {
             return false;
@@ -831,13 +832,17 @@ impl GameState {
             return false;
         }
 
-        // Write modified props back to inventory.
-        self.inventory.set_props(target_slot as usize, a_props);
-        self.inventory.set_props(source_slot as usize, b_props);
+        // Split one item from the target stack: remove it from the old slot,
+        // then re-insert with modified props (lands in a new slot if props differ).
+        self.inventory.remove_one(target_slot as usize);
+        self.inventory.add_with_props(target.kind, a_props);
 
-        // Consume source if it's a consumable.
+        // Source: consume one if consumable, otherwise update props in place
+        // (equipment doesn't stack, so set_props is safe for non-consumables).
         if rules_items::is_consumable(source.kind) {
             self.inventory.remove_one(source_slot as usize);
+        } else {
+            self.inventory.set_props(source_slot as usize, b_props);
         }
 
         self.log.add_event(GameEvent::CombineItems {
@@ -3474,6 +3479,7 @@ mod tests {
         let base_atk = gs.entities[0].attack;
         assert_eq!(gs.effective_attack(), base_atk);
         gs.equipment.weapon = Some(ItemKind::ShortSword);
+        gs.equipment.weapon_props = rules_items::default_properties(ItemKind::ShortSword);
         assert_eq!(gs.effective_attack(), base_atk + 3);
     }
 
@@ -3483,6 +3489,7 @@ mod tests {
         let base_def = gs.entities[0].defense;
         assert_eq!(gs.effective_defense(), base_def);
         gs.equipment.armor = Some(ItemKind::LeatherArmor);
+        gs.equipment.armor_props = rules_items::default_properties(ItemKind::LeatherArmor);
         assert_eq!(gs.effective_defense(), base_def + 2);
     }
 
@@ -3597,7 +3604,9 @@ mod tests {
     fn combat_uses_equipment_bonuses() {
         let mut gs = test_game();
         gs.equipment.weapon = Some(ItemKind::ShortSword);
+        gs.equipment.weapon_props = rules_items::default_properties(ItemKind::ShortSword);
         gs.equipment.armor = Some(ItemKind::LeatherArmor);
+        gs.equipment.armor_props = rules_items::default_properties(ItemKind::LeatherArmor);
         let goblin = Entity::from_template(data::goblin(), 6, 5);
         gs.entities.push(goblin);
         gs.update_fov();

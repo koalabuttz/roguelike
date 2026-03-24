@@ -208,8 +208,9 @@ mod tests {
     fn equipment_weapon_bonus() {
         let eq = Equipment {
             weapon: Some(ItemKind::ShortSword),
+            weapon_props: rules_items::default_properties(ItemKind::ShortSword),
             armor: None,
-            ..Equipment::default()
+            armor_props: crate::rules::properties::EMPTY,
         };
         assert_eq!(eq.attack_bonus(), 3);
         assert_eq!(eq.defense_bonus(), 0);
@@ -219,8 +220,9 @@ mod tests {
     fn equipment_armor_bonus() {
         let eq = Equipment {
             weapon: None,
+            weapon_props: crate::rules::properties::EMPTY,
             armor: Some(ItemKind::LeatherArmor),
-            ..Equipment::default()
+            armor_props: rules_items::default_properties(ItemKind::LeatherArmor),
         };
         assert_eq!(eq.attack_bonus(), 0);
         assert_eq!(eq.defense_bonus(), 2);
@@ -230,8 +232,9 @@ mod tests {
     fn equipment_both_slots() {
         let eq = Equipment {
             weapon: Some(ItemKind::ShortSword),
+            weapon_props: rules_items::default_properties(ItemKind::ShortSword),
             armor: Some(ItemKind::LeatherArmor),
-            ..Equipment::default()
+            armor_props: rules_items::default_properties(ItemKind::LeatherArmor),
         };
         assert_eq!(eq.attack_bonus(), 3);
         assert_eq!(eq.defense_bonus(), 2);

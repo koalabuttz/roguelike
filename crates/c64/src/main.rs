@@ -392,6 +392,9 @@ fn run_inventory(state: &mut MicroGameState) {
     let mut selected: u8 = 0;
     // None = Browse mode, Some(idx) = Act mode with action bar selection
     let mut action_sel: Option<u8> = None;
+    // Combine mode: after selecting Combine, this holds the target inventory
+    // index (relative to nth_occupied). The next Confirm picks the source.
+    let mut combine_target: Option<u8> = None;
 
     render::render_inventory(state, selected, None);
 
@@ -401,7 +404,13 @@ fn run_inventory(state: &mut MicroGameState) {
         let inp = input::wait_for_inventory_input();
 
         match inp {
-            InventoryInput::Close => return,
+            InventoryInput::Close => {
+                if combine_target.is_some() {
+                    combine_target = None;
+                } else {
+                    return;
+                }
+            }
 
             // --- Browse mode: cursor movement ---
             InventoryInput::Up => {
@@ -447,7 +456,15 @@ fn run_inventory(state: &mut MicroGameState) {
                     execute_inventory_action(state, selected - ec, InvAction::Drop);
                 }
                 action_sel = None;
+                combine_target = None;
                 clamp_selected(state, &mut selected);
+            }
+            InventoryInput::Combine => {
+                if selected >= ec {
+                    // Enter combine mode: remember this item as target
+                    combine_target = Some(selected - ec);
+                    action_sel = None;
+                }
             }
 
             // --- Action bar navigation ---
@@ -468,9 +485,21 @@ fn run_inventory(state: &mut MicroGameState) {
                 }
             }
 
-            // --- Confirm: enter Act mode or execute selected action ---
+            // --- Confirm: enter Act mode, execute action, or pick combine source ---
             InventoryInput::Confirm => {
                 if total == 0 {
+                    continue;
+                }
+                // In combine mode: confirm picks the source item
+                if let Some(target_inv) = combine_target {
+                    if selected >= ec {
+                        let source_inv = selected - ec;
+                        if source_inv != target_inv {
+                            execute_combine(state, target_inv, source_inv);
+                            clamp_selected(state, &mut selected);
+                        }
+                    }
+                    combine_target = None;
                     continue;
                 }
                 match action_sel {
@@ -483,6 +512,12 @@ fn run_inventory(state: &mut MicroGameState) {
                         if (sel as usize) < actions.len() {
                             let action = actions[sel as usize];
                             if action == InvAction::Back {
+                                action_sel = None;
+                            } else if action == InvAction::Combine {
+                                // Enter combine mode from action bar
+                                if selected >= ec {
+                                    combine_target = Some(selected - ec);
+                                }
                                 action_sel = None;
                             } else if selected < ec {
                                 match action {
@@ -510,11 +545,20 @@ fn run_inventory(state: &mut MicroGameState) {
         }
 
         // Build action bar for rendering
-        let bar = action_sel.map(|sel| {
-            let actions = current_actions(state, selected);
-            (actions, sel)
-        });
+        let bar = if combine_target.is_none() {
+            action_sel.map(|sel| {
+                let actions = current_actions(state, selected);
+                (actions, sel)
+            })
+        } else {
+            None // Suppress action bar in combine mode
+        };
         render::render_inventory(state, selected, bar);
+
+        // Overlay combine hint on the bottom row when in combine mode
+        if combine_target.is_some() {
+            c64::draw_text(2, 24, b"COMBINE WITH?  STOP:CANCEL", c64::COLOR_WHITE);
+        }
     }
 }
 
@@ -573,10 +617,29 @@ fn execute_inventory_action(
             render::InvAction::Use => GameCommand::UseItem(idx),
             render::InvAction::Equip => GameCommand::EquipItem(idx),
             render::InvAction::Drop => GameCommand::DropItem(idx),
-            render::InvAction::Unequip | render::InvAction::Back => return,
+            render::InvAction::Combine | render::InvAction::Unequip | render::InvAction::Back => {
+                return;
+            }
         };
         c64::io_bank_out();
         state.step(cmd);
+        c64::io_bank_in();
+    }
+}
+
+/// Execute a combine action between two inventory items (nth_occupied indices).
+fn execute_combine(state: &mut MicroGameState, target_inv: u8, source_inv: u8) {
+    let target_idx = state
+        .inventory
+        .nth_occupied(target_inv as usize)
+        .map(|(i, _)| i as u8);
+    let source_idx = state
+        .inventory
+        .nth_occupied(source_inv as usize)
+        .map(|(i, _)| i as u8);
+    if let (Some(t), Some(s)) = (target_idx, source_idx) {
+        c64::io_bank_out();
+        state.step(GameCommand::Combine(t, s));
         c64::io_bank_in();
     }
 }

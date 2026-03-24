@@ -1440,4 +1440,28 @@ mod tests {
         assert_eq!(parse_action("drop_item_Z"), None);
         assert_eq!(parse_action("equip_item_"), None);
     }
+
+    #[test]
+    fn parse_combine_a_b() {
+        assert_eq!(
+            parse_action("combine_a_b"),
+            Some(GameCommand::Combine(0, 1))
+        );
+    }
+
+    #[test]
+    fn parse_combine_z_a() {
+        assert_eq!(
+            parse_action("combine_z_a"),
+            Some(GameCommand::Combine(25, 0))
+        );
+    }
+
+    #[test]
+    fn parse_combine_invalid() {
+        assert_eq!(parse_action("combine_a"), None);
+        assert_eq!(parse_action("combine_"), None);
+        assert_eq!(parse_action("combine_A_b"), None);
+        assert_eq!(parse_action("combine_ab"), None);
+    }
 }

@@ -4126,4 +4126,56 @@ mod tests {
         assert_eq!(info.terrain, "Stairs down");
         assert_eq!(info.glyph, '>');
     }
+
+    // ── Combine tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn combine_self_rejected() {
+        let mut gs = test_game();
+        gs.inventory.add(ItemKind::ShortSword);
+        let result = gs.step(GameCommand::Combine(0, 0));
+        assert!(!result.action_taken);
+    }
+
+    #[test]
+    fn combine_empty_slot_rejected() {
+        let mut gs = test_game();
+        gs.inventory.add(ItemKind::ShortSword);
+        let result = gs.step(GameCommand::Combine(0, 5));
+        assert!(!result.action_taken);
+    }
+
+    #[test]
+    fn combine_no_effect_when_no_rules_match() {
+        let mut gs = test_game();
+        // Two swords: same material properties, no active ingredients
+        gs.inventory.add(ItemKind::ShortSword);
+        gs.inventory.add(ItemKind::ShortSword);
+        let result = gs.step(GameCommand::Combine(0, 1));
+        assert!(!result.action_taken);
+    }
+
+    #[test]
+    fn combine_consumes_consumable_source() {
+        use crate::rules::properties::{self, Property};
+        let mut gs = test_game();
+        // Sword (slot 0) has METAL:8. Potion of Strength (slot 1) has HOT:4.
+        // MTL+HOT → BoostA(HARD) — tempering should fire.
+        gs.inventory.add(ItemKind::ShortSword);
+        gs.inventory.add(ItemKind::StrengthPotion);
+        let sword_hard_before =
+            properties::get(&gs.inventory.get(0).unwrap().props, Property::Hard);
+        let result = gs.step(GameCommand::Combine(0, 1));
+        assert!(result.action_taken);
+        // Source (consumable) should be consumed
+        assert!(gs.inventory.get(1).is_none());
+        // Sword's HARD should have increased (tempering)
+        let sword_hard_after = properties::get(&gs.inventory.get(0).unwrap().props, Property::Hard);
+        assert!(
+            sword_hard_after > sword_hard_before,
+            "HARD should increase from tempering: before={}, after={}",
+            sword_hard_before,
+            sword_hard_after,
+        );
+    }
 }

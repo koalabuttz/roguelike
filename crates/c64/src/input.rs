@@ -350,10 +350,11 @@ pub fn read_seed_input(
 pub enum InventoryInput {
     Up,
     Down,
-    /// Direct keyboard action: U/E/D bypass the action bar.
+    /// Direct keyboard action: U/E/D/C bypass the action bar.
     Use,
     Equip,
     Drop,
+    Combine,
     /// Joystick fire or Return: enter/confirm action bar.
     Confirm,
     /// Left/right: cycle action bar selection.
@@ -378,6 +379,7 @@ pub fn wait_for_inventory_input() -> InventoryInput {
                 KEY_RIGHT => return InventoryInput::Right,
                 b'U' => return InventoryInput::Use,
                 b'D' => return InventoryInput::Drop,
+                b'C' => return InventoryInput::Combine,
                 KEY_RETURN | KEY_SPACE => return InventoryInput::Confirm,
                 KEY_RUNSTOP | KEY_I => return InventoryInput::Close,
                 _ => {

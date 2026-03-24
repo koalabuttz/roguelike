@@ -1670,4 +1670,50 @@ mod tests {
         assert_eq!(result.target_kind, Some(MonsterKind::Goblin));
         assert!(result.target_killed);
     }
+
+    // ── Combine tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn combine_self_rejected() {
+        let mut g = MicroGameState::new_default(42);
+        g.inventory.add(ItemKind::ShortSword);
+        let result = g.step(GameCommand::Combine(0, 0));
+        assert!(!result.action_taken);
+    }
+
+    #[test]
+    fn combine_empty_slot_rejected() {
+        let mut g = MicroGameState::new_default(42);
+        g.inventory.add(ItemKind::ShortSword);
+        let result = g.step(GameCommand::Combine(0, 5));
+        assert!(!result.action_taken);
+    }
+
+    #[test]
+    fn combine_no_effect_when_no_rules_match() {
+        let mut g = MicroGameState::new_default(42);
+        g.inventory.add(ItemKind::ShortSword);
+        g.inventory.add(ItemKind::ShortSword);
+        let result = g.step(GameCommand::Combine(0, 1));
+        assert!(!result.action_taken);
+    }
+
+    #[test]
+    fn combine_consumes_consumable_source() {
+        use crate::rules::properties::{self, Property};
+        let mut g = MicroGameState::new_default(42);
+        g.inventory.add(ItemKind::ShortSword);
+        g.inventory.add(ItemKind::StrengthPotion);
+        let hard_before = properties::get(&g.inventory.get(0).unwrap().props, Property::Hard);
+        let result = g.step(GameCommand::Combine(0, 1));
+        assert!(result.action_taken);
+        assert!(g.inventory.get(1).is_none());
+        let hard_after = properties::get(&g.inventory.get(0).unwrap().props, Property::Hard);
+        assert!(
+            hard_after > hard_before,
+            "HARD should increase: before={}, after={}",
+            hard_before,
+            hard_after,
+        );
+    }
 }

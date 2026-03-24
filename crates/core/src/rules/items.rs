@@ -507,11 +507,12 @@ impl Inventory {
 
     /// Update the property bag of an occupied slot. Used by the combine
     /// system to write back modified properties after an interaction.
+    #[allow(clippy::collapsible_if)]
     pub fn set_props(&mut self, idx: usize, props: PropertyBag) {
-        if idx < MAX_INVENTORY
-            && let Some(slot) = &mut self.slots[idx]
-        {
-            slot.props = props;
+        if idx < MAX_INVENTORY {
+            if let Some(slot) = &mut self.slots[idx] {
+                slot.props = props;
+            }
         }
     }
 
@@ -1004,5 +1005,45 @@ mod tests {
         assert_eq!(min_depth(ItemKind::HealthPotion), 1);
         assert_eq!(min_depth(ItemKind::ShortSword), 1);
         assert_eq!(min_depth(ItemKind::LeatherArmor), 1);
+    }
+
+    // ── Property-aware stacking tests ─────────────────────────────────
+
+    #[test]
+    fn inventory_stacks_with_matching_props() {
+        let mut inv = Inventory::new();
+        inv.add(ItemKind::HealthPotion);
+        inv.add(ItemKind::HealthPotion);
+        // Same kind + same default props → should stack
+        assert_eq!(inv.len(), 1);
+        assert_eq!(inv.get(0).unwrap().count, 2);
+    }
+
+    #[test]
+    fn inventory_no_stack_different_props() {
+        let mut inv = Inventory::new();
+        inv.add(ItemKind::HealthPotion);
+        // Modify the first potion's props
+        let mut modified_props = default_properties(ItemKind::HealthPotion);
+        properties::set(&mut modified_props, properties::Property::Hot, 5);
+        inv.set_props(0, modified_props);
+        // Add another default potion — different props, should NOT stack
+        inv.add(ItemKind::HealthPotion);
+        assert_eq!(inv.len(), 2);
+        assert_eq!(inv.get(0).unwrap().count, 1);
+        assert_eq!(inv.get(1).unwrap().count, 1);
+    }
+
+    #[test]
+    fn inventory_stacks_matching_modified_props() {
+        let mut inv = Inventory::new();
+        // Add a potion with modified props directly
+        let mut hot_props = default_properties(ItemKind::HealthPotion);
+        properties::set(&mut hot_props, properties::Property::Hot, 5);
+        inv.add_with_props(ItemKind::HealthPotion, hot_props);
+        inv.add_with_props(ItemKind::HealthPotion, hot_props);
+        // Same kind + same modified props → should stack
+        assert_eq!(inv.len(), 1);
+        assert_eq!(inv.get(0).unwrap().count, 2);
     }
 }

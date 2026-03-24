@@ -1418,15 +1418,18 @@ pub enum InvAction {
     Use,
     Equip,
     Unequip,
+    Combine,
     Drop,
     Back,
 }
 
 /// All actions for consumable items.
-const CONSUMABLE_ACTIONS: [InvAction; 3] = [InvAction::Use, InvAction::Drop, InvAction::Back];
+const CONSUMABLE_ACTIONS: [InvAction; 4] =
+    [InvAction::Use, InvAction::Combine, InvAction::Drop, InvAction::Back];
 /// All actions for equipment items in the bag (not yet equipped).
-const EQUIPMENT_ACTIONS: [InvAction; 3] = [InvAction::Equip, InvAction::Drop, InvAction::Back];
-/// Actions for currently equipped items.
+const EQUIPMENT_ACTIONS: [InvAction; 4] =
+    [InvAction::Equip, InvAction::Combine, InvAction::Drop, InvAction::Back];
+/// Actions for currently equipped items (unequip first to combine).
 const EQUIPPED_ACTIONS: [InvAction; 3] = [InvAction::Unequip, InvAction::Drop, InvAction::Back];
 
 /// Get the action list for an item kind (in inventory bag).
@@ -1448,6 +1451,7 @@ fn action_label(action: InvAction) -> &'static [u8] {
         InvAction::Use => b"USE",
         InvAction::Equip => b"EQUIP",
         InvAction::Unequip => b"UNEQUIP",
+        InvAction::Combine => b"COMBINE",
         InvAction::Drop => b"DROP",
         InvAction::Back => b"BACK",
     }
@@ -1568,9 +1572,9 @@ pub fn render_inventory(
         }
         None => {
             if selected < ec {
-                c64::draw_text(bx + 2, bar_row, b"U:USE E:UNEQUIP D:DROP", c64::COLOR_DGREY);
+                c64::draw_text(bx + 2, bar_row, b"U:UNEQUIP D:DROP", c64::COLOR_DGREY);
             } else {
-                c64::draw_text(bx + 2, bar_row, b"U:USE E:EQUIP D:DROP", c64::COLOR_DGREY);
+                c64::draw_text(bx + 2, bar_row, b"U:USE E:EQUIP C:MIX D:DROP", c64::COLOR_DGREY);
             }
         }
     }

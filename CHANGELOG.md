@@ -58,6 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Centralize nibble access: move get/set_by_index to properties.rs (#160)
 - Fix tautological fuzz test assertions and use .contains() in test code (#158)
 - Step 3: Combat reads from property bags (#157)
 - Remove explored % from player-facing UI (#116)

@@ -504,27 +504,7 @@ pub fn interact(
     effect_count
 }
 
-// ---------------------------------------------------------------------------
-// Index-based nibble access (avoids Property enum conversion in hot loop)
-// ---------------------------------------------------------------------------
-
-/// Read a nibble by raw index (0–15). Same logic as `properties::get` but
-/// takes a raw `u8` index instead of a `Property` enum.
-fn get_by_index(bag: &PropertyBag, idx: u8) -> u8 {
-    let byte = bag[(idx / 2) as usize];
-    if idx & 1 == 0 { byte >> 4 } else { byte & 0x0F }
-}
-
-/// Write a nibble by raw index (0–15). Clamps to 0–15.
-fn set_by_index(bag: &mut PropertyBag, idx: u8, val: u8) {
-    let val = val.min(15);
-    let byte = &mut bag[(idx / 2) as usize];
-    if idx & 1 == 0 {
-        *byte = (*byte & 0x0F) | (val << 4);
-    } else {
-        *byte = (*byte & 0xF0) | val;
-    }
-}
+use super::properties::{get_by_index, set_by_index};
 
 #[cfg(test)]
 mod tests {

@@ -84,28 +84,38 @@ pub type PropertyBag = [u8; 8];
 /// An empty property bag (all zeros).
 pub const EMPTY: PropertyBag = [0u8; 8];
 
-/// Read a property's intensity (0–15) from a nibble-packed bag.
-pub const fn get(bag: &PropertyBag, prop: Property) -> u8 {
-    let idx = prop as u8;
+/// Read a nibble by raw index (0–15). Single source of truth for the
+/// nibble layout — `get()` delegates here, and `interactions.rs` calls
+/// this directly to avoid `u8 → Property` enum conversion.
+pub const fn get_by_index(bag: &PropertyBag, idx: u8) -> u8 {
     let byte = bag[(idx / 2) as usize];
     if idx & 1 == 0 {
-        byte >> 4 // high nibble for even indices
+        byte >> 4
     } else {
-        byte & 0x0F // low nibble for odd indices
+        byte & 0x0F
     }
+}
+
+/// Write a nibble by raw index (0–15). Clamps values above 15.
+pub fn set_by_index(bag: &mut PropertyBag, idx: u8, val: u8) {
+    let val = if val > 15 { 15 } else { val };
+    let byte = &mut bag[(idx / 2) as usize];
+    if idx & 1 == 0 {
+        *byte = (*byte & 0x0F) | (val << 4);
+    } else {
+        *byte = (*byte & 0xF0) | val;
+    }
+}
+
+/// Read a property's intensity (0–15) from a nibble-packed bag.
+pub const fn get(bag: &PropertyBag, prop: Property) -> u8 {
+    get_by_index(bag, prop as u8)
 }
 
 /// Write a property's intensity (0–15) into a nibble-packed bag.
 /// Values above 15 are clamped.
 pub fn set(bag: &mut PropertyBag, prop: Property, val: u8) {
-    let val = if val > 15 { 15 } else { val };
-    let idx = prop as u8;
-    let byte = &mut bag[(idx / 2) as usize];
-    if idx & 1 == 0 {
-        *byte = (*byte & 0x0F) | (val << 4); // set high nibble
-    } else {
-        *byte = (*byte & 0xF0) | val; // set low nibble
-    }
+    set_by_index(bag, prop as u8, val);
 }
 
 /// Count non-zero properties in a bag.

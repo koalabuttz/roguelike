@@ -713,7 +713,15 @@ impl Inventory {
 
     /// Number of occupied slots.
     pub fn len(&self) -> usize {
-        self.slots.iter().filter(|s| s.is_some()).count()
+        let mut n = 0;
+        let mut i = 0;
+        while i < MAX_INVENTORY {
+            if self.slots[i].is_some() {
+                n += 1;
+            }
+            i += 1;
+        }
+        n
     }
 
     /// Whether the inventory is empty.
@@ -723,7 +731,14 @@ impl Inventory {
 
     /// Whether all 26 slots are occupied.
     pub fn is_full(&self) -> bool {
-        self.slots.iter().all(|s| s.is_some())
+        let mut i = 0;
+        while i < MAX_INVENTORY {
+            if self.slots[i].is_none() {
+                return false;
+            }
+            i += 1;
+        }
+        true
     }
 
     /// Iterate over occupied slots as `(index, &InvSlot)`.

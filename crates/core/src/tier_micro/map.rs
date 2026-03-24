@@ -116,20 +116,20 @@ impl MicroMap {
     /// Used for corridor branch detection during autorun.
     pub fn open_neighbors_excluding(&self, x: u8, y: u8, exclude_dx: i8, exclude_dy: i8) -> u8 {
         let mut count: u8 = 0;
-        for ny in -1i8..=1 {
-            for nx in -1i8..=1 {
-                if nx == 0 && ny == 0 {
-                    continue;
+        let mut ny: i8 = -1;
+        while ny <= 1 {
+            let mut nx: i8 = -1;
+            while nx <= 1 {
+                if (nx != 0 || ny != 0) && !(nx == exclude_dx && ny == exclude_dy) {
+                    let tx = (x as i8 + nx) as u8;
+                    let ty = (y as i8 + ny) as u8;
+                    if self.is_walkable(tx, ty) {
+                        count += 1;
+                    }
                 }
-                if nx == exclude_dx && ny == exclude_dy {
-                    continue;
-                }
-                let tx = (x as i8 + nx) as u8;
-                let ty = (y as i8 + ny) as u8;
-                if self.is_walkable(tx, ty) {
-                    count += 1;
-                }
+                nx += 1;
             }
+            ny += 1;
         }
         count
     }
@@ -178,15 +178,19 @@ impl MicroMap {
 
     fn carve_h_tunnel(&mut self, x1: u8, x2: u8, y: u8) {
         let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
-        for x in min_x..=max_x {
+        let mut x = min_x;
+        while x <= max_x {
             self.set_tile(x, y, TILE_FLOOR);
+            x += 1;
         }
     }
 
     fn carve_v_tunnel(&mut self, y1: u8, y2: u8, x: u8) {
         let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
-        for y in min_y..=max_y {
+        let mut y = min_y;
+        while y <= max_y {
             self.set_tile(x, y, TILE_FLOOR);
+            y += 1;
         }
     }
 
@@ -197,21 +201,21 @@ impl MicroMap {
                     continue;
                 }
                 let mut found = false;
-                for dy in -1i8..=1 {
-                    for dx in -1i8..=1 {
-                        if dx == 0 && dy == 0 {
-                            continue;
+                let mut dy: i8 = -1;
+                while dy <= 1 && !found {
+                    let mut dx: i8 = -1;
+                    while dx <= 1 {
+                        if dx != 0 || dy != 0 {
+                            let nx = (x as i8 + dx) as u8;
+                            let ny = (y as i8 + dy) as u8;
+                            if self.in_bounds(nx, ny) && self.tile_at(nx, ny) >= TILE_FLOOR {
+                                found = true;
+                                break;
+                            }
                         }
-                        let nx = (x as i8 + dx) as u8;
-                        let ny = (y as i8 + dy) as u8;
-                        if self.in_bounds(nx, ny) && self.tile_at(nx, ny) >= TILE_FLOOR {
-                            found = true;
-                            break;
-                        }
+                        dx += 1;
                     }
-                    if found {
-                        break;
-                    }
+                    dy += 1;
                 }
                 if found {
                     self.set_tile(x, y, TILE_STRUCTURAL);

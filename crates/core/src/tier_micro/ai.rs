@@ -137,21 +137,24 @@ fn wander(idx: u8, entities: &mut EntityStore, map: &MicroMap, rng: &mut LfsrRng
     let mut candidates: [(u8, u8); 8] = [(0, 0); 8];
     let mut count: u8 = 0;
 
-    for dy in -1i8..=1 {
-        for dx in -1i8..=1 {
-            if dx == 0 && dy == 0 {
-                continue;
+    let mut dy: i8 = -1;
+    while dy <= 1 {
+        let mut dx: i8 = -1;
+        while dx <= 1 {
+            if dx != 0 || dy != 0 {
+                let nx = (mx as i8 + dx) as u8;
+                let ny = (my as i8 + dy) as u8;
+                if !(nx == px && ny == py)
+                    && map.is_walkable(nx, ny)
+                    && !entities.is_occupied(nx, ny, idx)
+                {
+                    candidates[count as usize] = (nx, ny);
+                    count += 1;
+                }
             }
-            let nx = (mx as i8 + dx) as u8;
-            let ny = (my as i8 + dy) as u8;
-            if nx == px && ny == py {
-                continue;
-            }
-            if map.is_walkable(nx, ny) && !entities.is_occupied(nx, ny, idx) {
-                candidates[count as usize] = (nx, ny);
-                count += 1;
-            }
+            dx += 1;
         }
+        dy += 1;
     }
 
     if count > 0 {

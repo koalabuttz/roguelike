@@ -998,7 +998,7 @@ impl GameState {
         let mut colors = Vec::new();
         for (i, slot) in self.inventory.iter() {
             let letter = (b'a' + i as u8) as char;
-            let name = rules_items::name(slot.kind);
+            let name = item::described_item_name(slot.kind, &slot.props);
             if slot.count > 1 {
                 strings.push(format!("{}) {} (x{})", letter, name, slot.count));
             } else {
@@ -1653,11 +1653,12 @@ impl GameState {
             recent_messages: self.log.recent(10).to_vec(),
             game_over: self.game_over,
             turn_count: self.turn_count,
-            weapon: self
-                .equipment
-                .weapon
-                .map(|k| item::item_name(k).to_string()),
-            armor: self.equipment.armor.map(|k| item::item_name(k).to_string()),
+            weapon: self.equipment.weapon.map(|k| {
+                item::described_item_name(k, &self.equipment.weapon_props)
+            }),
+            armor: self.equipment.armor.map(|k| {
+                item::described_item_name(k, &self.equipment.armor_props)
+            }),
             kills,
             rooms_found,
             explored_pct,

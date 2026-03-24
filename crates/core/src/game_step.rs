@@ -441,16 +441,12 @@ impl GameStep for MicroGameStateAdapter {
             recent_messages,
             game_over: self.game.game_over,
             turn_count: self.game.turn_count as i32,
-            weapon: self
-                .game
-                .equipment
-                .weapon
-                .map(|k| rules_items::name(k).to_string()),
-            armor: self
-                .game
-                .equipment
-                .armor
-                .map(|k| rules_items::name(k).to_string()),
+            weapon: self.game.equipment.weapon.map(|k| {
+                crate::item::described_item_name(k, &self.game.equipment.weapon_props)
+            }),
+            armor: self.game.equipment.armor.map(|k| {
+                crate::item::described_item_name(k, &self.game.equipment.armor_props)
+            }),
             kills: self.game.kills as i32,
             rooms_found: map.room_count as i32,
             explored_pct,
@@ -819,7 +815,7 @@ fn build_micro_inventory(inv: &crate::rules::items::Inventory) -> (Vec<String>, 
     let mut colors = Vec::new();
     for (i, slot) in inv.iter() {
         let letter = (b'a' + i as u8) as char;
-        let name = rules_items::name(slot.kind);
+        let name = crate::item::described_item_name(slot.kind, &slot.props);
         if slot.count > 1 {
             strings.push(format!("{}) {} (x{})", letter, name, slot.count));
         } else {

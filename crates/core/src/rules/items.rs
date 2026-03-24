@@ -402,6 +402,141 @@ pub const fn default_properties(kind: ItemKind) -> PropertyBag {
 }
 
 // ---------------------------------------------------------------------------
+// Qualitative property descriptors
+// ---------------------------------------------------------------------------
+
+/// Maximum buffer size for a described item name.
+/// Worst realistic case: "razor-edged, smoldering Long Sword" = 34 chars.
+pub const DESCRIBED_NAME_MAX: usize = 64;
+
+/// Maximum number of adjectives prepended to an item name.
+const MAX_ADJECTIVES: usize = 2;
+
+/// Return (low_adjective, high_adjective) for a property, or None for
+/// properties that don't get descriptors (Metal, Organic — structural,
+/// not evocative).
+const fn adjectives(prop: properties::Property) -> Option<(&'static str, &'static str)> {
+    use properties::Property;
+    match prop {
+        Property::Sharp => Some(("keen", "razor-edged")),
+        Property::Hard => Some(("sturdy", "unyielding")),
+        Property::Heavy => Some(("weighty", "ponderous")),
+        Property::Swift => Some(("nimble", "flickering")),
+        Property::Hot => Some(("warm", "smoldering")),
+        Property::Cold => Some(("chilled", "frozen")),
+        Property::Wet => Some(("damp", "dripping")),
+        Property::Metal => None,
+        Property::Organic => None,
+        Property::Venomous => Some(("tainted", "venomous")),
+        Property::Magical => Some(("enchanted", "arcane")),
+        Property::Volatile => Some(("unstable", "volatile")),
+        Property::Bright => Some(("glowing", "luminous")),
+        Property::Corrosive => Some(("acrid", "corrosive")),
+        Property::Binding => Some(("clinging", "binding")),
+        Property::Cursed => Some(("eerie", "cursed")),
+    }
+}
+
+/// Build a descriptive item name with qualitative adjectives for properties
+/// that exceed the item's defaults. Writes to `buf`, returns bytes written.
+///
+/// - If `props == default_properties(kind)`, writes just the base name.
+/// - Otherwise, prepends up to 2 adjectives for the properties with the
+///   largest positive delta from default, e.g. "smoldering, luminous Short Sword".
+/// - Delta 1-3: low-tier adjective. Delta 4+: high-tier adjective.
+/// - Metal and Organic are skipped (structural, not evocative).
+pub fn describe_name(kind: ItemKind, props: &PropertyBag, buf: &mut [u8]) -> usize {
+    let default = default_properties(kind);
+
+    // Find properties where current > default, track top-2 by delta.
+    // Each entry: (delta, property_index).
+    let mut top: [(u8, u8); MAX_ADJECTIVES] = [(0, 0); MAX_ADJECTIVES];
+    let mut count: usize = 0;
+
+    let mut idx: u8 = 0;
+    while idx < 16 {
+        let cur = properties::get_by_index(props, idx);
+        let def = properties::get_by_index(&default, idx);
+        if cur > def {
+            // Skip Metal (7) and Organic (8).
+            if idx != 7 && idx != 8 {
+                let delta = cur - def;
+                // Insert into top-2 sorted by delta descending, then by index ascending.
+                if count < MAX_ADJECTIVES {
+                    top[count] = (delta, idx);
+                    count += 1;
+                    // Bubble up if needed.
+                    if count == 2
+                        && (top[1].0 > top[0].0
+                            || (top[1].0 == top[0].0 && top[1].1 < top[0].1))
+                    {
+                        top.swap(0, 1);
+                    }
+                } else if delta > top[1].0
+                    || (delta == top[1].0 && idx < top[1].1)
+                {
+                    // Replace the weaker entry.
+                    top[1] = (delta, idx);
+                    // Re-sort.
+                    if top[1].0 > top[0].0
+                        || (top[1].0 == top[0].0 && top[1].1 < top[0].1)
+                    {
+                        top.swap(0, 1);
+                    }
+                }
+            }
+        }
+        idx += 1;
+    }
+
+    // Write adjectives then base name into buffer.
+    let mut pos: usize = 0;
+
+    if count > 0 {
+        // Sort output by property index for stable display order.
+        if count == 2 && top[0].1 > top[1].1 {
+            top.swap(0, 1);
+        }
+
+        for (i, &(delta, pidx)) in top[..count].iter().enumerate() {
+            // Safety: pidx is 0-15, ALL_PROPERTIES has 16 entries.
+            let prop = properties::ALL_PROPERTIES[pidx as usize];
+            if let Some((low, high)) = adjectives(prop) {
+                let adj = if delta >= 4 { high } else { low };
+                let adj_bytes = adj.as_bytes();
+                let mut j = 0;
+                while j < adj_bytes.len() && pos < buf.len() {
+                    buf[pos] = adj_bytes[j];
+                    pos += 1;
+                    j += 1;
+                }
+                // Add separator: ", " between adjectives, " " before name.
+                if i + 1 < count && pos + 2 <= buf.len() {
+                    buf[pos] = b',';
+                    pos += 1;
+                    buf[pos] = b' ';
+                    pos += 1;
+                } else if pos < buf.len() {
+                    buf[pos] = b' ';
+                    pos += 1;
+                }
+            }
+        }
+    }
+
+    // Append base item name.
+    let base = name(kind).as_bytes();
+    let mut j = 0;
+    while j < base.len() && pos < buf.len() {
+        buf[pos] = base[j];
+        pos += 1;
+        j += 1;
+    }
+
+    pos
+}
+
+// ---------------------------------------------------------------------------
 // Property-based stat derivation
 // ---------------------------------------------------------------------------
 
@@ -1325,5 +1460,145 @@ mod tests {
     fn from_snake_case_unknown() {
         assert_eq!(from_snake_case("dragon_sword"), None);
         assert_eq!(from_snake_case(""), None);
+    }
+
+    // ── describe_name tests ────────────────────────────────────────────
+
+    fn describe(kind: ItemKind, props: &PropertyBag) -> String {
+        let mut buf = [0u8; DESCRIBED_NAME_MAX];
+        let len = describe_name(kind, props, &mut buf);
+        core::str::from_utf8(&buf[..len]).unwrap().to_string()
+    }
+
+    #[test]
+    fn describe_default_gives_plain_name() {
+        for kind in ALL_KINDS {
+            let bag = default_properties(kind);
+            assert_eq!(
+                describe(kind, &bag),
+                name(kind),
+                "default bag for {:?} should produce plain name",
+                kind
+            );
+        }
+    }
+
+    #[test]
+    fn describe_single_low_boost() {
+        // Short Sword default HARD=7, boost to 9 (delta 2 → low tier "sturdy")
+        let mut bag = default_properties(ItemKind::ShortSword);
+        properties::set(&mut bag, properties::Property::Hard, 9);
+        assert_eq!(describe(ItemKind::ShortSword, &bag), "sturdy Short Sword");
+    }
+
+    #[test]
+    fn describe_single_high_boost() {
+        // Short Sword default HARD=7, boost to 12 (delta 5 → high tier "unyielding")
+        let mut bag = default_properties(ItemKind::ShortSword);
+        properties::set(&mut bag, properties::Property::Hard, 12);
+        assert_eq!(
+            describe(ItemKind::ShortSword, &bag),
+            "unyielding Short Sword"
+        );
+    }
+
+    #[test]
+    fn describe_two_adjectives_ordered_by_property_index() {
+        // Short Sword: boost HARD (idx 1, delta 5) and BRIGHT (idx 12, delta 3).
+        // Output order by property index: Hard before Bright.
+        let mut bag = default_properties(ItemKind::ShortSword);
+        properties::set(&mut bag, properties::Property::Hard, 12); // delta 5
+        properties::set(&mut bag, properties::Property::Bright, 3); // delta 3 (from 0)
+        assert_eq!(
+            describe(ItemKind::ShortSword, &bag),
+            "unyielding, glowing Short Sword"
+        );
+    }
+
+    #[test]
+    fn describe_max_two_adjectives() {
+        // Boost 4 properties. Only top 2 by delta should appear.
+        let mut bag = default_properties(ItemKind::ShortSword);
+        properties::set(&mut bag, properties::Property::Hot, 8); // delta 8 (from 0)
+        properties::set(&mut bag, properties::Property::Bright, 6); // delta 6 (from 0)
+        properties::set(&mut bag, properties::Property::Cold, 2); // delta 2 (from 0)
+        properties::set(&mut bag, properties::Property::Cursed, 1); // delta 1 (from 0)
+        let result = describe(ItemKind::ShortSword, &bag);
+        // Top 2 by delta: HOT (8), BRIGHT (6). Order by index: Hot(4), Bright(12).
+        assert_eq!(result, "smoldering, luminous Short Sword");
+    }
+
+    #[test]
+    fn describe_metal_organic_skipped() {
+        // Boost only Metal (idx 7) above default. Should produce plain name.
+        let mut bag = default_properties(ItemKind::ShortSword);
+        // Default Metal=8, boost to 15.
+        properties::set(&mut bag, properties::Property::Metal, 15);
+        assert_eq!(describe(ItemKind::ShortSword, &bag), "Short Sword");
+    }
+
+    #[test]
+    fn describe_ties_broken_by_property_index() {
+        // Two properties with equal delta. Lower index appears first.
+        let mut bag = default_properties(ItemKind::ShortSword);
+        properties::set(&mut bag, properties::Property::Hot, 3); // delta 3, idx 4
+        properties::set(&mut bag, properties::Property::Cold, 3); // delta 3, idx 5
+        let result = describe(ItemKind::ShortSword, &bag);
+        assert_eq!(result, "warm, chilled Short Sword");
+    }
+
+    #[test]
+    fn describe_decreased_no_adjective() {
+        // SHARP default=6 for Short Sword, decrease to 2. No adjective.
+        let mut bag = default_properties(ItemKind::ShortSword);
+        properties::set(&mut bag, properties::Property::Sharp, 2);
+        assert_eq!(describe(ItemKind::ShortSword, &bag), "Short Sword");
+    }
+
+    #[test]
+    fn describe_buffer_truncation() {
+        // Tiny buffer — should write as much as fits without panicking.
+        let mut bag = default_properties(ItemKind::ShortSword);
+        properties::set(&mut bag, properties::Property::Hot, 8);
+        let mut buf = [0u8; 5];
+        let len = describe_name(ItemKind::ShortSword, &bag, &mut buf);
+        // Should fill the buffer without exceeding it.
+        assert_eq!(len, 5);
+        // First 5 bytes of "smoldering Short Sword" = "smold"
+        assert_eq!(&buf, b"smold");
+    }
+
+    #[test]
+    fn describe_tempered_sword() {
+        // Simulate tempering: Short Sword + Strength Potion should boost
+        // combat properties and add BRIGHT through chain reactions.
+        // Rather than running the full interaction engine, manually set
+        // the expected post-temper state.
+        let mut bag = default_properties(ItemKind::ShortSword);
+        // Tempering adds HOT and BRIGHT through chain reactions.
+        properties::set(&mut bag, properties::Property::Hot, 2); // delta 2 → "warm"
+        properties::set(&mut bag, properties::Property::Bright, 5); // delta 5 → "luminous"
+        let result = describe(ItemKind::ShortSword, &bag);
+        assert_eq!(result, "warm, luminous Short Sword");
+    }
+
+    #[test]
+    fn describe_organic_skipped_even_with_large_delta() {
+        // Leather Armor default ORGANIC=6. Boost to 15 (delta 9).
+        // Organic is skipped, so no adjective from it.
+        let mut bag = default_properties(ItemKind::LeatherArmor);
+        properties::set(&mut bag, properties::Property::Organic, 15);
+        assert_eq!(describe(ItemKind::LeatherArmor, &bag), "Leather Armor");
+    }
+
+    #[test]
+    fn describe_adjectives_all_valid_utf8() {
+        // Every adjective string returned by adjectives() should be valid ASCII.
+        for &prop in &properties::ALL_PROPERTIES {
+            if let Some((low, high)) = adjectives(prop) {
+                assert!(low.is_ascii(), "low adjective for {:?} not ASCII", prop);
+                assert!(high.is_ascii(), "high adjective for {:?} not ASCII", prop);
+            }
+        }
     }
 }

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::rules::{balance, items as rules_items};
+use crate::rules::{balance, items as rules_items, properties::PropertyBag};
 use crate::types::{Coord, GameColor, Stat};
 
 // Re-export from rules so all existing `item::ItemKind` / `item::Equipment` paths work.
@@ -39,6 +39,17 @@ pub fn item_color(kind: ItemKind) -> GameColor {
 /// Human-readable name for an item kind.
 pub fn item_name(kind: ItemKind) -> &'static str {
     rules_items::name(kind)
+}
+
+/// Item name with qualitative adjectives for non-default properties.
+/// Returns the base name if properties match defaults, or a descriptive
+/// name like "smoldering, luminous Short Sword" if they differ.
+pub fn described_item_name(kind: ItemKind, props: &PropertyBag) -> String {
+    let mut buf = [0u8; rules_items::DESCRIBED_NAME_MAX];
+    let len = rules_items::describe_name(kind, props, &mut buf);
+    core::str::from_utf8(&buf[..len])
+        .unwrap_or(rules_items::name(kind))
+        .to_string()
 }
 
 /// Spawn weight for the weighted item spawn table.

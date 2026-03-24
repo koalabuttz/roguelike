@@ -413,6 +413,13 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
 
                 let cmd = match game_input {
                     GameInput::Key { key, command } => {
+                        // Dev console (backtick).
+                        #[cfg(feature = "dev-tools")]
+                        if key.code == KeyCode::Char('`') {
+                            run_dev_console(game.as_mut(), renderer, input)?;
+                            continue;
+                        }
+
                         // Dev-tools key handling (F1-F12, overlay cursor, etc.).
                         if dev.handle_dev_key(key, game.as_mut(), &mut game_data) {
                             continue;
@@ -782,6 +789,89 @@ fn run_look_mode<W: Write>(
                 InputResult::NoCommand => {}
                 InputResult::Disconnected => return Ok(()),
             }
+        }
+    }
+}
+
+/// Run the dev console modal. Text input for debug commands.
+#[cfg(feature = "dev-tools")]
+fn run_dev_console<W: Write>(
+    game: &mut dyn GameStep,
+    _renderer: &mut CrosstermRenderer<W>,
+    input: &mut dyn InputProvider,
+) -> io::Result<()> {
+    use roguelike_core::dev_tools;
+
+    let (cols, rows) = terminal::size().unwrap_or((80, 24));
+    let width = cols as usize;
+    let mut text_buf = String::new();
+    let mut output = String::from("Dev console. Type 'help' for commands.");
+    let mut stdout = io::stdout();
+
+    loop {
+        let prompt_row = rows.saturating_sub(2);
+        let output_row = rows.saturating_sub(1);
+
+        // Output line
+        queue!(
+            stdout,
+            cursor::MoveTo(0, output_row),
+            style::SetForegroundColor(style::Color::DarkGrey),
+            style::Print(format!("{:<width$}", &output)),
+            style::ResetColor
+        )?;
+
+        // Prompt line
+        let prompt = format!("> {}_", &text_buf);
+        queue!(
+            stdout,
+            cursor::MoveTo(0, prompt_row),
+            style::SetForegroundColor(style::Color::White),
+            style::SetBackgroundColor(style::Color::DarkGrey),
+            style::Print(format!("{:<width$}", &prompt)),
+            style::ResetColor
+        )?;
+        stdout.flush()?;
+
+        match input.wait_for_key()? {
+            InputResult::Command(key) => match key.code {
+                KeyCode::Esc => return Ok(()),
+                KeyCode::Enter => {
+                    if text_buf.is_empty() {
+                        continue;
+                    }
+                    // Parse and execute.
+                    match dev_tools::parse_console(&text_buf) {
+                        Ok(cmd) => {
+                            // Get inventory from either tier.
+                            if let Some(gs) = game.as_any_mut().downcast_mut::<GameState>() {
+                                output = dev_tools::exec_console(&mut gs.inventory, cmd);
+                            } else if let Some(adapter) =
+                                game.as_any_mut().downcast_mut::<MicroGameStateAdapter>()
+                            {
+                                output = dev_tools::exec_console(&mut adapter.game.inventory, cmd);
+                            } else {
+                                output = "Unsupported game tier.".into();
+                            }
+                        }
+                        Err(e) => {
+                            output = if e.is_empty() { String::new() } else { e };
+                        }
+                    }
+                    text_buf.clear();
+                }
+                KeyCode::Backspace => {
+                    text_buf.pop();
+                }
+                KeyCode::Char(c) if c.is_ascii_graphic() || c == ' ' => {
+                    if text_buf.len() < 60 {
+                        text_buf.push(c);
+                    }
+                }
+                _ => {}
+            },
+            InputResult::NoCommand => {}
+            InputResult::Disconnected => return Ok(()),
         }
     }
 }

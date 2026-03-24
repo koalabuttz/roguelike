@@ -139,6 +139,162 @@ pub const fn total_intensity(bag: &PropertyBag) -> u16 {
     total
 }
 
+/// 3-letter shorthand for display (matches the design document).
+pub const fn short_name(prop: Property) -> &'static str {
+    match prop {
+        Property::Sharp => "SHP",
+        Property::Hard => "HRD",
+        Property::Heavy => "HVY",
+        Property::Swift => "SWF",
+        Property::Hot => "HOT",
+        Property::Cold => "CLD",
+        Property::Wet => "WET",
+        Property::Metal => "MTL",
+        Property::Organic => "ORG",
+        Property::Venomous => "VNM",
+        Property::Magical => "MAG",
+        Property::Volatile => "VOL",
+        Property::Bright => "BRT",
+        Property::Corrosive => "CRS",
+        Property::Binding => "BND",
+        Property::Cursed => "CSD",
+    }
+}
+
+/// Look up a Property by lowercase name (e.g., "sharp", "hot", "corrosive").
+/// Case-insensitive, const fn with byte-by-byte comparison.
+pub const fn from_name(s: &str) -> Option<Property> {
+    // Use byte comparison for const fn compatibility.
+    let b = s.as_bytes();
+    match b.len() {
+        3 => {
+            if ci_eq(b, b"hot") {
+                return Some(Property::Hot);
+            }
+            if ci_eq(b, b"wet") {
+                return Some(Property::Wet);
+            }
+        }
+        4 => {
+            if ci_eq(b, b"hard") {
+                return Some(Property::Hard);
+            }
+            if ci_eq(b, b"cold") {
+                return Some(Property::Cold);
+            }
+        }
+        5 => {
+            if ci_eq(b, b"sharp") {
+                return Some(Property::Sharp);
+            }
+            if ci_eq(b, b"heavy") {
+                return Some(Property::Heavy);
+            }
+            if ci_eq(b, b"swift") {
+                return Some(Property::Swift);
+            }
+            if ci_eq(b, b"metal") {
+                return Some(Property::Metal);
+            }
+        }
+        6 => {
+            if ci_eq(b, b"cursed") {
+                return Some(Property::Cursed);
+            }
+            if ci_eq(b, b"bright") {
+                return Some(Property::Bright);
+            }
+        }
+        7 => {
+            if ci_eq(b, b"organic") {
+                return Some(Property::Organic);
+            }
+            if ci_eq(b, b"magical") {
+                return Some(Property::Magical);
+            }
+            if ci_eq(b, b"binding") {
+                return Some(Property::Binding);
+            }
+        }
+        8 => {
+            if ci_eq(b, b"venomous") {
+                return Some(Property::Venomous);
+            }
+            if ci_eq(b, b"volatile") {
+                return Some(Property::Volatile);
+            }
+        }
+        9 => {
+            if ci_eq(b, b"corrosive") {
+                return Some(Property::Corrosive);
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
+/// Case-insensitive byte comparison (const fn compatible).
+const fn ci_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        let ca = if a[i] >= b'A' && a[i] <= b'Z' {
+            a[i] + 32
+        } else {
+            a[i]
+        };
+        let cb = if b[i] >= b'A' && b[i] <= b'Z' {
+            b[i] + 32
+        } else {
+            b[i]
+        };
+        if ca != cb {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// Format a property bag as "SHP:6 HRD:7 MTL:8" (non-zero properties only).
+/// Returns the number of bytes written to `buf`.
+pub fn format_bag(bag: &PropertyBag, buf: &mut [u8]) -> usize {
+    let mut pos = 0;
+    for &prop in &ALL_PROPERTIES {
+        let val = get(bag, prop);
+        if val == 0 {
+            continue;
+        }
+        if pos > 0 && pos < buf.len() {
+            buf[pos] = b' ';
+            pos += 1;
+        }
+        let label = short_name(prop).as_bytes();
+        for &b in label {
+            if pos < buf.len() {
+                buf[pos] = b;
+                pos += 1;
+            }
+        }
+        if pos < buf.len() {
+            buf[pos] = b':';
+            pos += 1;
+        }
+        if val >= 10 && pos < buf.len() {
+            buf[pos] = b'0' + val / 10;
+            pos += 1;
+        }
+        if pos < buf.len() {
+            buf[pos] = b'0' + val % 10;
+            pos += 1;
+        }
+    }
+    pos
+}
+
 // Compile-time guarantees.
 const _: () = assert!(size_of::<Property>() == 1);
 const _: () = assert!(size_of::<PropertyBag>() == 8);
@@ -272,5 +428,46 @@ mod tests {
         // All 16 properties at max (15) = 240.
         let bag: PropertyBag = [0xFF; 8];
         assert_eq!(total_intensity(&bag), 240);
+    }
+
+    #[test]
+    fn from_name_roundtrips_all_properties() {
+        for &prop in &ALL_PROPERTIES {
+            let name = format!("{:?}", prop).to_ascii_lowercase();
+            assert_eq!(
+                from_name(&name),
+                Some(prop),
+                "from_name({:?}) should return {:?}",
+                name,
+                prop
+            );
+        }
+    }
+
+    #[test]
+    fn from_name_case_insensitive() {
+        assert_eq!(from_name("SHARP"), Some(Property::Sharp));
+        assert_eq!(from_name("Hot"), Some(Property::Hot));
+        assert_eq!(from_name("corrosive"), Some(Property::Corrosive));
+    }
+
+    #[test]
+    fn from_name_unknown() {
+        assert_eq!(from_name("fire"), None);
+        assert_eq!(from_name(""), None);
+    }
+
+    #[test]
+    fn format_bag_shows_nonzero() {
+        let mut bag = EMPTY;
+        set(&mut bag, Property::Sharp, 6);
+        set(&mut bag, Property::Hard, 7);
+        set(&mut bag, Property::Metal, 8);
+        let mut buf = [0u8; 80];
+        let len = format_bag(&bag, &mut buf);
+        let s = core::str::from_utf8(&buf[..len]).unwrap();
+        assert!(s.contains("SHP:6"));
+        assert!(s.contains("HRD:7"));
+        assert!(s.contains("MTL:8"));
     }
 }

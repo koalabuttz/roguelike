@@ -687,6 +687,151 @@ pub struct BatchRunStats {
     pub seeds_used: Vec<u64>,
 }
 
+// ---------------------------------------------------------------------------
+// Dev console — text-based debug commands operating on Inventory
+// ---------------------------------------------------------------------------
+
+use crate::rules::items::{self as rules_items, Inventory, ItemKind};
+use crate::rules::properties::{self, Property};
+
+/// Parse a console input string into a command.
+pub fn parse_console(input: &str) -> Result<ConsoleCommand, String> {
+    let parts: Vec<&str> = input.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err(String::new());
+    }
+    match parts[0] {
+        "spawn" => {
+            if parts.len() < 2 {
+                return Err("Usage: spawn <item_name>".into());
+            }
+            rules_items::from_snake_case(parts[1])
+                .map(ConsoleCommand::Spawn)
+                .ok_or_else(|| format!("Unknown item: {}", parts[1]))
+        }
+        "give_all" => Ok(ConsoleCommand::GiveAll),
+        "inspect" | "props" => {
+            if parts.len() < 2 {
+                return Err("Usage: inspect <slot a-z>".into());
+            }
+            parse_slot(parts[1])
+                .map(ConsoleCommand::Inspect)
+                .ok_or_else(|| "Slot must be a-z.".into())
+        }
+        "set" => {
+            if parts.len() < 4 {
+                return Err("Usage: set <slot> <property> <value>".into());
+            }
+            let slot = parse_slot(parts[1]).ok_or("Slot must be a-z.")?;
+            let prop = properties::from_name(parts[2])
+                .ok_or_else(|| format!("Unknown property: {}", parts[2]))?;
+            let val: u8 = parts[3]
+                .parse()
+                .map_err(|_| "Value must be 0-15.".to_string())?;
+            if val > 15 {
+                return Err("Value must be 0-15.".into());
+            }
+            Ok(ConsoleCommand::SetProp(slot, prop, val))
+        }
+        "items" => Ok(ConsoleCommand::ListItems),
+        "help" | "?" => Ok(ConsoleCommand::Help),
+        _ => Err(format!("Unknown command: {}", parts[0])),
+    }
+}
+
+/// Execute a console command on an inventory.
+pub fn exec_console(inv: &mut Inventory, cmd: ConsoleCommand) -> String {
+    match cmd {
+        ConsoleCommand::Spawn(kind) => {
+            if inv.add(kind) {
+                format!("Spawned {}.", rules_items::name(kind))
+            } else {
+                "Inventory full.".into()
+            }
+        }
+        ConsoleCommand::GiveAll => {
+            let mut count = 0;
+            for &kind in &rules_items::ALL_KINDS {
+                if inv.add(kind) {
+                    count += 1;
+                }
+            }
+            format!("Spawned {} items.", count)
+        }
+        ConsoleCommand::Inspect(slot) => match inv.get(slot as usize) {
+            Some(s) => {
+                let mut buf = [0u8; 80];
+                let len = properties::format_bag(&s.props, &mut buf);
+                let props_str = core::str::from_utf8(&buf[..len]).unwrap_or("?");
+                format!("{}: {}", rules_items::name(s.kind), props_str)
+            }
+            None => "Empty slot.".into(),
+        },
+        ConsoleCommand::SetProp(slot, prop, val) => match inv.get(slot as usize) {
+            Some(s) => {
+                let mut new_props = s.props;
+                let kind = s.kind;
+                properties::set(&mut new_props, prop, val);
+                inv.set_props(slot as usize, new_props);
+                format!(
+                    "Set {}:{} on {}.",
+                    properties::short_name(prop),
+                    val,
+                    rules_items::name(kind)
+                )
+            }
+            None => "Empty slot.".into(),
+        },
+        ConsoleCommand::ListItems => {
+            let mut out = String::new();
+            for &kind in &rules_items::ALL_KINDS {
+                let atk = rules_items::attack_bonus(kind);
+                let def = rules_items::defense_bonus(kind);
+                let heal = rules_items::heal_amount(kind);
+                let name = rules_items::name(kind);
+                let snake = name.to_ascii_lowercase().replace(' ', "_");
+                if atk > 0 {
+                    out.push_str(&format!("{} (+{}ATK) ", snake, atk));
+                } else if def > 0 {
+                    out.push_str(&format!("{} (+{}DEF) ", snake, def));
+                } else if heal > 0 {
+                    out.push_str(&format!("{} ({}HP) ", snake, heal));
+                } else {
+                    out.push_str(&format!("{} ", snake));
+                }
+            }
+            out
+        }
+        ConsoleCommand::Help => {
+            "spawn <item> | inspect <slot> | set <slot> <prop> <val> | give_all | items | help"
+                .into()
+        }
+    }
+}
+
+/// A dev console command (inventory-focused, works across all tiers).
+pub enum ConsoleCommand {
+    Spawn(ItemKind),
+    GiveAll,
+    Inspect(u8),
+    SetProp(u8, Property, u8),
+    ListItems,
+    Help,
+}
+
+fn parse_slot(s: &str) -> Option<u8> {
+    let bytes = s.as_bytes();
+    if bytes.len() == 1 {
+        match bytes[0] {
+            b'a'..=b'z' => Some(bytes[0] - b'a'),
+            b'A'..=b'Z' => Some(bytes[0] - b'A'),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1369,5 +1514,91 @@ mod tests {
         assert!(msg.contains("off"));
         assert_eq!(session.overlay_flags & (1 << 5), 0);
         assert!(session.monster_fov_cursor.is_none());
+    }
+
+    // ── Console tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn console_parse_spawn() {
+        let cmd = parse_console("spawn iron_mace").unwrap();
+        assert!(matches!(cmd, ConsoleCommand::Spawn(ItemKind::IronMace)));
+    }
+
+    #[test]
+    fn console_parse_spawn_unknown() {
+        assert!(parse_console("spawn dragon_sword").is_err());
+    }
+
+    #[test]
+    fn console_parse_inspect() {
+        let cmd = parse_console("inspect a").unwrap();
+        assert!(matches!(cmd, ConsoleCommand::Inspect(0)));
+    }
+
+    #[test]
+    fn console_parse_set() {
+        let cmd = parse_console("set b hot 8").unwrap();
+        assert!(matches!(cmd, ConsoleCommand::SetProp(1, Property::Hot, 8)));
+    }
+
+    #[test]
+    fn console_parse_set_overflow() {
+        assert!(parse_console("set a hot 20").is_err());
+    }
+
+    #[test]
+    fn console_parse_give_all() {
+        let cmd = parse_console("give_all").unwrap();
+        assert!(matches!(cmd, ConsoleCommand::GiveAll));
+    }
+
+    #[test]
+    fn console_parse_help() {
+        let cmd = parse_console("help").unwrap();
+        assert!(matches!(cmd, ConsoleCommand::Help));
+    }
+
+    #[test]
+    fn console_exec_spawn() {
+        let mut inv = Inventory::new();
+        let msg = exec_console(&mut inv, ConsoleCommand::Spawn(ItemKind::IronMace));
+        assert!(msg.contains("Iron Mace"));
+        assert_eq!(inv.len(), 1);
+    }
+
+    #[test]
+    fn console_exec_give_all() {
+        let mut inv = Inventory::new();
+        let msg = exec_console(&mut inv, ConsoleCommand::GiveAll);
+        assert!(msg.contains("8"));
+        assert_eq!(inv.len(), 8);
+    }
+
+    #[test]
+    fn console_exec_inspect() {
+        let mut inv = Inventory::new();
+        inv.add(ItemKind::ShortSword);
+        let msg = exec_console(&mut inv, ConsoleCommand::Inspect(0));
+        assert!(msg.contains("Short Sword"));
+        assert!(msg.contains("SHP:6"));
+        assert!(msg.contains("MTL:8"));
+    }
+
+    #[test]
+    fn console_exec_set_prop() {
+        let mut inv = Inventory::new();
+        inv.add(ItemKind::ShortSword);
+        let msg = exec_console(&mut inv, ConsoleCommand::SetProp(0, Property::Hot, 9));
+        assert!(msg.contains("HOT:9"));
+        // Verify property was actually set
+        let props = inv.get(0).unwrap().props;
+        assert_eq!(properties::get(&props, Property::Hot), 9);
+    }
+
+    #[test]
+    fn console_exec_inspect_empty() {
+        let mut inv = Inventory::new();
+        let msg = exec_console(&mut inv, ConsoleCommand::Inspect(0));
+        assert!(msg.contains("Empty"));
     }
 }

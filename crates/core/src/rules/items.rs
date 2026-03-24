@@ -289,8 +289,21 @@ pub fn is_better_armor(new: ItemKind, current: Option<ItemKind>) -> bool {
     is_upgrade(new, current, defense_bonus)
 }
 
+/// Look up an `ItemKind` by snake_case name (e.g., "health_potion", "iron_mace").
+/// Case-insensitive. Matches against the display name with spaces→underscores.
+pub fn from_snake_case(s: &str) -> Option<ItemKind> {
+    let lower = s.to_ascii_lowercase();
+    for &kind in &ALL_KINDS {
+        let n = name(kind).to_ascii_lowercase().replace(' ', "_");
+        if n == lower {
+            return Some(kind);
+        }
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
-// Property profiles (dead code in step 1 — nothing reads these at runtime)
+// Property profiles
 // ---------------------------------------------------------------------------
 
 /// Default property bag for an item kind. This is the starting state for
@@ -1045,5 +1058,34 @@ mod tests {
         // Same kind + same modified props → should stack
         assert_eq!(inv.len(), 1);
         assert_eq!(inv.get(0).unwrap().count, 2);
+    }
+
+    #[test]
+    fn from_snake_case_roundtrips_all_kinds() {
+        for &kind in &ALL_KINDS {
+            let snake = name(kind).to_ascii_lowercase().replace(' ', "_");
+            assert_eq!(
+                from_snake_case(&snake),
+                Some(kind),
+                "from_snake_case({:?}) should return {:?}",
+                snake,
+                kind
+            );
+        }
+    }
+
+    #[test]
+    fn from_snake_case_case_insensitive() {
+        assert_eq!(from_snake_case("IRON_MACE"), Some(ItemKind::IronMace));
+        assert_eq!(
+            from_snake_case("Health_Potion"),
+            Some(ItemKind::HealthPotion)
+        );
+    }
+
+    #[test]
+    fn from_snake_case_unknown() {
+        assert_eq!(from_snake_case("dragon_sword"), None);
+        assert_eq!(from_snake_case(""), None);
     }
 }

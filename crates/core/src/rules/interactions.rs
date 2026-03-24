@@ -475,9 +475,15 @@ pub fn interact(
                     set_by_index(a, rule.target, cur.saturating_sub(rule.modifier));
                 }
                 ResultType::Cancel => {
+                    // Amount to cancel is determined by snapshot values (how
+                    // much was present at the start of the pass), but the
+                    // subtraction applies to the working copy — consistent
+                    // with how BoostA/ReduceA read from the working copy.
                     let amount = val_a.min(val_b);
-                    set_by_index(a, rule.prop_a, val_a - amount);
-                    set_by_index(b, rule.prop_b, val_b - amount);
+                    let cur_a = get_by_index(a, rule.prop_a);
+                    let cur_b = get_by_index(b, rule.prop_b);
+                    set_by_index(a, rule.prop_a, cur_a.saturating_sub(amount));
+                    set_by_index(b, rule.prop_b, cur_b.saturating_sub(amount));
                 }
                 ResultType::Produce => {
                     if (effect_count as usize) < MAX_EFFECTS {

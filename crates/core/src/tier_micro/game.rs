@@ -482,10 +482,10 @@ impl MicroGameState {
 
         // Consume source first (if consumable) so it can't interfere with
         // target re-insertion, and to free a slot for the split target.
+        // Non-consumable source props are updated AFTER the target succeeds,
+        // so the undo path doesn't need to revert them.
         if rules_items::is_consumable(source.kind) {
             self.inventory.remove_one(source_slot as usize);
-        } else {
-            self.inventory.set_props(source_slot as usize, b_props);
         }
 
         // Remove target and re-add with modified props. This maintains the
@@ -500,6 +500,11 @@ impl MicroGameState {
             }
             self.log.add(GameEvent::InventoryFull);
             return false;
+        }
+
+        // Update non-consumable source props after target succeeded.
+        if !rules_items::is_consumable(source.kind) {
+            self.inventory.set_props(source_slot as usize, b_props);
         }
 
         self.log.add(GameEvent::CombineItems {

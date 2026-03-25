@@ -1457,6 +1457,24 @@ fn action_label(action: InvAction) -> &'static [u8] {
     }
 }
 
+/// Draw a described item name (adjectives + base name) at screen position.
+/// Returns the number of characters drawn.
+/// Lives in .text (not .hiramcode) so its buffer doesn't inflate
+/// render_inventory's static stack frame in .noinit.state.
+#[inline(never)]
+fn draw_described_name(
+    x: u8,
+    y: u8,
+    kind: roguelike_core::rules::items::ItemKind,
+    props: &roguelike_core::rules::properties::PropertyBag,
+    color: u8,
+) -> u8 {
+    let mut buf = [0u8; 32];
+    let len = items::describe_name(kind, props, &mut buf);
+    c64::draw_text(x, y, &buf[..len], color);
+    len as u8
+}
+
 /// Count selectable equipped items (0, 1, or 2).
 pub fn equip_count(state: &MicroGameState) -> u8 {
     state.equipment.weapon.is_some() as u8 + state.equipment.armor.is_some() as u8
@@ -1500,7 +1518,7 @@ pub fn render_inventory(
                 c64::COLOR_GREEN
             };
             c64::draw_text(bx + 3, row, b"W: ", color);
-            c64::draw_text(bx + 6, row, items::name(kind).as_bytes(), color);
+            draw_described_name(bx + 6, row, kind, &state.equipment.weapon_props, color);
             row += 1;
             equip_idx += 1;
         }
@@ -1511,7 +1529,7 @@ pub fn render_inventory(
                 c64::COLOR_GREEN
             };
             c64::draw_text(bx + 3, row, b"A: ", color);
-            c64::draw_text(bx + 6, row, items::name(kind).as_bytes(), color);
+            draw_described_name(bx + 6, row, kind, &state.equipment.armor_props, color);
             row += 1;
         }
         row += 1; // blank line separator
@@ -1534,9 +1552,8 @@ pub fn render_inventory(
         };
         c64::draw_char(col, row, letter, label_color);
         c64::draw_char(col + 1, row, b')', label_color);
-        c64::draw_text(col + 3, row, items::name(slot.kind).as_bytes(), name_color);
+        let name_len = draw_described_name(col + 3, row, slot.kind, &slot.props, name_color);
         if slot.count > 1 {
-            let name_len = items::name(slot.kind).len() as u8;
             let p = col + 3 + name_len + 1;
             c64::draw_char(p, row, b'X', c64::COLOR_GREY);
             c64::draw_number(p + 1, row, slot.count, c64::COLOR_GREY);

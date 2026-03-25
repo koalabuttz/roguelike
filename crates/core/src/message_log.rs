@@ -139,6 +139,9 @@ pub fn format_event(event: GameEvent) -> String {
             )
         }
         GameEvent::CombineNoEffect => "Nothing happens.".into(),
+        GameEvent::ItemDestroyed { kind } => {
+            format!("Your {} is destroyed!", items::name(kind))
+        }
         GameEvent::AutorunStop { cause } => match cause {
             AutorunStopCause::WallReached => "Path blocked.".into(),
             AutorunStopCause::MonsterSpotted => "Monster spotted!".into(),

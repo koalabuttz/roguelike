@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.5.0] - 2026-03-18
 
 ### Added
+- Add item death when material property reaches zero (#175)
 - Add property visibility in look mode and MCP observe (#171)
 - Add dev text console for debug commands (#156)
 - Emergent item interaction engine (property system step 2) (#155)

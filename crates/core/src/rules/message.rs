@@ -133,6 +133,8 @@ pub enum GameEvent {
     CombineItems { target: ItemKind, source: ItemKind },
     /// Combine attempt produced no property changes.
     CombineNoEffect,
+    /// An item was destroyed when its material property reached zero.
+    ItemDestroyed { kind: ItemKind },
 }
 
 // Compile-time size checks — keep these small for constrained tiers.

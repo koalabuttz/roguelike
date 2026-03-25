@@ -37,7 +37,7 @@ impl MicroMessageLog {
 
     pub fn add(&mut self, event: GameEvent) {
         self.events[self.head as usize] = Some(event);
-        self.head = (self.head + 1) % MSG_COUNT as u8;
+        self.head = (self.head + 1) & (MSG_COUNT as u8 - 1);
         self.total = self.total.wrapping_add(1);
     }
 
@@ -46,7 +46,7 @@ impl MicroMessageLog {
         if n as usize >= MSG_COUNT {
             return None;
         }
-        let idx = (self.head as usize + MSG_COUNT - 1 - n as usize) % MSG_COUNT;
+        let idx = (self.head as usize + MSG_COUNT - 1 - n as usize) & (MSG_COUNT - 1);
         self.events[idx]
     }
 

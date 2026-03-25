@@ -823,6 +823,10 @@ fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
             copy_bytes(buf, p, items::name(source).as_bytes())
         }
         GameEvent::CombineNoEffect => copy_bytes(buf, 0, b"Nothing happens."),
+        GameEvent::ItemDestroyed { kind } => {
+            let p = copy_bytes(buf, 0, items::name(kind).as_bytes());
+            copy_bytes(buf, p, b" destroyed!")
+        }
     };
 }
 

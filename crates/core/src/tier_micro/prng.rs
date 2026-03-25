@@ -54,7 +54,7 @@ impl LfsrRng16 {
         }
         let span_u8 = span as u8;
         // Find smallest bitmask >= span: next_power_of_two - 1.
-        let mask = if span_u8.is_power_of_two() {
+        let mask = if span_u8 & (span_u8 - 1) == 0 {
             span_u8 - 1
         } else {
             // Manual next_power_of_two for u8 to avoid widening.

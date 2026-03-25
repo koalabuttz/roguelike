@@ -402,6 +402,23 @@ pub const fn default_properties(kind: ItemKind) -> PropertyBag {
 }
 
 // ---------------------------------------------------------------------------
+// Item death (material property destruction)
+// ---------------------------------------------------------------------------
+
+/// Check if an item's structural material has been destroyed by interaction.
+///
+/// Returns true if METAL reached 0 (for items that start with METAL > 0)
+/// or ORGANIC reached 0 (for items that start with ORGANIC > 0). Items
+/// without material properties (potions) cannot die.
+pub fn is_material_dead(kind: ItemKind, props: &PropertyBag) -> bool {
+    let default = default_properties(kind);
+    let had_metal = properties::get(&default, properties::Property::Metal) > 0;
+    let had_organic = properties::get(&default, properties::Property::Organic) > 0;
+    (had_metal && properties::get(props, properties::Property::Metal) == 0)
+        || (had_organic && properties::get(props, properties::Property::Organic) == 0)
+}
+
+// ---------------------------------------------------------------------------
 // Qualitative property descriptors
 // ---------------------------------------------------------------------------
 
@@ -1615,5 +1632,71 @@ mod tests {
                 assert!(high.is_ascii(), "high adjective for {:?} not ASCII", prop);
             }
         }
+    }
+
+    // ── is_material_dead tests ──────────────────────────────────────
+
+    #[test]
+    fn material_dead_metal_zero() {
+        let mut bag = default_properties(ItemKind::ShortSword);
+        assert!(!is_material_dead(ItemKind::ShortSword, &bag));
+        properties::set(&mut bag, properties::Property::Metal, 0);
+        assert!(is_material_dead(ItemKind::ShortSword, &bag));
+    }
+
+    #[test]
+    fn material_dead_organic_zero() {
+        let mut bag = default_properties(ItemKind::LeatherArmor);
+        assert!(!is_material_dead(ItemKind::LeatherArmor, &bag));
+        properties::set(&mut bag, properties::Property::Organic, 0);
+        assert!(is_material_dead(ItemKind::LeatherArmor, &bag));
+    }
+
+    #[test]
+    fn material_dead_metal_above_zero() {
+        let mut bag = default_properties(ItemKind::ShortSword);
+        properties::set(&mut bag, properties::Property::Metal, 1);
+        assert!(!is_material_dead(ItemKind::ShortSword, &bag));
+    }
+
+    #[test]
+    fn potions_cannot_die() {
+        for kind in [
+            ItemKind::HealthPotion,
+            ItemKind::GreaterHealthPotion,
+            ItemKind::StrengthPotion,
+        ] {
+            let mut bag = default_properties(kind);
+            // Zero out everything — potions still can't die (no material)
+            bag = properties::EMPTY;
+            assert!(
+                !is_material_dead(kind, &bag),
+                "{:?} should not be material-dead",
+                kind
+            );
+        }
+    }
+
+    #[test]
+    fn is_material_dead_all_equipment() {
+        // All metal items die when METAL=0
+        for kind in [
+            ItemKind::ShortSword,
+            ItemKind::IronMace,
+            ItemKind::LongSword,
+            ItemKind::ChainMail,
+        ] {
+            let mut bag = default_properties(kind);
+            properties::set(&mut bag, properties::Property::Metal, 0);
+            assert!(
+                is_material_dead(kind, &bag),
+                "{:?} should die when METAL=0",
+                kind
+            );
+        }
+        // Leather armor dies when ORGANIC=0
+        let mut bag = default_properties(ItemKind::LeatherArmor);
+        properties::set(&mut bag, properties::Property::Organic, 0);
+        assert!(is_material_dead(ItemKind::LeatherArmor, &bag));
     }
 }

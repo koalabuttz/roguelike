@@ -42,18 +42,21 @@ fn panic(_info: &PanicInfo) -> ! {
 #[unsafe(link_section = ".noinit.state")]
 static mut STATE: MaybeUninit<MicroGameState> = MaybeUninit::uninit();
 
-/// Previous-frame snapshot for differential rendering (~810 bytes).
-/// Placed in main RAM (.noinit) to free HIRAM for cold render code.
-/// Only accessed during rendering (I/O visible), never during banked compute.
-#[unsafe(link_section = ".noinit")]
-static mut DIFF: render::DiffState = render::DiffState::new();
-
-/// Scratch buffer for save/load serialization (~4 KB).
-/// Placed in main RAM so it's accessible while KERNAL is banked in.
-/// Only used during save/load operations — not during gameplay.
+/// Save buffer and diff state share memory — they're never live simultaneously.
+/// `save_buf` is used during disk I/O only. `diff` is used during rendering only.
+/// After any save/load operation, `diff` must be reinitialized via `snapshot()`.
 const SAVE_BUF_SIZE: usize = 4096;
+
+#[repr(C)]
+union SharedBuf {
+    save_buf: [u8; SAVE_BUF_SIZE],
+    diff: core::mem::ManuallyDrop<render::DiffState>,
+}
+
 #[unsafe(link_section = ".noinit")]
-static mut SAVE_BUF: [u8; SAVE_BUF_SIZE] = [0u8; SAVE_BUF_SIZE];
+static mut SHARED: SharedBuf = SharedBuf {
+    save_buf: [0u8; SAVE_BUF_SIZE],
+};
 
 /// Application states for the main loop.
 enum AppState {
@@ -111,7 +114,7 @@ fn run_title(hint: SaveHint) -> TitleResult {
         SaveHint::Preloaded(size) => Some(size),
         SaveHint::NoSave => None,
         SaveHint::CheckDisk => {
-            let buf = unsafe { &mut SAVE_BUF };
+            let buf = unsafe { &mut SHARED.save_buf };
             disk::has_save_and_preload(buf)
         }
     };
@@ -784,7 +787,7 @@ fn run_autorun(state: &mut MicroGameState, dir: Direction) {
 #[inline(never)]
 fn render_and_snapshot(state: &MicroGameState) {
     render::render_all(state);
-    let diff = unsafe { &mut DIFF };
+    let diff = unsafe { &mut SHARED.diff };
     diff.snapshot(state, render::viewport_pos(state));
 }
 
@@ -817,7 +820,7 @@ fn start_and_present_game(seed: u16, width: u8, height: u8) {
 /// Post-step rendering: full redraw on descent, viewport scroll, or diff render.
 #[inline(never)]
 fn render_after_step(state: &MicroGameState, old_depth: u8) {
-    let diff = unsafe { &mut DIFF };
+    let diff = unsafe { &mut SHARED.diff };
     if state.depth != old_depth {
         let vp = render::viewport_pos(state);
         render::render_all(state);
@@ -843,7 +846,7 @@ fn render_after_step(state: &MicroGameState, old_depth: u8) {
 /// success (data remains in SAVE_BUF for immediate re-use on title screen).
 #[inline(never)]
 fn save_game(state: &MicroGameState) -> Option<usize> {
-    let buf = unsafe { &mut SAVE_BUF };
+    let buf = unsafe { &mut SHARED.save_buf };
     let mut pos = 0;
     save::serialize(state, &mut |b| {
         if pos < SAVE_BUF_SIZE {
@@ -863,7 +866,7 @@ fn save_game(state: &MicroGameState) -> Option<usize> {
 /// Scratches the save file on success (permadeath semantics).
 #[inline(never)]
 fn deserialize_save(size: usize) -> Option<&'static mut MicroGameState> {
-    let buf = unsafe { &SAVE_BUF };
+    let buf = unsafe { &SHARED.save_buf };
     let state = unsafe { &mut *STATE.as_mut_ptr() };
     let mut pos = 0;
     let result = save::deserialize(state, &mut || {

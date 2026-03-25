@@ -79,6 +79,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Inventory UX polish: equip bonus display, equipped indicators, item coloring (#89, #92, #93)
 
 ### Fixed
+- Check is_material_dead for non-consumable source items in combine_items (#186)
 - Fix combine undo not reverting non-consumable source mutation (#167)
 - Fix combine stacking invariant: consume source before re-adding target (#166)
 - Fix Cancel rule reading snapshot instead of working copy in interact() (#165)

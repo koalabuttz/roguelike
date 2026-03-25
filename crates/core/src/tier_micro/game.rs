@@ -480,11 +480,14 @@ impl MicroGameState {
             return false;
         }
 
-        // Consume source first (if consumable) so it can't interfere with
-        // target re-insertion, and to free a slot for the split target.
-        // Non-consumable source props are updated AFTER the target succeeds,
-        // so the undo path doesn't need to revert them.
-        if rules_items::is_consumable(source.kind) {
+        // Source is removed if consumable OR if its material was destroyed
+        // by the interaction (Cancel rules can reduce METAL/ORGANIC on both
+        // items). Remove source first to free a slot for the split target.
+        let source_consumed = rules_items::is_consumable(source.kind);
+        let source_destroyed =
+            !source_consumed && rules_items::is_material_dead(source.kind, &b_props);
+        let source_removed = source_consumed || source_destroyed;
+        if source_removed {
             self.inventory.remove_one(source_slot as usize);
         }
 
@@ -495,9 +498,11 @@ impl MicroGameState {
         self.inventory.remove_one(target_slot as usize);
         if !target_destroyed && !self.inventory.add_with_props(target.kind, a_props) {
             // Inventory full — undo everything.
+            // Invariant: remove_one never mutates props on the remaining
+            // stack, so add_with_props with original props always re-stacks.
             let ok = self.inventory.add_with_props(target.kind, target.props);
             debug_assert!(ok, "undo target re-insert must succeed");
-            if rules_items::is_consumable(source.kind) {
+            if source_removed {
                 let ok = self.inventory.add_with_props(source.kind, source.props);
                 debug_assert!(ok, "undo source re-insert must succeed");
             }
@@ -505,8 +510,8 @@ impl MicroGameState {
             return false;
         }
 
-        // Update non-consumable source props after target succeeded.
-        if !rules_items::is_consumable(source.kind) {
+        // Update surviving non-removed source's props.
+        if !source_removed {
             self.inventory.set_props(source_slot as usize, b_props);
         }
 
@@ -517,6 +522,11 @@ impl MicroGameState {
         if target_destroyed {
             self.log.add(GameEvent::ItemDestroyed {
                 kind: target.kind,
+            });
+        }
+        if source_destroyed {
+            self.log.add(GameEvent::ItemDestroyed {
+                kind: source.kind,
             });
         }
 
@@ -1761,6 +1771,30 @@ mod tests {
             "HARD should increase: before={}, after={}",
             hard_before,
             hard_after,
+        );
+    }
+
+    #[test]
+    fn combine_destroys_source_with_dead_material() {
+        use crate::rules::items::default_properties;
+        use crate::rules::properties::{self, Property};
+        let mut g = MicroGameState::new_default(42);
+        // Target sword with COLD:5 so the CLD+HOT Cancel rule fires.
+        let mut target_props = default_properties(ItemKind::ShortSword);
+        properties::set(&mut target_props, Property::Cold, 5);
+        g.inventory.add_with_props(ItemKind::ShortSword, target_props);
+        // Source sword with METAL zeroed (simulates prior corrosion) and
+        // HOT:5 to trigger the Cancel rule and make properties change.
+        let mut source_props = default_properties(ItemKind::ShortSword);
+        properties::set(&mut source_props, Property::Metal, 0);
+        properties::set(&mut source_props, Property::Hot, 5);
+        g.inventory.add_with_props(ItemKind::ShortSword, source_props);
+
+        let result = g.step(GameCommand::Combine(0, 1));
+        assert!(result.action_taken);
+        assert!(
+            g.inventory.get(1).is_none(),
+            "non-consumable source with dead material should be destroyed"
         );
     }
 }

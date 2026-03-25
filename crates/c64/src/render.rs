@@ -818,7 +818,8 @@ fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
 /// Render the 2 most recent messages on rows 23-24.
 #[inline(never)]
 pub(crate) fn render_messages(state: &MicroGameState) {
-    let mut buf = [b' '; 40];
+    let mut buf = unsafe { &mut crate::SHARED.msg_buf };
+    *buf = [b' '; 40];
 
     // Row 23: second most recent (dim)
     match state.log.recent(1) {
@@ -852,7 +853,7 @@ pub(crate) fn render_messages(state: &MicroGameState) {
 // ---------------------------------------------------------------------------
 
 /// Viewport dirty bitfield size: ceil(40 * 22 / 8) = 110 bytes.
-const DIRTY_SIZE: usize = ((VIEW_W as usize) * (VIEW_H as usize) + 7) / 8;
+pub(crate) const DIRTY_SIZE: usize = ((VIEW_W as usize) * (VIEW_H as usize) + 7) / 8;
 
 /// Packed alive-flag bitfield size for entities.
 const ENTITY_ALIVE_BYTES: usize = (MAX_ENTITIES + 7) / 8;
@@ -961,7 +962,8 @@ fn mark_dirty_world(dirty: &mut [u8; DIRTY_SIZE], vx: u8, vy: u8, wx: u8, wy: u8
 /// or `render_all()`. Computes a dirty bitfield from FOV/entity/item
 /// changes and redraws only those cells via `restore_tile()`.
 pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
-    let mut dirty = [0u8; DIRTY_SIZE];
+    let mut dirty = unsafe { &mut crate::SHARED.dirty };
+    *dirty = [0u8; DIRTY_SIZE];
 
     // --- 1. FOV visibility changes ---
     // XOR old and new visible bitfields; differing bits indicate tiles
@@ -1212,7 +1214,8 @@ pub fn draw_cursor(vx: u8, vy: u8, cx: u8, cy: u8) {
 /// Render the look mode status bar on row 22, replacing the normal status bar.
 /// Shows: [L] terrain + entity/item name based on visibility.
 pub fn render_look_status(state: &MicroGameState, cx: u8, cy: u8) {
-    let mut buf = [b' '; 40];
+    let mut buf = unsafe { &mut crate::SHARED.msg_buf };
+    *buf = [b' '; 40];
 
     let mut p = copy_bytes(&mut buf, 0, b"[L] ");
 
@@ -1859,7 +1862,8 @@ pub fn render_message_history(state: &MicroGameState) {
     c64::fill_row(0, 0xC0, c64::COLOR_CYAN);
     c64::draw_text(2, 0, b"MESSAGE LOG", c64::COLOR_BLACK);
 
-    let mut buf = [b' '; 40];
+    let mut buf = unsafe { &mut crate::SHARED.msg_buf };
+    *buf = [b' '; 40];
 
     // Count how many messages actually exist (log may not be full yet).
     let mut count: u8 = 0;

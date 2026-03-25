@@ -48,13 +48,15 @@ static mut STATE: MaybeUninit<MicroGameState> = MaybeUninit::uninit();
 const SAVE_BUF_SIZE: usize = 4096;
 
 #[repr(C)]
-union SharedBuf {
-    save_buf: [u8; SAVE_BUF_SIZE],
-    diff: core::mem::ManuallyDrop<render::DiffState>,
+pub(crate) union SharedBuf {
+    pub save_buf: [u8; SAVE_BUF_SIZE],
+    pub diff: core::mem::ManuallyDrop<render::DiffState>,
+    pub dirty: [u8; render::DIRTY_SIZE],
+    pub msg_buf: [u8; 40],
 }
 
 #[unsafe(link_section = ".noinit")]
-static mut SHARED: SharedBuf = SharedBuf {
+pub(crate) static mut SHARED: SharedBuf = SharedBuf {
     save_buf: [0u8; SAVE_BUF_SIZE],
 };
 

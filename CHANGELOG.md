@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.5.0] - 2026-03-18
 
 ### Added
+- Add property visibility in look mode and MCP observe (#171)
 - Add dev text console for debug commands (#156)
 - Emergent item interaction engine (property system step 2) (#155)
 - Add more item types for deeper dungeon progression (#16)
@@ -58,6 +59,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- C64: Replace RangeInclusive iterators and inventory iterator adaptors with manual loops (#180)
+- C64: Overlap SAVE_BUF and DiffState with union to save 809 bytes .noinit (#182)
 - Centralize nibble access: move get/set_by_index to properties.rs (#160)
 - Fix tautological fuzz test assertions and use .contains() in test code (#158)
 - Step 3: Combat reads from property bags (#157)

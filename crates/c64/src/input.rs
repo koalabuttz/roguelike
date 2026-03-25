@@ -26,7 +26,7 @@ const KEY_RETURN: u8 = c64::PETSCII_RETURN;
 const KEY_RUNSTOP: u8 = c64::PETSCII_STOP;
 const KEY_DELETE: u8 = c64::PETSCII_DELETE;
 #[cfg(feature = "dev-console")]
-const KEY_LEFTARROW: u8 = 0x5F; // ← key (top-left of C64 keyboard)
+const KEY_DEV_CONSOLE: u8 = 0x85; // F1 key
 
 // Dev console flag — set by wait_for_input when ← is pressed.
 #[cfg(feature = "dev-console")]
@@ -251,7 +251,7 @@ pub fn wait_for_input() -> GameCommand {
         let (key, shifted) = key_repeat();
         if key != 0 {
             #[cfg(feature = "dev-console")]
-            if key == KEY_LEFTARROW {
+            if key == KEY_DEV_CONSOLE {
                 unsafe { DEV_CONSOLE = true; }
                 return GameCommand::Wait;
             }

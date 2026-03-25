@@ -374,7 +374,7 @@ pub const PETSCII_RIGHT: u8 = 0x1D;
 /// 0 = unused/ignored key.
 const KEY_MATRIX: [[u8; 8]; 8] = [
     // PA0: DEL, RETURN, CRSR_H, F7, F1, F3, F5, CRSR_V
-    [PETSCII_DELETE, PETSCII_RETURN, KEY_CRSR_HORIZ, 0, 0, 0, 0, KEY_CRSR_VERT],
+    [PETSCII_DELETE, PETSCII_RETURN, KEY_CRSR_HORIZ, 0, 0x85, 0, 0, KEY_CRSR_VERT],
     // PA1: 3, W, A, 4, Z, S, E, LSHIFT
     [b'3', b'W', b'A', b'4', b'Z', b'S', b'E', 0],
     // PA2: 5, R, D, 6, C, F, T, X

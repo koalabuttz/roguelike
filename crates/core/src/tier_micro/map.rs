@@ -228,7 +228,7 @@ impl MicroMap {
     #[cfg_attr(feature = "c64-overlay", unsafe(link_section = ".overlay"))]
     pub fn generate(&mut self, rng: &mut LfsrRng16) -> Pos {
         // Reset to all walls (TILE_WALL=0, so zero the packed array)
-        let packed_size = ((self.width as usize) * (self.height as usize)).div_ceil(2);
+        let packed_size = (((self.width as usize) * (self.height as usize)) + 1) >> 1;
         self.tiles[..packed_size].fill(0);
         self.room_count = 0;
 
@@ -385,7 +385,7 @@ mod tests {
         let (b, sb) = make_map(1234);
         assert_eq!(sa, sb);
         assert_eq!(a.room_count, b.room_count);
-        let packed_size = ((a.width as usize) * (a.height as usize)).div_ceil(2);
+        let packed_size = (((a.width as usize) * (a.height as usize)) + 1) >> 1;
         assert_eq!(a.tiles[..packed_size], b.tiles[..packed_size]);
     }
 

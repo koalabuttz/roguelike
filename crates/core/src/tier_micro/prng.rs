@@ -38,25 +38,36 @@ impl LfsrRng16 {
         (hi << 8) | lo
     }
 
-    /// Random value in `[min, max]` inclusive, using rejection sampling.
+    /// Random value in `[min, max]` inclusive, using bitmask rejection sampling.
+    ///
+    /// Uses bitmasking instead of modulo to avoid pulling in `__umodhi3`
+    /// (159 bytes) and `__udivmodhi4` (234 bytes) on 6502. Masks to the
+    /// smallest power-of-2 >= span, then rejects values outside range.
+    /// Worst-case rejection rate is 50% (when span is just above a power of 2).
     pub fn range_u8(&mut self, min: u8, max: u8) -> u8 {
         if min >= max {
             return min;
         }
-        let span = max as u16 - min as u16 + 1;
-        if span == 256 {
+        let span = (max - min) as u16 + 1;
+        if span >= 256 {
             return self.next_u8();
         }
         let span_u8 = span as u8;
-        let reject = (256u16 % span) as u8;
-        if reject == 0 {
-            return min + (self.next_u8() % span_u8);
-        }
-        let threshold = (256u16 - reject as u16) as u8;
+        // Find smallest bitmask >= span: next_power_of_two - 1.
+        let mask = if span_u8.is_power_of_two() {
+            span_u8 - 1
+        } else {
+            // Manual next_power_of_two for u8 to avoid widening.
+            let mut v = span_u8 - 1;
+            v |= v >> 1;
+            v |= v >> 2;
+            v |= v >> 4;
+            v // v is now (next_power_of_two - 1), i.e. the bitmask
+        };
         loop {
-            let r = self.next_u8();
-            if r < threshold {
-                return min + (r % span_u8);
+            let r = self.next_u8() & mask;
+            if r < span_u8 {
+                return min + r;
             }
         }
     }

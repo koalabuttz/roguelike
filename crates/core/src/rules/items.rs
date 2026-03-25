@@ -555,7 +555,7 @@ pub const fn attack_from_bag(bag: &PropertyBag) -> u8 {
     // Primary: SHARP for edged weapons, (HARD+HEAVY)/2 for blunt
     let blunt = (hard + heavy) / 2; // max 15, fits u8
     let primary = if sharp >= blunt { sharp } else { blunt };
-    let base = primary.div_ceil(2);
+    let base = (primary + 1) >> 1;
 
     // Elemental bonus: strongest elemental property / 4
     let hot = properties::get(bag, properties::Property::Hot);

@@ -169,13 +169,13 @@ fn decode_item_kind(b: u8) -> ItemKind {
 /// Number of bytes in the packed tile array for the given dimensions.
 fn packed_tile_count(width: u8, height: u8) -> usize {
     let tiles = (width as usize) * (height as usize);
-    tiles.div_ceil(2)
+    (tiles + 1) >> 1
 }
 
 /// Number of bytes in the explored bitfield for the given dimensions.
 fn bitfield_byte_count(width: u8, height: u8) -> usize {
     let tiles = (width as usize) * (height as usize);
-    tiles.div_ceil(8)
+    (tiles + 7) >> 3
 }
 
 // ---------------------------------------------------------------------------

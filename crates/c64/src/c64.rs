@@ -607,6 +607,90 @@ core::arch::global_asm!(
     "  sta (__rc4),y",
     "  tax",                    // X = 0
     "  rts",
+
+    // --- __mulhi3: u16 multiply ---
+    // ~47 bytes. Replaces 55-byte version (removes dead JMPs, tightens exit).
+    // Entry: A:X = multiplicand, rc2:rc3 = multiplier
+    // Exit:  A(lo):X(hi) = product (low 16 bits)
+    ".section .text.__mulhi3,\"ax\",@progbits",
+    ".globl __mulhi3",
+    "__mulhi3:",
+    "  ldy __rc3",
+    "  bne .Lmul_start",
+    "  ldy __rc2",
+    "  beq .Lmul_zero",
+    ".Lmul_start:",
+    "  sta __rc4",              // save multiplicand lo
+    "  stx __rc5",              // save multiplicand hi
+    "  ldy #0",                 // result_lo = 0
+    "  ldx #0",                 // result_hi = 0
+    ".Lmul_loop:",
+    "  lsr __rc3",              // shift multiplier right
+    "  ror __rc2",
+    "  bcc .Lmul_noadd",
+    "  tya",
+    "  clc",
+    "  adc __rc4",              // result_lo += multiplicand_lo
+    "  tay",
+    "  txa",
+    "  adc __rc5",              // result_hi += multiplicand_hi
+    "  tax",
+    ".Lmul_noadd:",
+    "  asl __rc4",              // shift multiplicand left
+    "  rol __rc5",
+    "  lda __rc3",
+    "  ora __rc2",
+    "  bne .Lmul_loop",
+    "  tya",                    // A = result_lo
+    "  rts",
+    ".Lmul_zero:",
+    "  ldx #0",
+    "  tya",                    // A = 0 (Y was 0 from ldy __rc2)
+    "  rts",
+
+    // --- __ashlqi3: u8 left shift ---
+    // 9 bytes. Replaces 11-byte version (removes redundant cpx after dex).
+    // Entry: A = value, X = shift count
+    // Exit:  A = value << count
+    ".section .text.__ashlqi3,\"ax\",@progbits",
+    ".globl __ashlqi3",
+    "__ashlqi3:",
+    "  cpx #0",
+    "  beq .Lashl_done",
+    ".Lashl_loop:",
+    "  asl",
+    "  dex",
+    "  bne .Lashl_loop",
+    ".Lashl_done:",
+    "  rts",
+
+    // --- __memset: fill memory ---
+    // ~30 bytes. Replaces 43-byte version (page-based fill, no dead JMPs).
+    // Entry: A = fill byte, rc2:rc3 = dest ptr, X = count_lo, rc4 = count_hi
+    ".section .text.__memset,\"ax\",@progbits",
+    ".globl __memset",
+    "__memset:",
+    "  ldy __rc4",              // high byte of count (full pages)
+    "  beq .Lmset_remainder",
+    "  ldy #0",
+    ".Lmset_page:",
+    "  sta (__rc2),y",
+    "  iny",
+    "  bne .Lmset_page",        // 256 iterations per page
+    "  inc __rc3",              // next page
+    "  dec __rc4",
+    "  bne .Lmset_page",
+    ".Lmset_remainder:",
+    "  cpx #0",
+    "  beq .Lmset_done",
+    "  ldy #0",
+    ".Lmset_rem:",
+    "  sta (__rc2),y",
+    "  iny",
+    "  dex",
+    "  bne .Lmset_rem",
+    ".Lmset_done:",
+    "  rts",
 );
 
 // ---------------------------------------------------------------------------

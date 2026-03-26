@@ -23,7 +23,7 @@ build:
 		exit $$rc
 
 # Generate linker map (builds with -Map flag)
-MAP_RUSTFLAGS = -C link-arg=-Tlink.ld -C link-arg=-Wl,--no-check-sections -C link-arg=-Wl,-Map,map.txt
+MAP_RUSTFLAGS = -C link-arg=-Tlink.ld -C link-arg=-Wl,--no-check-sections -C link-arg=-Wl,--allow-multiple-definition -C link-arg=-Wl,-Map,map.txt
 map:
 	@sed -i.bak 's/edition = "2024"/edition = "2021"/' $(WORKSPACE_TOML)
 	@$(DOCKER_RUN) env RUSTFLAGS="$(MAP_RUSTFLAGS)" cargo build --release; rc=$$?; \

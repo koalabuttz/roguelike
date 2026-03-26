@@ -6,4 +6,4 @@ build-std = ["core"]
 build-std-features = ["compiler-builtins-mem"]
 
 [target.mos-c64-none]
-rustflags = ["-C", "link-arg=-Tlink.ld", "-C", "link-arg=-Wl,--no-check-sections", "-Z", "mir-opt-level=1"]
+rustflags = ["-C", "link-arg=-Tlink.ld", "-C", "link-arg=-Wl,--no-check-sections", "-C", "link-arg=-Wl,--allow-multiple-definition", "-Z", "mir-opt-level=1"]

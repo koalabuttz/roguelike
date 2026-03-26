@@ -493,6 +493,123 @@ pub fn draw_number(x: u8, y: u8, val: u8, color: u8) -> u8 {
 }
 
 // ---------------------------------------------------------------------------
+// Compact division builtin overrides (6502 assembly)
+// ---------------------------------------------------------------------------
+//
+// The llvm-mos-sdk builtins use binary long division: efficient in iterations
+// (O(bits)) but code-heavy on 6502 (388 bytes total for the 3 functions).
+// These subtraction-loop replacements total ~50 bytes — same ABI, ~340 bytes
+// saved. The linker uses these instead of libcrt.a's versions.
+//
+// Written in assembly so they're opaque to LTO — LLVM can't inline or
+// convert the subtraction loops back into division calls.
+//
+// ABI (from disassembly of llvm-mos-sdk/mos-platform/common/crt/divmod.cc):
+//   __udivqi3(A=dividend, X=divisor) -> A=quotient
+//   __umodqi3(A=dividend, X=divisor) -> A=remainder
+//   __udivmodhi4(A=dividend_lo, X=dividend_hi, rc2:rc3=divisor,
+//                rc4:rc5=rem_ptr) -> A=quotient_lo, X=quotient_hi
+
+core::arch::global_asm!(
+    // --- __udivqi3: u8 division (A / X) -> quotient in A ---
+    // 16 bytes. Replaces 90-byte binary long division.
+    ".section .text.__udivqi3,\"ax\",@progbits",
+    ".globl __udivqi3",
+    "__udivqi3:",
+    "  cpx #0",
+    "  beq .Ldivqi_zero",
+    "  stx __rc3",
+    "  ldx #0",             // q = 0
+    "  sec",
+    ".Ldivqi_loop:",
+    "  sbc __rc3",          // A -= divisor
+    "  bcc .Ldivqi_done",   // if borrow, undo
+    "  inx",                // q++
+    "  bcs .Ldivqi_loop",   // carry still set, loop
+    ".Ldivqi_done:",
+    "  adc __rc3",          // undo last subtraction
+    "  txa",                // A = quotient
+    "  rts",
+    ".Ldivqi_zero:",
+    "  lda #0",
+    "  rts",
+
+    // --- __umodqi3: u8 modulo (A % X) -> remainder in A ---
+    // 12 bytes. Replaces 64-byte binary long division.
+    ".section .text.__umodqi3,\"ax\",@progbits",
+    ".globl __umodqi3",
+    "__umodqi3:",
+    "  cpx #0",
+    "  beq .Lmodqi_done",
+    "  stx __rc3",
+    "  sec",
+    ".Lmodqi_loop:",
+    "  sbc __rc3",          // A -= divisor
+    "  bcs .Lmodqi_loop",   // if no borrow, keep going
+    "  adc __rc3",          // undo last subtraction
+    ".Lmodqi_done:",
+    "  rts",
+
+    // --- __udivmodhi4: u16 divmod ---
+    // ~73 bytes. Replaces 234-byte binary long division.
+    // Entry: A=dividend_lo, X=dividend_hi, rc2:rc3=divisor, rc4:rc5=rem pointer
+    // Exit:  A=quotient_lo, X=quotient_hi, *rem=remainder
+    ".section .text.__udivmodhi4,\"ax\",@progbits",
+    ".globl __udivmodhi4",
+    "__udivmodhi4:",
+    "  sta __rc8",              // save dividend_lo
+    "  stx __rc9",              // save dividend_hi
+    // Check divisor == 0
+    "  lda __rc3",
+    "  ora __rc2",
+    "  beq .Ldivhi_zero",
+    // quotient = 0
+    "  lda #0",
+    "  sta __rc10",             // q_lo
+    "  sta __rc11",             // q_hi
+    ".Ldivhi_loop:",
+    // Compare dividend >= divisor (16-bit unsigned)
+    "  lda __rc8",              // dividend_lo
+    "  cmp __rc2",              // - divisor_lo (sets carry)
+    "  lda __rc9",              // dividend_hi
+    "  sbc __rc3",              // - divisor_hi (uses carry)
+    "  bcc .Ldivhi_done",       // if dividend < divisor, done
+    // dividend -= divisor (16-bit)
+    "  lda __rc8",
+    "  sec",
+    "  sbc __rc2",
+    "  sta __rc8",
+    "  lda __rc9",
+    "  sbc __rc3",
+    "  sta __rc9",
+    // quotient++ (16-bit)
+    "  inc __rc10",
+    "  bne .Ldivhi_loop",
+    "  inc __rc11",
+    "  jmp .Ldivhi_loop",
+    ".Ldivhi_done:",
+    // Store remainder via pointer in rc4:rc5
+    "  ldy #0",
+    "  lda __rc8",
+    "  sta (__rc4),y",          // *rem = remainder_lo
+    "  iny",
+    "  lda __rc9",
+    "  sta (__rc4),y",          // *(rem+1) = remainder_hi
+    // Return quotient in A:X
+    "  lda __rc10",
+    "  ldx __rc11",
+    "  rts",
+    ".Ldivhi_zero:",
+    // divisor == 0: store 0 to *rem, return 0
+    "  ldy #0",
+    "  sta (__rc4),y",          // A is already 0
+    "  iny",
+    "  sta (__rc4),y",
+    "  tax",                    // X = 0
+    "  rts",
+);
+
+// ---------------------------------------------------------------------------
 // SID sound effects — percussive one-shots for combat feedback
 // ---------------------------------------------------------------------------
 

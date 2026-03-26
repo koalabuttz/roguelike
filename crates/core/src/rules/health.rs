@@ -20,23 +20,17 @@ pub enum HealthTier {
 
 /// Compute the health tier from current and max HP.
 ///
-/// Uses multiplication instead of division to avoid pulling in
-/// `__udivhi3` (192 bytes) on 6502. `hp > N%` is equivalent to
-/// `hp * D > max_hp * N` for appropriate D, N constants.
+/// Uses integer math only (u16 intermediate to avoid overflow).
 pub const fn health_tier(hp: u8, max_hp: u8) -> HealthTier {
     if max_hp == 0 || hp == 0 {
         return HealthTier::AlmostDead;
     }
-    let h = hp as u16;
-    let m = max_hp as u16;
-    if h * 4 > m * 3 {
-        // hp > 75%
+    let pct = (hp as u16 * 100) / (max_hp as u16);
+    if pct > 75 {
         HealthTier::Healthy
-    } else if h * 5 > m * 2 {
-        // hp > 40%
+    } else if pct > 40 {
         HealthTier::Moderate
-    } else if h * 20 > m * 3 {
-        // hp > 15%
+    } else if pct > 15 {
         HealthTier::Severe
     } else {
         HealthTier::AlmostDead

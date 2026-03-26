@@ -7,6 +7,9 @@ pub mod tier_micro;
 
 pub mod command;
 
+#[cfg(test)]
+mod mem_override_tests;
+
 // --- Standard-tier engine (std feature implies rand + serde) ---
 #[cfg(feature = "std")]
 pub mod ai;

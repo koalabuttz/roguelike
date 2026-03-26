@@ -586,28 +586,17 @@ fn render_status_bar(state: &MicroGameState) {
     // "HP " label
     c64::draw_text(0, STATUS_ROW, b"HP ", c64::COLOR_WHITE);
 
-    // HP bar: 8 chars wide, filled proportionally.
-    // Uses multiply-compare instead of division to avoid __udivhi3 (192B on 6502).
+    // HP bar: 8 chars wide, filled proportionally
     let bar_width: u8 = 8;
     let filled = if max_hp > 0 {
-        let h8 = hp as u16 * 8;
-        let m = max_hp as u16;
-        let mut f: u8 = 0;
-        let mut threshold = m;
-        while f < bar_width && h8 >= threshold {
-            f += 1;
-            threshold += m;
-        }
-        f
+        ((hp as u16) * (bar_width as u16) / (max_hp as u16)) as u8
     } else {
         0
     };
 
-    let h = hp as u16;
-    let m = max_hp as u16;
-    let bar_color = if max_hp == 0 || h * 5 > m * 3 {
+    let bar_color = if max_hp == 0 || hp * 100 / max_hp > 60 {
         c64::COLOR_GREEN
-    } else if h * 10 > m * 3 {
+    } else if hp * 100 / max_hp > 30 {
         c64::COLOR_YELLOW
     } else {
         c64::COLOR_RED

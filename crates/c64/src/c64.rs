@@ -550,6 +550,75 @@ core::arch::global_asm!(
     ".Lmodqi_done:",
     "  rts",
 
+    // --- __udivhi3: u16 division ---
+    // Entry: A=dividend_lo, X=dividend_hi, rc2:rc3=divisor
+    // Exit:  A=quotient_lo, X=quotient_hi
+    ".section .text.__udivhi3,\"ax\",@progbits",
+    ".globl __udivhi3",
+    "__udivhi3:",
+    "  sta __rc8",
+    "  stx __rc9",
+    "  lda __rc3",
+    "  ora __rc2",
+    "  beq .Ldivhi3_zero",
+    "  lda #0",
+    "  sta __rc10",
+    "  sta __rc11",
+    ".Ldivhi3_loop:",
+    "  lda __rc8",
+    "  cmp __rc2",
+    "  lda __rc9",
+    "  sbc __rc3",
+    "  bcc .Ldivhi3_done",
+    "  lda __rc8",
+    "  sec",
+    "  sbc __rc2",
+    "  sta __rc8",
+    "  lda __rc9",
+    "  sbc __rc3",
+    "  sta __rc9",
+    "  inc __rc10",
+    "  bne .Ldivhi3_loop",
+    "  inc __rc11",
+    "  jmp .Ldivhi3_loop",
+    ".Ldivhi3_done:",
+    "  lda __rc10",
+    "  ldx __rc11",
+    "  rts",
+    ".Ldivhi3_zero:",
+    "  tax",                    // A=0, X=0
+    "  rts",
+
+    // --- __umodhi3: u16 modulo ---
+    // Entry: A=dividend_lo, X=dividend_hi, rc2:rc3=divisor
+    // Exit:  A=remainder_lo, X=remainder_hi
+    ".section .text.__umodhi3,\"ax\",@progbits",
+    ".globl __umodhi3",
+    "__umodhi3:",
+    "  sta __rc8",
+    "  stx __rc9",
+    "  lda __rc3",
+    "  ora __rc2",
+    "  beq .Lmodhi_done",
+    ".Lmodhi_loop:",
+    "  lda __rc8",
+    "  cmp __rc2",
+    "  lda __rc9",
+    "  sbc __rc3",
+    "  bcc .Lmodhi_done",
+    "  lda __rc8",
+    "  sec",
+    "  sbc __rc2",
+    "  sta __rc8",
+    "  lda __rc9",
+    "  sbc __rc3",
+    "  sta __rc9",
+    "  jmp .Lmodhi_loop",
+    ".Lmodhi_done:",
+    "  lda __rc8",
+    "  ldx __rc9",
+    "  rts",
+
     // --- __udivmodhi4: u16 divmod ---
     // ~73 bytes. Replaces 234-byte binary long division.
     // Entry: A=dividend_lo, X=dividend_hi, rc2:rc3=divisor, rc4:rc5=rem pointer
@@ -691,7 +760,174 @@ core::arch::global_asm!(
     "  bne .Lmset_rem",
     ".Lmset_done:",
     "  rts",
+
+    // --- memcpy: page-based forward copy ---
+    // ~32 bytes. Replaces 45-byte + 7-byte outlined fn (52 total).
+    // Entry: rc2:rc3=dest, rc4:rc5=src, A=n_lo, X=n_hi
+    // Exit:  A:X=dest (original rc2:rc3)
+    ".section .text.memcpy,\"ax\",@progbits",
+    ".globl memcpy",
+    "memcpy:",
+    "  sta __rc8",              // count_lo
+    "  stx __rc9",              // count_hi
+    "  lda __rc2",
+    "  sta __rc6",              // working dest_lo (preserve rc2:rc3 for return)
+    "  lda __rc3",
+    "  sta __rc7",              // working dest_hi
+    "  ldx __rc9",              // page count
+    "  beq .Lmcpy_rem",
+    "  ldy #0",
+    ".Lmcpy_page:",
+    "  lda (__rc4),y",
+    "  sta (__rc6),y",
+    "  iny",
+    "  bne .Lmcpy_page",
+    "  inc __rc5",
+    "  inc __rc7",
+    "  dex",
+    "  bne .Lmcpy_page",
+    ".Lmcpy_rem:",
+    "  ldx __rc8",              // remaining bytes
+    "  beq .Lmcpy_done",
+    "  ldy #0",
+    ".Lmcpy_rl:",
+    "  lda (__rc4),y",
+    "  sta (__rc6),y",
+    "  iny",
+    "  dex",
+    "  bne .Lmcpy_rl",
+    ".Lmcpy_done:",
+    "  lda __rc2",
+    "  ldx __rc3",
+    "  rts",
+
+    // --- memmove: overlap-safe copy ---
+    // ~95 bytes. Replaces 145-byte version.
+    // Forward case jumps to memcpy. Backward uses page-based reverse copy.
+    // Entry: rc2:rc3=dest, rc4:rc5=src, A=n_lo, X=n_hi
+    // Exit:  A:X=dest
+    ".section .text.memmove,\"ax\",@progbits",
+    ".globl memmove",
+    "memmove:",
+    "  sta __rc8",
+    "  stx __rc9",
+    // if n == 0, return
+    "  ora __rc9",
+    "  beq .Lmmov_ret",
+    // delta = dest - src (unsigned)
+    "  lda __rc2",
+    "  sec",
+    "  sbc __rc4",
+    "  tay",                    // Y = delta_lo
+    "  lda __rc3",
+    "  sbc __rc5",              // A = delta_hi
+    // if delta >= n, forward is safe
+    "  cmp __rc9",
+    "  bcc .Lmmov_bkwd",
+    "  bne .Lmmov_fwd",
+    "  tya",
+    "  cmp __rc8",
+    "  bcs .Lmmov_fwd",
+    ".Lmmov_bkwd:",
+    // Backward copy: add n to src/dest, copy from end
+    "  clc",
+    "  lda __rc8",
+    "  adc __rc4",
+    "  sta __rc4",              // src += n
+    "  lda __rc9",
+    "  adc __rc5",
+    "  sta __rc5",
+    "  clc",
+    "  lda __rc8",
+    "  adc __rc2",
+    "  sta __rc6",              // dest_work = dest + n
+    "  lda __rc9",
+    "  adc __rc3",
+    "  sta __rc7",
+    // Partial page (count_lo bytes from end)
+    "  ldy __rc8",
+    "  beq .Lmmov_bpages",
+    ".Lmmov_bpart:",
+    "  dey",
+    "  lda (__rc4),y",
+    "  sta (__rc6),y",
+    "  tya",
+    "  bne .Lmmov_bpart",
+    ".Lmmov_bpages:",
+    "  ldx __rc9",              // full pages
+    "  beq .Lmmov_ret",
+    "  dec __rc5",              // back one page
+    "  dec __rc7",
+    ".Lmmov_bfull:",
+    "  dey",                    // 0 → FF
+    "  lda (__rc4),y",
+    "  sta (__rc6),y",
+    "  tya",
+    "  bne .Lmmov_bfull",       // copies FF..01
+    "  lda (__rc4),y",          // copy byte 0
+    "  sta (__rc6),y",
+    "  dec __rc5",
+    "  dec __rc7",
+    "  dex",
+    "  bne .Lmmov_bfull",
+    ".Lmmov_ret:",
+    "  lda __rc2",
+    "  ldx __rc3",
+    "  rts",
+    ".Lmmov_fwd:",
+    "  lda __rc8",
+    "  ldx __rc9",
+    "  jmp memcpy",
+
+    // --- memcmp: page-based byte comparison ---
+    // ~32 bytes. Replaces 62-byte + 5-byte outlined fn (67 total).
+    // Entry: rc2:rc3=s1, rc4:rc5=s2, A=n_lo, X=n_hi
+    // Exit:  A:X = s1[i]-s2[i] (i16) for first differing byte, or 0
+    ".section .text.memcmp,\"ax\",@progbits",
+    ".globl memcmp",
+    "memcmp:",
+    "  sta __rc8",
+    "  stx __rc9",
+    "  ldx __rc9",              // page count
+    "  beq .Lcmp_rem",
+    "  ldy #0",
+    ".Lcmp_page:",
+    "  lda (__rc2),y",
+    "  cmp (__rc4),y",
+    "  bne .Lcmp_diff",
+    "  iny",
+    "  bne .Lcmp_page",
+    "  inc __rc3",
+    "  inc __rc5",
+    "  dex",
+    "  bne .Lcmp_page",
+    ".Lcmp_rem:",
+    "  ldx __rc8",
+    "  beq .Lcmp_eq",
+    "  ldy #0",
+    ".Lcmp_rl:",
+    "  lda (__rc2),y",
+    "  cmp (__rc4),y",
+    "  bne .Lcmp_diff",
+    "  iny",
+    "  dex",
+    "  bne .Lcmp_rl",
+    ".Lcmp_eq:",
+    "  lda #0",
+    "  tax",
+    "  rts",
+    ".Lcmp_diff:",
+    // A has s1 byte (from LDA), need s1 - s2 as i16
+    "  sec",
+    "  sbc (__rc4),y",          // A = s1 - s2 (low byte)
+    "  tay",
+    "  lda #0",
+    "  sbc #0",                 // sign extend: A = 0 or $FF
+    "  tax",                    // X = sign byte
+    "  tya",                    // A = difference
+    "  rts",
 );
+
 
 // ---------------------------------------------------------------------------
 // SID sound effects — percussive one-shots for combat feedback

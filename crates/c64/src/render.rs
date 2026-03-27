@@ -15,7 +15,7 @@ use roguelike_core::rules::balance;
 use roguelike_core::rules::color::GameColor;
 use roguelike_core::rules::items;
 use roguelike_core::rules::health::{self, HealthTier};
-use roguelike_core::rules::message::{GameEvent, SoundDistance};
+use roguelike_core::rules::message::{Combatant, GameEvent, SoundDistance};
 use roguelike_core::rules::monster_table;
 use roguelike_core::tier_micro::game::MicroGameState;
 use roguelike_core::tier_micro::item_store::MAX_ITEMS;
@@ -687,134 +687,153 @@ fn copy_num(buf: &mut [u8; 40], pos: usize, val: u8) -> usize {
 }
 
 /// Format a GameEvent into a 40-byte PETSCII buffer (space-padded).
+/// Messages match PC-tier text quality within the 40-column limit.
 #[inline(never)]
 fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
     *buf = [b' '; 40];
     let _ = match event {
-        GameEvent::Attack {
-            attacker,
-            defender,
-            damage: _,
-        } => {
+        GameEvent::Attack { attacker, defender, .. } => {
             let p = copy_bytes(buf, 0, attacker.name().as_bytes());
             let p = copy_bytes(buf, p, b" hits ");
-            copy_bytes(buf, p, defender.name().as_bytes())
-        }
-        GameEvent::HealthStatus { who, tier } => {
-            let p = copy_bytes(buf, 0, who.name().as_bytes());
-            let desc: &[u8] = match tier {
-                HealthTier::Healthy => b": healthy",
-                HealthTier::Moderate => b": damaged",
-                HealthTier::Severe => b": wounded",
-                HealthTier::AlmostDead => b": dying!",
-            };
-            copy_bytes(buf, p, desc)
-        }
-        GameEvent::NoDamage {
-            attacker,
-            defender,
-        } => {
-            let p = copy_bytes(buf, 0, attacker.name().as_bytes());
-            let p = copy_bytes(buf, p, b" hit ");
             let p = copy_bytes(buf, p, defender.name().as_bytes());
-            copy_bytes(buf, p, b": no dmg")
+            copy_bytes(buf, p, b".")
         }
-        GameEvent::Kill { attacker: _, victim } => {
+        GameEvent::NoDamage { attacker, defender } => {
+            let p = copy_bytes(buf, 0, attacker.name().as_bytes());
+            let p = copy_bytes(buf, p, b" attacks ");
+            let p = copy_bytes(buf, p, defender.name().as_bytes());
+            copy_bytes(buf, p, b". No damage.")
+        }
+        GameEvent::Kill { victim, .. } => {
             let p = copy_bytes(buf, 0, victim.name().as_bytes());
             copy_bytes(buf, p, b" is dead!")
         }
+        GameEvent::HealthStatus { who, tier } => {
+            let desc: &[u8] = match tier {
+                HealthTier::Healthy => b"healthy.",
+                HealthTier::Moderate => b"damaged.",
+                HealthTier::Severe => b"wounded.",
+                HealthTier::AlmostDead => b"almost dead.",
+            };
+            match who {
+                Combatant::Player => {
+                    let p = copy_bytes(buf, 0, b"You are ");
+                    copy_bytes(buf, p, desc)
+                }
+                _ => {
+                    let p = copy_bytes(buf, 0, b"The ");
+                    let p = copy_bytes(buf, p, who.name().as_bytes());
+                    let p = copy_bytes(buf, p, b" is ");
+                    copy_bytes(buf, p, desc)
+                }
+            }
+        }
         GameEvent::EntityNotice { who } => {
-            let p = copy_bytes(buf, 0, who.name().as_bytes());
+            let p = copy_bytes(buf, 0, b"The ");
+            let p = copy_bytes(buf, p, who.name().as_bytes());
             copy_bytes(buf, p, b" notices you!")
         }
-        GameEvent::DrinkPotion { kind: _, healed } => {
-            let p = copy_bytes(buf, 0, b"+");
+        GameEvent::DrinkPotion { kind, healed } => {
+            let p = copy_bytes(buf, 0, b"You drink ");
+            let p = copy_bytes(buf, p, items::name(kind).as_bytes());
+            let p = copy_bytes(buf, p, b". (+");
             let p = copy_num(buf, p, healed);
-            copy_bytes(buf, p, b" HP")
+            copy_bytes(buf, p, b" HP)")
         }
-        GameEvent::EquipWeapon { kind, bonus } | GameEvent::EquipArmor { kind, bonus } => {
-            let p = copy_bytes(buf, 0, b"Equip ");
-            let mut p = copy_bytes(buf, p, items::name(kind).as_bytes());
-            // Inline " +N" to avoid extra function calls (tight .noinit budget).
-            // Bonus values are single-digit (2-3) with current items.
-            if p < 37 {
-                buf[p] = b' ';
-                buf[p + 1] = b'+';
-                buf[p + 2] = b'0' + bonus;
-                p += 3;
-            }
-            p
+        GameEvent::UseStrengthPotion { bonus } => {
+            let p = copy_bytes(buf, 0, b"You drink ");
+            let p = copy_bytes(buf, p, items::name(items::ItemKind::StrengthPotion).as_bytes());
+            let p = copy_bytes(buf, p, b". (+");
+            let p = copy_num(buf, p, bonus);
+            copy_bytes(buf, p, b" ATK)")
+        }
+        GameEvent::EquipWeapon { kind, bonus } => {
+            let p = copy_bytes(buf, 0, b"You equip ");
+            let p = copy_bytes(buf, p, items::name(kind).as_bytes());
+            let p = copy_bytes(buf, p, b". (+");
+            let p = copy_num(buf, p, bonus);
+            copy_bytes(buf, p, b" ATK)")
+        }
+        GameEvent::EquipArmor { kind, bonus } => {
+            let p = copy_bytes(buf, 0, b"You equip ");
+            let p = copy_bytes(buf, p, items::name(kind).as_bytes());
+            let p = copy_bytes(buf, p, b". (+");
+            let p = copy_num(buf, p, bonus);
+            copy_bytes(buf, p, b" DEF)")
         }
         GameEvent::UnequipWeapon { kind } | GameEvent::UnequipArmor { kind } => {
-            let p = copy_bytes(buf, 0, b"Unequip ");
-            copy_bytes(buf, p, items::name(kind).as_bytes())
+            let p = copy_bytes(buf, 0, b"You unequip ");
+            let p = copy_bytes(buf, p, items::name(kind).as_bytes());
+            copy_bytes(buf, p, b".")
         }
-        GameEvent::NoStairs => copy_bytes(buf, 0, b"No stairs"),
-        GameEvent::Descend { depth, target: _ } => {
-            let p = copy_bytes(buf, 0, b"Depth ");
-            copy_num(buf, p, depth)
+        GameEvent::NoStairs => copy_bytes(buf, 0, b"There are no stairs here."),
+        GameEvent::Descend { depth, .. } => {
+            let p = copy_bytes(buf, 0, b"You descend to depth ");
+            let p = copy_num(buf, p, depth);
+            copy_bytes(buf, p, b".")
         }
-        GameEvent::Victory { depth: _ } => copy_bytes(buf, 0, b"Victory!"),
-        GameEvent::Welcome => copy_bytes(buf, 0, b"Welcome!"),
+        GameEvent::Victory { .. } => copy_bytes(buf, 0, b"Victory! Dungeon conquered!"),
+        GameEvent::Welcome => copy_bytes(buf, 0, b"Welcome to the dungeon!"),
         GameEvent::SoundCue { distance } => {
-            let msg = match distance {
-                SoundDistance::Near => b"You hear something nearby!" as &[u8],
-                SoundDistance::Medium => b"You hear a distant sound..." as &[u8],
-                SoundDistance::Far => b"You hear something far away..." as &[u8],
+            let msg: &[u8] = match distance {
+                SoundDistance::Near => b"Something is moving very close!",
+                SoundDistance::Medium => b"You hear footsteps nearby.",
+                SoundDistance::Far => b"You hear a distant sound...",
             };
             copy_bytes(buf, 0, msg)
         }
         GameEvent::PlayerDeath => copy_bytes(buf, 0, b"You have died!"),
         GameEvent::PickupItem { kind } => {
-            let p = copy_bytes(buf, 0, b"Got ");
-            copy_bytes(buf, p, items::name(kind).as_bytes())
+            let p = copy_bytes(buf, 0, b"You pick up ");
+            let p = copy_bytes(buf, p, items::name(kind).as_bytes());
+            copy_bytes(buf, p, b".")
         }
         GameEvent::DropItem { kind } => {
-            let p = copy_bytes(buf, 0, b"Drop ");
-            copy_bytes(buf, p, items::name(kind).as_bytes())
+            let p = copy_bytes(buf, 0, b"You drop ");
+            let p = copy_bytes(buf, p, items::name(kind).as_bytes());
+            copy_bytes(buf, p, b".")
         }
-        GameEvent::InventoryFull => copy_bytes(buf, 0, b"Inventory full!"),
+        GameEvent::InventoryFull => copy_bytes(buf, 0, b"Your inventory is full."),
         GameEvent::ItemsHere { kind, count } => {
             if count <= 1 {
-                let p = copy_bytes(buf, 0, b"See: ");
-                copy_bytes(buf, p, items::name(kind).as_bytes())
+                let p = copy_bytes(buf, 0, b"You see ");
+                let p = copy_bytes(buf, p, items::name(kind).as_bytes());
+                copy_bytes(buf, p, b" here.")
             } else {
-                let p = copy_bytes(buf, 0, b"See ");
+                let p = copy_bytes(buf, 0, b"You see ");
                 let p = copy_num(buf, p, count);
                 let p = copy_bytes(buf, p, b"x ");
-                copy_bytes(buf, p, items::name(kind).as_bytes())
+                let p = copy_bytes(buf, p, items::name(kind).as_bytes());
+                copy_bytes(buf, p, b" here.")
             }
         }
         GameEvent::Autorun => copy_bytes(buf, 0, b"Running..."),
         GameEvent::AutorunStop { cause } => {
             use roguelike_core::rules::message::AutorunStopCause;
-            let msg = match cause {
-                AutorunStopCause::WallReached => b"Path blocked." as &[u8],
+            let msg: &[u8] = match cause {
+                AutorunStopCause::WallReached => b"Path blocked.",
                 AutorunStopCause::MonsterSpotted => b"Monster spotted!",
                 AutorunStopCause::DamageTaken => b"You take damage!",
                 AutorunStopCause::GameOver => b"You have died!",
                 AutorunStopCause::CorridorBranches => b"Path branches.",
                 AutorunStopCause::MaxSteps => b"You stop running.",
                 AutorunStopCause::PathComplete => b"Arrived.",
-                AutorunStopCause::StairsFound => b"Stairs here.",
+                AutorunStopCause::StairsFound => b"You see stairs here.",
             };
             copy_bytes(buf, 0, msg)
         }
-        GameEvent::UseStrengthPotion { bonus } => {
-            let p = copy_bytes(buf, 0, b"+");
-            let p = copy_num(buf, p, bonus);
-            copy_bytes(buf, p, b" ATK")
-        }
         GameEvent::CombineItems { target, source } => {
-            let p = copy_bytes(buf, 0, b"Mix ");
+            let p = copy_bytes(buf, 0, b"Combine ");
             let p = copy_bytes(buf, p, items::name(target).as_bytes());
-            let p = copy_bytes(buf, p, b"+");
-            copy_bytes(buf, p, items::name(source).as_bytes())
+            let p = copy_bytes(buf, p, b" + ");
+            let p = copy_bytes(buf, p, items::name(source).as_bytes());
+            copy_bytes(buf, p, b".")
         }
         GameEvent::CombineNoEffect => copy_bytes(buf, 0, b"Nothing happens."),
         GameEvent::ItemDestroyed { kind } => {
-            let p = copy_bytes(buf, 0, items::name(kind).as_bytes());
-            copy_bytes(buf, p, b" destroyed!")
+            let p = copy_bytes(buf, 0, b"Your ");
+            let p = copy_bytes(buf, p, items::name(kind).as_bytes());
+            copy_bytes(buf, p, b" is destroyed!")
         }
     };
 }

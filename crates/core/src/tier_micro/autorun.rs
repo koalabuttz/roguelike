@@ -192,13 +192,13 @@ impl MicroAutorunStepper {
         // Check 7: corridor branches — wall ahead with 2+ alternatives.
         let px = state.entities.x[pi];
         let py = state.entities.y[pi];
-        let (dx, dy) = self.dir.to_offset_i8();
-        let ahead_x = (px as i8 + dx) as u8;
-        let ahead_y = (py as i8 + dy) as u8;
+        let (dx, dy) = self.dir.to_offset();
+        let ahead_x = (px as i8 + dx as i8) as u8;
+        let ahead_y = (py as i8 + dy as i8) as u8;
         if !state.map.is_walkable(ahead_x, ahead_y) {
             let alternatives = state
                 .map
-                .open_neighbors_excluding(px, py, -dx, -dy);
+                .open_neighbors_excluding(px, py, -(dx as i8), -(dy as i8));
             if alternatives >= 2 {
                 return MicroStepOutcome::Done(MicroAutorunStop::CorridorBranches);
             }

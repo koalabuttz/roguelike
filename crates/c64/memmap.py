@@ -24,6 +24,19 @@ def main():
     ram_free = ram_cap - ram_total
     hiram_free = hiram_cap - hiram_total
 
+    # Address placement check: verify no section extends past region end.
+    # The size-based free can be misleading when NOLOAD sections overlap
+    # with LMA regions (e.g., .noinit reuses overlay/hiramcode LMA space).
+    ram_end = 0xCFFF
+    hiram_end = 0xFFF7
+    ram_high = max((v + s - 1) for v, s in ram.values()) if ram else 0
+    hiram_high = max((v + s - 1) for v, s in hiram.values()) if hiram else 0
+    ram_placement_free = ram_end - ram_high if ram else ram_cap
+    hiram_placement_free = hiram_end - hiram_high if hiram else hiram_cap
+    # Use the LESSER of size-based and placement-based free
+    ram_free = min(ram_free, ram_placement_free)
+    hiram_free = min(hiram_free, hiram_placement_free)
+
     print("--- RAM ($0801-$CFFF, 50 KB) ---")
     for n, (_, s) in sorted(ram.items(), key=lambda x: -x[1][1]):
         print(f"  {n:24s} {s:6d} B  ({s/1024:.1f} KB)")

@@ -52,17 +52,6 @@ impl Direction {
         }
     }
 
-    /// Convert to `(dx, dy)` as `(i8, i8)`. Preferred on constrained platforms
-    /// (6502, GBA) to avoid i32 codegen overhead and match-table fragility.
-    /// Uses lookup tables indexed by discriminant — compiles to `LDA abs,X`.
-    pub const fn to_offset_i8(self) -> (i8, i8) {
-        //                   N   S   E   W  NE  NW  SE  SW
-        const DX: [i8; 8] = [0,  0,  1, -1,  1, -1,  1, -1];
-        const DY: [i8; 8] = [-1, 1,  0,  0, -1, -1,  1,  1];
-        let d = self as u8 as usize;
-        (DX[d], DY[d])
-    }
-
     /// Return the opposite direction (180° reversal).
     pub const fn opposite(self) -> Direction {
         match self {
@@ -139,16 +128,6 @@ mod tests {
             let (dx, dy) = dir.to_offset();
             let (ox, oy) = dir.opposite().to_offset();
             assert_eq!((dx + ox, dy + oy), (0, 0));
-        }
-    }
-
-    #[test]
-    fn to_offset_i8_matches_to_offset() {
-        for &dir in &ALL_DIRECTIONS {
-            let (dx32, dy32) = dir.to_offset();
-            let (dx8, dy8) = dir.to_offset_i8();
-            assert_eq!(dx8 as i32, dx32, "dx mismatch for {:?}", dir);
-            assert_eq!(dy8 as i32, dy32, "dy mismatch for {:?}", dir);
         }
     }
 

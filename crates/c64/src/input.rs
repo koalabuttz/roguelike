@@ -129,16 +129,16 @@ fn joy_bits() -> u8 {
 /// that can miscompile on 6502 (jump table fragility).
 const JOY_TO_DIR_IDX: [u8; 16] = [
     0xFF, //  0: no direction
-    0,    //  1: up         → North
-    1,    //  2: down       → South
+    0,    //  1: up         -> North
+    1,    //  2: down       -> South
     0xFF, //  3: up+down    (invalid)
-    3,    //  4: left       → West
-    5,    //  5: up+left    → NorthWest
-    7,    //  6: down+left  → SouthWest
+    3,    //  4: left       -> West
+    5,    //  5: up+left    -> NorthWest
+    7,    //  6: down+left  -> SouthWest
     0xFF, //  7: invalid
-    2,    //  8: right      → East
-    4,    //  9: up+right   → NorthEast
-    6,    //  A: down+right → SouthEast
+    2,    //  8: right      -> East
+    4,    //  9: up+right   -> NorthEast
+    6,    //  A: down+right -> SouthEast
     0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 ];
 
@@ -149,8 +149,7 @@ const DIRECTIONS: [Direction; 8] = [
 ];
 
 /// Decode 5-bit joystick state into (direction, fire).
-/// Uses lookup tables instead of match to avoid 6502 codegen issues
-/// (jump table miscompilation, wide-type overhead).
+/// Uses lookup tables instead of match to avoid 6502 jump table codegen bugs.
 fn decode_joy(bits: u8) -> (Option<Direction>, bool) {
     let fire = bits & 0x10 != 0;
     let idx = JOY_TO_DIR_IDX[(bits & 0x0F) as usize];

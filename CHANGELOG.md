@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.5.0] - 2026-03-18
 
 ### Added
+- Increase dungeon to 22 levels with rebalanced depth scaling (#192)
 - Add item death when material property reaches zero (#175)
 - Add property visibility in look mode and MCP observe (#171)
 - Add dev text console for debug commands (#156)
@@ -60,6 +61,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Token-templated message system for C64 format_event (#190)
 - C64: Replace RangeInclusive iterators and inventory iterator adaptors with manual loops (#180)
 - C64: Overlap SAVE_BUF and DiffState with union to save 809 bytes .noinit (#182)
 - Centralize nibble access: move get/set_by_index to properties.rs (#160)

@@ -1183,8 +1183,9 @@ impl GameState {
     /// Checks: grace period, spawn interval (with idle acceleration),
     /// Apply depth-based stat scaling to a monster entity.
     fn apply_depth_scaling(&self, entity: &mut Entity) {
-        let bonus_hp = (self.depth - 1) * self.depth_scaling.monster_hp_per_floor;
-        let bonus_atk = (self.depth - 1) * self.depth_scaling.monster_atk_per_floor;
+        let steps = (self.depth - 1) / self.depth_scaling.depth_scale_interval;
+        let bonus_hp = steps * self.depth_scaling.monster_hp_per_floor;
+        let bonus_atk = steps * self.depth_scaling.monster_atk_per_floor;
         entity.hp += bonus_hp;
         entity.max_hp += bonus_hp;
         entity.attack += bonus_atk;
@@ -1957,6 +1958,7 @@ mod tests {
     use crate::entity::{Entity, EntityKind};
     use crate::item::ItemKind;
     use crate::map::{Map, Tile};
+    use crate::rules::balance;
 
     /// Build a minimal GameState with a custom open map (no random generation).
     fn test_game() -> GameState {
@@ -4090,6 +4092,7 @@ mod tests {
         let mut gs = GameState::with_seed(80, 40, 42);
         gs.depth_scaling.monster_hp_per_floor = 2;
         gs.depth_scaling.monster_atk_per_floor = 1;
+        gs.depth_scaling.depth_scale_interval = 1;
 
         // Move to stairs and descend to depth 2.
         let stairs_pos = gs
@@ -4105,7 +4108,7 @@ mod tests {
         gs.descend();
 
         // Check that monsters on floor 2 have bonus stats.
-        // depth=2, so bonus = (2-1)*scaling = 1*scaling.
+        // interval=1, depth=2, so steps=(2-1)/1=1, bonus=1*scaling.
         let base_goblin_hp = data::goblin().hp;
         let base_goblin_atk = data::goblin().attack;
         for e in gs.entities.iter().skip(1) {
@@ -4159,7 +4162,7 @@ mod tests {
         let gs = GameState::with_seed(80, 40, 42);
         let obs = gs.observe();
         assert_eq!(obs.depth, 1);
-        assert_eq!(obs.target_depth, 5);
+        assert_eq!(obs.target_depth, balance::TARGET_DEPTH as Stat);
         assert!(!obs.game_won);
     }
 

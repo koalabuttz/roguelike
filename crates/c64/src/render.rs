@@ -631,8 +631,7 @@ fn render_status_bar(state: &MicroGameState) {
     let eff_def = state.effective_defense();
     col += c64::draw_number(col, STATUS_ROW, eff_def, c64::COLOR_WHITE);
 
-    // Depth indicator (using > glyph to avoid confusion with D for DEF)
-    col += 1;
+    // Depth indicator (no leading space — tighter layout for 2-digit depths)
     c64::draw_char(col, STATUS_ROW, b'>', c64::COLOR_GREY);
     col += 1;
     col += c64::draw_number(col, STATUS_ROW, state.depth, c64::COLOR_WHITE);

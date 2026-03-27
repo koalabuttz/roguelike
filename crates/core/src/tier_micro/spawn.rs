@@ -103,12 +103,17 @@ pub fn spawn_items(items: &mut ItemStore, map: &MicroMap, depth: u8, rng: &mut L
 // ---------------------------------------------------------------------------
 
 /// Apply per-floor stat increases to a single entity at `idx`.
+///
+/// Monsters gain +1 HP/ATK every `DEPTH_SCALE_INTERVAL` floors (integer
+/// division), so difficulty ramps gradually over 22 levels instead of
+/// becoming unwinnable by floor 10.
 pub fn scale_monster(entities: &mut EntityStore, idx: usize, depth: u8) {
     if depth <= 1 {
         return;
     }
-    let hp_bonus = balance::MONSTER_HP_PER_FLOOR.saturating_mul(depth - 1);
-    let atk_bonus = balance::MONSTER_ATK_PER_FLOOR.saturating_mul(depth - 1);
+    let steps = (depth - 1) / balance::DEPTH_SCALE_INTERVAL;
+    let hp_bonus = balance::MONSTER_HP_PER_FLOOR.saturating_mul(steps);
+    let atk_bonus = balance::MONSTER_ATK_PER_FLOOR.saturating_mul(steps);
     entities.hp[idx] = entities.hp[idx].saturating_add(hp_bonus);
     entities.max_hp[idx] = entities.max_hp[idx].saturating_add(hp_bonus);
     entities.atk[idx] = entities.atk[idx].saturating_add(atk_bonus);
@@ -177,7 +182,8 @@ mod tests {
         let base_hp = entities.hp[1];
         let base_atk = entities.atk[1];
 
-        apply_depth_scaling(&mut entities, 3); // depth 3 → +2 bonus
+        // depth 7 → (7-1)/3 = 2 steps → +2 bonus
+        apply_depth_scaling(&mut entities, 7);
 
         assert_eq!(entities.hp[1], base_hp + 2);
         assert_eq!(entities.max_hp[1], base_hp + 2);
@@ -195,6 +201,18 @@ mod tests {
 
         let base_hp = entities.hp[1];
         apply_depth_scaling(&mut entities, 1);
+        assert_eq!(entities.hp[1], base_hp);
+    }
+
+    #[test]
+    fn apply_depth_scaling_noop_within_first_interval() {
+        // Depths 2 and 3 should give 0 bonus: (2-1)/3 = 0, (3-1)/3 = 0
+        let mut entities = EntityStore::new();
+        entities.spawn_player(0, 0);
+        entities.spawn_monster(MonsterKind::Goblin, 5, 5, AiBehavior::Chase);
+
+        let base_hp = entities.hp[1];
+        apply_depth_scaling(&mut entities, 3);
         assert_eq!(entities.hp[1], base_hp);
     }
 

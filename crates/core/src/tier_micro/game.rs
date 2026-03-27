@@ -1130,12 +1130,14 @@ mod tests {
     #[test]
     fn monsters_scaled_on_deeper_floors() {
         let mut g = MicroGameState::new_default(42);
-        let last = g.map.rooms[(g.map.room_count - 1) as usize];
-        g.entities.x[0] = last.cx();
-        g.entities.y[0] = last.cy();
-
-        g.step(GameCommand::Descend);
-        assert_eq!(g.depth, 2);
+        // Descend to depth 4 where scaling kicks in: (4-1)/3 = 1 step.
+        for _ in 0..3 {
+            let last = g.map.rooms[(g.map.room_count - 1) as usize];
+            g.entities.x[0] = last.cx();
+            g.entities.y[0] = last.cy();
+            g.step(GameCommand::Descend);
+        }
+        assert_eq!(g.depth, 4);
 
         // Check that at least one monster has scaled stats
         if g.entities.count > 1 {
@@ -1144,7 +1146,7 @@ mod tests {
             assert_eq!(
                 g.entities.hp[1],
                 base_hp + balance::MONSTER_HP_PER_FLOOR,
-                "monster HP should be scaled for depth 2"
+                "monster HP should be scaled for depth 4 (1 interval step)"
             );
         }
     }

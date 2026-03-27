@@ -61,7 +61,7 @@ pub const MAX_AUTORUN_STEPS: u8 = 100;
 pub const MIN_MAP_WIDTH: u8 = 20;
 pub const MIN_MAP_HEIGHT: u8 = 15;
 pub const REGEN_INTERVAL: u8 = 3;
-pub const TARGET_DEPTH: u8 = 5;
+pub const TARGET_DEPTH: u8 = 22;
 
 // ---------------------------------------------------------------------------
 // Depth scaling — per-floor monster stat increases
@@ -69,6 +69,9 @@ pub const TARGET_DEPTH: u8 = 5;
 
 pub const MONSTER_HP_PER_FLOOR: u8 = 1;
 pub const MONSTER_ATK_PER_FLOOR: u8 = 1;
+/// Monsters gain stat bonuses every N floors (integer division).
+/// At interval 3 over 22 floors: max bonus = (22-1)/3 = 7.
+pub const DEPTH_SCALE_INTERVAL: u8 = 3;
 
 // ---------------------------------------------------------------------------
 // Wandering spawn config
@@ -95,6 +98,12 @@ const _: () = assert!(
     "WANDERING_IDLE_ACCELERATION must be a power of 2 for 6502 shift optimization"
 );
 
+// Compile-time: interval must be non-zero to avoid division by zero.
+const _: () = assert!(
+    DEPTH_SCALE_INTERVAL > 0,
+    "DEPTH_SCALE_INTERVAL must be > 0"
+);
+
 // ---------------------------------------------------------------------------
 // Item balance
 // ---------------------------------------------------------------------------
@@ -117,27 +126,27 @@ pub const LEATHER_ARMOR_MIN_DEPTH: u8 = 1;
 // Iron Mace
 pub const IRON_MACE_ATK_BONUS: u8 = 4;
 pub const IRON_MACE_SPAWN_WEIGHT: u8 = 12;
-pub const IRON_MACE_MIN_DEPTH: u8 = 2;
+pub const IRON_MACE_MIN_DEPTH: u8 = 3;
 
 // Long Sword
 pub const LONG_SWORD_ATK_BONUS: u8 = 5;
 pub const LONG_SWORD_SPAWN_WEIGHT: u8 = 8;
-pub const LONG_SWORD_MIN_DEPTH: u8 = 3;
+pub const LONG_SWORD_MIN_DEPTH: u8 = 7;
 
 // Chain Mail
 pub const CHAIN_MAIL_DEF_BONUS: u8 = 4;
 pub const CHAIN_MAIL_SPAWN_WEIGHT: u8 = 8;
-pub const CHAIN_MAIL_MIN_DEPTH: u8 = 3;
+pub const CHAIN_MAIL_MIN_DEPTH: u8 = 9;
 
 // Greater Health Potion
 pub const GREATER_HEALTH_POTION_HEAL: u8 = 20;
 pub const GREATER_HEALTH_POTION_SPAWN_WEIGHT: u8 = 15;
-pub const GREATER_HEALTH_POTION_MIN_DEPTH: u8 = 3;
+pub const GREATER_HEALTH_POTION_MIN_DEPTH: u8 = 11;
 
 // Potion of Strength
 pub const STRENGTH_POTION_ATK_BOOST: u8 = 1;
 pub const STRENGTH_POTION_SPAWN_WEIGHT: u8 = 8;
-pub const STRENGTH_POTION_MIN_DEPTH: u8 = 2;
+pub const STRENGTH_POTION_MIN_DEPTH: u8 = 5;
 
 pub const MAX_ITEMS_PER_ROOM: u8 = 1;
 pub const MAX_INVENTORY: usize = super::items::MAX_INVENTORY;

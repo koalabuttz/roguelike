@@ -1149,7 +1149,7 @@ mod tests {
         assert!(is_weapon(ItemKind::IronMace));
         assert!(!is_consumable(ItemKind::IronMace));
         assert!(!is_armor(ItemKind::IronMace));
-        assert_eq!(min_depth(ItemKind::IronMace), 2);
+        assert_eq!(min_depth(ItemKind::IronMace), 3);
     }
 
     #[test]
@@ -1157,7 +1157,7 @@ mod tests {
         assert_eq!(name(ItemKind::LongSword), "Long Sword");
         assert_eq!(attack_bonus(ItemKind::LongSword), 5);
         assert!(is_weapon(ItemKind::LongSword));
-        assert_eq!(min_depth(ItemKind::LongSword), 3);
+        assert_eq!(min_depth(ItemKind::LongSword), 7);
     }
 
     #[test]
@@ -1165,7 +1165,7 @@ mod tests {
         assert_eq!(name(ItemKind::ChainMail), "Chain Mail");
         assert_eq!(defense_bonus(ItemKind::ChainMail), 4);
         assert!(is_armor(ItemKind::ChainMail));
-        assert_eq!(min_depth(ItemKind::ChainMail), 3);
+        assert_eq!(min_depth(ItemKind::ChainMail), 9);
     }
 
     #[test]
@@ -1173,7 +1173,7 @@ mod tests {
         assert_eq!(name(ItemKind::GreaterHealthPotion), "Greater Health Potion");
         assert_eq!(heal_amount(ItemKind::GreaterHealthPotion), 20);
         assert!(is_consumable(ItemKind::GreaterHealthPotion));
-        assert_eq!(min_depth(ItemKind::GreaterHealthPotion), 3);
+        assert_eq!(min_depth(ItemKind::GreaterHealthPotion), 11);
     }
 
     #[test]
@@ -1182,7 +1182,7 @@ mod tests {
         assert_eq!(strength_boost(ItemKind::StrengthPotion), 1);
         assert_eq!(heal_amount(ItemKind::StrengthPotion), 0);
         assert!(is_consumable(ItemKind::StrengthPotion));
-        assert_eq!(min_depth(ItemKind::StrengthPotion), 2);
+        assert_eq!(min_depth(ItemKind::StrengthPotion), 5);
     }
 
     #[test]

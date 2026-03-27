@@ -58,6 +58,10 @@ fn default_atk_per_floor() -> Stat {
     balance::MONSTER_ATK_PER_FLOOR as Stat
 }
 
+fn default_depth_scale_interval() -> Stat {
+    balance::DEPTH_SCALE_INTERVAL as Stat
+}
+
 /// Game-wide tuning knobs — change these to rebalance without touching logic.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct GameConfig {
@@ -80,6 +84,8 @@ pub struct DepthScaling {
     pub monster_hp_per_floor: Stat,
     #[serde(default = "default_atk_per_floor")]
     pub monster_atk_per_floor: Stat,
+    #[serde(default = "default_depth_scale_interval")]
+    pub depth_scale_interval: Stat,
 }
 
 impl Default for DepthScaling {
@@ -87,6 +93,7 @@ impl Default for DepthScaling {
         Self {
             monster_hp_per_floor: default_hp_per_floor(),
             monster_atk_per_floor: default_atk_per_floor(),
+            depth_scale_interval: default_depth_scale_interval(),
         }
     }
 }
@@ -401,6 +408,12 @@ mod data_files {
             warnings.push(format!(
                 "depth_scaling.monster_atk_per_floor must be >= 0 (got {})",
                 data.depth_scaling.monster_atk_per_floor
+            ));
+        }
+        if data.depth_scaling.depth_scale_interval <= 0 {
+            warnings.push(format!(
+                "depth_scaling.depth_scale_interval must be > 0 (got {})",
+                data.depth_scaling.depth_scale_interval
             ));
         }
 

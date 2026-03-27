@@ -14,11 +14,12 @@ max_monsters_per_room = 2
 ui_bottom_rows = 5
 max_autorun_steps = 100
 regen_interval = 3
-target_depth = 5
+target_depth = 22
 
 [depth_scaling]
 monster_hp_per_floor = 1
 monster_atk_per_floor = 1
+depth_scale_interval = 3
 
 [wandering]
 spawn_interval = 30

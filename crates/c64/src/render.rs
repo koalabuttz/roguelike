@@ -984,7 +984,7 @@ fn mark_dirty_world(dirty: &mut [u8; DIRTY_SIZE], vx: u8, vy: u8, wx: u8, wy: u8
 /// or `render_all()`. Computes a dirty bitfield from FOV/entity/item
 /// changes and redraws only those cells via `restore_tile()`.
 pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
-    let mut dirty = unsafe { &mut crate::SHARED.dirty };
+    let mut dirty = unsafe { &mut crate::DIRTY };
     *dirty = [0u8; DIRTY_SIZE];
 
     // --- 1. FOV visibility changes ---

@@ -51,7 +51,6 @@ const SAVE_BUF_SIZE: usize = 4096;
 pub(crate) union SharedBuf {
     pub save_buf: [u8; SAVE_BUF_SIZE],
     pub diff: core::mem::ManuallyDrop<render::DiffState>,
-    pub dirty: [u8; render::DIRTY_SIZE],
     pub msg_buf: [u8; 40],
 }
 
@@ -59,6 +58,13 @@ pub(crate) union SharedBuf {
 pub(crate) static mut SHARED: SharedBuf = SharedBuf {
     save_buf: [0u8; SAVE_BUF_SIZE],
 };
+
+/// Dirty bitfield for differential rendering — separate from SharedBuf because
+/// render_diff reads DiffState (prev) while simultaneously writing to dirty.
+/// Overlapping them in a union caused the first 110 bytes of the FOV visible
+/// bitmap to be zeroed, leaving ghost entity glyphs on tiles that lost visibility.
+#[unsafe(link_section = ".noinit")]
+pub(crate) static mut DIRTY: [u8; render::DIRTY_SIZE] = [0u8; render::DIRTY_SIZE];
 
 /// Application states for the main loop.
 enum AppState {

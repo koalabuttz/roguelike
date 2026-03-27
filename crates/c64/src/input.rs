@@ -124,25 +124,41 @@ fn joy_bits() -> u8 {
     (c64::peek(c64::CIA1_PA as *const u8) ^ 0xFF) & 0x1F
 }
 
+/// Map 4-bit joystick direction state to Direction discriminant (0-7),
+/// or 0xFF for invalid/none. Lookup table avoids match-statement codegen
+/// that can miscompile on 6502 (jump table fragility).
+const JOY_TO_DIR_IDX: [u8; 16] = [
+    0xFF, //  0: no direction
+    0,    //  1: up         → North
+    1,    //  2: down       → South
+    0xFF, //  3: up+down    (invalid)
+    3,    //  4: left       → West
+    5,    //  5: up+left    → NorthWest
+    7,    //  6: down+left  → SouthWest
+    0xFF, //  7: invalid
+    2,    //  8: right      → East
+    4,    //  9: up+right   → NorthEast
+    6,    //  A: down+right → SouthEast
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+];
+
+/// Direction values indexed by discriminant, for table-driven construction.
+const DIRECTIONS: [Direction; 8] = [
+    Direction::North, Direction::South, Direction::East, Direction::West,
+    Direction::NorthEast, Direction::NorthWest, Direction::SouthEast, Direction::SouthWest,
+];
+
 /// Decode 5-bit joystick state into (direction, fire).
-/// Uses direct bit-pattern match instead of tuple destructuring to avoid
-/// MOS compiler codegen issues with multi-field tuple pattern matching.
+/// Uses lookup tables instead of match to avoid 6502 codegen issues
+/// (jump table miscompilation, wide-type overhead).
 fn decode_joy(bits: u8) -> (Option<Direction>, bool) {
     let fire = bits & 0x10 != 0;
-
-    // Match on direction bits (0-3) directly: bit0=up, bit1=down, bit2=left, bit3=right
-    let dir = match bits & 0x0F {
-        0x01 => Some(Direction::North),
-        0x02 => Some(Direction::South),
-        0x08 => Some(Direction::East),
-        0x04 => Some(Direction::West),
-        0x09 => Some(Direction::NorthEast),
-        0x05 => Some(Direction::NorthWest),
-        0x0A => Some(Direction::SouthEast),
-        0x06 => Some(Direction::SouthWest),
-        _    => None,
+    let idx = JOY_TO_DIR_IDX[(bits & 0x0F) as usize];
+    let dir = if idx < 8 {
+        Some(DIRECTIONS[idx as usize])
+    } else {
+        None
     };
-
     (dir, fire)
 }
 
@@ -248,6 +264,24 @@ pub fn wait_for_input() -> GameCommand {
         c64::wait_next_frame();
         c64::music_auto_tick();
 
+        // Joystick checked FIRST — prevents keyboard ghosting from overriding
+        // joystick input. The C64 keyboard matrix shares CIA1 Port A with
+        // joystick port 2; an active joystick direction pulls PA bits low
+        // during the keyboard scan, causing phantom key detections.
+        if let Some(bits) = joy_repeat() {
+            let (dir, fire) = decode_joy(bits);
+            if fire && dir.is_none() {
+                return GameCommand::Wait;
+            }
+            if let Some(d) = dir {
+                return if fire {
+                    GameCommand::Autorun(d)
+                } else {
+                    GameCommand::Move(d)
+                };
+            }
+        }
+
         let (key, shifted) = key_repeat();
         if key != 0 {
             #[cfg(feature = "dev-console")]
@@ -268,20 +302,6 @@ pub fn wait_for_input() -> GameCommand {
             }
             if let Some(cmd) = key_to_action(key) {
                 return cmd;
-            }
-        }
-
-        if let Some(bits) = joy_repeat() {
-            let (dir, fire) = decode_joy(bits);
-            if fire && dir.is_none() {
-                return GameCommand::Wait;
-            }
-            if let Some(d) = dir {
-                return if fire {
-                    GameCommand::Autorun(d)
-                } else {
-                    GameCommand::Move(d)
-                };
             }
         }
     }

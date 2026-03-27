@@ -62,7 +62,7 @@ fn is_frontier(x: u8, y: u8, map: &MicroMap, fov: &MicroFov) -> bool {
         return false;
     }
     for &dir in &ALL_DIRECTIONS {
-        let (dx, dy) = dir.to_offset();
+        let (dx, dy) = dir.to_offset_i8();
         let nx = x as i16 + dx as i16;
         let ny = y as i16 + dy as i16;
         if nx < 0 || ny < 0 || nx >= map.width as i16 || ny >= map.height as i16 {
@@ -104,7 +104,7 @@ pub fn find_nearest_frontier(
         }
 
         for &dir in &ALL_DIRECTIONS {
-            let (dx, dy) = dir.to_offset();
+            let (dx, dy) = dir.to_offset_i8();
             let nx = cx as i16 + dx as i16;
             let ny = cy as i16 + dy as i16;
             if nx < 0 || ny < 0 || nx >= map.width as i16 || ny >= map.height as i16 {
@@ -161,7 +161,7 @@ pub fn find_first_step(
 
         // Check if any neighbor of this tile is the player position.
         for &dir in &ALL_DIRECTIONS {
-            let (dx, dy) = dir.to_offset();
+            let (dx, dy) = dir.to_offset_i8();
             let nx = cx as i16 + dx as i16;
             let ny = cy as i16 + dy as i16;
             if nx < 0 || ny < 0 || nx >= map.width as i16 || ny >= map.height as i16 {
@@ -179,7 +179,7 @@ pub fn find_first_step(
 
         // Expand neighbors.
         for &dir in &ALL_DIRECTIONS {
-            let (dx, dy) = dir.to_offset();
+            let (dx, dy) = dir.to_offset_i8();
             let nx = cx as i16 + dx as i16;
             let ny = cy as i16 + dy as i16;
             if nx < 0 || ny < 0 || nx >= map.width as i16 || ny >= map.height as i16 {
@@ -226,7 +226,7 @@ pub fn frontier_count(px: u8, py: u8, map: &MicroMap, fov: &MicroFov, buf: &mut 
         }
 
         for &dir in &ALL_DIRECTIONS {
-            let (dx, dy) = dir.to_offset();
+            let (dx, dy) = dir.to_offset_i8();
             let nx = cx as i16 + dx as i16;
             let ny = cy as i16 + dy as i16;
             if nx < 0 || ny < 0 || nx >= map.width as i16 || ny >= map.height as i16 {

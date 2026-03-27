@@ -167,8 +167,8 @@ impl MicroGameState {
         let action_taken = match cmd {
             GameCommand::Wait => true,
             GameCommand::Move(dir) => {
-                let (dx, dy) = dir.to_offset();
-                self.player_move_or_attack(dx as i8, dy as i8)
+                let (dx, dy) = dir.to_offset_i8();
+                self.player_move_or_attack(dx, dy)
             }
             GameCommand::Pickup => self.pickup_item(),
             GameCommand::UseItem(slot) => self.use_item(slot),

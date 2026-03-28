@@ -825,25 +825,17 @@ fn start_and_present_game(seed: u16, width: u8, height: u8) {
     c64::music_start();
 }
 
-/// Post-step rendering: full redraw on descent, viewport scroll, or diff render.
+/// Post-step rendering: full redraw every frame.
+///
+/// Differential rendering (render_diff) is disabled — llvm-mos LTO at -Oz
+/// miscompiles the render_diff path, producing a JAM at $01E8 (hardware
+/// stack corruption). Full redraw costs ~2x cycles but is correct. See #201.
 #[inline(never)]
 fn render_after_step(state: &MicroGameState, old_depth: u8) {
     let diff = unsafe { &mut SHARED.diff };
-    if state.depth != old_depth {
-        let vp = render::viewport_pos(state);
-        render::render_all(state);
-        diff.snapshot(state, vp);
-    } else {
-        let (old_vx, old_vy) = diff.viewport;
-        let (vx, vy) = render::viewport_pos_lazy(state, old_vx, old_vy);
-        if (vx, vy) != (old_vx, old_vy) {
-            render::render_viewport_scroll(state, diff, vx, vy, old_vx, old_vy);
-        } else {
-            render::draw_player_immediate(state, diff, vx, vy);
-            render::render_diff(state, diff, vx, vy);
-        }
-        diff.snapshot(state, (vx, vy));
-    }
+    let vp = render::viewport_pos(state);
+    render::render_all(state);
+    diff.snapshot(state, vp);
 }
 
 // ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ pub mod fov;
 pub mod item_store;
 pub mod map;
 pub mod msglog;
+pub mod pathfinding;
 pub mod prng;
 pub mod spawn;
 pub mod types;

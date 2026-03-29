@@ -17,7 +17,7 @@ see the [C64 platform guide](../platforms/c64-platform-guide.md).
 
 - **rules** (all platforms): Pure functions and constants — damage formulas, balance constants, `MonsterKind` enum, `GameEvent` structured messages, `no_std` seed encoding. No game state interaction. Spawn logic produces `SpawnDirective` structs; each tier applies them to its own state.
 - **tier micro** (C64): `u8` coords/stats, 64 entities, 64x48 maps, LFSR-16, iterative shadowcasting FOV, `no_std`
-- **tier compact** (GBA): `i16` coords, `u8` stats, 128 entities, 80x40 maps, LFSR-32, iterative shadowcasting FOV, `no_std` — initially stubs only (type aliases + PRNG) until GBA port begins
+- **tier compact** (GBA): `i32` coords (ARM7-native), `u8` stats, 128 entities, 80x40 maps, LFSR-32, iterative integer shadowcasting FOV, `no_std` — built from standard tier patterns (same i32 coords) with fixed arrays instead of Vec
 - **tier standard** (Vita/PC): `i32` coords/stats, 512-1024 entities, 80x40+ maps, ChaCha20, shadowcasting FOV, `std`
 
 The distinction between **game rules** and **game mechanics** is key: rules are pure functions (damage calculation, item stat lookups, enchantment caps) that produce values; mechanics are stateful operations (applying damage to entities, inserting spawned monsters) that remain per-tier.
@@ -66,7 +66,7 @@ roguelike/
           msglog.rs   # Circular buffer for GameEvent values (no string formatting)
         tier_compact/ # Stubs only until GBA port begins — no_std
           mod.rs
-          types.rs    # Coord = i16, Stat = u8
+          types.rs    # Coord = i32 (ARM7-native), Stat = u8
           prng.rs     # LfsrRng32 — 32-bit Galois LFSR (minimal)
         game_step.rs  # #[cfg(feature = "std")] trait GameStep — cross-tier interface;
                       #   MicroGameStateAdapter wraps MicroGameState (u8→i32 widening);
@@ -139,7 +139,7 @@ pub mod data;          // game.toml loading
 ```
 
 Each tier uses concrete types appropriate to its capability level. Tier micro
-uses `u8` coords and fixed-size arrays; tier compact uses `i16` coords with
+uses `u8` coords and fixed-size arrays; tier compact uses `i32` coords (ARM7-native) with
 `u8` stats (stubs only until GBA port); tier standard uses `i32` types and
 `Vec`-based collections. Game rules in `rules/` (damage formulas, balance
 constants, item definitions, `MonsterKind` enum, `GameEvent` messages, seed
@@ -486,12 +486,12 @@ Each tier defines its own types, algorithms, and storage representations:
 
 | Aspect | Tier micro | Tier compact | Tier standard |
 |--------|-----------|-------------|--------------|
-| Coord | `u8` | `i16` | `i32` |
+| Coord | `u8` | `i32` (ARM7-native) | `i32` |
 | Stat | `u8` | `u8` | `i32` |
 | Entity storage | 64 (fixed array) | 128 (fixed array) | 512-1024 (Vec) |
 | Map | 64x48, flat `[u8; W*H]` | 80x40, flat `[u8; W*H]` | 80x40+, `Vec<Vec<Tile>>` |
 | PRNG | LFSR-16 | LFSR-32 | ChaCha20 |
-| FOV | Iterative shadowcasting | Iterative shadowcasting (`no_std`: integer slopes, bitfield) | Recursive shadowcasting (`f64` slopes, `HashSet`) |
+| FOV | Iterative shadowcasting (integer slopes, 6502-optimized) | Iterative shadowcasting (integer slopes, i32, bitfield — fresh rewrite, not adapted from micro) | Recursive shadowcasting (`f64` slopes, `HashSet`) |
 | Pathfinding | BFS (fixed buffers) | BFS or A* with fixed-size heap (TBD) | A* |
 | Messages | GameEvent enum (Copy) | GameEvent enum (Copy) | GameEvent → String formatting |
 | Enchantment cap | 5 (u8) | 5 (u8) | 5 (configurable) |

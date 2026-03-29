@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.5.0] - 2026-03-18
 
 ### Added
+- GBA: Update docs and memory with all resolved decisions (#209)
+- GBA: Define compact tier launch feature scope (#205)
+- GBA: Decide code sharing strategy between micro and compact tiers (#208)
+- GBA: Decide allocation strategy — no_std fixed arrays vs allocator vs hybrid (#206)
+- GBA: Update docs with session decisions and open questions (#207)
 - Increase dungeon to 22 levels with rebalanced depth scaling (#192)
 - Add item death when material property reaches zero (#175)
 - Add property visibility in look mode and MCP observe (#171)
@@ -61,6 +66,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Fix compact tier and GBA spec documentation (#202)
 - Token-templated message system for C64 format_event (#190)
 - C64: Replace RangeInclusive iterators and inventory iterator adaptors with manual loops (#180)
 - C64: Overlap SAVE_BUF and DiffState with union to save 809 bytes .noinit (#182)

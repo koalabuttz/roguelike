@@ -35,3 +35,6 @@ pub const NO_ENTITY: u8 = 0xFF;
 
 /// Player is always entity index 0.
 pub const PLAYER_IDX: u8 = 0;
+
+/// Bitfield size for visibility/explored sets (one bit per tile).
+pub const BITFIELD_SIZE: usize = MAP_SIZE.div_ceil(8);

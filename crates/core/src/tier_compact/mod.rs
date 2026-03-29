@@ -3,8 +3,11 @@
 //! Built from standard tier patterns with ARM7-native i32 coordinates,
 //! unpacked u8 tile storage, and no heap allocation. Phase 0 of the GBA port.
 
+pub mod ai;
+pub mod combat;
 pub mod entity;
 pub mod fov;
 pub mod map;
+pub mod msglog;
 pub mod prng;
 pub mod types;

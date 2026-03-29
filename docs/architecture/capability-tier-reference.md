@@ -480,19 +480,22 @@ The `effective_attack()` and `effective_defense()` helpers in
 return the effective values. Item spawn weights and `min_depth` thresholds
 are data-driven via `[[items]]` entries in `game.toml`.
 
-### 1.8 Type Sizing by Capability Tier
+### 1.8 Tier Comparison
 
-Each tier defines its own types and algorithms:
+Each tier defines its own types, algorithms, and storage representations:
 
-| Type | Tier micro | Tier compact | Tier standard |
-|------|-----------|-------------|--------------|
+| Aspect | Tier micro | Tier compact | Tier standard |
+|--------|-----------|-------------|--------------|
 | Coord | `u8` | `i16` | `i32` |
 | Stat | `u8` | `u8` | `i32` |
-| Entity cap | 16 | 128 | 512-1024 |
-| Map | 64x48 | 128x96 | 80x40+ |
+| Entity storage | 16 (fixed array) | 128 (fixed array) | 512-1024 (Vec) |
+| Map | 64x48, flat `[u8; W*H]` | 128x96, flat `[u8; W*H]` | 80x40+, `Vec<Vec<Tile>>` |
 | PRNG | LFSR-16 | LFSR-32 | ChaCha20 |
-| FOV | Iterative shadowcasting | Iterative shadowcasting | Shadowcasting |
+| FOV | Iterative shadowcasting | Iterative shadowcasting | Recursive shadowcasting |
 | Pathfinding | BFS (fixed buffers) | BFS (fixed buffers) | A* |
+| Messages | GameEvent enum (Copy) | GameEvent enum (Copy) | GameEvent → String formatting |
+| Enchantment cap | 5 (u8) | 5 (u8) | 5 (configurable) |
+| Save format | Binary (platform-specific) | Binary (platform-specific) | JSON via serde |
 
 The compact tier will initially be stubs only — `tier_compact/types.rs` (type aliases) and `tier_compact/prng.rs` (`LfsrRng32`). Full implementation (game state, mapgen, entity storage) is deferred until the GBA port begins.
 
@@ -562,20 +565,9 @@ the same algorithms. Standard-tier leaderboards include Vita and PC players.
 
 ### 1.10 Tier Divergence
 
-The following table documents intentional differences between tiers. These are
-not bugs or limitations — they reflect principled trade-offs for each tier's
-hardware constraints.
-
-| Aspect | Tier micro | Tier compact | Tier standard |
-|--------|-----------|-------------|--------------|
-| FOV | Iterative shadowcasting | Iterative shadowcasting | Recursive shadowcasting |
-| Pathfinding | BFS (fixed buffers) | BFS (fixed buffers) | A* |
-| Entity cap | 16 (fixed array) | 128 (fixed array) | 512-1024 (Vec) |
-| Messages | GameEvent enum (Copy) | GameEvent enum (Copy) | GameEvent → String formatting |
-| Map storage | Flat `[u8; W*H]` | Flat `[u8; W*H]` | `Vec<Vec<Tile>>` |
-| PRNG | LFSR-16 | LFSR-32 | ChaCha20 |
-| Enchantment cap | 5 (u8) | 5 (u8) | 5 (configurable) |
-| Save format | Binary (platform-specific) | Binary (platform-specific) | JSON via serde |
+All intentional tier differences are documented in the comparison table in §1.8
+above. These reflect principled trade-offs for each tier's hardware constraints,
+not bugs or limitations.
 
 The `rules/` module produces tier-independent values (damage amounts, item
 stats, enchantment caps, monster stats) that all tiers consume identically.

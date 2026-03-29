@@ -564,18 +564,14 @@ The deterministic replay system can verify that a given seed + command sequence 
 
 ## Relationship to Other Constrained Ports
 
-The patterns established here are reusable:
+The patterns established here are reusable. For tier type sizing and algorithm comparison, see the [overview table above](#architecture). The table below covers what varies per *platform* (not per tier):
 
 | Pattern | GBA (tier compact) | Vita/PC (tier standard) | C64 (tier micro) |
 |---------|-----|------|-----|
 | Core module | `core::rules` + `core::tier_compact` + `core::tier_micro` | `core::rules` + all tiers | `core::rules` + `core::tier_micro` |
-| Coord / Stat types | `i16` / `u8` | `i32` / `i32` | `u8` / `u8` |
-| RNG | LFSR-32 | ChaCha20 | LFSR-16 |
-| FOV | Shadowcasting (iterative) | Shadowcasting (recursive) | Shadowcasting (iterative) |
 | `no_std` / `std` | `no_std` (tier compact/micro are `no_std`) | `std` | `no_std` (tier micro is `no_std`) |
 | Containers | Fixed-size arrays (128 entities, 128×96 maps) | `Vec`, `HashMap`, `HashSet` | Fixed-size arrays (16 entities, 64×48 maps) |
-| Compact save format | `postcard` over SRAM | JSON / `postcard` | Custom binary over disk |
-| Hardware-specific renderer | Tiles + OAM | vita2d / terminal / GPU | PETSCII + color RAM |
-| Entity cap | 128 | 512–1024 | 16 |
+| Save format | `postcard` over SRAM | JSON / `postcard` | Custom binary over disk |
+| Renderer | Tiles + OAM | vita2d / terminal / GPU | PETSCII + color RAM |
 
 All platforms use `roguelike-core` directly, each compiling `core::rules` (pure game rules) plus its native tier. The C64 compiles `core::rules` + `core::tier_micro` (`u8` coords, 16 entities, LFSR-16). The GBA compiles `core::rules` + `core::tier_compact` (`i16` coords, 128 entities, LFSR-32) + `core::tier_micro` for cross-platform seed playback. The Vita and desktop compile `core::rules` + all tiers. Game rules in `core::rules` are written once — pure functions and constants with no state interaction. Game mechanics (spawn placement, damage application) remain per-tier. This is the "don't close doors" principle in action: the tier hierarchy gives every platform exactly the types and capacities it needs without feature flags or conditional compilation.

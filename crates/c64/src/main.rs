@@ -828,8 +828,9 @@ fn start_and_present_game(seed: u16, width: u8, height: u8) {
 /// Post-step rendering: full redraw every frame.
 ///
 /// Differential rendering (render_diff) is disabled — llvm-mos LTO at -Oz
-/// miscompiles the render_diff path, producing a JAM at $01E8 (hardware
-/// stack corruption). Full redraw costs ~2x cycles but is correct. See #201.
+/// miscompiles the render_diff function body pervasively (both dirty-bit
+/// computation and render loop). Full redraw costs ~2x cycles but is
+/// correct. See #201.
 #[inline(never)]
 fn render_after_step(state: &MicroGameState, old_depth: u8) {
     let diff = unsafe { &mut SHARED.diff };

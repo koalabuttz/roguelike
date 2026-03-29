@@ -16,8 +16,8 @@ see the [C64 platform guide](../platforms/c64-platform-guide.md).
 `roguelike-core` is organized around three capability tiers, plus a `rules/` module containing pure game rules shared by all tiers:
 
 - **rules** (all platforms): Pure functions and constants — damage formulas, balance constants, `MonsterKind` enum, `GameEvent` structured messages, `no_std` seed encoding. No game state interaction. Spawn logic produces `SpawnDirective` structs; each tier applies them to its own state.
-- **tier micro** (C64): `u8` coords/stats, 16 entities, 64x48 maps, LFSR-16, iterative shadowcasting FOV, `no_std`
-- **tier compact** (GBA): `i16` coords, `u8` stats, 128 entities, 128x96 maps, LFSR-32, iterative shadowcasting FOV, `no_std` — initially stubs only (type aliases + PRNG) until GBA port begins
+- **tier micro** (C64): `u8` coords/stats, 64 entities, 64x48 maps, LFSR-16, iterative shadowcasting FOV, `no_std`
+- **tier compact** (GBA): `i16` coords, `u8` stats, 128 entities, 80x40 maps, LFSR-32, iterative shadowcasting FOV, `no_std` — initially stubs only (type aliases + PRNG) until GBA port begins
 - **tier standard** (Vita/PC): `i32` coords/stats, 512-1024 entities, 80x40+ maps, ChaCha20, shadowcasting FOV, `std`
 
 The distinction between **game rules** and **game mechanics** is key: rules are pure functions (damage calculation, item stat lookups, enchantment caps) that produce values; mechanics are stateful operations (applying damage to entities, inserting spawned monsters) that remain per-tier.
@@ -53,7 +53,7 @@ roguelike/
           mod.rs
           types.rs    # Coord = u8, Stat = u8, Pos = (u8, u8)
           prng.rs     # LfsrRng — 16-bit Galois LFSR
-          entity.rs   # fixed-size entity array (max 16 entities)
+          entity.rs   # fixed-size entity array (max 64 entities)
           game.rs     # MicroGameState with fixed-size arrays
           map.rs      # generate() on fixed-size tile arrays (64×48)
           fov.rs      # Iterative shadowcasting FOV → bitfield (Bresenham LOS)
@@ -337,7 +337,7 @@ use roguelike_core::tier_compact::*;
 fn main() {
     let seed = get_seed();
     let mut state = CompactGameState::new(seed);
-    // 128×96 maps, up to 128 entities, LFSR-32, iterative shadowcasting FOV
+    // 80×40 maps, up to 128 entities, LFSR-32, iterative shadowcasting FOV
     run_game_loop(&mut state);
 }
 ```
@@ -412,10 +412,10 @@ the `std` feature. The C64 uses `default-features = false` and only accesses
 | **Color system** | All | **Rules** | `core/rules/color.rs` | `GameColor` enum (`#[repr(u8)]`), palette management |
 | **GameStep trait** | std | **Cross-tier** | `core/game_step.rs` | `#[cfg(feature = "std")]` — uniform interface for FrameSink/MCP/TUI; `MicroGameStateAdapter` wraps micro tier |
 | **RenderSource trait** | std | **Cross-tier** | `tui/render_source.rs` | Unified rendering: per-tile, entity, item, and status queries; implemented for both GameState and MicroGameStateAdapter |
-| **Entity system** | Per-tier | Per-tier | `core/tier_*/entity.rs` | micro: 16-entry fixed array; compact: stubs; standard: `Vec<Entity>` |
+| **Entity system** | Per-tier | Per-tier | `core/tier_*/entity.rs` | micro: 64-entry parallel arrays (`EntityStore`); compact: stubs; standard: `Vec<Entity>` |
 | **AI** | Per-tier | Per-tier | `core/tier_*/ai.rs`, `core/ai.rs` | Chase, wander, mood logic — same algorithms, tier-appropriate types |
 | **Game state** | Per-tier | Per-tier | `core/tier_*/game.rs` | `MicroGameState` / `CompactGameState` (stub) / `GameState` |
-| **FOV** | Per-tier | Per-tier | `core/tier_*/fov.rs` | micro: iterative shadowcasting → bitfield; compact: iterative shadowcasting → bitfield; standard: recursive shadowcasting (std) |
+| **FOV** | Per-tier | Per-tier | `core/tier_*/fov.rs` | micro/compact: iterative shadowcasting with integer slopes → bitfield (`no_std`); standard: recursive shadowcasting with `f64` slopes → `HashSet` (`std`). Constrained tiers use iterative because standard's recursive impl depends on `f64` and heap — not available in `no_std`. |
 | **BFS pathfinding** | micro | Per-tier | `core/tier_micro/pathfinding.rs` | Fixed-size buffers (1.1 KB), enables auto\_explore and pathfind\_to on micro tier |
 | A\* pathfinding | standard | **No** | PC only (`std`) | Requires heap (HashMap, BinaryHeap) |
 | Rendering | N/A | **No** | Separate impls | crossterm vs VIC-II vs GBA hardware |
@@ -433,7 +433,7 @@ and platforms use the same constants directly. The module defines:
 - **Monster stats** (per kind: Goblin, Orc, Troll): HP, ATK, DEF, sight range, spawn weight — all `u8`
 - **Player defaults**: HP (`30`), ATK (`5`), DEF (`2`) — all `u8`
 - **Config constants**: regen interval, max monsters per room — `u8`
-- **Per-tier map dimensions**: micro (`64×48`, 12 rooms, 16 entities), compact (`128×96`, 24 rooms, 128 entities), standard (`80×40`) — `u8`
+- **Per-tier map dimensions**: micro (`64×48`, 12 rooms, 64 entities), compact (`80×40`, 12 rooms, 128 entities), standard (`80×40`) — `u8`
 - **Wandering spawn** (Phase 1): spawn interval (`40`), delay (`60`), max active (`5`) — `u8`
 - **Depth scaling** (Phase 2): target depth (`5`), HP per floor (`+1`), ATK per 2 floors (`+1`) — `u8`
 - **Enchantment** (Phase 4): max enchant level (`5`), enchantment bonus per level (`+1`) — `u8`
@@ -488,18 +488,20 @@ Each tier defines its own types, algorithms, and storage representations:
 |--------|-----------|-------------|--------------|
 | Coord | `u8` | `i16` | `i32` |
 | Stat | `u8` | `u8` | `i32` |
-| Entity storage | 16 (fixed array) | 128 (fixed array) | 512-1024 (Vec) |
-| Map | 64x48, flat `[u8; W*H]` | 128x96, flat `[u8; W*H]` | 80x40+, `Vec<Vec<Tile>>` |
+| Entity storage | 64 (fixed array) | 128 (fixed array) | 512-1024 (Vec) |
+| Map | 64x48, flat `[u8; W*H]` | 80x40, flat `[u8; W*H]` | 80x40+, `Vec<Vec<Tile>>` |
 | PRNG | LFSR-16 | LFSR-32 | ChaCha20 |
-| FOV | Iterative shadowcasting | Iterative shadowcasting | Recursive shadowcasting |
-| Pathfinding | BFS (fixed buffers) | BFS (fixed buffers) | A* |
+| FOV | Iterative shadowcasting | Iterative shadowcasting (`no_std`: integer slopes, bitfield) | Recursive shadowcasting (`f64` slopes, `HashSet`) |
+| Pathfinding | BFS (fixed buffers) | BFS or A* with fixed-size heap (TBD) | A* |
 | Messages | GameEvent enum (Copy) | GameEvent enum (Copy) | GameEvent → String formatting |
 | Enchantment cap | 5 (u8) | 5 (u8) | 5 (configurable) |
 | Save format | Binary (platform-specific) | Binary (platform-specific) | JSON via serde |
 
 The compact tier will initially be stubs only — `tier_compact/types.rs` (type aliases) and `tier_compact/prng.rs` (`LfsrRng32`). Full implementation (game state, mapgen, entity storage) is deferred until the GBA port begins.
 
-When a higher platform runs a lower-tier game, it uses the lower tier's types and algorithms. This means a PC running a tier micro seed instantiates `MicroGameState` with an adapter (wrap, not reimplement) — using `u8` coords, LFSR-16, and iterative shadowcasting FOV to produce the same dungeon a C64 would generate. Remaining values (turn counts, kill counts, etc.) are sized per-field based on their value ranges.
+> **Open design decision:** Whether the GBA needs a dedicated compact tier depends on the allocation strategy (#206). If a heap allocator is used on GBA, the standard `GameState` could run directly, making compact tier vestigial. If no allocator, the compact tier's fixed arrays and `no_std` algorithms are necessary. See [GBA port — Key Open Decision](../platforms/gba-port.md#key-open-decision-allocation-strategy).
+
+When a higher platform runs a lower-tier game, it uses the lower tier's types and algorithms. Tier compatibility is downward only — higher tiers play lower-tier seeds, not vice versa. A PC running a tier micro seed instantiates `MicroGameState` with an adapter (wrap, not reimplement) — using `u8` coords, LFSR-16, and iterative shadowcasting FOV to produce the same dungeon a C64 would generate. The GBA runs both micro seeds (via `MicroGameStateAdapter`) and compact seeds (its native tier). Standard seeds are not supported on GBA. Remaining values (turn counts, kill counts, etc.) are sized per-field based on their value ranges.
 
 ### 1.9 Seed System and Cross-Platform Seeds
 
@@ -511,7 +513,7 @@ numeric value and shows platform compatibility in the UI.
 The decoded numeric value of the seed determines the tier:
 
 - **seed <= 0xFFFF** (u16 range) → **micro**: 64×48, LFSR-16, iterative shadowcasting FOV
-- **seed <= 0xFFFFFFFF** (u32 range) → **compact**: 128×96, LFSR-32, iterative shadowcasting FOV
+- **seed <= 0xFFFFFFFF** (u32 range) → **compact**: 80×40, LFSR-32, iterative shadowcasting FOV
 - **seed > 0xFFFFFFFF** (u64 range) → **standard**: 80×40, ChaCha20, shadowcasting FOV
 
 The base36 encoding length is a *consequence* of the numeric range, not the
@@ -522,11 +524,11 @@ numeric value directly: `seed <= 0xFFFF` → micro.
 ```
 Seed: r7z              (value: 0x2E93, fits u16)
 Plays on: C64 · GBA · Vita · PC
-Map: 64×48 · 16 entities · Iterative shadowcasting FOV
+Map: 64×48 · 64 entities · Iterative shadowcasting FOV
 
 Seed: r7z3kq           (value: 0x3A1B_C4E2, fits u32)
 Plays on: GBA · Vita · PC
-Map: 128×96 · 128 entities · Iterative shadowcasting FOV
+Map: 80×40 · 128 entities · Iterative shadowcasting FOV
 
 Seed: r7z3kq9ab2x      (value: 0x1F3C_7A2B_0E91_D4F6, u64)
 Plays on: Vita · PC
@@ -545,7 +547,7 @@ On platforms above micro, the new game screen offers a compatibility choice:
 ```
 New Game
   Standard (80×40, full features)
-  Compact  (128×96, GBA-compatible)
+  Compact  (80×40, GBA-compatible)
   Micro    (64×48, plays on everything)    ← cross-platform daily challenges use this
 ```
 

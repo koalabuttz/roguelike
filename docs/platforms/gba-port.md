@@ -1,6 +1,8 @@
 # Game Boy Advance Port
 
 > **Status:** Proposed. Design and implementation plan for the GBA frontend crate (`crates/gba/`).
+>
+> **Gating decision:** The allocation strategy (#206) determines whether GBA uses a dedicated compact tier or runs the standard tier with an allocator. See [Key Open Decision](#key-open-decision-allocation-strategy) below. Much of this doc assumes the no-allocator / compact tier path — sections affected are noted.
 
 How to bring the roguelike to the Game Boy Advance while keeping all game logic in `roguelike-core`, leveraging GBA hardware for features that benefit the game across platforms, and establishing patterns reusable by other constrained ports (Vita, C64).
 
@@ -19,6 +21,24 @@ How to bring the roguelike to the Game Boy Advance while keeping all game logic 
 | Sound | 4 PSG channels (2 pulse, 1 wave, 1 noise) + 2 DMA | Procedural audio from register writes. See [acoustic propagation doc](../design/acoustic-propagation.md#gba-psg). |
 | Save | SRAM (32 KB), Flash (64/128 KB), or EEPROM (512 B / 8 KB) | SRAM is simplest. 32 KB is sufficient for compact save format. |
 | Input | D-pad, A, B, L, R, Start, Select | 10 buttons. No analog. |
+
+## Key Open Decision: Allocation Strategy
+
+> **Chainlink:** #206 (critical, blocks #203 HAL choice and #205 feature scope)
+
+The single decision that gates everything else: **does the GBA use a heap allocator?**
+
+| Path | What it means | Pros | Cons |
+|------|--------------|------|------|
+| **No allocator** | Build full compact tier (~15 modules, fixed arrays, `no_std`). GBA is a distinct tier. | Deterministic memory, zero OOM risk, compact seed tier preserved, embedded best practice. | Maintain two parallel `no_std` game engines (micro + compact) plus standard. Features may need 3 implementations. |
+| **Allocator** | Bring a bump/pool allocator (or `agb`'s). Run standard `GameState` directly on GBA. | One game engine everywhere. Every new standard-tier feature works on GBA automatically. Massively less code. | Standard tier was written without memory budgets — unbounded `Vec::push` or `HashSet` resize could OOM. Requires allocation audit. Compact seed tier becomes vestigial. |
+| **Hybrid** | Allocator for temporary scratch (pathfinding, FOV working set). Core game state stays in fixed arrays. | Deterministic state + ergonomic algorithms. | Still requires building compact tier state modules. More complex allocation story. |
+
+**What makes this non-obvious:** The GBA is in a murkier spot than the C64. The C64 *needed* its own tier — 50 KB RAM, 8-bit CPU, every byte matters. The GBA has 288 KB total RAM and a 32-bit ARM CPU. The `agb` crate ships with a bump allocator. Some GBA homebrew uses `alloc` freely. The tier system was designed assuming GBA would be constrained enough to need its own tier, but that assumption is worth pressure-testing.
+
+**Arguments for keeping compact tier even with allocator available:** (1) Deterministic memory — no OOM on floor 22. (2) Cross-platform compact seed sharing. (3) Types and PRNG already exist.
+
+Most of this document assumes the no-allocator path (compact tier). Sections affected by this decision are noted where relevant.
 
 ## Relationship to Existing Docs
 
@@ -76,8 +96,8 @@ The three named tiers are:
 
 | Tier | Target | Coord | Stats | Entities | Map size | RNG | FOV | Alloc |
 |------|--------|-------|-------|----------|----------|-----|-----|-------|
-| **micro** | C64 | `u8` | `u8` | 16 | 64×48 | LFSR-16 | Shadowcasting | `no_std` |
-| **compact** | GBA | `i16` | `u8` | 128 | 128×96 | LFSR-32 | Shadowcasting (iterative) | `no_std` |
+| **micro** | C64 | `u8` | `u8` | 64 | 64×48 | LFSR-16 | Shadowcasting (iterative) | `no_std` |
+| **compact** | GBA | `i16` | `u8` | 128 | 80×40 | LFSR-32 | Shadowcasting (iterative) | `no_std` |
 | **standard** | Vita/PC | `i32` | `i32` | 512–1024 | 80×40+ | ChaCha20 | Shadowcasting | `std` |
 
 The compact tier is initially stubs only — `tier_compact/types.rs` (type aliases) and `tier_compact/prng.rs` (`LfsrRng32`). The full compact tier (game state, mapgen, entity storage, FOV) will be fleshed out when GBA work begins.
@@ -92,20 +112,20 @@ Each tier defines its own coordinate, stat, and position types directly. There i
 // core::tier_micro::types
 pub type Coord = u8;
 pub type Stat = u8;
-pub struct Pos { pub x: u8, pub y: u8 }
+pub type Pos = (Coord, Coord);
 
 // core::tier_compact::types
 pub type Coord = i16;
 pub type Stat = u8;
-pub struct Pos { pub x: i16, pub y: i16 }
+pub type Pos = (Coord, Coord);
 
 // core (top-level, tier standard)
 pub type Coord = i32;
 pub type Stat = i32;
-pub struct Pos { pub x: i32, pub y: i32 }
+pub type Pos = (Coord, Coord);
 ```
 
-`Stat` is `u8` on both constrained tiers — HP values 0–255 are sufficient for C64 and GBA. Tier standard widens to `i32` for Vita/PC where balance headroom is useful. The GBA uses `i16` coordinates natively (maps up to 128×96, well within `i16` range) without any opt-in.
+`Stat` is `u8` on both constrained tiers — this matches micro tier so all `rules::balance` constants work at their natural width without widening. ARM7 can handle wider types natively, but `u8` keeps the two constrained tiers interchangeable for balance calculations. Tier standard widens to `i32` for Vita/PC where balance headroom is useful.
 
 #### `no_std` in core
 
@@ -117,26 +137,34 @@ Core containers used by tier micro and tier compact, and their tier standard equ
 
 | Usage | Tier micro / compact | Tier standard |
 |-------|---------------------|---------------|
-| FOV / explored set | Fixed-size bitset indexed by `map.idx()`. 64×48 = 384 bytes (micro), 128×96 = 1536 bytes (compact). | `HashSet<Pos>` |
-| Entity list | Fixed-size array. Capacity 16 (micro), 128 (compact). | `Vec<Entity>` |
-| Map tiles | Fixed-size array `[Tile; MAX_TILES]`. 64×48 (micro), 128×96 (compact). | `Vec<Tile>` |
+| FOV / explored set | Fixed-size bitset indexed by `map.idx()`. 64×48 = 384 bytes (micro), 80×40 = 400 bytes (compact). | `HashSet<Pos>` |
+| Entity list | `EntityStore` parallel arrays. Capacity 64 (micro), 128 (compact). | `Vec<Entity>` |
+| Map tiles | Fixed-size array `[Tile; MAX_TILES]`. 64×48 (micro), 80×40 (compact). | `Vec<Tile>` |
 | Rooms | Fixed-size array `[Rect; MAX_ROOMS]`. | `Vec<Rect>` |
 | Messages | Fixed-size array of fixed-size byte buffers. 8 messages × 64 chars. | `Vec<String>` |
 | Entity names | `&'static str` (monster names are compile-time known). | `&'static str` |
 | Floor items | Parallel array indexed by `map.idx()`, or fixed-size array of `(Pos, Item)`. | `HashMap<Pos, Item>` |
 
-Tier compact uses the same fixed-array approach as tier micro, but with larger capacities (128 entities vs 16, 128×96 maps vs 64×48). Both constrained tiers avoid heap allocation entirely.
+Tier compact uses the same fixed-array approach as tier micro, but with larger capacities (128 entities vs 64, 80×40 maps vs 64×48). Both constrained tiers avoid heap allocation entirely.
 
-A type alias layer within each tier keeps call sites clean:
+The micro tier uses a **struct-of-arrays** pattern (`EntityStore`) with parallel fixed arrays for cache-friendly access on constrained hardware. Compact should follow the same pattern, widened to `i16` coordinates:
 
 ```rust
-// In tier_compact:
-pub type EntityVec = ArrayVec<Entity, 128>;
-pub type RoomVec = ArrayVec<Rect, MAX_ROOMS>;
-pub type MessageBuf = ArrayVec<ArrayString<64>, 8>;
+// In tier_compact (following tier_micro::entity::EntityStore):
+pub struct EntityStore {
+    pub x: [i16; MAX_ENTITIES],
+    pub y: [i16; MAX_ENTITIES],
+    pub hp: [Stat; MAX_ENTITIES],
+    pub max_hp: [Stat; MAX_ENTITIES],
+    pub atk: [Stat; MAX_ENTITIES],
+    pub def: [Stat; MAX_ENTITIES],
+    pub kind: [Option<MonsterKind>; MAX_ENTITIES],
+    pub alive: [bool; MAX_ENTITIES],
+    pub count: u8,
+}
 ```
 
-This keeps call sites unchanged: `entities.push()`, `entities.iter()`, `entities[i]` all work regardless of tier. The capacity constants are baked into each tier module, not set dynamically.
+This matches the micro tier's existing implementation. The capacity constants are baked into each tier module, not set dynamically.
 
 **Risk:** The tier system is already the target architecture for core. The compact tier will initially be stubs only (type aliases + PRNG); the full compact tier (game state, mapgen, entity storage, FOV) will be fleshed out when GBA work begins. The GBA-specific work is writing the GBA frontend crate and completing the compact tier — no other core refactoring is needed.
 
@@ -212,7 +240,7 @@ Each frame during VBlank:
 3. Set OAM attributes: position (world-to-screen transform), tile index (from glyph → sprite graphic table), palette (from `GameColor` mapping), flip/size.
 4. Entities exiting FOV: set their OAM entry to off-screen or disable the sprite.
 
-The player always occupies OAM slot 0 (highest priority). Monsters fill slots 1–N. With `SimBudget::max_entities = 128` and 128 OAM slots available, there is no contention in practice — the FOV limits how many entities are simultaneously visible to well under 128.
+The player always occupies OAM slot 0 (highest priority). Monsters fill slots 1–N. With `balance::COMPACT_MAX_ENTITIES = 128` and 128 OAM slots available, there is no contention in practice — the FOV limits how many entities are simultaneously visible to well under 128.
 
 #### Animation
 
@@ -281,6 +309,8 @@ Cost: ~20 register writes per frame. The visual effect is a flickering light bou
 
 The flicker state is an `u32` LFSR (linear feedback shift register) seeded from the game's RNG. This keeps flicker deterministic for replay purposes, though since it's purely visual, determinism is optional.
 
+**Why iterative shadowcasting:** The standard tier's recursive FOV implementation (`core/fov.rs`) uses `f64` slopes and returns `HashSet<Pos>` — neither available in `no_std`. The iterative version (`tier_micro/fov.rs`) was designed for constrained platforms: integer rational slopes, bitfield output, explicit stack. The compact tier reuses this approach, widened from `u8` to `i16` coordinates. On ARM7TDMI, the 6502-specific optimizations (quarter-square multiply table, branch-based octant transform) would be replaced with native multiply instructions.
+
 **"Don't close doors" note:** The FOV distance data that drives palette selection comes from `compute_fov()` in core. On the compact tier, `compute_fov()` populates a bitfield (same iterative shadowcasting algorithm as micro tier, widened to i16 coords). The GBA renderer computes Chebyshev distance from the player to each visible tile — this is a per-tile subtraction, not a core change. Other platforms can implement similar lighting if desired (terminal could use ANSI 256-color greyscale; C64 uses color RAM as described in the [acoustic propagation doc](../design/acoustic-propagation.md#visual-complement-dynamic-fov-lighting-c64)). The core doesn't know about palettes.
 
 ## Input
@@ -303,7 +333,7 @@ GBA buttons map to `GameCommand` and `MenuCommand`:
 
 ### Diagonals via L Modifier
 
-The GBA's D-pad natively reports only 4 directions (with hardware diagonals from pressing two buttons simultaneously, but this is unreliable on some hardware). The L-button modifier provides clean 8-directional input:
+The GBA's D-pad reports each direction as an independent bit in `REG_KEYINPUT` (0x04000130) — simultaneous presses are reliably detected on all hardware. The L-modifier is an ergonomic choice: pressing clean diagonals on a D-pad rocker is physically awkward during fast play, so the modifier gives precise 8-directional input from 4 cardinal buttons:
 
 - **No L held:** D-pad = 4 cardinal directions.
 - **L held:** D-pad Up = NW, D-pad Right = NE, D-pad Down = SE, D-pad Left = SW.
@@ -332,11 +362,11 @@ Alternative: L held + two D-pad buttons = diagonal (L + Up + Right = NE). This m
 
 GBA SRAM provides 32 KB of battery-backed storage. JSON serialization (`serde_json`) is not available in `no_std` and would be wasteful of space. Instead, use a compact binary format.
 
-Option A: **`postcard`** — a `no_std`-compatible serde format that produces compact binary. Core's `GameState` already derives `Serialize`/`Deserialize`, so this requires minimal code. A typical game state (30×20 map, ~50 entities, 8 messages) serializes to ~2–4 KB with `postcard`, fitting comfortably in 32 KB SRAM with room for multiple save slots.
+Option A: **`postcard`** — a `no_std`-compatible serde format that produces compact binary. The compact tier's `CompactGameState` would need its own `Serialize`/`Deserialize` derives (the standard tier's `GameState` derives exist but are a different type). A typical compact game state (80×40 map, ~50 entities, 8 messages) serializes to ~2–4 KB with `postcard`, fitting comfortably in 32 KB SRAM with room for multiple save slots.
 
-Option B: **Manual binary layout** — hand-written `to_bytes()` / `from_bytes()` methods. Smaller output, more code to maintain, fragile across version changes.
+Option B: **Manual binary layout** — hand-written `to_bytes()` / `from_bytes()` methods, following the micro tier's pattern in `tier_micro/save.rs`. Smaller output, full control over format, proven approach on a constrained tier. More code to maintain, fragile across version changes.
 
-Recommendation: **Option A (`postcard`)**. It leverages the existing serde derives, is `no_std`-compatible, and the GBA's 32 KB SRAM budget is generous enough that `postcard`'s overhead is acceptable.
+Both are viable. The micro tier uses manual binary (Option B) and it works well. `postcard` (Option A) would reduce boilerplate if serde derives are added to the compact tier. Decision deferred until GBA implementation begins.
 
 #### Save Discipline
 
@@ -418,40 +448,57 @@ Estimated IWRAM (32 KB) usage for hot data:
 
 | Data | Size | Notes |
 |------|------|-------|
-| Entity array | 128 × 20 bytes = 2,560 B | `Entity` with `i16` coords (tier compact), `u8` stats, properties, mood/memory |
-| FOV bitset | 1,536 B (12,288 bits) | 128×96 map, 1 bit per tile |
-| Explored bitset | 1,536 B | Same |
-| Structural walls | 1,536 B | Same |
+| Entity array | 128 × 20 bytes = 2,560 B | `EntityStore` parallel arrays with `i16` coords (tier compact), `u8` stats |
+| FOV bitset | 400 B (3,200 bits) | 80×40 map, 1 bit per tile |
+| Explored bitset | 400 B | Same |
+| Structural walls | 400 B | Same |
 | Event queue | ~512 B | 32 events × 16 bytes |
 | OAM shadow | 1,024 B | 128 entries × 8 bytes, written to OAM during VBlank |
 | Sprite anim state | 256 B | Per-OAM-slot counters |
 | PSG driver state | 32 B | |
 | Stack + misc | ~4 KB | |
-| **Total** | **~13 KB** | **40% of IWRAM** |
+| **Total** | **~10 KB** | **30% of IWRAM** |
 
 EWRAM (256 KB) usage:
 
 | Data | Size | Notes |
 |------|------|-------|
-| Map tiles | 12,288 B | 128×96, `Tile` is 1 byte |
-| Sound grid | 12,288 B | 128×96, `u8` per tile |
-| BFS pathfinding buffers | ~12 KB | Visited array + queue for 128×96 map |
+| Map tiles | 3,200 B | 80×40, `Tile` is 1 byte |
+| Sound grid | 3,200 B | 80×40, `u8` per tile |
+| Pathfinding buffers | ~3.2 KB | Visited array + queue for 80×40 map (BFS or fixed-size A*) |
 | Tile graphics (staging) | 2 KB | 64 tiles × 32 bytes. Also in ROM; EWRAM copy for palette swaps. |
 | Sprite graphics (staging) | 4 KB | 128 sprite tiles. |
-| Room array | 288 B | 24 rooms × 12 bytes |
-| Message buffer | 512 B | 8 × `ArrayString<64>` |
+| Room array | 144 B | 12 rooms × 12 bytes |
+| Message buffer | 512 B | 8 × 64-byte fixed buffers |
 | Floor deltas (if multi-level) | ~1.6 KB | 50 floors × 32 bytes |
 | Save staging buffer | ~4 KB | For serialization before SRAM write |
 | Scroll/lighting working buffers | ~2 KB | Tilemap row/column staging |
-| **Total** | **~51 KB** | **20% of EWRAM** |
+| **Total** | **~24 KB** | **9% of EWRAM** |
 
 The budget is comfortable. Even doubling all estimates leaves significant headroom in both regions.
 
 ## Implementation Phases
 
-Each phase is independently testable. Phases 1–3 produce a playable GBA build. Phases 4–6 add polish and integrate with systems from other design docs.
+> **Sequencing decision (settled):** Build compact tier in core first, test via MCP/TUI/headless, then build the GBA frontend. This mirrors the micro tier's development — `tier_micro` was complete and testable via `MicroGameStateAdapter` before the C64 frontend existed. The payoff: hundreds of automated playthroughs validating balance and correctness before writing any GBA-specific code.
 
-### Phase 1: Scaffold and Static Rendering (Effort: M)
+### Phase 0: Compact Tier in Core (Effort: L)
+
+**Goal:** Compact tier is playable in the terminal, MCP server, and headless playtester.
+
+> Affected by allocation strategy (#206). If allocator path is chosen, this phase is replaced by an allocation audit of standard `GameState`.
+
+- Build `tier_compact` modules in `crates/core/src/tier_compact/`: game state, entity store, map generation, FOV, AI, combat, spawn, items, pathfinding, autorun, message log.
+- Map generation algorithm: match standard tier if it fits comfortably in GBA constraints (80×40, fixed arrays). Diverge only where necessary.
+- Add `CompactGameStateAdapter` to `game_step.rs` (follows `MicroGameStateAdapter` pattern).
+- Wire into `create_game()` factory: seeds ≤ `0xFFFFFFFF` route to compact tier.
+- Implement `RenderSource` for compact adapter — compact tier is now playable in the terminal.
+- Add compact-tier golden replays and balance integration tests.
+- Run headless parameter sweeps on compact seeds to validate balance.
+- **Test:** `cargo test --workspace`, MCP playtesting with compact seeds, headless sweeps.
+
+**Depends on:** Allocation strategy decision (#206).
+
+### Phase 1: GBA Scaffold and Static Rendering (Effort: M)
 
 **Goal:** GBA binary boots, renders a static dungeon map, player is visible.
 
@@ -462,7 +509,7 @@ Each phase is independently testable. Phases 1–3 produce a playable GBA build.
 - Display a static HP bar using background tiles on a second layer (BG1) or the bottom 2 tile rows of BG0.
 - **Test:** Build with `cargo build --target thumbv4t-none-eabi -p roguelike-gba`. Boot in mGBA emulator. Verify map and player render.
 
-**Depends on:** Nothing. This is the starting point.
+**Depends on:** Phase 0 (compact tier must be complete and tested in core).
 
 ### Phase 2: Input and Game Loop (Effort: S-M)
 
@@ -477,9 +524,11 @@ Each phase is independently testable. Phases 1–3 produce a playable GBA build.
 
 **Depends on:** Phase 1.
 
-### Phase 3: Smooth Scrolling + Tile Streaming (Effort: M)
+### Phase 3: Smooth Scrolling + Tile Streaming (Effort: M) — Optional Polish
 
 **Goal:** Camera follows the player smoothly instead of snapping.
+
+> **Nice-to-have**, not required for a playable GBA build. Most GBA roguelikes snap the viewport. Phase 2 already produces a fully playable game with snap scrolling. Smooth scrolling adds visual polish but significant complexity (tile streaming, input buffering during animation, double-buffered BG updates). Can be deferred indefinitely without blocking other phases.
 
 - Implement viewport tracking and tilemap edge-writing (tile streaming).
 - Implement scroll register interpolation over `N` frames per move.
@@ -525,21 +574,35 @@ Each phase is independently testable. Phases 1–3 produce a playable GBA build.
 
 ## Open Questions
 
-1. **`agb` vs `gba` crate.** `agb` is higher-level (provides allocator, sprite management, tiled backgrounds) but opinionated. The `gba` crate is thinner and more manual. `agb` may fight the project's own rendering approach; `gba` requires more boilerplate but fewer surprises. Needs evaluation against the specific tile streaming and OAM management requirements above.
+1. **`agb` vs `gba` crate.** *(Open — blocked by #206.)* `agb` is higher-level (provides allocator, sprite management, tiled backgrounds) but opinionated. The `gba` crate is thinner and more manual. `agb` may fight the project's own rendering approach; `gba` requires more boilerplate but fewer surprises. A third option — raw MMIO with `voladdress` — gives maximum control with no dependency risk. Key tension: `agb` wants to own your game loop and memory; our architecture wants core to own the logic. The allocator decision (#206) heavily influences this: if we want an allocator, `agb` provides one; if not, `agb`'s allocator is unwanted baggage. **Chainlink: #203.**
 
-2. **Map rendering for 128×96.** The tier compact map is 128×96 tiles — far larger than the 32×32 screenblock. Tile streaming (Phase 3) handles this: the renderer writes one row or column of tilemap entries as the viewport scrolls, and the screenblock wraps at its boundaries. This is standard GBA scrolling technique. For maps wider than 32 tiles in either dimension, a second screenblock may be needed (BG0 supports two screenblocks at the cost of VRAM). The 128×96 map lives in EWRAM; only the visible viewport region is loaded into the screenblock.
+2. **Map rendering for 80×40.** *(Resolved.)* Single 32×32 screenblock with wrapping — standard GBA scrolling technique. The 80×40 map lives in EWRAM; only the visible viewport region (~28×18 tiles) is loaded into the screenblock. Neither dimension exceeds 64 tiles, so a single screenblock suffices.
 
-3. **Seed code compatibility.** GBA-generated dungeons at tier compact (128×96 map, `i16` coords, LFSR-32 RNG) will not produce the same dungeon as desktop tier standard for the same seed — the map dimensions and RNG algorithm differ. The FOV algorithm (iterative shadowcasting) and FOV radius (8) are shared across micro and compact tiers. Short seeds (tier micro) are cross-platform by design: any platform can play back a tier micro seed. Tier is determined by the seed's numeric value (`seed <= 0xFFFF` → micro, `seed <= 0xFFFFFFFF` → compact, else standard), so seed sharing is explicit about what generated the dungeon.
+3. **Seed code compatibility.** *(Resolved.)* Tier compatibility is downward only — higher tiers play lower-tier seeds, not vice versa. GBA runs micro seeds (≤ 0xFFFF) with identical results to C64/PC. Compact seeds (≤ 0xFFFFFFFF) play on GBA, Vita, and PC but produce different dungeons than standard seeds for the same numeric value (different RNG). This is intentional tier divergence, not a bug.
 
-4. **`no_std` tier module scope.** Tier micro and tier compact are `no_std` modules with fixed-size arrays. The GBA uses these directly. Dev-tools-only modules (`analytics`, `scenario`, `exploration_graph`) live at tier standard behind `std`, which is fine since the GBA does not need them.
+4. **`no_std` tier module scope.** *(Resolved.)* Tier micro and tier compact are `no_std` modules with fixed-size arrays. Dev-tools-only modules live at tier standard behind `std`. No changes needed.
 
-5. **Tile art style.** Pixel art tiles versus rendered font glyphs. Using actual ASCII glyphs in an 8×8 font preserves the terminal aesthetic and is simpler to implement (one tile per character, palette swap for color). Custom pixel art tiles are more visually interesting but require an artist or generated assets. A reasonable path: start with font-glyph tiles, add pixel art later as a separate tileset (the tile index mapping is the same either way).
+5. **Tile art style.** *(Decided.)* ASCII font glyphs first. This project should feel like a terminal roguelike. Start with 8×8 font glyph tiles (one tile per character, palette swap for color). Pixel art is a nice-to-have for later — the tile index mapping is the same either way, so the door stays open.
+
+6. **Save format.** *(Open.)* `postcard` (serde-based `no_std`) vs custom binary (proven C64 pattern). Decision deferred — depends on HAL choice (#203) since `agb` has its own save abstraction. **Chainlink: #204.**
+
+7. **Compact tier feature scope.** *(Open — blocked by #206.)* Which micro-tier features ship in compact v1? GBA has 256 KB EWRAM (far less pressure than C64), but more features = more implementation time before hardware. If allocator path is chosen, this becomes moot — standard tier parity for free. **Chainlink: #205.**
 
 ## Testing Strategy
 
+### Compact Tier Testing (Phase 0)
+
+Before any GBA-specific code is written, the compact tier is tested on the host:
+
+- **Unit tests:** `#[cfg(test)] mod tests` in each `tier_compact` module, same pattern as micro tier.
+- **Golden replays:** Compact-tier-specific golden replay files (compact seeds, separate from micro tier's 5 replays). Verified by the existing `golden_replays.rs` integration test harness.
+- **Balance scenarios:** Compact-tier balance integration tests using the scenario framework.
+- **Headless playtesting:** `cargo run --bin headless` with compact seeds, parameter sweeps, analytics.
+- **MCP playtesting:** LLM playtesting via `llm_playtest.py` with compact seeds for automated gameplay validation.
+
 ### Emulator Testing
 
-All development and CI testing uses **mGBA** (accurate GBA emulator with CLI mode). `mgba-rom-test` can run headless with a timeout, verifying that the ROM boots and doesn't crash.
+mGBA is the preliminary choice for GBA emulator testing (accurate, has CLI mode, GDB stub, debug console). Other emulators should be evaluated before committing. `mgba-rom-test` can run headless with a timeout, verifying that the ROM boots and doesn't crash.
 
 ### Cross-Feature CI
 
@@ -570,8 +633,8 @@ The patterns established here are reusable. For tier type sizing and algorithm c
 |---------|-----|------|-----|
 | Core module | `core::rules` + `core::tier_compact` + `core::tier_micro` | `core::rules` + all tiers | `core::rules` + `core::tier_micro` |
 | `no_std` / `std` | `no_std` (tier compact/micro are `no_std`) | `std` | `no_std` (tier micro is `no_std`) |
-| Containers | Fixed-size arrays (128 entities, 128×96 maps) | `Vec`, `HashMap`, `HashSet` | Fixed-size arrays (16 entities, 64×48 maps) |
-| Save format | `postcard` over SRAM | JSON / `postcard` | Custom binary over disk |
+| Containers | Fixed-size arrays (128 entities, 80×40 maps) | `Vec`, `HashMap`, `HashSet` | Fixed-size arrays (64 entities, 64×48 maps) |
+| Save format | `postcard` or custom binary over SRAM | JSON / `postcard` | Custom binary over disk |
 | Renderer | Tiles + OAM | vita2d / terminal / GPU | PETSCII + color RAM |
 
-All platforms use `roguelike-core` directly, each compiling `core::rules` (pure game rules) plus its native tier. The C64 compiles `core::rules` + `core::tier_micro` (`u8` coords, 16 entities, LFSR-16). The GBA compiles `core::rules` + `core::tier_compact` (`i16` coords, 128 entities, LFSR-32) + `core::tier_micro` for cross-platform seed playback. The Vita and desktop compile `core::rules` + all tiers. Game rules in `core::rules` are written once — pure functions and constants with no state interaction. Game mechanics (spawn placement, damage application) remain per-tier. This is the "don't close doors" principle in action: the tier hierarchy gives every platform exactly the types and capacities it needs without feature flags or conditional compilation.
+All platforms use `roguelike-core` directly, each compiling `core::rules` (pure game rules) plus its native tier. The C64 compiles `core::rules` + `core::tier_micro` (`u8` coords, 64 entities, LFSR-16). The GBA compiles `core::rules` + `core::tier_compact` (`i16` coords, 128 entities, LFSR-32) + `core::tier_micro` for cross-platform seed playback. The Vita and desktop compile `core::rules` + all tiers. Game rules in `core::rules` are written once — pure functions and constants with no state interaction. Game mechanics (spawn placement, damage application) remain per-tier. This is the "don't close doors" principle in action: the tier hierarchy gives every platform exactly the types and capacities it needs without feature flags or conditional compilation.

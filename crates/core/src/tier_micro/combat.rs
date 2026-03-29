@@ -1,13 +1,14 @@
 //! Melee attack resolution for the micro tier.
 //!
-//! Uses `rules::damage::damage()` for the formula and emits `GameEvent`s.
+//! Delegates to [`rules::combat::resolve_melee`](crate::rules::combat::resolve_melee)
+//! for the algorithm. This module adapts between the shared rule and the
+//! micro tier's parallel-array entity storage and circular message log.
 
 use super::entity::EntityStore;
 use super::msglog::MicroMessageLog;
 use super::types::*;
-use crate::rules::damage;
-use crate::rules::health;
-use crate::rules::message::{Combatant, GameEvent};
+use crate::rules::combat as rules_combat;
+use crate::rules::message::Combatant;
 
 fn combatant(entities: &EntityStore, idx: u8) -> Combatant {
     if idx == PLAYER_IDX {
@@ -32,52 +33,37 @@ pub fn melee_attack(
     entities: &mut EntityStore,
     log: &mut MicroMessageLog,
 ) -> bool {
-    let dmg = damage::damage(atk, def);
-
     let a = combatant(entities, attacker);
     let d = combatant(entities, defender);
 
-    if dmg > 0 {
-        let old_tier = health::health_tier(
-            entities.hp[defender as usize],
-            entities.max_hp[defender as usize],
-        );
-        let new_hp = entities.hp[defender as usize].saturating_sub(dmg);
-        entities.hp[defender as usize] = new_hp;
-        log.add(GameEvent::Attack {
-            attacker: a,
-            defender: d,
-            damage: dmg,
-        });
-        if new_hp > 0 {
-            let new_tier = health::health_tier(new_hp, entities.max_hp[defender as usize]);
-            if new_tier != old_tier {
-                log.add(GameEvent::HealthStatus {
-                    who: d,
-                    tier: new_tier,
-                });
-            }
-        }
-        if new_hp == 0 {
-            entities.kill(defender);
-            log.add(GameEvent::Kill {
-                attacker: a,
-                victim: d,
-            });
-            return true;
-        }
-    } else {
-        log.add(GameEvent::NoDamage {
-            attacker: a,
-            defender: d,
-        });
+    let outcome = rules_combat::resolve_melee(
+        a,
+        d,
+        atk,
+        def,
+        entities.hp[defender as usize],
+        entities.max_hp[defender as usize],
+    );
+
+    entities.hp[defender as usize] = outcome.new_hp;
+    if outcome.killed {
+        entities.kill(defender);
     }
-    false
+
+    // Emit events — while-loop, not iterator adaptors (6502-safe).
+    let mut i: u8 = 0;
+    while i < outcome.event_count {
+        log.add(outcome.events[i as usize]);
+        i += 1;
+    }
+
+    outcome.killed
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rules::message::GameEvent;
     use crate::rules::monster_table::{AiBehavior, MonsterKind};
 
     fn setup() -> (EntityStore, MicroMessageLog) {

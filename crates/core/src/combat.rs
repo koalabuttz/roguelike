@@ -1,8 +1,7 @@
 use crate::entity::Entity;
 use crate::message_log::MessageLog;
-use crate::rules::damage as rules_damage;
-use crate::rules::health;
-use crate::rules::message::GameEvent;
+use crate::rules::combat as rules_combat;
+use crate::rules::damage::narrow;
 use crate::types::Stat;
 
 /// Resolve a melee attack between two entities by index.
@@ -20,51 +19,28 @@ pub fn melee_attack(
     def: Stat,
     log: &mut MessageLog,
 ) -> bool {
-    let damage = rules_damage::damage(rules_damage::narrow(atk), rules_damage::narrow(def)) as Stat;
     let attacker_c = entities[attacker].combatant();
     let defender_c = entities[defender].combatant();
 
-    if damage > 0 {
-        let old_tier = health::health_tier(
-            rules_damage::narrow(entities[defender].hp),
-            rules_damage::narrow(entities[defender].max_hp),
-        );
-        entities[defender].hp -= damage;
-        log.add_event(GameEvent::Attack {
-            attacker: attacker_c,
-            defender: defender_c,
-            damage: damage as u8,
-        });
+    let outcome = rules_combat::resolve_melee(
+        attacker_c,
+        defender_c,
+        narrow(atk),
+        narrow(def),
+        narrow(entities[defender].hp),
+        narrow(entities[defender].max_hp),
+    );
 
-        if entities[defender].hp > 0 {
-            let new_tier = health::health_tier(
-                rules_damage::narrow(entities[defender].hp),
-                rules_damage::narrow(entities[defender].max_hp),
-            );
-            if new_tier != old_tier {
-                log.add_event(GameEvent::HealthStatus {
-                    who: defender_c,
-                    tier: new_tier,
-                });
-            }
-        }
-
-        if entities[defender].hp <= 0 {
-            entities[defender].alive = false;
-            log.add_event(GameEvent::Kill {
-                attacker: attacker_c,
-                victim: defender_c,
-            });
-            return true;
-        }
-    } else {
-        log.add_event(GameEvent::NoDamage {
-            attacker: attacker_c,
-            defender: defender_c,
-        });
+    entities[defender].hp = outcome.new_hp as Stat;
+    if outcome.killed {
+        entities[defender].alive = false;
     }
 
-    false
+    for i in 0..outcome.event_count {
+        log.add_event(outcome.events[i as usize]);
+    }
+
+    outcome.killed
 }
 
 #[cfg(test)]

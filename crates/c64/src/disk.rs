@@ -39,8 +39,8 @@ const VIC_CTRL1: *mut u8 = 0xD011 as *mut u8;  // VIC control register 1
 const VIC_RASTER: *mut u8 = 0xD012 as *mut u8;  // VIC raster compare
 const VIC_IRQ_EN: *mut u8 = 0xD01A as *mut u8;  // VIC IRQ enable mask
 
-// ZP locations for KERNAL SAVE pointer ($FB/$FC are free).
-const ZP_PTR: u8 = 0xFB;
+// ZP $FB/$FC are free for user programs on C64 (KERNAL doesn't use them).
+// $9A is KERNAL DFLTO (default output device) — clobbered by SAVE, restore after.
 const ZP_PTR_ADDR: *mut u8 = 0xFB as *mut u8;
 
 // ---------------------------------------------------------------------------
@@ -166,7 +166,6 @@ fn kernal_clrchn() {
 // Additional hardware registers that KERNAL I/O may clobber.
 const VIC_MEMPTR: *mut u8 = 0xD018 as *mut u8;  // VIC memory setup
 const KERNAL_MSGFLAG: *mut u8 = 0x9D as *mut u8; // KERNAL message control
-const KERNAL_DFLTO: *mut u8 = 0x9A as *mut u8;   // Default output device
 
 struct SavedIrqState {
     irq_lo: u8,

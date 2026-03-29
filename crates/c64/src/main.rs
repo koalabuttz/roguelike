@@ -832,7 +832,7 @@ fn start_and_present_game(seed: u16, width: u8, height: u8) {
 /// computation and render loop). Full redraw costs ~2x cycles but is
 /// correct. See #201.
 #[inline(never)]
-fn render_after_step(state: &MicroGameState, old_depth: u8) {
+fn render_after_step(state: &MicroGameState, _old_depth: u8) {
     let diff = unsafe { &mut SHARED.diff };
     let vp = render::viewport_pos(state);
     render::render_all(state);

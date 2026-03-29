@@ -1083,19 +1083,21 @@ const SPRITE_BASE_PTR: u8 = (SPRITE_BASE_ADDR / 64) as u8; // 13
 /// src/dst are 64-byte sprite frame pointers (63 data + 1 padding).
 /// Uses ascending/descending offset counters to avoid multiply on 6502.
 unsafe fn sprite_vflip(src: *const u8, dst: *mut u8) {
-    let mut s: u8 = 0;   // source offset: 0, 3, 6, ... 60
-    let mut d: u8 = 60;  // dest offset: 60, 57, 54, ... 0
-    loop {
-        let si = s as usize;
-        let di = d as usize;
-        write_volatile(dst.add(di), *src.add(si));
-        write_volatile(dst.add(di + 1), *src.add(si + 1));
-        write_volatile(dst.add(di + 2), *src.add(si + 2));
-        s += 3;
-        if s >= 63 { break; }
-        d -= 3;
+    unsafe {
+        let mut s: u8 = 0;   // source offset: 0, 3, 6, ... 60
+        let mut d: u8 = 60;  // dest offset: 60, 57, 54, ... 0
+        loop {
+            let si = s as usize;
+            let di = d as usize;
+            write_volatile(dst.add(di), *src.add(si));
+            write_volatile(dst.add(di + 1), *src.add(si + 1));
+            write_volatile(dst.add(di + 2), *src.add(si + 2));
+            s += 3;
+            if s >= 63 { break; }
+            d -= 3;
+        }
+        write_volatile(dst.add(63), 0); // padding
     }
-    write_volatile(dst.add(63), 0); // padding
 }
 
 /// 6502 machine code for the spinner + footstep IRQ handler (102 bytes).

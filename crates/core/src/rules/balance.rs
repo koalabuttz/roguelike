@@ -176,6 +176,7 @@ pub const COMPACT_MAX_ROOMS: u8 = 12;
 pub const COMPACT_MAX_ENTITIES: u8 = 128;
 pub const COMPACT_ROOM_SIZE_MIN: u8 = ROOM_SIZE_MIN;
 pub const COMPACT_ROOM_SIZE_MAX: u8 = ROOM_SIZE_MAX;
+pub const COMPACT_MAX_ITEMS: u8 = 48;
 
 // Tier standard (Vita/PC) — uses the config constants above
 pub const STANDARD_MAP_WIDTH: u8 = 80;

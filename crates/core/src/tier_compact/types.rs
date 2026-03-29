@@ -36,5 +36,11 @@ pub const NO_ENTITY: u8 = 0xFF;
 /// Player is always entity index 0.
 pub const PLAYER_IDX: u8 = 0;
 
+/// Maximum floor items.
+pub const MAX_ITEMS: usize = balance::COMPACT_MAX_ITEMS as usize;
+
+/// Sentinel: no item at this position.
+pub const NO_ITEM: u8 = 0xFF;
+
 /// Bitfield size for visibility/explored sets (one bit per tile).
 pub const BITFIELD_SIZE: usize = MAP_SIZE.div_ceil(8);

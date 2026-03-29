@@ -67,6 +67,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Implement compact tier item_store and spawn modules (#216)
+- Implement compact tier combat, msglog, and AI modules (#215)
+- Implement compact tier FOV module (tier_compact/fov.rs) (#214)
+- Implement compact tier entity module (tier_compact/entity.rs) (#213)
+- Implement compact tier map module (tier_compact/map.rs) (#212)
+- Extract combat resolution algorithm to rules/combat.rs (#211)
 - Fix compact tier and GBA spec documentation (#202)
 - Token-templated message system for C64 format_event (#190)
 - C64: Replace RangeInclusive iterators and inventory iterator adaptors with manual loops (#180)

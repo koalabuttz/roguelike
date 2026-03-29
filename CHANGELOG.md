@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.5.0] - 2026-03-18
 
 ### Added
+- Update compact tier Coord type from i16 to i32 (ARM7-native) (#210)
 - GBA: Update docs and memory with all resolved decisions (#209)
 - GBA: Define compact tier launch feature scope (#205)
 - GBA: Decide code sharing strategy between micro and compact tiers (#208)

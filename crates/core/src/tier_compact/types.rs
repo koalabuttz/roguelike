@@ -23,3 +23,15 @@ pub const MAP_WIDTH: Coord = balance::COMPACT_MAP_WIDTH as Coord;
 
 /// Default map height.
 pub const MAP_HEIGHT: Coord = balance::COMPACT_MAP_HEIGHT as Coord;
+
+/// Maximum room count.
+pub const MAX_ROOMS: usize = balance::COMPACT_MAX_ROOMS as usize;
+
+/// Total tile count for default map dimensions.
+pub const MAP_SIZE: usize = (MAP_WIDTH as usize) * (MAP_HEIGHT as usize);
+
+/// Sentinel: no entity at this position.
+pub const NO_ENTITY: u8 = 0xFF;
+
+/// Player is always entity index 0.
+pub const PLAYER_IDX: u8 = 0;

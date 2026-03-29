@@ -168,12 +168,14 @@ pub const MICRO_ROOM_SIZE_MIN: u8 = ROOM_SIZE_MIN;
 pub const MICRO_ROOM_SIZE_MAX: u8 = ROOM_SIZE_MAX;
 pub const MICRO_FOV_RADIUS: u8 = FOV_RADIUS;
 
-// Tier compact (GBA)
-// Note: these exceed u8 range, so use u16
-pub const COMPACT_MAP_WIDTH: u16 = 128;
-pub const COMPACT_MAP_HEIGHT: u16 = 96;
-pub const COMPACT_MAX_ROOMS: u8 = 24;
+// Tier compact (GBA) — matches standard map dimensions; differentiates on
+// entity budget, coord width (i32), and no_std constraints, not map size.
+pub const COMPACT_MAP_WIDTH: u16 = 80;
+pub const COMPACT_MAP_HEIGHT: u16 = 40;
+pub const COMPACT_MAX_ROOMS: u8 = 12;
 pub const COMPACT_MAX_ENTITIES: u8 = 128;
+pub const COMPACT_ROOM_SIZE_MIN: u8 = ROOM_SIZE_MIN;
+pub const COMPACT_ROOM_SIZE_MAX: u8 = ROOM_SIZE_MAX;
 
 // Tier standard (Vita/PC) — uses the config constants above
 pub const STANDARD_MAP_WIDTH: u8 = 80;

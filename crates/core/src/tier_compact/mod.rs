@@ -1,7 +1,8 @@
-//! Compact capability tier — stubs for GBA (i16 coords, LFSR-32).
+//! Compact capability tier — GBA (i32 coords, LFSR-32, fixed arrays).
 //!
-//! Only type aliases and PRNG are implemented. Full game state, map
-//! generation, entity storage, and FOV are deferred until GBA port begins.
+//! Built from standard tier patterns with ARM7-native i32 coordinates,
+//! unpacked u8 tile storage, and no heap allocation. Phase 0 of the GBA port.
 
+pub mod map;
 pub mod prng;
 pub mod types;

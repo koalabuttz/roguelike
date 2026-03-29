@@ -112,3 +112,88 @@ impl<'a> InputProvider for SshInput<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    fn make_input<'a>(
+        rx: &'a Receiver<Vec<u8>>,
+        parser: &'a mut AnsiParser,
+        size_rx: &'a mut tokio::sync::watch::Receiver<(u32, u32)>,
+    ) -> SshInput<'a> {
+        SshInput {
+            rx,
+            parser,
+            size_rx,
+        }
+    }
+
+    #[test]
+    fn check_resize_returns_none_when_unchanged() {
+        let (_size_tx, mut size_rx) = tokio::sync::watch::channel((80, 24));
+        // Mark initial value as seen.
+        size_rx.borrow_and_update();
+        let (_, rx) = mpsc::channel::<Vec<u8>>();
+        let mut parser = AnsiParser::new();
+        let mut input = make_input(&rx, &mut parser, &mut size_rx);
+
+        assert_eq!(input.check_resize(), None);
+    }
+
+    #[test]
+    fn check_resize_returns_new_size() {
+        let (size_tx, mut size_rx) = tokio::sync::watch::channel((80, 24));
+        // Mark initial value as seen.
+        size_rx.borrow_and_update();
+        let (_, rx) = mpsc::channel::<Vec<u8>>();
+        let mut parser = AnsiParser::new();
+
+        size_tx.send((120, 40)).unwrap();
+
+        let mut input = make_input(&rx, &mut parser, &mut size_rx);
+        assert_eq!(input.check_resize(), Some((120, 40)));
+    }
+
+    #[test]
+    fn check_resize_clears_after_read() {
+        let (size_tx, mut size_rx) = tokio::sync::watch::channel((80, 24));
+        size_rx.borrow_and_update();
+        let (_, rx) = mpsc::channel::<Vec<u8>>();
+        let mut parser = AnsiParser::new();
+
+        size_tx.send((132, 50)).unwrap();
+
+        let mut input = make_input(&rx, &mut parser, &mut size_rx);
+        assert!(input.check_resize().is_some());
+        // Second call should return None — change was consumed.
+        assert_eq!(input.check_resize(), None);
+    }
+
+    #[test]
+    fn poll_animation_interrupt_timeout_returns_false() {
+        let (_tx, rx) = mpsc::channel::<Vec<u8>>();
+        let (_size_tx, mut size_rx) = tokio::sync::watch::channel((80, 24));
+        let mut parser = AnsiParser::new();
+        let mut input = make_input(&rx, &mut parser, &mut size_rx);
+
+        // With no data sent, poll should time out and return false.
+        let result = input.poll_animation_interrupt(Duration::from_millis(10)).unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn poll_animation_interrupt_disconnected_returns_true() {
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        let (_size_tx, mut size_rx) = tokio::sync::watch::channel((80, 24));
+        let mut parser = AnsiParser::new();
+
+        // Drop sender to simulate disconnect.
+        drop(tx);
+
+        let mut input = make_input(&rx, &mut parser, &mut size_rx);
+        let result = input.poll_animation_interrupt(Duration::from_millis(10)).unwrap();
+        assert!(result);
+    }
+}

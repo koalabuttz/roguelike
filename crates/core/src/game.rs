@@ -381,6 +381,27 @@ fn default_max_monsters_per_room() -> Stat {
     2
 }
 
+/// Independent RNG streams derived from a master seed.
+/// Order matters for determinism: map (1st), spawn (2nd), wandering (3rd), items (4th).
+struct DerivedRngs {
+    map: StdRng,
+    spawn: StdRng,
+    wandering_seed: u64,
+    item: StdRng,
+}
+
+impl DerivedRngs {
+    fn from_seed(seed: u64) -> Self {
+        let mut master = StdRng::seed_from_u64(seed);
+        Self {
+            map: StdRng::from_rng(&mut master).unwrap(),
+            spawn: StdRng::from_rng(&mut master).unwrap(),
+            wandering_seed: StdRng::from_rng(&mut master).unwrap().next_u64(),
+            item: StdRng::from_rng(&mut master).unwrap(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct GameState {
     pub map: map::Map,
@@ -484,13 +505,12 @@ impl GameState {
         game_data: &data::GameData,
     ) -> Self {
         let cfg = &game_data.config;
-        // Derive independent RNG streams from the master seed.
-        // Order matters: map (1st), spawn (2nd), wandering (3rd), items (4th).
-        let mut master = StdRng::seed_from_u64(seed);
-        let mut map_rng = StdRng::from_rng(&mut master).unwrap();
-        let mut spawn_rng = StdRng::from_rng(&mut master).unwrap();
-        let wandering_seed = StdRng::from_rng(&mut master).unwrap().next_u64();
-        let mut item_rng = StdRng::from_rng(&mut master).unwrap();
+        let DerivedRngs {
+            map: mut map_rng,
+            spawn: mut spawn_rng,
+            wandering_seed,
+            item: mut item_rng,
+        } = DerivedRngs::from_seed(seed);
 
         let mut map = map::Map::new(width, height);
         let (px, py) = map.from_preset(preset, &mut map_rng);
@@ -565,14 +585,12 @@ impl GameState {
     /// all balance values, monster definitions, and player stats.
     pub fn with_data(width: Coord, height: Coord, seed: u64, game_data: &data::GameData) -> Self {
         let cfg = &game_data.config;
-
-        // Derive independent RNG streams from the master seed.
-        // Order matters: map (1st), spawn (2nd), wandering (3rd), items (4th).
-        let mut master = StdRng::seed_from_u64(seed);
-        let mut map_rng = StdRng::from_rng(&mut master).unwrap();
-        let mut spawn_rng = StdRng::from_rng(&mut master).unwrap();
-        let wandering_seed = StdRng::from_rng(&mut master).unwrap().next_u64();
-        let mut item_rng = StdRng::from_rng(&mut master).unwrap();
+        let DerivedRngs {
+            map: mut map_rng,
+            spawn: mut spawn_rng,
+            wandering_seed,
+            item: mut item_rng,
+        } = DerivedRngs::from_seed(seed);
 
         let mut map = map::Map::new(width, height);
         let (px, py) = map.generate(
@@ -1067,12 +1085,12 @@ impl GameState {
         // Derive deterministic seed for this floor (XOR-multiply decorrelates adjacent seeds).
         let floor_seed = self.seed ^ (self.depth as u64).wrapping_mul(0x9E37);
 
-        // Derive independent RNG streams (same pattern as with_data).
-        let mut master = StdRng::seed_from_u64(floor_seed);
-        let mut map_rng = StdRng::from_rng(&mut master).unwrap();
-        let mut spawn_rng = StdRng::from_rng(&mut master).unwrap();
-        let wandering_seed = StdRng::from_rng(&mut master).unwrap().next_u64();
-        let mut item_rng = StdRng::from_rng(&mut master).unwrap();
+        let DerivedRngs {
+            map: mut map_rng,
+            spawn: mut spawn_rng,
+            wandering_seed,
+            item: mut item_rng,
+        } = DerivedRngs::from_seed(floor_seed);
 
         // Generate new map with same dimensions.
         let width = self.map.width;

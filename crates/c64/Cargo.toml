@@ -9,7 +9,8 @@ description = "Commodore 64 port of the roguelike dungeon crawler"
 
 [features]
 default = []
-dev-console = []  # Menu-driven dev tools via ← key
+dev-console = []     # Menu-driven dev tools via ← key
+diff-rendering = []  # Differential rendering — disabled until llvm-mos LTO codegen bug is fixed (#201)
 
 [dependencies]
 roguelike-core = { path = "../core", default-features = false, features = ["c64-overlay"] }

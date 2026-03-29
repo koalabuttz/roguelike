@@ -59,6 +59,7 @@ pub(crate) static mut SHARED: SharedBuf = SharedBuf {
     save_buf: [0u8; SAVE_BUF_SIZE],
 };
 
+#[cfg(feature = "diff-rendering")]
 /// Dirty bitfield for differential rendering — separate from SharedBuf because
 /// render_diff reads DiffState (prev) while simultaneously writing to dirty.
 /// Overlapping them in a union caused the first 110 bytes of the FOV visible

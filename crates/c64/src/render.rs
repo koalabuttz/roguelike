@@ -48,12 +48,14 @@ pub fn viewport_pos(state: &MicroGameState) -> (u8, u8) {
 /// Dead-zone margin: the player can roam this many tiles from the
 /// viewport edge before a scroll is triggered.  With VIEW_W=40 and
 /// VIEW_H=22 this gives a 30×12 free-movement zone.
+#[cfg(feature = "diff-rendering")]
 const DEADZONE: u8 = 5;
 
 /// Dead-zone viewport positioning.  Returns the previous viewport
 /// unchanged unless the player is within DEADZONE tiles of an edge,
 /// in which case the viewport shifts by exactly 1 tile in the
 /// breached direction(s).  Clamped to valid map bounds.
+#[cfg(feature = "diff-rendering")]
 pub fn viewport_pos_lazy(
     state: &MicroGameState,
     prev_vx: u8,
@@ -197,6 +199,7 @@ fn render_map(state: &MicroGameState, vx: u8, vy: u8) {
 /// The explored bitfield is monotonically increasing (tiles never become
 /// unexplored), so checking the current explored state is sufficient to know
 /// that both old and new tiles are unexplored.
+#[cfg(feature = "diff-rendering")]
 fn render_map_sparse(
     state: &MicroGameState,
     vx: u8,
@@ -265,8 +268,10 @@ fn render_map_sparse(
 
 // ---------------------------------------------------------------------------
 // Memory-copy viewport scrolling (1-tile shifts)
+// Gated behind diff-rendering — disabled until llvm-mos LTO codegen bug is fixed (#201).
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "diff-rendering")]
 /// Shift screen RAM and color RAM vertically by 1 row.
 /// `dy > 0` (scroll down): copy rows 1..VIEW_H to 0..VIEW_H-1.
 /// `dy < 0` (scroll up):   copy rows 0..VIEW_H-1 to 1..VIEW_H.
@@ -285,6 +290,7 @@ fn scroll_vertical(dy: i8) {
     }
 }
 
+#[cfg(feature = "diff-rendering")]
 /// Shift screen RAM and color RAM horizontally by 1 column.
 /// `dx > 0` (scroll right): for each row, copy cols 1..VIEW_W to 0..VIEW_W-1.
 /// `dx < 0` (scroll left):  for each row, copy cols 0..VIEW_W-1 to 1..VIEW_W.
@@ -305,6 +311,7 @@ fn scroll_horizontal(dx: i8) {
     }
 }
 
+#[cfg(feature = "diff-rendering")]
 /// Row-wise diagonal scroll using `ptr::copy` per row.
 ///
 /// Each row's 39-byte slice is copied in bulk rather than per-cell,
@@ -324,6 +331,7 @@ fn scroll_diagonal(dx: i8, dy: i8) {
     copy_diagonal_rows(c64::COLOR_RAM, dx, dy);
 }
 
+#[cfg(feature = "diff-rendering")]
 /// Copy 21 rows of 39 bytes diagonally within a 40-column buffer.
 fn copy_diagonal_rows(base: *mut u8, dx: i8, dy: i8) {
     let rows = (VIEW_H - 1) as usize;
@@ -349,6 +357,7 @@ fn copy_diagonal_rows(base: *mut u8, dx: i8, dy: i8) {
     }
 }
 
+#[cfg(feature = "diff-rendering")]
 /// Render a single viewport row at screen row `sy`.
 fn render_edge_row(state: &MicroGameState, vx: u8, vy: u8, sy: u8) {
     let wy = vy + sy;
@@ -380,6 +389,7 @@ fn render_edge_row(state: &MicroGameState, vx: u8, vy: u8, sy: u8) {
     }
 }
 
+#[cfg(feature = "diff-rendering")]
 /// Render a single viewport column at screen column `sx`.
 fn render_edge_col(state: &MicroGameState, vx: u8, vy: u8, sx: u8) {
     let wx = vx + sx;
@@ -410,6 +420,7 @@ fn render_edge_col(state: &MicroGameState, vx: u8, vy: u8, sx: u8) {
     }
 }
 
+#[cfg(feature = "diff-rendering")]
 /// Handle a viewport scroll.  Uses memory-copy for 1-tile shifts,
 /// falls back to sparse render for larger deltas.  Always re-renders
 /// items, entities, status bar, and messages.
@@ -470,6 +481,7 @@ pub fn render_viewport_scroll(
     render_messages(state);
 }
 
+#[cfg(feature = "diff-rendering")]
 /// Re-render terrain for all viewport tiles that are currently visible
 /// or were visible in the previous frame.  This fixes two issues after
 /// a memory-copy scroll:
@@ -874,6 +886,7 @@ pub(crate) fn render_messages(state: &MicroGameState) {
 // Differential rendering — snapshot + dirty-cell diffing
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "diff-rendering")]
 /// Viewport dirty bitfield size: ceil(40 * 22 / 8) = 110 bytes.
 pub(crate) const DIRTY_SIZE: usize = ((VIEW_W as usize) * (VIEW_H as usize) + 7) / 8;
 
@@ -903,6 +916,7 @@ pub struct DiffState {
 }
 
 impl DiffState {
+    #[cfg(feature = "diff-rendering")]
     /// Create a zeroed DiffState. Call `snapshot()` before first use.
     pub const fn new() -> Self {
         Self {
@@ -955,21 +969,25 @@ impl DiffState {
         }
     }
 
+    #[cfg(feature = "diff-rendering")]
     fn was_entity_alive(&self, i: usize) -> bool {
         self.entity_alive[i >> 3] & (BIT[i & 7]) != 0
     }
 
+    #[cfg(feature = "diff-rendering")]
     fn was_item_alive(&self, i: usize) -> bool {
         self.item_alive[i >> 3] & (BIT[i & 7]) != 0
     }
 }
 
+#[cfg(feature = "diff-rendering")]
 /// Set a bit in the viewport dirty bitfield.
 fn mark_dirty(dirty: &mut [u8; DIRTY_SIZE], sx: u8, sy: u8) {
     let idx = (sy as usize) * (VIEW_W as usize) + (sx as usize);
     dirty[idx >> 3] |= BIT[idx & 7];
 }
 
+#[cfg(feature = "diff-rendering")]
 /// Mark a world-coordinate position dirty if it falls within the viewport.
 fn mark_dirty_world(dirty: &mut [u8; DIRTY_SIZE], vx: u8, vy: u8, wx: u8, wy: u8) {
     if wx >= vx && wx < vx + VIEW_W && wy >= vy && wy < vy + VIEW_H {
@@ -977,6 +995,7 @@ fn mark_dirty_world(dirty: &mut [u8; DIRTY_SIZE], vx: u8, vy: u8, wx: u8, wy: u8
     }
 }
 
+#[cfg(feature = "diff-rendering")]
 /// Differential render: only redraw cells that changed since the last frame.
 ///
 /// Assumes the viewport has NOT scrolled and the depth has NOT changed —
@@ -1123,6 +1142,7 @@ pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
     render_messages(state);
 }
 
+#[cfg(feature = "diff-rendering")]
 /// Erase the old player glyph and draw the new one instantly.
 /// Called before the background render so the player sees immediate
 /// feedback with no ghost at the old position.

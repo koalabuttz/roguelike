@@ -25,7 +25,7 @@ pub struct ServerState {
     pub accounts: AccountStore,
     pub active_sessions: AtomicUsize,
     pub max_connections: usize,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Wired from CLI args; used when #144 (idle timeout) lands
     pub idle_timeout_secs: u64,
 }
 

@@ -1886,9 +1886,9 @@ impl GameState {
                 map::Tile::Wall => '#',
                 map::Tile::StairsDown => '>',
             })
-        } else if entity.is_some() {
+        } else if let Some(e) = entity.as_ref() {
             // Revealed monster — show its glyph.
-            entity.as_ref().unwrap().glyph
+            e.glyph
         } else {
             match tile {
                 map::Tile::Floor => '.',

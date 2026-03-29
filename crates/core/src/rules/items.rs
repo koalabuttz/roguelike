@@ -484,20 +484,15 @@ pub fn describe_name(kind: ItemKind, props: &PropertyBag, buf: &mut [u8]) -> usi
                     count += 1;
                     // Bubble up if needed.
                     if count == 2
-                        && (top[1].0 > top[0].0
-                            || (top[1].0 == top[0].0 && top[1].1 < top[0].1))
+                        && (top[1].0 > top[0].0 || (top[1].0 == top[0].0 && top[1].1 < top[0].1))
                     {
                         top.swap(0, 1);
                     }
-                } else if delta > top[1].0
-                    || (delta == top[1].0 && idx < top[1].1)
-                {
+                } else if delta > top[1].0 || (delta == top[1].0 && idx < top[1].1) {
                     // Replace the weaker entry.
                     top[1] = (delta, idx);
                     // Re-sort.
-                    if top[1].0 > top[0].0
-                        || (top[1].0 == top[0].0 && top[1].1 < top[0].1)
-                    {
+                    if top[1].0 > top[0].0 || (top[1].0 == top[0].0 && top[1].1 < top[0].1) {
                         top.swap(0, 1);
                     }
                 }

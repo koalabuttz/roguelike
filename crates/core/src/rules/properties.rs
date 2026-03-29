@@ -89,11 +89,7 @@ pub const EMPTY: PropertyBag = [0u8; 8];
 /// this directly to avoid `u8 → Property` enum conversion.
 pub const fn get_by_index(bag: &PropertyBag, idx: u8) -> u8 {
     let byte = bag[(idx / 2) as usize];
-    if idx & 1 == 0 {
-        byte >> 4
-    } else {
-        byte & 0x0F
-    }
+    if idx & 1 == 0 { byte >> 4 } else { byte & 0x0F }
 }
 
 /// Write a nibble by raw index (0–15). Clamps values above 15.

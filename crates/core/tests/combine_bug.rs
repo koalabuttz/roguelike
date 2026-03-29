@@ -43,7 +43,9 @@ fn combine_full_inventory_succeeds_with_consumable_source() {
             if slot.kind == ItemKind::StrengthPotion {
                 found_source = true;
             }
-            if slot.kind == ItemKind::HealthPotion && slot.props != items::default_properties(ItemKind::HealthPotion) {
+            if slot.kind == ItemKind::HealthPotion
+                && slot.props != items::default_properties(ItemKind::HealthPotion)
+            {
                 found_modified = true;
             }
         }

@@ -88,7 +88,9 @@ mod tests {
 
     // --- ashlqi3: u8 left shift ---
     fn our_ashlqi3(val: u8, count: u8) -> u8 {
-        if count == 0 { return val; }
+        if count == 0 {
+            return val;
+        }
         let mut v = val;
         for _ in 0..count {
             v <<= 1;
@@ -98,30 +100,48 @@ mod tests {
 
     // --- Division overrides ---
     fn our_udivqi3(a: u8, b: u8) -> u8 {
-        if b == 0 { return 0; }
+        if b == 0 {
+            return 0;
+        }
         let mut q: u8 = 0;
         let mut r = a;
-        while r >= b { r -= b; q += 1; }
+        while r >= b {
+            r -= b;
+            q += 1;
+        }
         q
     }
 
     fn our_umodqi3(a: u8, b: u8) -> u8 {
-        if b == 0 { return 0; }
+        if b == 0 {
+            return 0;
+        }
         let mut r = a;
-        while r >= b { r -= b; }
+        while r >= b {
+            r -= b;
+        }
         r
     }
 
     fn our_udivmodhi4(a: u16, b: u16) -> (u16, u16) {
-        if b == 0 { return (0, 0); }
+        if b == 0 {
+            return (0, 0);
+        }
         let mut q: u16 = 0;
         let mut r = a;
-        while r >= b { r -= b; q += 1; }
+        while r >= b {
+            r -= b;
+            q += 1;
+        }
         (q, r)
     }
 
-    fn our_udivhi3(a: u16, b: u16) -> u16 { our_udivmodhi4(a, b).0 }
-    fn our_umodhi3(a: u16, b: u16) -> u16 { our_udivmodhi4(a, b).1 }
+    fn our_udivhi3(a: u16, b: u16) -> u16 {
+        our_udivmodhi4(a, b).0
+    }
+    fn our_umodhi3(a: u16, b: u16) -> u16 {
+        our_udivmodhi4(a, b).1
+    }
 
     // ======================================================================
     // memcpy tests
@@ -187,7 +207,9 @@ mod tests {
     fn memcpy_matches_std() {
         // Compare against standard copy for various sizes
         for &n in &[0, 1, 127, 128, 255, 256, 257, 511, 512, 1000] {
-            let src: Vec<u8> = (0..n).map(|i: usize| (i.wrapping_mul(37) & 0xFF) as u8).collect();
+            let src: Vec<u8> = (0..n)
+                .map(|i: usize| (i.wrapping_mul(37) & 0xFF) as u8)
+                .collect();
             let mut dst_ours = vec![0u8; n];
             let mut dst_std = vec![0u8; n];
             our_memcpy(&mut dst_ours, &src, n);
@@ -252,17 +274,20 @@ mod tests {
         // forward safe when delta >= n, backward when delta < n.
         for &(dst, src, n) in &[
             (0usize, 0usize, 5usize), // same address
-            (2, 0, 5),                 // dst > src, overlap
-            (0, 2, 5),                 // dst < src, wrapping delta is large
-            (100, 0, 5),               // no overlap
-            (0, 100, 5),               // no overlap, wrapping
-            (1, 0, 1),                 // adjacent, overlap by 1
+            (2, 0, 5),                // dst > src, overlap
+            (0, 2, 5),                // dst < src, wrapping delta is large
+            (100, 0, 5),              // no overlap
+            (0, 100, 5),              // no overlap, wrapping
+            (1, 0, 1),                // adjacent, overlap by 1
         ] {
             let delta = dst.wrapping_sub(src);
             let need_backward = delta < n;
             // Verify: if dst > src and the gap is less than n, we need backward
             if dst > src && dst < src + n {
-                assert!(need_backward, "should need backward for dst={dst} src={src} n={n}");
+                assert!(
+                    need_backward,
+                    "should need backward for dst={dst} src={src} n={n}"
+                );
             }
         }
     }
@@ -480,7 +505,11 @@ mod tests {
     #[test]
     fn mulhi3_commutative() {
         for &(a, b) in &[(3u16, 7), (100, 200), (255, 2), (0, 65535), (1, 65535)] {
-            assert_eq!(our_mulhi3(a, b), our_mulhi3(b, a), "mulhi3 not commutative for ({a}, {b})");
+            assert_eq!(
+                our_mulhi3(a, b),
+                our_mulhi3(b, a),
+                "mulhi3 not commutative for ({a}, {b})"
+            );
         }
     }
 
@@ -517,8 +546,11 @@ mod tests {
     fn ashlqi3_matches_native() {
         for val in 0..=255u8 {
             for count in 0..8u8 {
-                assert_eq!(our_ashlqi3(val, count), val << count,
-                    "ashlqi3({val}, {count})");
+                assert_eq!(
+                    our_ashlqi3(val, count),
+                    val << count,
+                    "ashlqi3({val}, {count})"
+                );
             }
         }
     }
@@ -546,14 +578,12 @@ mod tests {
     #[test]
     fn row_table_values() {
         let expected_lo: [u8; 25] = [
-            0x00, 0x28, 0x50, 0x78, 0xA0, 0xC8, 0xF0, 0x18, 0x40, 0x68,
-            0x90, 0xB8, 0xE0, 0x08, 0x30, 0x58, 0x80, 0xA8, 0xD0, 0xF8,
-            0x20, 0x48, 0x70, 0x98, 0xC0,
+            0x00, 0x28, 0x50, 0x78, 0xA0, 0xC8, 0xF0, 0x18, 0x40, 0x68, 0x90, 0xB8, 0xE0, 0x08,
+            0x30, 0x58, 0x80, 0xA8, 0xD0, 0xF8, 0x20, 0x48, 0x70, 0x98, 0xC0,
         ];
         let expected_hi: [u8; 25] = [
-            0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x05, 0x05, 0x05,
-            0x05, 0x05, 0x05, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06,
-            0x07, 0x07, 0x07, 0x07, 0x07,
+            0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x06,
+            0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x07, 0x07, 0x07, 0x07, 0x07,
         ];
         for y in 0..25u8 {
             let addr = row_addr(y);
@@ -593,15 +623,15 @@ mod tests {
     #[test]
     fn screen_code_boundary_values() {
         // Test boundary bytes around the converted ranges
-        assert_eq!(to_screen_code(b'@'), 0);       // 0x40 → 0
-        assert_eq!(to_screen_code(b'A'), 1);       // 0x41 → 1
-        assert_eq!(to_screen_code(b'Z'), 26);      // 0x5A → 26
-        assert_eq!(to_screen_code(b'['), b'[');     // 0x5B → passthrough
-        assert_eq!(to_screen_code(b'`'), b'`');     // 0x60 → passthrough
-        assert_eq!(to_screen_code(b'a'), 1);       // 0x61 → 1
-        assert_eq!(to_screen_code(b'z'), 26);      // 0x7A → 26
-        assert_eq!(to_screen_code(b'{'), b'{');     // 0x7B → passthrough
-        assert_eq!(to_screen_code(b'?'), b'?');     // 0x3F → passthrough (just before @)
+        assert_eq!(to_screen_code(b'@'), 0); // 0x40 → 0
+        assert_eq!(to_screen_code(b'A'), 1); // 0x41 → 1
+        assert_eq!(to_screen_code(b'Z'), 26); // 0x5A → 26
+        assert_eq!(to_screen_code(b'['), b'['); // 0x5B → passthrough
+        assert_eq!(to_screen_code(b'`'), b'`'); // 0x60 → passthrough
+        assert_eq!(to_screen_code(b'a'), 1); // 0x61 → 1
+        assert_eq!(to_screen_code(b'z'), 26); // 0x7A → 26
+        assert_eq!(to_screen_code(b'{'), b'{'); // 0x7B → passthrough
+        assert_eq!(to_screen_code(b'?'), b'?'); // 0x3F → passthrough (just before @)
     }
 
     #[test]

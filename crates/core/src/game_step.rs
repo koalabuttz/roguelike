@@ -441,12 +441,16 @@ impl GameStep for MicroGameStateAdapter {
             recent_messages,
             game_over: self.game.game_over,
             turn_count: self.game.turn_count as i32,
-            weapon: self.game.equipment.weapon.map(|k| {
-                crate::item::described_item_name(k, &self.game.equipment.weapon_props)
-            }),
-            armor: self.game.equipment.armor.map(|k| {
-                crate::item::described_item_name(k, &self.game.equipment.armor_props)
-            }),
+            weapon: self
+                .game
+                .equipment
+                .weapon
+                .map(|k| crate::item::described_item_name(k, &self.game.equipment.weapon_props)),
+            armor: self
+                .game
+                .equipment
+                .armor
+                .map(|k| crate::item::described_item_name(k, &self.game.equipment.armor_props)),
             kills: self.game.kills as i32,
             rooms_found: map.room_count as i32,
             explored_pct,

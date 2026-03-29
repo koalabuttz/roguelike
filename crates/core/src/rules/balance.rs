@@ -99,10 +99,7 @@ const _: () = assert!(
 );
 
 // Compile-time: interval must be non-zero to avoid division by zero.
-const _: () = assert!(
-    DEPTH_SCALE_INTERVAL > 0,
-    "DEPTH_SCALE_INTERVAL must be > 0"
-);
+const _: () = assert!(DEPTH_SCALE_INTERVAL > 0, "DEPTH_SCALE_INTERVAL must be > 0");
 
 // ---------------------------------------------------------------------------
 // Item balance

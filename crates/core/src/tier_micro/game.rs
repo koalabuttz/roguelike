@@ -520,14 +520,10 @@ impl MicroGameState {
             source: source.kind,
         });
         if target_destroyed {
-            self.log.add(GameEvent::ItemDestroyed {
-                kind: target.kind,
-            });
+            self.log.add(GameEvent::ItemDestroyed { kind: target.kind });
         }
         if source_destroyed {
-            self.log.add(GameEvent::ItemDestroyed {
-                kind: source.kind,
-            });
+            self.log.add(GameEvent::ItemDestroyed { kind: source.kind });
         }
 
         true
@@ -1784,13 +1780,15 @@ mod tests {
         // Target sword with COLD:5 so the CLD+HOT Cancel rule fires.
         let mut target_props = default_properties(ItemKind::ShortSword);
         properties::set(&mut target_props, Property::Cold, 5);
-        g.inventory.add_with_props(ItemKind::ShortSword, target_props);
+        g.inventory
+            .add_with_props(ItemKind::ShortSword, target_props);
         // Source sword with METAL zeroed (simulates prior corrosion) and
         // HOT:5 to trigger the Cancel rule and make properties change.
         let mut source_props = default_properties(ItemKind::ShortSword);
         properties::set(&mut source_props, Property::Metal, 0);
         properties::set(&mut source_props, Property::Hot, 5);
-        g.inventory.add_with_props(ItemKind::ShortSword, source_props);
+        g.inventory
+            .add_with_props(ItemKind::ShortSword, source_props);
 
         let result = g.step(GameCommand::Combine(0, 1));
         assert!(result.action_taken);

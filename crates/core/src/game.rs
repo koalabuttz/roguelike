@@ -872,14 +872,12 @@ impl GameState {
             source: source.kind,
         });
         if target_destroyed {
-            self.log.add_event(GameEvent::ItemDestroyed {
-                kind: target.kind,
-            });
+            self.log
+                .add_event(GameEvent::ItemDestroyed { kind: target.kind });
         }
         if source_destroyed {
-            self.log.add_event(GameEvent::ItemDestroyed {
-                kind: source.kind,
-            });
+            self.log
+                .add_event(GameEvent::ItemDestroyed { kind: source.kind });
         }
 
         true
@@ -1667,12 +1665,14 @@ impl GameState {
             recent_messages: self.log.recent(10).to_vec(),
             game_over: self.game_over,
             turn_count: self.turn_count,
-            weapon: self.equipment.weapon.map(|k| {
-                item::described_item_name(k, &self.equipment.weapon_props)
-            }),
-            armor: self.equipment.armor.map(|k| {
-                item::described_item_name(k, &self.equipment.armor_props)
-            }),
+            weapon: self
+                .equipment
+                .weapon
+                .map(|k| item::described_item_name(k, &self.equipment.weapon_props)),
+            armor: self
+                .equipment
+                .armor
+                .map(|k| item::described_item_name(k, &self.equipment.armor_props)),
             kills,
             rooms_found,
             explored_pct,
@@ -4249,13 +4249,15 @@ mod tests {
         // Target sword with COLD:5 so the CLD+HOT Cancel rule fires.
         let mut target_props = default_properties(ItemKind::ShortSword);
         properties::set(&mut target_props, Property::Cold, 5);
-        gs.inventory.add_with_props(ItemKind::ShortSword, target_props);
+        gs.inventory
+            .add_with_props(ItemKind::ShortSword, target_props);
         // Source sword with METAL zeroed (simulates prior corrosion) and
         // HOT:5 to trigger the Cancel rule and make properties change.
         let mut source_props = default_properties(ItemKind::ShortSword);
         properties::set(&mut source_props, Property::Metal, 0);
         properties::set(&mut source_props, Property::Hot, 5);
-        gs.inventory.add_with_props(ItemKind::ShortSword, source_props);
+        gs.inventory
+            .add_with_props(ItemKind::ShortSword, source_props);
 
         let result = gs.step(GameCommand::Combine(0, 1));
         assert!(result.action_taken);

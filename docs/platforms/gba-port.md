@@ -66,7 +66,7 @@ crates/core/src/
                   #   seed_code, monster_table, GameEvent — no_std, always compiled
   command.rs      # GameCommand with Direction enum — no Coord dependency, no_std
   tier_micro/     # u8 coords, u8 stats, LFSR-16, iterative shadowcasting FOV, fixed arrays — no_std
-  tier_compact/   # i16 coords, u8 stats, LFSR-32, Bresenham FOV, fixed arrays — no_std
+  tier_compact/   # i16 coords, u8 stats, LFSR-32, iterative shadowcasting FOV, fixed arrays — no_std
                   #   (stubs only — types.rs + prng.rs — until GBA port fleshes it out)
   game_step.rs    # #[cfg(feature = "std")] GameStep trait — cross-tier interface
   (top-level)     # tier standard: i32 coords, i32 stats, ChaCha20, shadowcasting FOV, Vec — std
@@ -77,12 +77,12 @@ The three named tiers are:
 | Tier | Target | Coord | Stats | Entities | Map size | RNG | FOV | Alloc |
 |------|--------|-------|-------|----------|----------|-----|-----|-------|
 | **micro** | C64 | `u8` | `u8` | 16 | 64×48 | LFSR-16 | Shadowcasting | `no_std` |
-| **compact** | GBA | `i16` | `u8` | 128 | 128×96 | LFSR-32 | Bresenham | `no_std` |
+| **compact** | GBA | `i16` | `u8` | 128 | 128×96 | LFSR-32 | Shadowcasting (iterative) | `no_std` |
 | **standard** | Vita/PC | `i32` | `i32` | 512–1024 | 80×40+ | ChaCha20 | Shadowcasting | `std` |
 
 The compact tier is initially stubs only — `tier_compact/types.rs` (type aliases) and `tier_compact/prng.rs` (`LfsrRng32`). The full compact tier (game state, mapgen, entity storage, FOV) will be fleshed out when GBA work begins.
 
-**GBA runs natively at tier compact.** It compiles `core::rules` (pure game rules), `core::tier_micro` (for cross-platform seed compatibility — short seeds generated anywhere play back at tier micro) and `core::tier_compact` (the GBA-native module with `i16` coords, 128-entity fixed arrays, LFSR-32 RNG, and Bresenham FOV). No feature flags are needed to get the right types — each tier module defines its own.
+**GBA runs natively at tier compact.** It compiles `core::rules` (pure game rules), `core::tier_micro` (for cross-platform seed compatibility — short seeds generated anywhere play back at tier micro) and `core::tier_compact` (the GBA-native module with `i16` coords, 128-entity fixed arrays, LFSR-32 RNG, and iterative shadowcasting FOV). No feature flags are needed to get the right types — each tier module defines its own.
 
 #### Tier-specific types (no `cfg` switching)
 
@@ -281,7 +281,7 @@ Cost: ~20 register writes per frame. The visual effect is a flickering light bou
 
 The flicker state is an `u32` LFSR (linear feedback shift register) seeded from the game's RNG. This keeps flicker deterministic for replay purposes, though since it's purely visual, determinism is optional.
 
-**"Don't close doors" note:** The FOV distance data that drives palette selection comes from `compute_fov()` in core, which already returns `HashSet<Pos>`. The GBA renderer computes Chebyshev distance from the player to each visible tile — this is a per-tile subtraction, not a core change. Other platforms can implement similar lighting if desired (terminal could use ANSI 256-color greyscale; C64 uses color RAM as described in the [acoustic propagation doc](../design/acoustic-propagation.md#visual-complement-dynamic-fov-lighting-c64)). The core doesn't know about palettes.
+**"Don't close doors" note:** The FOV distance data that drives palette selection comes from `compute_fov()` in core. On the compact tier, `compute_fov()` populates a bitfield (same iterative shadowcasting algorithm as micro tier, widened to i16 coords). The GBA renderer computes Chebyshev distance from the player to each visible tile — this is a per-tile subtraction, not a core change. Other platforms can implement similar lighting if desired (terminal could use ANSI 256-color greyscale; C64 uses color RAM as described in the [acoustic propagation doc](../design/acoustic-propagation.md#visual-complement-dynamic-fov-lighting-c64)). The core doesn't know about palettes.
 
 ## Input
 
@@ -419,32 +419,33 @@ Estimated IWRAM (32 KB) usage for hot data:
 | Data | Size | Notes |
 |------|------|-------|
 | Entity array | 128 × 20 bytes = 2,560 B | `Entity` with `i16` coords (tier compact), `u8` stats, properties, mood/memory |
-| Map tiles | 600 B (30×20) | `Tile` is 1 byte |
-| FOV bitset | 75 B (600 bits) | Replaces `HashSet<Pos>` |
-| Explored bitset | 75 B | Same |
-| Structural walls | 75 B | Same |
-| Sound grid | 600 B | `u8` per tile |
+| FOV bitset | 1,536 B (12,288 bits) | 128×96 map, 1 bit per tile |
+| Explored bitset | 1,536 B | Same |
+| Structural walls | 1,536 B | Same |
 | Event queue | ~512 B | 32 events × 16 bytes |
 | OAM shadow | 1,024 B | 128 entries × 8 bytes, written to OAM during VBlank |
 | Sprite anim state | 256 B | Per-OAM-slot counters |
 | PSG driver state | 32 B | |
 | Stack + misc | ~4 KB | |
-| **Total** | **~9.8 KB** | **30% of IWRAM** |
+| **Total** | **~13 KB** | **40% of IWRAM** |
 
 EWRAM (256 KB) usage:
 
 | Data | Size | Notes |
 |------|------|-------|
+| Map tiles | 12,288 B | 128×96, `Tile` is 1 byte |
+| Sound grid | 12,288 B | 128×96, `u8` per tile |
+| BFS pathfinding buffers | ~12 KB | Visited array + queue for 128×96 map |
 | Tile graphics (staging) | 2 KB | 64 tiles × 32 bytes. Also in ROM; EWRAM copy for palette swaps. |
 | Sprite graphics (staging) | 4 KB | 128 sprite tiles. |
-| Room array | 300 B | 30 rooms × 10 bytes |
+| Room array | 288 B | 24 rooms × 12 bytes |
 | Message buffer | 512 B | 8 × `ArrayString<64>` |
 | Floor deltas (if multi-level) | ~1.6 KB | 50 floors × 32 bytes |
 | Save staging buffer | ~4 KB | For serialization before SRAM write |
 | Scroll/lighting working buffers | ~2 KB | Tilemap row/column staging |
-| **Total** | **~14.4 KB** | **5.6% of EWRAM** |
+| **Total** | **~51 KB** | **20% of EWRAM** |
 
-The budget is comfortable. Even doubling all estimates leaves significant headroom.
+The budget is comfortable. Even doubling all estimates leaves significant headroom in both regions.
 
 ## Implementation Phases
 
@@ -526,12 +527,9 @@ Each phase is independently testable. Phases 1–3 produce a playable GBA build.
 
 1. **`agb` vs `gba` crate.** `agb` is higher-level (provides allocator, sprite management, tiled backgrounds) but opinionated. The `gba` crate is thinner and more manual. `agb` may fight the project's own rendering approach; `gba` requires more boilerplate but fewer surprises. Needs evaluation against the specific tile streaming and OAM management requirements above.
 
-2. **Map size clamping.** Desktop-generated maps can be 80×40 or larger. The GBA viewport is 28×18 with a 32×32 screenblock. Options:
-   - Generate GBA-sized maps (30×20) when building for GBA, via `GameConfig` overrides.
-   - Support larger maps with tile streaming (Phase 3 handles this). The screenblock wraps, so maps up to ~60×60 work. Beyond that, a second screenblock is needed (BG0 supports two screenblocks at the cost of VRAM).
-   - The simplest v1: cap map size to 30×20 on GBA via `game.toml` defaults baked into ROM.
+2. **Map rendering for 128×96.** The tier compact map is 128×96 tiles — far larger than the 32×32 screenblock. Tile streaming (Phase 3) handles this: the renderer writes one row or column of tilemap entries as the viewport scrolls, and the screenblock wraps at its boundaries. This is standard GBA scrolling technique. For maps wider than 32 tiles in either dimension, a second screenblock may be needed (BG0 supports two screenblocks at the cost of VRAM). The 128×96 map lives in EWRAM; only the visible viewport region is loaded into the screenblock.
 
-3. **Seed code compatibility.** GBA-generated dungeons at tier compact (128×96 map, `i16` coords, LFSR-32 RNG) will not produce the same dungeon as desktop tier standard for the same seed — the map dimensions, RNG algorithm, and FOV differ. Short seeds (tier micro) are cross-platform by design: any platform can play back a tier micro seed. Tier is determined by the seed's numeric value (`seed <= 0xFFFF` → micro, `seed <= 0xFFFFFFFF` → compact, else standard), so seed sharing is explicit about what generated the dungeon.
+3. **Seed code compatibility.** GBA-generated dungeons at tier compact (128×96 map, `i16` coords, LFSR-32 RNG) will not produce the same dungeon as desktop tier standard for the same seed — the map dimensions and RNG algorithm differ. The FOV algorithm (iterative shadowcasting) and FOV radius (8) are shared across micro and compact tiers. Short seeds (tier micro) are cross-platform by design: any platform can play back a tier micro seed. Tier is determined by the seed's numeric value (`seed <= 0xFFFF` → micro, `seed <= 0xFFFFFFFF` → compact, else standard), so seed sharing is explicit about what generated the dungeon.
 
 4. **`no_std` tier module scope.** Tier micro and tier compact are `no_std` modules with fixed-size arrays. The GBA uses these directly. Dev-tools-only modules (`analytics`, `scenario`, `exploration_graph`) live at tier standard behind `std`, which is fine since the GBA does not need them.
 
@@ -573,7 +571,7 @@ The patterns established here are reusable:
 | Core module | `core::rules` + `core::tier_compact` + `core::tier_micro` | `core::rules` + all tiers | `core::rules` + `core::tier_micro` |
 | Coord / Stat types | `i16` / `u8` | `i32` / `i32` | `u8` / `u8` |
 | RNG | LFSR-32 | ChaCha20 | LFSR-16 |
-| FOV | Bresenham | Shadowcasting | Shadowcasting |
+| FOV | Shadowcasting (iterative) | Shadowcasting (recursive) | Shadowcasting (iterative) |
 | `no_std` / `std` | `no_std` (tier compact/micro are `no_std`) | `std` | `no_std` (tier micro is `no_std`) |
 | Containers | Fixed-size arrays (128 entities, 128×96 maps) | `Vec`, `HashMap`, `HashSet` | Fixed-size arrays (16 entities, 64×48 maps) |
 | Compact save format | `postcard` over SRAM | JSON / `postcard` | Custom binary over disk |

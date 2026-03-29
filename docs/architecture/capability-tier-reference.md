@@ -17,7 +17,7 @@ see the [C64 platform guide](../platforms/c64-platform-guide.md).
 
 - **rules** (all platforms): Pure functions and constants — damage formulas, balance constants, `MonsterKind` enum, `GameEvent` structured messages, `no_std` seed encoding. No game state interaction. Spawn logic produces `SpawnDirective` structs; each tier applies them to its own state.
 - **tier micro** (C64): `u8` coords/stats, 16 entities, 64x48 maps, LFSR-16, iterative shadowcasting FOV, `no_std`
-- **tier compact** (GBA): `i16` coords, `u8` stats, 128 entities, 128x96 maps, LFSR-32, Bresenham FOV, `no_std` — initially stubs only (type aliases + PRNG) until GBA port begins
+- **tier compact** (GBA): `i16` coords, `u8` stats, 128 entities, 128x96 maps, LFSR-32, iterative shadowcasting FOV, `no_std` — initially stubs only (type aliases + PRNG) until GBA port begins
 - **tier standard** (Vita/PC): `i32` coords/stats, 512-1024 entities, 80x40+ maps, ChaCha20, shadowcasting FOV, `std`
 
 The distinction between **game rules** and **game mechanics** is key: rules are pure functions (damage calculation, item stat lookups, enchantment caps) that produce values; mechanics are stateful operations (applying damage to entities, inserting spawned monsters) that remain per-tier.
@@ -337,7 +337,7 @@ use roguelike_core::tier_compact::*;
 fn main() {
     let seed = get_seed();
     let mut state = CompactGameState::new(seed);
-    // 128×96 maps, up to 128 entities, LFSR-32, Bresenham FOV
+    // 128×96 maps, up to 128 entities, LFSR-32, iterative shadowcasting FOV
     run_game_loop(&mut state);
 }
 ```
@@ -415,7 +415,7 @@ the `std` feature. The C64 uses `default-features = false` and only accesses
 | **Entity system** | Per-tier | Per-tier | `core/tier_*/entity.rs` | micro: 16-entry fixed array; compact: stubs; standard: `Vec<Entity>` |
 | **AI** | Per-tier | Per-tier | `core/tier_*/ai.rs`, `core/ai.rs` | Chase, wander, mood logic — same algorithms, tier-appropriate types |
 | **Game state** | Per-tier | Per-tier | `core/tier_*/game.rs` | `MicroGameState` / `CompactGameState` (stub) / `GameState` |
-| **FOV** | Per-tier | Per-tier | `core/tier_*/fov.rs` | micro: iterative shadowcasting → bitfield; compact: Bresenham → bitfield; standard: recursive shadowcasting (std) |
+| **FOV** | Per-tier | Per-tier | `core/tier_*/fov.rs` | micro: iterative shadowcasting → bitfield; compact: iterative shadowcasting → bitfield; standard: recursive shadowcasting (std) |
 | **BFS pathfinding** | micro | Per-tier | `core/tier_micro/pathfinding.rs` | Fixed-size buffers (1.1 KB), enables auto\_explore and pathfind\_to on micro tier |
 | A\* pathfinding | standard | **No** | PC only (`std`) | Requires heap (HashMap, BinaryHeap) |
 | Rendering | N/A | **No** | Separate impls | crossterm vs VIC-II vs GBA hardware |
@@ -491,8 +491,8 @@ Each tier defines its own types and algorithms:
 | Entity cap | 16 | 128 | 512-1024 |
 | Map | 64x48 | 128x96 | 80x40+ |
 | PRNG | LFSR-16 | LFSR-32 | ChaCha20 |
-| FOV | Iterative shadowcasting | Bresenham | Shadowcasting |
-| Pathfinding | BFS (fixed buffers) | Greedy chase | A* |
+| FOV | Iterative shadowcasting | Iterative shadowcasting | Shadowcasting |
+| Pathfinding | BFS (fixed buffers) | BFS (fixed buffers) | A* |
 
 The compact tier will initially be stubs only — `tier_compact/types.rs` (type aliases) and `tier_compact/prng.rs` (`LfsrRng32`). Full implementation (game state, mapgen, entity storage) is deferred until the GBA port begins.
 
@@ -508,7 +508,7 @@ numeric value and shows platform compatibility in the UI.
 The decoded numeric value of the seed determines the tier:
 
 - **seed <= 0xFFFF** (u16 range) → **micro**: 64×48, LFSR-16, iterative shadowcasting FOV
-- **seed <= 0xFFFFFFFF** (u32 range) → **compact**: 128×96, LFSR-32, Bresenham FOV
+- **seed <= 0xFFFFFFFF** (u32 range) → **compact**: 128×96, LFSR-32, iterative shadowcasting FOV
 - **seed > 0xFFFFFFFF** (u64 range) → **standard**: 80×40, ChaCha20, shadowcasting FOV
 
 The base36 encoding length is a *consequence* of the numeric range, not the
@@ -523,7 +523,7 @@ Map: 64×48 · 16 entities · Iterative shadowcasting FOV
 
 Seed: r7z3kq           (value: 0x3A1B_C4E2, fits u32)
 Plays on: GBA · Vita · PC
-Map: 128×96 · 128 entities · Bresenham FOV
+Map: 128×96 · 128 entities · Iterative shadowcasting FOV
 
 Seed: r7z3kq9ab2x      (value: 0x1F3C_7A2B_0E91_D4F6, u64)
 Plays on: Vita · PC
@@ -568,8 +568,8 @@ hardware constraints.
 
 | Aspect | Tier micro | Tier compact | Tier standard |
 |--------|-----------|-------------|--------------|
-| FOV | Iterative shadowcasting | Bresenham rays | Shadowcasting |
-| Pathfinding | BFS (fixed buffers) | Greedy chase | A* |
+| FOV | Iterative shadowcasting | Iterative shadowcasting | Recursive shadowcasting |
+| Pathfinding | BFS (fixed buffers) | BFS (fixed buffers) | A* |
 | Entity cap | 16 (fixed array) | 128 (fixed array) | 512-1024 (Vec) |
 | Messages | GameEvent enum (Copy) | GameEvent enum (Copy) | GameEvent → String formatting |
 | Map storage | Flat `[u8; W*H]` | Flat `[u8; W*H]` | `Vec<Vec<Tile>>` |

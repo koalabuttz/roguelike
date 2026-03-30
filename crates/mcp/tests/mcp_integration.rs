@@ -9,8 +9,8 @@ use roguelike_mcp::mcp_server::{
     ActParams, LookAtParams, NewGameParams, PathfindParams, RoguelikeMcpServer,
 };
 
-/// Standard-tier seed (> 0xFFFF). Seeds <= 0xFFFF create micro-tier games.
-const SEED: u64 = 0x1_0042;
+/// Standard-tier seed (> 0xFFFF_FFFF). Lower seeds route to micro or compact.
+const SEED: u64 = 0x1_0000_0042;
 
 /// Start a game with a fixed seed and default 80x40 map.
 async fn start_game(server: &RoguelikeMcpServer) -> serde_json::Value {

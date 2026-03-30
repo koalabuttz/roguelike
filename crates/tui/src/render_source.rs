@@ -5,7 +5,7 @@
 //! the micro tier full-color rendering with palette support.
 
 use roguelike_core::game::GameState;
-use roguelike_core::game_step::MicroGameStateAdapter;
+use roguelike_core::game_step::{CompactGameStateAdapter, MicroGameStateAdapter};
 use roguelike_core::item;
 use roguelike_core::map::Tile;
 use roguelike_core::message_log::format_event;
@@ -381,6 +381,168 @@ impl RenderSource for MicroGameStateAdapter {
             }
         }
         // Return at most n, oldest first.
+        let skip = messages.len().saturating_sub(n);
+        messages.into_iter().skip(skip).collect()
+    }
+
+    fn kills(&self) -> Stat {
+        self.game.kills as Stat
+    }
+
+    fn turn_count(&self) -> Stat {
+        self.game.turn_count as Stat
+    }
+
+    fn game_won(&self) -> bool {
+        self.game.game_won
+    }
+
+    fn game_over(&self) -> bool {
+        self.game.game_over
+    }
+}
+
+// ── Compact tier ────────────────────────────────────────────────────────
+
+impl RenderSource for CompactGameStateAdapter {
+    fn map_size(&self) -> (Coord, Coord) {
+        (self.game.map.width, self.game.map.height)
+    }
+
+    fn tile_visibility(&self, x: Coord, y: Coord) -> TileVisibility {
+        if self.game.fov.is_visible(x, y) {
+            TileVisibility::Visible
+        } else if self.game.fov.is_explored(x, y) {
+            TileVisibility::Explored
+        } else {
+            TileVisibility::Unexplored
+        }
+    }
+
+    fn tile_at(&self, x: Coord, y: Coord) -> RenderTile {
+        let tile = self.game.map.tile_at(x, y);
+        match tile_rules::from_micro(tile) {
+            Some(kind) => RenderTile {
+                glyph: tile_rules::glyph(kind),
+                fg: tile_rules::color(kind),
+                structural: kind == TileKind::Structural,
+            },
+            None => RenderTile {
+                glyph: ' ',
+                fg: GameColor::Black,
+                structural: false,
+            },
+        }
+    }
+
+    fn for_each_visible_entity(&self, f: &mut dyn FnMut(RenderEntity)) {
+        let entities = &self.game.entities;
+        let fov = &self.game.fov;
+        let pi = PLAYER_IDX as usize;
+        for i in 0..entities.count as usize {
+            if !fov.is_visible(entities.x[i], entities.y[i]) {
+                continue;
+            }
+            if entities.alive[i] {
+                let (glyph, fg) = if i == pi {
+                    ('@', GameColor::Yellow)
+                } else if let Some(kind) = entities.kind[i] {
+                    (monster_table::glyph(kind), monster_table::color(kind))
+                } else {
+                    ('?', GameColor::White)
+                };
+                f(RenderEntity {
+                    x: entities.x[i],
+                    y: entities.y[i],
+                    glyph,
+                    fg,
+                    alive: true,
+                });
+            } else if i != pi {
+                f(RenderEntity {
+                    x: entities.x[i],
+                    y: entities.y[i],
+                    glyph: '%',
+                    fg: GameColor::DarkRed,
+                    alive: false,
+                });
+            }
+        }
+    }
+
+    fn for_each_visible_item(&self, f: &mut dyn FnMut(RenderItem)) {
+        let items = &self.game.items;
+        let fov = &self.game.fov;
+        for i in 0..items.count as usize {
+            if items.alive[i] && fov.is_visible(items.x[i], items.y[i]) {
+                let kind = items.kind[i];
+                f(RenderItem {
+                    x: items.x[i],
+                    y: items.y[i],
+                    glyph: rules_items::glyph(kind),
+                    fg: rules_items::color(kind),
+                });
+            }
+        }
+    }
+
+    fn player_pos(&self) -> (Coord, Coord) {
+        let pi = PLAYER_IDX as usize;
+        (self.game.entities.x[pi], self.game.entities.y[pi])
+    }
+
+    fn player_hp(&self) -> (Stat, Stat) {
+        let pi = PLAYER_IDX as usize;
+        (
+            self.game.entities.hp[pi] as Stat,
+            self.game.entities.max_hp[pi] as Stat,
+        )
+    }
+
+    fn player_atk(&self) -> (Stat, Stat) {
+        (
+            self.game.entities.atk[PLAYER_IDX as usize] as Stat,
+            self.game.equipment.attack_bonus() as Stat,
+        )
+    }
+
+    fn player_def(&self) -> (Stat, Stat) {
+        (
+            self.game.entities.def[PLAYER_IDX as usize] as Stat,
+            self.game.equipment.defense_bonus() as Stat,
+        )
+    }
+
+    fn depth(&self) -> (Stat, Stat) {
+        (self.game.depth as Stat, balance::TARGET_DEPTH as Stat)
+    }
+
+    fn explored_pct(&self) -> Stat {
+        let total = self.game.map.floor_count();
+        let explored = self.game.fov.explored_floor_count(&self.game.map);
+        if total > 0 {
+            ((explored as i32) * 100) / (total as i32)
+        } else {
+            0
+        }
+    }
+
+    fn seed_code(&self) -> String {
+        seed_code::encode(&SeedParams {
+            seed: self.game.seed as u64,
+            width: self.game.map.width,
+            height: self.game.map.height,
+            preset: None,
+        })
+    }
+
+    fn recent_messages(&self, n: usize) -> Vec<String> {
+        let mut messages = Vec::new();
+        for i in (0..8u8).rev() {
+            if let Some(event) = self.game.log.recent(i) {
+                messages.push(format_event(event));
+            }
+        }
         let skip = messages.len().saturating_sub(n);
         messages.into_iter().skip(skip).collect()
     }

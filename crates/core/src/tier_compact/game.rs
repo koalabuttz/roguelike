@@ -61,10 +61,10 @@ pub struct CompactAutoFightResult {
 }
 
 impl CompactGameState {
-    /// Create a new game with the given seed.
-    pub fn new(seed: u32) -> Self {
+    /// Create a new game with the given seed and map dimensions.
+    pub fn new(seed: u32, width: Coord, height: Coord) -> Self {
         let mut rng = LfsrRng32::new(seed);
-        let mut map = CompactMap::new(MAP_WIDTH, MAP_HEIGHT);
+        let mut map = CompactMap::new(width, height);
         let (sx, sy) = map.generate(&mut rng);
 
         let mut entities = EntityStore::new();
@@ -75,7 +75,7 @@ impl CompactGameState {
         spawn::spawn_items(&mut items, &map, 1, &mut rng);
         spawn::apply_depth_scaling(&mut entities, 1);
 
-        let mut fov = CompactFov::new(MAP_WIDTH, MAP_HEIGHT);
+        let mut fov = CompactFov::new(width, height);
         fov.compute_fov(sx, sy, balance::FOV_RADIUS, &map);
 
         let mut log = CompactMessageLog::new();
@@ -249,8 +249,10 @@ impl CompactGameState {
         let atk = self.entities.atk[pi];
         let def = self.entities.def[pi];
 
-        // Generate new map
-        self.map = CompactMap::new(MAP_WIDTH, MAP_HEIGHT);
+        // Generate new map (preserve dimensions from current map)
+        let w = self.map.width;
+        let h = self.map.height;
+        self.map = CompactMap::new(w, h);
         let (sx, sy) = self.map.generate(&mut self.rng);
 
         // Reset entities — player keeps stats
@@ -266,7 +268,7 @@ impl CompactGameState {
         self.items = ItemStore::new();
         spawn::spawn_items(&mut self.items, &self.map, self.depth, &mut self.rng);
 
-        self.fov = CompactFov::new(MAP_WIDTH, MAP_HEIGHT);
+        self.fov = CompactFov::new(w, h);
         self.fov.compute_fov(sx, sy, balance::FOV_RADIUS, &self.map);
 
         self.idle_count = 0;
@@ -845,7 +847,7 @@ mod tests {
 
     #[test]
     fn new_game_is_playable() {
-        let state = CompactGameState::new(42);
+        let state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         assert!(!state.game_over);
         assert!(!state.game_won);
         assert!(state.entities.count > 1, "should have monsters");
@@ -854,7 +856,7 @@ mod tests {
 
     #[test]
     fn move_changes_position() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         let pi = PLAYER_IDX as usize;
         let px = state.entities.x[pi];
         let py = state.entities.y[pi];
@@ -876,7 +878,7 @@ mod tests {
 
     #[test]
     fn wait_passes_turn() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         let tc = state.turn_count;
         let r = state.step(GameCommand::Wait);
         assert!(r.action_taken);
@@ -885,7 +887,7 @@ mod tests {
 
     #[test]
     fn game_over_blocks_step() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         state.game_over = true;
         let r = state.step(GameCommand::Wait);
         assert!(!r.action_taken);
@@ -893,8 +895,8 @@ mod tests {
 
     #[test]
     fn deterministic_with_same_seed() {
-        let mut a = CompactGameState::new(1234);
-        let mut b = CompactGameState::new(1234);
+        let mut a = CompactGameState::new(1234, MAP_WIDTH, MAP_HEIGHT);
+        let mut b = CompactGameState::new(1234, MAP_WIDTH, MAP_HEIGHT);
         for _ in 0..5 {
             a.step(GameCommand::Wait);
             b.step(GameCommand::Wait);
@@ -905,7 +907,7 @@ mod tests {
 
     #[test]
     fn regen_heals_player() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         let pi = PLAYER_IDX as usize;
         state.entities.hp[pi] = 1;
         let max_hp = state.entities.max_hp[pi];
@@ -926,7 +928,7 @@ mod tests {
 
     #[test]
     fn descend_on_stairs_succeeds() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         walk_to_stairs(&mut state);
         let r = state.step(GameCommand::Descend);
         assert!(r.action_taken);
@@ -935,7 +937,7 @@ mod tests {
 
     #[test]
     fn descend_not_on_stairs_fails() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         let r = state.step(GameCommand::Descend);
         assert!(!r.action_taken);
         assert_eq!(state.depth, 1);
@@ -943,7 +945,7 @@ mod tests {
 
     #[test]
     fn victory_after_target_depth() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         state.depth = balance::TARGET_DEPTH;
         walk_to_stairs(&mut state);
         let r = state.step(GameCommand::Descend);
@@ -953,7 +955,7 @@ mod tests {
 
     #[test]
     fn player_hp_carries_over() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         let pi = PLAYER_IDX as usize;
         state.entities.hp[pi] = 5;
         walk_to_stairs(&mut state);
@@ -963,8 +965,8 @@ mod tests {
 
     #[test]
     fn deterministic_floor_generation() {
-        let mut a = CompactGameState::new(42);
-        let mut b = CompactGameState::new(42);
+        let mut a = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
+        let mut b = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         walk_to_stairs(&mut a);
         walk_to_stairs(&mut b);
         a.step(GameCommand::Descend);
@@ -975,7 +977,7 @@ mod tests {
 
     #[test]
     fn monsters_scaled_on_deeper_floors() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         // Descend enough floors to trigger scaling (depth > DEPTH_SCALE_INTERVAL)
         for _ in 0..5 {
             walk_to_stairs(&mut state);
@@ -1006,7 +1008,7 @@ mod tests {
 
     #[test]
     fn pickup_adds_to_inventory() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         let pi = PLAYER_IDX as usize;
         let px = state.entities.x[pi];
         let py = state.entities.y[pi];
@@ -1020,7 +1022,7 @@ mod tests {
 
     #[test]
     fn use_potion_heals() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         let pi = PLAYER_IDX as usize;
         state.entities.hp[pi] = 1;
         state.inventory.add(rules_items::ItemKind::HealthPotion);
@@ -1031,7 +1033,7 @@ mod tests {
 
     #[test]
     fn drop_puts_item_on_ground() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         state.inventory.add(rules_items::ItemKind::ShortSword);
         let items_before = state.items.count;
         let r = state.step(GameCommand::DropItem(0));
@@ -1041,7 +1043,7 @@ mod tests {
 
     #[test]
     fn equip_from_inventory() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         state.inventory.add(rules_items::ItemKind::ShortSword);
         let r = state.step(GameCommand::EquipItem(0));
         assert!(r.action_taken);
@@ -1050,7 +1052,7 @@ mod tests {
 
     #[test]
     fn effective_attack_with_weapon() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         let base = state.effective_attack();
         state.inventory.add(rules_items::ItemKind::ShortSword);
         state.step(GameCommand::EquipItem(0));
@@ -1059,7 +1061,7 @@ mod tests {
 
     #[test]
     fn auto_pickup_when_enabled() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         state.auto_pickup = true;
         let pi = PLAYER_IDX as usize;
         // Find a walkable neighbor to place item and move onto
@@ -1083,7 +1085,7 @@ mod tests {
 
     #[test]
     fn inventory_persists_across_descent() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         state.inventory.add(rules_items::ItemKind::HealthPotion);
         walk_to_stairs(&mut state);
         state.step(GameCommand::Descend);
@@ -1092,7 +1094,7 @@ mod tests {
 
     #[test]
     fn equipment_persists_across_descent() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         state.inventory.add(rules_items::ItemKind::ShortSword);
         state.step(GameCommand::EquipItem(0));
         walk_to_stairs(&mut state);
@@ -1104,7 +1106,7 @@ mod tests {
 
     #[test]
     fn idle_count_tracks_waits() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         state.step(GameCommand::Wait);
         assert_eq!(state.idle_count, 1);
         state.step(GameCommand::Wait);
@@ -1121,7 +1123,7 @@ mod tests {
 
     #[test]
     fn combine_self_rejected() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         state.inventory.add(rules_items::ItemKind::HealthPotion);
         let r = state.step(GameCommand::Combine(0, 0));
         assert!(!r.action_taken);
@@ -1131,7 +1133,7 @@ mod tests {
 
     #[test]
     fn auto_fight_no_adjacent_returns_none() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         // Kill all adjacent monsters
         let pi = PLAYER_IDX as usize;
         let px = state.entities.x[pi];
@@ -1148,7 +1150,7 @@ mod tests {
 
     #[test]
     fn auto_fight_kills_adjacent() {
-        let mut state = CompactGameState::new(42);
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
         let pi = PLAYER_IDX as usize;
         let px = state.entities.x[pi];
         let py = state.entities.y[pi];

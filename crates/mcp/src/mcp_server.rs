@@ -247,6 +247,14 @@ impl RoguelikeMcpServer {
                 adapter
                     .auto_fight()
                     .map_err(|e| McpError::invalid_request(e, None))?
+            } else if let Some(adapter) = session
+                .game
+                .as_any_mut()
+                .downcast_mut::<game_step::CompactGameStateAdapter>()
+            {
+                adapter
+                    .auto_fight()
+                    .map_err(|e| McpError::invalid_request(e, None))?
             } else {
                 return Err(McpError::invalid_request(
                     "Auto-fight not supported for this game tier",
@@ -290,6 +298,12 @@ impl RoguelikeMcpServer {
                 .game
                 .as_any_mut()
                 .downcast_mut::<game_step::MicroGameStateAdapter>()
+            {
+                adapter.autorun(dir)
+            } else if let Some(adapter) = session
+                .game
+                .as_any_mut()
+                .downcast_mut::<game_step::CompactGameStateAdapter>()
             {
                 adapter.autorun(dir)
             } else {
@@ -441,6 +455,14 @@ impl RoguelikeMcpServer {
             adapter
                 .pathfind_to(params.x, params.y)
                 .map_err(|e| McpError::invalid_request(e, None))?
+        } else if let Some(adapter) = session
+            .game
+            .as_any_mut()
+            .downcast_mut::<game_step::CompactGameStateAdapter>()
+        {
+            adapter
+                .pathfind_to(params.x, params.y)
+                .map_err(|e| McpError::invalid_request(e, None))?
         } else {
             return Err(McpError::invalid_request(
                 "Pathfinding not supported for this game tier",
@@ -492,6 +514,16 @@ impl RoguelikeMcpServer {
                 .game
                 .as_any_mut()
                 .downcast_mut::<game_step::MicroGameStateAdapter>()
+            {
+                let result = adapter
+                    .auto_explore()
+                    .map_err(|e| McpError::invalid_request(e, None))?;
+                let fc = adapter.frontier_count();
+                (result, fc)
+            } else if let Some(adapter) = session
+                .game
+                .as_any_mut()
+                .downcast_mut::<game_step::CompactGameStateAdapter>()
             {
                 let result = adapter
                     .auto_explore()

@@ -3,6 +3,7 @@
 //! Since we can't use `format!` without alloc, these functions write
 //! ASCII directly into fixed-size buffers.
 
+use roguelike_core::rules::health::HealthTier;
 use roguelike_core::rules::message::{Combatant, GameEvent};
 
 /// Write a u32 as 8-digit uppercase hexadecimal into `buf` starting at `pos`.
@@ -182,6 +183,48 @@ fn format_event_inner(event: GameEvent, buf: &mut [u8; 30]) -> usize {
 
         GameEvent::SoundCue { .. } => write_str(buf, 0, "You hear something..."),
 
-        _ => write_str(buf, 0, "..."),
+        GameEvent::HealthStatus { who, tier } => {
+            let mut p = write_combatant(buf, 0, who);
+            p = write_str(buf, p, match tier {
+                HealthTier::Healthy => " looks healthy",
+                HealthTier::Moderate => " looks damaged",
+                HealthTier::Severe => " looks wounded",
+                HealthTier::AlmostDead => " is dying",
+            });
+            p
+        }
+
+        GameEvent::UnequipWeapon { kind } => {
+            let mut p = write_str(buf, 0, "Unequipped ");
+            p = write_str(buf, p, roguelike_core::rules::items::name(kind));
+            p
+        }
+
+        GameEvent::UnequipArmor { kind } => {
+            let mut p = write_str(buf, 0, "Unequipped ");
+            p = write_str(buf, p, roguelike_core::rules::items::name(kind));
+            p
+        }
+
+        GameEvent::UseStrengthPotion { bonus } => {
+            let mut p = write_str(buf, 0, "ATK +");
+            p = write_u16(buf, p, bonus as u16);
+            p = write_str(buf, p, "!");
+            p
+        }
+
+        GameEvent::CombineItems { target, .. } => {
+            let mut p = write_str(buf, 0, "Combined ");
+            p = write_str(buf, p, roguelike_core::rules::items::name(target));
+            p
+        }
+
+        GameEvent::CombineNoEffect => write_str(buf, 0, "No effect."),
+
+        GameEvent::ItemDestroyed { kind } => {
+            let mut p = write_str(buf, 0, roguelike_core::rules::items::name(kind));
+            p = write_str(buf, p, " destroyed!");
+            p
+        }
     }
 }

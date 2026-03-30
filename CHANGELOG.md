@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.5.0] - 2026-03-18
 
 ### Added
+- GBA: Add message formatting for all GameEvent variants (#234)
+- GBA: Add look mode with tile descriptions (#233)
+- GBA: Add inventory UI modal screen (#231)
+- GBA: Frontend implementation — crates/gba/ with display, input, save, menus (#230)
 - GBA: Input mapping — joypad buttons to GameCommand (#228)
 - GBA: Screen layout — map, status bar, message log split (#227)
 - GBA: Display architecture — Mode 0 config, BG layers, font encoding, color mapping (#225)
@@ -76,6 +80,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- GBA debugging toolchain: logging, GDB workflow, enhanced panic handler, stack canary (#236)
 - Refactor compact tier counters from countdown to modulo (#221)
 - Add compact tier autorun with directional and BFS steppers (#218)
 - Add compact tier BFS pathfinding with fixed-size buffers (#217)

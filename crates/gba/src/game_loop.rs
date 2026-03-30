@@ -122,7 +122,8 @@ pub fn run() -> ! {
                         continue;
                     }
                     GameCommand::OpenInventory => {
-                        // Deferred (#231)
+                        crate::inventory_ui::run_inventory(game());
+                        render::render_game(game());
                         continue;
                     }
                     _ => {}

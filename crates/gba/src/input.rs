@@ -22,6 +22,28 @@ pub enum MenuCommand {
     Back,
 }
 
+/// Inventory modal input.
+pub enum InventoryInput {
+    Up,
+    Down,
+    /// A = context-smart primary action (Use/Equip/Unequip).
+    Primary,
+    /// L = open secondary submenu (Drop, Combine).
+    Secondary,
+    /// B = close inventory.
+    Close,
+}
+
+/// Submenu popup input (2-3 item menu, no repeat needed).
+pub enum SubmenuInput {
+    Up,
+    Down,
+    /// A = confirm selection.
+    Confirm,
+    /// B = cancel back to browse.
+    Cancel,
+}
+
 /// Frames before held D-pad starts repeating (~200ms at 60fps).
 const INITIAL_DELAY: u16 = 12;
 /// Frames between repeats once repeating (~67ms at 60fps).
@@ -241,6 +263,85 @@ pub fn read_look_input() -> Option<LookCommand> {
 
     if edges & BIT_B != 0 {
         return Some(LookCommand::Close);
+    }
+
+    None
+}
+
+/// Read inventory modal input. D-pad up/down with repeat, edge-triggered buttons.
+pub fn read_inventory_input() -> Option<InventoryInput> {
+    let pressed = read_pressed();
+    let state = state();
+    let edges = pressed & !state.prev_pressed;
+
+    // D-pad up/down with repeat (same pattern as game/look input)
+    let ud = pressed & (BIT_UP | BIT_DOWN);
+    let dir_cmd = if ud != 0 {
+        let dir_edges = edges & (BIT_UP | BIT_DOWN);
+        if dir_edges != 0 {
+            state.repeat_counter = 0;
+            state.repeating = false;
+            true
+        } else {
+            state.repeat_counter += 1;
+            let threshold = if state.repeating { REPEAT_RATE } else { INITIAL_DELAY };
+            if state.repeat_counter >= threshold {
+                state.repeat_counter = 0;
+                state.repeating = true;
+                true
+            } else {
+                false
+            }
+        }
+    } else {
+        state.repeat_counter = 0;
+        state.repeating = false;
+        false
+    };
+
+    state.prev_pressed = pressed;
+
+    if dir_cmd {
+        if pressed & BIT_UP != 0 {
+            return Some(InventoryInput::Up);
+        }
+        if pressed & BIT_DOWN != 0 {
+            return Some(InventoryInput::Down);
+        }
+    }
+
+    // Edge-triggered action buttons
+    if edges & BIT_A != 0 {
+        return Some(InventoryInput::Primary);
+    }
+    if edges & BIT_L != 0 {
+        return Some(InventoryInput::Secondary);
+    }
+    if edges & BIT_B != 0 {
+        return Some(InventoryInput::Close);
+    }
+
+    None
+}
+
+/// Read submenu popup input. Edge-triggered only (small menu, no repeat needed).
+pub fn read_submenu_input() -> Option<SubmenuInput> {
+    let pressed = read_pressed();
+    let state = state();
+    let edges = pressed & !state.prev_pressed;
+    state.prev_pressed = pressed;
+
+    if edges & BIT_UP != 0 {
+        return Some(SubmenuInput::Up);
+    }
+    if edges & BIT_DOWN != 0 {
+        return Some(SubmenuInput::Down);
+    }
+    if edges & BIT_A != 0 {
+        return Some(SubmenuInput::Confirm);
+    }
+    if edges & BIT_B != 0 {
+        return Some(SubmenuInput::Cancel);
     }
 
     None

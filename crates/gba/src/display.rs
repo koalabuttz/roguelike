@@ -123,3 +123,15 @@ pub fn write_map_string(x: usize, y: usize, s: &str, palbank: u16) {
         row.index(col).write(entry);
     }
 }
+
+/// Clear the entire HUD layer (BG1) to transparent tiles.
+pub fn clear_hud() {
+    let sb = TEXT_SCREENBLOCKS.get_frame(HUD_SCREENBLOCK as usize).unwrap();
+    let empty = TextEntry::new();
+    for y in 0..SCREEN_ROWS {
+        let row = sb.get_row(y).unwrap();
+        for x in 0..32 {
+            row.index(x).write(empty);
+        }
+    }
+}

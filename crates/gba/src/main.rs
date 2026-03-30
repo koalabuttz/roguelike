@@ -6,6 +6,7 @@ mod display;
 mod format;
 mod game_loop;
 mod input;
+mod inventory_ui;
 mod palette;
 mod render;
 #[cfg(feature = "dev")]

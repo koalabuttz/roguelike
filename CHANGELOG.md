@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.5.0] - 2026-03-18
 
 ### Added
+- Implement compact tier game.rs with full command dispatch (micro tier parity) (#219)
 - Update compact tier Coord type from i16 to i32 (ARM7-native) (#210)
 - GBA: Update docs and memory with all resolved decisions (#209)
 - GBA: Define compact tier launch feature scope (#205)
@@ -67,6 +68,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Refactor compact tier counters from countdown to modulo (#221)
 - Add compact tier autorun with directional and BFS steppers (#218)
 - Add compact tier BFS pathfinding with fixed-size buffers (#217)
 - Implement compact tier item_store and spawn modules (#216)

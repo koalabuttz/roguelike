@@ -1,0 +1,1518 @@
+{
+  "name": "seed_80000_default",
+  "description": "Seed 80000, 80x40, preset=default, max_turns=500",
+  "replay": {
+    "seed": 80000,
+    "width": 80,
+    "height": 40,
+    "commands": [
+      {
+        "Move": "SouthWest"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "SouthWest"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "NorthWest"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "NorthEast"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "NorthEast"
+      },
+      {
+        "Move": "NorthEast"
+      },
+      {
+        "Move": "NorthEast"
+      },
+      {
+        "Move": "NorthEast"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "NorthEast"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "NorthWest"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "NorthWest"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "NorthWest"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "NorthWest"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "SouthWest"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "SouthWest"
+      },
+      {
+        "Move": "SouthWest"
+      },
+      {
+        "Move": "SouthWest"
+      },
+      {
+        "Move": "SouthWest"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "NorthWest"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      "Pickup",
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "NorthWest"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "SouthWest"
+      },
+      {
+        "Move": "SouthWest"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      "Descend",
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "NorthWest"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "NorthEast"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "NorthEast"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "NorthEast"
+      },
+      {
+        "Move": "NorthEast"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "NorthEast"
+      },
+      {
+        "Move": "NorthEast"
+      },
+      {
+        "Move": "NorthEast"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "SouthWest"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "South"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "SouthEast"
+      },
+      {
+        "Move": "NorthWest"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "North"
+      },
+      {
+        "Move": "NorthWest"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "NorthWest"
+      },
+      {
+        "Move": "NorthWest"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "SouthWest"
+      },
+      {
+        "Move": "NorthWest"
+      },
+      {
+        "Move": "SouthWest"
+      },
+      {
+        "Move": "SouthWest"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "West"
+      },
+      {
+        "Move": "NorthWest"
+      },
+      {
+        "Move": "NorthEast"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      },
+      {
+        "Move": "East"
+      }
+    ],
+    "preset": null
+  },
+  "expected": {
+    "turns_played": 501,
+    "game_over": false,
+    "final_hp": 30,
+    "final_turn": 500,
+    "kills": 15
+  }
+}

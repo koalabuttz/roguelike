@@ -524,7 +524,230 @@ fn run_single_game(
 }
 
 /// Run a single game and save it as a golden replay.
+///
+/// For standard tier seeds: uses A* pathfinding + direct GameState access.
+/// For micro/compact tier seeds: uses auto_explore() + auto_fight() via
+/// the GameStep adapter, recording individual step commands.
 fn run_and_save_golden(
+    width: Coord,
+    height: Coord,
+    seed: u64,
+    preset: Option<MapPreset>,
+    max_turns: Stat,
+    output_path: &str,
+    game_data: &GameData,
+) {
+    use roguelike_core::game_step::{self, CompactGameStateAdapter, MicroGameStateAdapter};
+    use roguelike_core::seed_code;
+
+    let tier = seed_code::tier_from_seed(seed);
+
+    match tier {
+        seed_code::Tier::Standard => {
+            // Standard tier: use direct GameState access with A* pathfinding.
+            run_and_save_golden_standard(
+                width,
+                height,
+                seed,
+                preset,
+                max_turns,
+                output_path,
+                game_data,
+            );
+        }
+        _ => {
+            // Micro/Compact tier: drive game one step at a time using
+            // pathfinding to decide direction each turn.
+            let mut game = game_step::create_game(seed, width, height, preset, game_data)
+                .expect("failed to create game for golden replay");
+
+            let mut commands: Vec<GameCommand> = Vec::new();
+
+            while !game.is_game_over() && game.turn_count() < max_turns as u32 {
+                let cmd = if let Some(adapter) =
+                    game.as_any_mut().downcast_mut::<CompactGameStateAdapter>()
+                {
+                    pick_compact_command(adapter)
+                } else if let Some(adapter) =
+                    game.as_any_mut().downcast_mut::<MicroGameStateAdapter>()
+                {
+                    pick_micro_command(adapter)
+                } else {
+                    GameCommand::Wait
+                };
+                let _result = game.step(cmd);
+                commands.push(cmd);
+            }
+
+            // Build golden replay: re-execute to get expected result.
+            let replay = Replay {
+                seed,
+                width,
+                height,
+                commands,
+                preset,
+            };
+            let expected = replay.execute();
+
+            let preset_name = preset
+                .map(|p| format!("{:?}", p))
+                .unwrap_or_else(|| "default".to_string());
+            let name = format!("seed_{}_{}", seed, preset_name.to_lowercase());
+            let description = format!(
+                "Seed {}, {}x{}, preset={}, max_turns={}",
+                seed, width, height, preset_name, max_turns
+            );
+
+            let golden = GoldenReplay {
+                name,
+                description,
+                replay,
+                expected,
+            };
+
+            let json = serde_json::to_string_pretty(&golden).expect("failed to serialize");
+            std::fs::write(output_path, json).expect("failed to write golden replay file");
+            eprintln!("Saved golden replay to {}", output_path);
+            eprintln!(
+                "  Result: turns={} kills={} {}",
+                golden.expected.turns_played,
+                golden.expected.kills,
+                if golden.expected.game_over {
+                    "DIED"
+                } else {
+                    "SURVIVED"
+                }
+            );
+        }
+    }
+}
+
+/// Pick the next command for a compact tier game using direct state access.
+fn pick_compact_command(
+    adapter: &mut roguelike_core::game_step::CompactGameStateAdapter,
+) -> GameCommand {
+    use roguelike_core::tier_compact::autorun::has_adjacent_monster;
+    use roguelike_core::tier_compact::map::TILE_STAIRS_DOWN;
+    use roguelike_core::tier_compact::pathfinding;
+    use roguelike_core::tier_compact::types::PLAYER_IDX;
+
+    let g = &adapter.game;
+    let pi = PLAYER_IDX as usize;
+    let px = g.entities.x[pi];
+    let py = g.entities.y[pi];
+
+    // On stairs → descend.
+    if g.map.tile_at(px, py) == TILE_STAIRS_DOWN {
+        return GameCommand::Descend;
+    }
+
+    // Adjacent monster → attack it.
+    if has_adjacent_monster(&g.entities) {
+        // Find the adjacent monster and move toward it.
+        for i in 1..g.entities.count as usize {
+            if g.entities.alive[i] {
+                let dx = (g.entities.x[i] - px).abs();
+                let dy = (g.entities.y[i] - py).abs();
+                if dx <= 1 && dy <= 1 {
+                    return GameCommand::move_or_wait(g.entities.x[i] - px, g.entities.y[i] - py);
+                }
+            }
+        }
+    }
+
+    // Item at feet → pick up.
+    if g.items.item_at(px, py) != roguelike_core::tier_compact::types::NO_ITEM {
+        return GameCommand::Pickup;
+    }
+
+    // Find nearest frontier and step toward it.
+    let mut buf = pathfinding::BfsBuffers::new();
+    if let Some((fx, fy)) = pathfinding::find_nearest_frontier(px, py, &g.map, &g.fov, &mut buf)
+        && let Some(dir) = pathfinding::find_first_step(px, py, fx, fy, &g.map, &g.fov, &mut buf)
+    {
+        return GameCommand::Move(dir);
+    }
+
+    // No frontier → try to navigate to stairs if explored.
+    for y in 0..g.map.height {
+        for x in 0..g.map.width {
+            if g.fov.is_explored(x, y) && g.map.tile_at(x, y) == TILE_STAIRS_DOWN {
+                let mut buf2 = pathfinding::BfsBuffers::new();
+                if let Some(dir) =
+                    pathfinding::find_first_step(px, py, x, y, &g.map, &g.fov, &mut buf2)
+                {
+                    return GameCommand::Move(dir);
+                }
+            }
+        }
+    }
+
+    GameCommand::Wait
+}
+
+/// Pick the next command for a micro tier game using direct state access.
+fn pick_micro_command(
+    adapter: &mut roguelike_core::game_step::MicroGameStateAdapter,
+) -> GameCommand {
+    use roguelike_core::tier_micro::autorun::has_adjacent_monster;
+    use roguelike_core::tier_micro::map::TILE_STAIRS_DOWN;
+    use roguelike_core::tier_micro::pathfinding;
+    use roguelike_core::tier_micro::types::PLAYER_IDX;
+
+    let g = &adapter.game;
+    let pi = PLAYER_IDX as usize;
+    let px = g.entities.x[pi];
+    let py = g.entities.y[pi];
+
+    if g.map.tile_at(px, py) == TILE_STAIRS_DOWN {
+        return GameCommand::Descend;
+    }
+
+    if has_adjacent_monster(&g.entities) {
+        for i in 1..g.entities.count as usize {
+            if g.entities.alive[i] {
+                let dx = g.entities.x[i].abs_diff(px);
+                let dy = g.entities.y[i].abs_diff(py);
+                if dx <= 1 && dy <= 1 {
+                    return GameCommand::move_or_wait(
+                        g.entities.x[i] as i32 - px as i32,
+                        g.entities.y[i] as i32 - py as i32,
+                    );
+                }
+            }
+        }
+    }
+
+    use roguelike_core::tier_micro::item_store::NO_ITEM;
+    if g.items.item_at(px, py) != NO_ITEM {
+        return GameCommand::Pickup;
+    }
+
+    let mut buf = pathfinding::BfsBuffers::new();
+    if let Some((fx, fy)) = pathfinding::find_nearest_frontier(px, py, &g.map, &g.fov, &mut buf)
+        && let Some(dir) = pathfinding::find_first_step(px, py, fx, fy, &g.map, &g.fov, &mut buf)
+    {
+        return GameCommand::Move(dir);
+    }
+
+    for y in 0..g.map.height {
+        for x in 0..g.map.width {
+            if g.fov.is_explored(x, y) && g.map.tile_at(x, y) == TILE_STAIRS_DOWN {
+                let mut buf2 = pathfinding::BfsBuffers::new();
+                if let Some(dir) =
+                    pathfinding::find_first_step(px, py, x, y, &g.map, &g.fov, &mut buf2)
+                {
+                    return GameCommand::Move(dir);
+                }
+            }
+        }
+    }
+
+    GameCommand::Wait
+}
+
+/// Standard tier golden generation (original logic using A* pathfinding).
+fn run_and_save_golden_standard(
     width: Coord,
     height: Coord,
     seed: u64,

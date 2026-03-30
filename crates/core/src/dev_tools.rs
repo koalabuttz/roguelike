@@ -605,12 +605,56 @@ impl Replay {
     }
 
     /// Execute this replay and return the result.
+    ///
+    /// Compact-tier seeds (0x10000..=0xFFFF_FFFF) route through
+    /// `create_game()` to the compact tier adapter. All other seeds
+    /// use the standard-tier `GameState` for backwards compatibility
+    /// with existing golden replays.
     pub fn execute(&self) -> ReplayResult {
+        use crate::rules::seed_code;
+        if seed_code::tier_from_seed(self.seed) == seed_code::Tier::Compact {
+            return self.execute_via_game_step();
+        }
+        // Standard/Micro seeds: use GameState directly (backwards compat).
         let mut gs = match self.preset {
             Some(preset) => GameState::with_preset(self.width, self.height, self.seed, preset),
             None => GameState::with_seed(self.width, self.height, self.seed),
         };
         replay_commands(&mut gs, &self.commands)
+    }
+
+    /// Execute via the tier-agnostic GameStep interface.
+    fn execute_via_game_step(&self) -> ReplayResult {
+        let game_data = data::load_game_data();
+        let mut game = crate::game_step::create_game(
+            self.seed,
+            self.width,
+            self.height,
+            self.preset,
+            &game_data,
+        )
+        .expect("failed to create game for replay");
+
+        let mut turns_played: Stat = 0;
+        for &cmd in &self.commands {
+            if game.is_game_over() {
+                break;
+            }
+            let result = game.step(cmd);
+            if result.action_taken {
+                turns_played += 1;
+            }
+        }
+
+        let (hp, _max_hp) = game.player_hp();
+        let obs = game.observe();
+        ReplayResult {
+            turns_played,
+            game_over: obs.game_over,
+            final_hp: hp,
+            final_turn: game.turn_count() as Stat,
+            kills: obs.kills,
+        }
     }
 }
 

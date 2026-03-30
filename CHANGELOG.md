@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.5.0] - 2026-03-18
 
 ### Added
+- GBA: Input mapping — joypad buttons to GameCommand (#228)
 - GBA: Screen layout — map, status bar, message log split (#227)
 - GBA: Display architecture — Mode 0 config, BG layers, font encoding, color mapping (#225)
 - GBA: Build system — toolchain, linker script, ROM output, emulator runner (#229)

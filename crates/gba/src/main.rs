@@ -2,6 +2,7 @@
 #![no_main]
 
 mod display;
+mod input;
 mod palette;
 
 use gba::prelude::*;

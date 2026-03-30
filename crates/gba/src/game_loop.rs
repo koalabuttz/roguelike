@@ -50,6 +50,16 @@ fn game() -> &'static mut CompactGameState {
     unsafe { &mut *(&raw mut GAME).cast::<CompactGameState>() }
 }
 
+/// Run the title screen and return a seed (either random or user-entered).
+fn run_title_and_get_seed() -> u32 {
+    loop {
+        match crate::title_screen::run_title() {
+            crate::title_screen::TitleAction::NewGame => return read_timer_seed(),
+            crate::title_screen::TitleAction::Seed(s) => return s,
+        }
+    }
+}
+
 /// Read the GBA's free-running timer as a seed source.
 fn read_timer_seed() -> u32 {
     TIMER0_RELOAD.write(0);
@@ -79,11 +89,7 @@ fn wait_for_key() {
 
 /// Main entry point — runs forever.
 pub fn run() -> ! {
-    show_title();
-    wait_for_key();
-
-    display::write_map_string(8, 14, "Generating...", GameColor::DarkGrey as u16);
-    let seed = read_timer_seed();
+    let seed = run_title_and_get_seed();
     start_game(seed);
     render::render_game(game());
 
@@ -119,9 +125,7 @@ pub fn run() -> ! {
                         continue;
                     }
                     GameCommand::Quit => {
-                        show_title();
-                        wait_for_key();
-                        let seed = read_timer_seed();
+                        let seed = run_title_and_get_seed();
                         start_game(seed);
                         render::render_game(game());
                         app_state = AppState::Playing;
@@ -174,10 +178,7 @@ pub fn run() -> ! {
                 show_game_over(game());
                 wait_for_key();
 
-                show_title();
-                wait_for_key();
-
-                let seed = read_timer_seed();
+                let seed = run_title_and_get_seed();
                 start_game(seed);
                 render::render_game(game());
                 app_state = AppState::Playing;
@@ -277,19 +278,6 @@ fn render_look_description(state: &CompactGameState, cx: i32, cy: i32) {
     if let Ok(s) = core::str::from_utf8(&buf) {
         display::write_hud_string(0, display::MSG_ROW, s.trim_end(), crate::palette::PALBANK_MSG);
     }
-}
-
-/// Show a simple title screen.
-fn show_title() {
-    for y in 0..20 {
-        for x in 0..30 {
-            display::write_map_tile(x, y, b' ', 0);
-            display::write_hud_tile(x, y, b' ', 0);
-        }
-    }
-
-    display::write_map_string(8, 8, "ROGUELIKE", GameColor::White as u16);
-    display::write_map_string(5, 11, "Press any key to start", GameColor::Grey as u16);
 }
 
 /// Show game over screen.

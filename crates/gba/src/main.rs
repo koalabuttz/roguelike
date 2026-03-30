@@ -9,6 +9,7 @@ mod input;
 mod inventory_ui;
 mod palette;
 mod render;
+mod title_screen;
 #[cfg(feature = "dev")]
 mod stack_check;
 

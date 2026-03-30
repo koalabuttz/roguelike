@@ -9,8 +9,12 @@ use gba::prelude::*;
 
 use roguelike_core::command::GameCommand;
 use roguelike_core::rules::color::GameColor;
+use roguelike_core::rules::health::{self, HealthTier};
+use roguelike_core::rules::items as rules_items;
+use roguelike_core::rules::monster_table;
 use roguelike_core::tier_compact::game::CompactGameState;
-use roguelike_core::tier_compact::types::{MAP_HEIGHT, MAP_WIDTH, PLAYER_IDX};
+use roguelike_core::tier_compact::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_STRUCTURAL};
+use roguelike_core::tier_compact::types::{MAP_HEIGHT, MAP_WIDTH, NO_ENTITY, NO_ITEM, PLAYER_IDX};
 
 use crate::display;
 use crate::input;
@@ -109,6 +113,8 @@ pub fn run() -> ! {
                     GameCommand::Look => {
                         let cx = state.entities.x[PLAYER_IDX as usize];
                         let cy = state.entities.y[PLAYER_IDX as usize];
+                        render_look_cursor(state, cx, cy);
+                        render_look_description(state, cx, cy);
                         app_state = AppState::Looking { cx, cy };
                         continue;
                     }
@@ -154,6 +160,7 @@ pub fn run() -> ! {
 
                         render::render_game(state);
                         render_look_cursor(state, nx, ny);
+                        render_look_description(state, nx, ny);
                     }
                     Some(input::LookCommand::Close) => {
                         render::render_game(game());
@@ -192,6 +199,83 @@ fn render_look_cursor(state: &CompactGameState, wx: i32, wy: i32) {
     let sy = wy - vy;
     if sx >= 0 && sx < vp_w && sy >= 0 && sy < vp_h {
         display::write_map_tile(sx as usize, sy as usize, b'X', PALBANK_HIGHLIGHT);
+    }
+}
+
+/// Show a description of the tile at (cx, cy) on the HUD message row.
+fn render_look_description(state: &CompactGameState, cx: i32, cy: i32) {
+    let mut buf = [b' '; 30];
+    let mut p = crate::format::write_str(&mut buf, 0, "[L] ");
+
+    if !state.map.in_bounds(cx, cy) || !state.fov.is_explored(cx, cy) {
+        p = crate::format::write_str(&mut buf, p, "Unexplored");
+    } else {
+        let visible = state.fov.is_visible(cx, cy);
+
+        // Terrain
+        let tile = state.map.tile_at(cx, cy);
+        p = match tile {
+            TILE_FLOOR => crate::format::write_str(&mut buf, p, "Floor"),
+            TILE_STAIRS_DOWN => crate::format::write_str(&mut buf, p, "Stairs down"),
+            TILE_STRUCTURAL => crate::format::write_str(&mut buf, p, "Wall"),
+            _ => crate::format::write_str(&mut buf, p, "Wall"),
+        };
+
+        if !visible {
+            p = crate::format::write_str(&mut buf, p, " (remembered)");
+        } else {
+            // Entity on tile
+            let eidx = state.entities.entity_at(cx, cy);
+            if eidx != NO_ENTITY {
+                if p < 30 {
+                    buf[p] = b' ';
+                    p += 1;
+                }
+                if eidx == PLAYER_IDX {
+                    p = crate::format::write_str(&mut buf, p, "Player");
+                } else if let Some(kind) = state.entities.kind[eidx as usize] {
+                    p = crate::format::write_str(&mut buf, p, monster_table::name(kind));
+                    let tier = health::health_tier(
+                        state.entities.hp[eidx as usize],
+                        state.entities.max_hp[eidx as usize],
+                    );
+                    let desc = match tier {
+                        HealthTier::Healthy => "",
+                        HealthTier::Moderate => " (damaged)",
+                        HealthTier::Severe => " (wounded)",
+                        HealthTier::AlmostDead => " (dying)",
+                    };
+                    p = crate::format::write_str(&mut buf, p, desc);
+                }
+            }
+
+            // Item on tile (show first one)
+            let iidx = state.items.item_at(cx, cy);
+            if iidx != NO_ITEM {
+                if p < 30 {
+                    buf[p] = b' ';
+                    p += 1;
+                }
+                if p < 30 {
+                    buf[p] = b'[';
+                    p += 1;
+                }
+                p = crate::format::write_str(&mut buf, p, rules_items::name(state.items.kind[iidx as usize]));
+                if p < 30 {
+                    buf[p] = b']';
+                    p += 1;
+                }
+            }
+        }
+    }
+    let _ = p;
+
+    // Clear message row and write description
+    for x in 0..display::SCREEN_COLS {
+        display::write_hud_tile(x, display::MSG_ROW, b' ', 0);
+    }
+    if let Ok(s) = core::str::from_utf8(&buf) {
+        display::write_hud_string(0, display::MSG_ROW, s.trim_end(), crate::palette::PALBANK_MSG);
     }
 }
 

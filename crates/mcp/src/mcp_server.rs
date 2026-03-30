@@ -374,10 +374,22 @@ impl RoguelikeMcpServer {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
 
-        let state = require_standard(session.game.as_ref())?;
-        let map_lines = state.explored_map();
+        let (map_lines, frontier_tiles) = if let Some(state) = standard_state(session.game.as_ref())
+        {
+            (state.explored_map(), state.frontier_tiles())
+        } else if let Some(adapter) = session
+            .game
+            .as_any()
+            .downcast_ref::<game_step::CompactGameStateAdapter>()
+        {
+            (adapter.explored_map(), adapter.frontier_tiles())
+        } else {
+            return Err(McpError::invalid_request(
+                "get_explored_map not supported for this game tier",
+                None,
+            ));
+        };
         let (px, py) = session.game.player_pos();
-        let frontier_tiles = state.frontier_tiles();
         let frontier_exits: Vec<serde_json::Value> = frontier_tiles
             .iter()
             .map(|&(x, y)| serde_json::json!({"x": x, "y": y}))

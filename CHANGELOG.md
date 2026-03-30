@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.5.0] - 2026-03-18
 
 ### Added
+- Add get_explored_map MCP support for compact tier (#224)
 - Add golden replay tests for compact tier seeds (#223)
 - Add compact tier adapter with GameStep, RenderSource, and seed routing (#222)
 - Implement compact tier game.rs with full command dispatch (micro tier parity) (#219)

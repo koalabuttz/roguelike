@@ -992,6 +992,68 @@ impl CompactGameStateAdapter {
         ) as i32
     }
 
+    /// Frontier tiles: explored walkable tiles with unexplored walkable neighbors.
+    pub fn frontier_tiles(&self) -> Vec<(Coord, Coord)> {
+        let g = &self.game;
+        let mut result = Vec::new();
+        for y in 0..g.map.height {
+            for x in 0..g.map.width {
+                if !g.fov.is_explored(x, y) || !g.map.is_walkable(x, y) {
+                    continue;
+                }
+                let is_frontier = (-1..=1_i32).any(|dy| {
+                    (-1..=1_i32).any(|dx| {
+                        (dx != 0 || dy != 0)
+                            && g.map.in_bounds(x + dx, y + dy)
+                            && !g.fov.is_explored(x + dx, y + dy)
+                    })
+                });
+                if is_frontier {
+                    result.push((x, y));
+                }
+            }
+        }
+        result
+    }
+
+    /// Produce an ASCII map of all explored tiles.
+    pub fn explored_map(&self) -> Vec<String> {
+        use std::collections::HashSet;
+        let frontiers: HashSet<(Coord, Coord)> = self.frontier_tiles().into_iter().collect();
+        let g = &self.game;
+        let mut lines = Vec::new();
+        for y in 0..g.map.height {
+            let mut line = String::with_capacity(g.map.width as usize);
+            let mut has_content = false;
+            for x in 0..g.map.width {
+                if g.fov.is_explored(x, y) {
+                    has_content = true;
+                    if g.fov.is_visible(x, y) {
+                        if let Some(ei) = compact_entity_info_at(&g.entities, x, y) {
+                            line.push(ei.glyph);
+                            continue;
+                        }
+                        if let Some(glyph) = compact_item_glyph_at(&g.items, x, y) {
+                            line.push(glyph);
+                            continue;
+                        }
+                    }
+                    if frontiers.contains(&(x, y)) {
+                        line.push('~');
+                    } else {
+                        line.push(tile_glyph(g.map.tile_at(x, y)));
+                    }
+                } else {
+                    line.push(' ');
+                }
+            }
+            if has_content {
+                lines.push(line.trim_end().to_string());
+            }
+        }
+        lines
+    }
+
     pub fn auto_fight(&mut self) -> Result<AutoFightResult, String> {
         let msg_before = self.game.log.total();
         let result = self

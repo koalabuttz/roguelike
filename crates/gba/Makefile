@@ -12,9 +12,9 @@ build:
 gba: build
 	agb-gbafix $(ELF) -o $(GBA) -t "ROGUELIKE" -c "RGLK" -m "DV"
 
-# Run in mGBA (loads ELF with debug symbols)
+# Run in mGBA SDL backend (no Qt flicker on Chromebook)
 run: build
-	mgba-qt $(ELF)
+	mgba -2 $(ELF)
 
 # Show ROM and section sizes
 size: build

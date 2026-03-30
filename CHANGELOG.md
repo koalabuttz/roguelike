@@ -67,6 +67,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Add compact tier autorun with directional and BFS steppers (#218)
 - Add compact tier BFS pathfinding with fixed-size buffers (#217)
 - Implement compact tier item_store and spawn modules (#216)
 - Implement compact tier combat, msglog, and AI modules (#215)

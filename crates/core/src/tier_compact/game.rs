@@ -103,6 +103,62 @@ impl CompactGameState {
         }
     }
 
+    /// Construct a new game directly at `dst`, avoiding large stack allocations.
+    ///
+    /// Same as `new()` but writes each field directly to the destination pointer.
+    /// Use this on constrained platforms (GBA, C64) where the ~8 KB struct
+    /// would overflow the stack if returned by value.
+    ///
+    /// # Safety
+    /// `dst` must point to valid, writable memory of at least `size_of::<Self>()` bytes.
+    pub unsafe fn new_into(dst: *mut Self, seed: u32, width: Coord, height: Coord) {
+        use core::ptr::addr_of_mut;
+
+        // Use raw pointer field access throughout — no &mut to uninitialized memory.
+        addr_of_mut!((*dst).rng).write(LfsrRng32::new(seed));
+        addr_of_mut!((*dst).seed).write(seed);
+
+        // Initialize map in-place, then generate.
+        addr_of_mut!((*dst).map).write(CompactMap::new(width, height));
+        let (sx, sy) = (*dst).map.generate(&mut (*dst).rng);
+
+        // Entities — spawn player + monsters.
+        addr_of_mut!((*dst).entities).write(EntityStore::new());
+        (*dst).entities.spawn_player(sx, sy);
+
+        // Items.
+        addr_of_mut!((*dst).items).write(ItemStore::new());
+        spawn::spawn_monsters(&mut (*dst).entities, &(*dst).map, &mut (*dst).rng);
+        spawn::spawn_items(&mut (*dst).items, &(*dst).map, 1, &mut (*dst).rng);
+        spawn::apply_depth_scaling(&mut (*dst).entities, 1);
+
+        // FOV.
+        addr_of_mut!((*dst).fov).write(CompactFov::new(width, height));
+        (*dst)
+            .fov
+            .compute_fov(sx, sy, balance::FOV_RADIUS, &(*dst).map);
+
+        // Message log.
+        addr_of_mut!((*dst).log).write(CompactMessageLog::new());
+        (*dst).log.add(GameEvent::Welcome);
+
+        // Equipment + inventory.
+        addr_of_mut!((*dst).equipment).write(Equipment::default());
+        addr_of_mut!((*dst).inventory).write(Inventory::new());
+
+        // Scalars.
+        addr_of_mut!((*dst).turn_count).write(0);
+        addr_of_mut!((*dst).kills).write(0);
+        addr_of_mut!((*dst).depth).write(1);
+        addr_of_mut!((*dst).game_over).write(false);
+        addr_of_mut!((*dst).game_won).write(false);
+        addr_of_mut!((*dst).idle_count).write(0);
+        addr_of_mut!((*dst).wandering_spawned).write(0);
+        addr_of_mut!((*dst).wandering_counter)
+            .write(balance::WANDERING_GRACE_PERIOD - 1);
+        addr_of_mut!((*dst).auto_pickup).write(false);
+    }
+
     /// Effective attack: base + weapon bonus.
     pub fn effective_attack(&self) -> u8 {
         let base = self.entities.atk[PLAYER_IDX as usize];

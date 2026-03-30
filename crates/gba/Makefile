@@ -4,17 +4,14 @@ GBA = roguelike-gba.gba
 
 .PHONY: build gba run clean size
 
-# Build ELF (runnable in mGBA directly)
+# Build ELF + .gba ROM
 build:
 	cargo +nightly build --release
-
-# Build .gba ROM file (reads ELF directly, no separate objcopy)
-gba: build
-	agb-gbafix $(ELF) -o $(GBA) -t "ROGUELIKE" -c "RGLK" -m "DV"
+	agb-gbafix $(ELF) -o $(GBA) -p -t "ROGUELIKE" -c "RGLK" -m "DV"
 
 # Run in mGBA SDL backend (no Qt flicker on Chromebook)
 run: build
-	mgba -2 $(ELF)
+	mgba -2 $(GBA)
 
 # Show ROM and section sizes
 size: build
@@ -22,3 +19,4 @@ size: build
 
 clean:
 	cargo +nightly clean
+	rm -f $(GBA)

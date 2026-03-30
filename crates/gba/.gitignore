@@ -1,3 +1,4 @@
-roguelike-gba.gba
+*.gba
+*.sav
 target/
 Cargo.lock

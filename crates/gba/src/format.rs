@@ -5,6 +5,20 @@
 
 use roguelike_core::rules::message::{Combatant, GameEvent};
 
+/// Write a u32 as 8-digit uppercase hexadecimal into `buf` starting at `pos`.
+/// Returns the new position after the 8 hex digits.
+pub fn write_hex(buf: &mut [u8], pos: usize, val: u32) -> usize {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut p = pos;
+    for i in (0..8).rev() {
+        if p < buf.len() {
+            buf[p] = HEX[((val >> (i * 4)) & 0xF) as usize];
+        }
+        p += 1;
+    }
+    p
+}
+
 /// Write a u16 as decimal ASCII digits into `buf` starting at `pos`.
 /// Returns the new position after the digits.
 pub fn write_u16(buf: &mut [u8], pos: usize, val: u16) -> usize {

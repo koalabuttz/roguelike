@@ -10,7 +10,7 @@ use gba::prelude::*;
 use roguelike_core::command::GameCommand;
 use roguelike_core::rules::color::GameColor;
 use roguelike_core::tier_compact::game::CompactGameState;
-use roguelike_core::tier_compact::types::PLAYER_IDX;
+use roguelike_core::tier_compact::types::{MAP_HEIGHT, MAP_WIDTH, PLAYER_IDX};
 
 use crate::display;
 use crate::input;
@@ -36,7 +36,8 @@ fn vblank_wait() {
 /// Start a new game directly in EWRAM, avoiding large stack allocation.
 fn start_game(seed: u32) {
     let ptr = unsafe { (&raw mut GAME).cast::<CompactGameState>() };
-    unsafe { CompactGameState::new_into(ptr, seed, 80, 50) };
+    unsafe { CompactGameState::new_into(ptr, seed, MAP_WIDTH, MAP_HEIGHT) };
+    crate::debug::debug_log!("Game initialized: seed={}, map={}x{}", seed, MAP_WIDTH, MAP_HEIGHT);
 }
 
 /// Get a reference to the active game state.
@@ -86,6 +87,13 @@ pub fn run() -> ! {
 
     loop {
         vblank_wait();
+
+        #[cfg(feature = "dev")]
+        if !crate::stack_check::check_canary() {
+            crate::display::write_map_string(0, 0, "STACK OVERFLOW", 4);
+            crate::debug::debug_log_fatal!("Stack canary corrupted — overflow detected");
+            loop {}
+        }
 
         match app_state {
             AppState::Playing => {

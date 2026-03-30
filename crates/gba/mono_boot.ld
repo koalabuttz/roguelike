@@ -85,6 +85,12 @@ SECTIONS {
   .debug_funcnames 0 : { *(.debug_funcnames) }
   .debug_typenames 0 : { *(.debug_typenames) }
   .debug_varnames  0 : { *(.debug_varnames) }
+  .debug_ranges    0 : { *(.debug_ranges) }
+  .debug_rnglists  0 : { *(.debug_rnglists) }
+  .debug_loclists  0 : { *(.debug_loclists) }
+  .debug_line_str  0 : { *(.debug_line_str) }
+  .debug_addr      0 : { *(.debug_addr) }
+  .debug_str_offsets 0 : { *(.debug_str_offsets) }
 
   /DISCARD/ : { *(*) }
 }

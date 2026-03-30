@@ -11,7 +11,12 @@ description = "Game Boy Advance port of the roguelike dungeon crawler"
 gba = "0.15"
 roguelike-core = { path = "../core", default-features = false }
 
+[features]
+default = []
+dev = []
+
 [profile.release]
 opt-level = "z"
 lto = true
 codegen-units = 1
+debug = true

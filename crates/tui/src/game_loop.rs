@@ -415,7 +415,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                             && key.code == KeyCode::Char('p')
                         {
                             if let Some(gs) = standard_state(game.as_ref()) {
-                                run_message_history(gs.log.all(), renderer, input)?;
+                                run_message_history(&gs.log.all(), renderer, input)?;
                             } else {
                                 let obs = game.observe();
                                 run_message_history(&obs.recent_messages, renderer, input)?;
@@ -456,7 +456,7 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                         }
                         GameCommand::MessageHistory => {
                             if let Some(gs) = standard_state(game.as_ref()) {
-                                run_message_history(gs.log.all(), renderer, input)?;
+                                run_message_history(&gs.log.all(), renderer, input)?;
                             } else {
                                 let obs = game.observe();
                                 run_message_history(&obs.recent_messages, renderer, input)?;

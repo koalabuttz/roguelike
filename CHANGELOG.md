@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.5.0] - 2026-03-18
 
 ### Added
+- Migrate standard tier MessageLog to store GameEvent values (#242)
 - GBA: Decide save system format — postcard vs custom binary (#204)
 - GBA: Add title screen with seed selection (#232)
 - Add GBA display helpers, cursor module, LineBuf, and palette lerp (#238)

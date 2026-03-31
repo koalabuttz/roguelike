@@ -2,9 +2,17 @@ use crate::rules::health;
 use crate::rules::items;
 use crate::rules::message::{AutorunStopCause, Combatant, GameEvent, SoundDistance};
 
+/// Entry in the message log: formatted string + optional structured event.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct LogEntry {
+    text: String,
+    #[serde(skip)]
+    event: Option<GameEvent>,
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct MessageLog {
-    messages: Vec<String>,
+    entries: Vec<LogEntry>,
 }
 
 impl Default for MessageLog {
@@ -16,43 +24,59 @@ impl Default for MessageLog {
 impl MessageLog {
     pub fn new() -> Self {
         MessageLog {
-            messages: Vec::new(),
+            entries: Vec::new(),
         }
     }
 
     pub fn add(&mut self, msg: impl Into<String>) {
-        self.messages.push(msg.into());
+        self.entries.push(LogEntry {
+            text: msg.into(),
+            event: None,
+        });
     }
 
     /// Add a structured game event, formatting it to a human-readable string.
     pub fn add_event(&mut self, event: GameEvent) {
-        self.messages.push(format_event(event));
+        self.entries.push(LogEntry {
+            text: format_event(event),
+            event: Some(event),
+        });
     }
 
-    /// Return the last `n` messages (newest last).
-    pub fn recent(&self, n: usize) -> &[String] {
-        let start = self.messages.len().saturating_sub(n);
-        &self.messages[start..]
+    /// Return the last `n` messages as strings (newest last).
+    pub fn recent(&self, n: usize) -> Vec<String> {
+        let start = self.entries.len().saturating_sub(n);
+        self.entries[start..].iter().map(|e| e.text.clone()).collect()
+    }
+
+    /// Return the nth most recent GameEvent (0 = most recent).
+    /// Returns None if the entry was a raw string or index is out of range.
+    pub fn recent_event(&self, n: usize) -> Option<GameEvent> {
+        let len = self.entries.len();
+        if n >= len {
+            return None;
+        }
+        self.entries[len - 1 - n].event
     }
 
     /// Total number of messages ever added.
     pub fn len(&self) -> usize {
-        self.messages.len()
+        self.entries.len()
     }
 
     /// Whether the log contains no messages.
     pub fn is_empty(&self) -> bool {
-        self.messages.is_empty()
+        self.entries.is_empty()
     }
 
-    /// Return all messages (oldest first).
-    pub fn all(&self) -> &[String] {
-        &self.messages
+    /// Return all messages as strings (oldest first).
+    pub fn all(&self) -> Vec<String> {
+        self.entries.iter().map(|e| e.text.clone()).collect()
     }
 
     /// Return all messages added since index `since` (exclusive).
     pub fn messages_since(&self, since: usize) -> Vec<String> {
-        self.messages[since..].to_vec()
+        self.entries[since..].iter().map(|e| e.text.clone()).collect()
     }
 }
 

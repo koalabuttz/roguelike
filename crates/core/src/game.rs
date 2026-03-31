@@ -1680,7 +1680,7 @@ impl GameState {
             map_ascii: map_lines,
             visible_entities,
             visible_items,
-            recent_messages: self.log.recent(10).to_vec(),
+            recent_messages: self.log.recent(10),
             game_over: self.game_over,
             turn_count: self.turn_count,
             weapon: self
@@ -2074,10 +2074,8 @@ impl crate::rules::game_view::GameView for GameState {
     fn target_depth(&self) -> u8 {
         self.target_depth as u8
     }
-    fn recent_message(&self, _n: u8) -> Option<crate::rules::message::GameEvent> {
-        // Standard tier uses String messages via MessageLog.
-        // GameEvent-based access is for micro/compact tiers.
-        None
+    fn recent_message(&self, n: u8) -> Option<crate::rules::message::GameEvent> {
+        self.log.recent_event(n as usize)
     }
     fn step_view(&mut self, cmd: GameCommand) -> crate::rules::game_view::GameViewStep {
         let r = GameState::step(self, cmd);

@@ -1985,9 +1985,9 @@ impl crate::rules::game_view::GameView for GameState {
         let idx = self.map.idx(x, y);
         match self.map.tiles[idx] {
             map::Tile::Wall if self.map.structural[idx] => 1, // TILE_STRUCTURAL
-            map::Tile::Wall => 0,                              // TILE_WALL
-            map::Tile::Floor => 2,                             // TILE_FLOOR
-            map::Tile::StairsDown => 3,                        // TILE_STAIRS_DOWN
+            map::Tile::Wall => 0,                             // TILE_WALL
+            map::Tile::Floor => 2,                            // TILE_FLOOR
+            map::Tile::StairsDown => 3,                       // TILE_STAIRS_DOWN
         }
     }
     fn is_visible(&self, x: i32, y: i32) -> bool {

@@ -1661,9 +1661,8 @@ mod tests {
             ItemKind::GreaterHealthPotion,
             ItemKind::StrengthPotion,
         ] {
-            let mut bag = default_properties(kind);
             // Zero out everything — potions still can't die (no material)
-            bag = properties::EMPTY;
+            let bag = properties::EMPTY;
             assert!(
                 !is_material_dead(kind, &bag),
                 "{:?} should not be material-dead",

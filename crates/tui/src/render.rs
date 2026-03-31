@@ -9,7 +9,7 @@ use crossterm::{
 use roguelike_core::game::GameObservation;
 use roguelike_core::game_step::GameStep;
 use roguelike_core::platform::Renderer;
-use roguelike_core::rules::game_view::{GameView, TileVisibility};
+use roguelike_core::rules::game_view::TileVisibility;
 use roguelike_core::settings::{ColorPalette, Settings};
 use roguelike_core::types::{Coord, GameColor, Stat};
 

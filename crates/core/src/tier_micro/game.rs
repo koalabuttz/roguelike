@@ -961,7 +961,11 @@ impl crate::rules::game_view::GameView for MicroGameState {
     }
     fn entity_at(&self, x: i32, y: i32) -> Option<u8> {
         let idx = self.entities.entity_at(x as u8, y as u8);
-        if idx == super::types::NO_ENTITY { None } else { Some(idx) }
+        if idx == super::types::NO_ENTITY {
+            None
+        } else {
+            Some(idx)
+        }
     }
     fn item_count(&self) -> usize {
         self.items.count as usize
@@ -977,7 +981,11 @@ impl crate::rules::game_view::GameView for MicroGameState {
     }
     fn item_at(&self, x: i32, y: i32) -> Option<u8> {
         let idx = self.items.item_at(x as u8, y as u8);
-        if idx == super::item_store::NO_ITEM { None } else { Some(idx) }
+        if idx == super::item_store::NO_ITEM {
+            None
+        } else {
+            Some(idx)
+        }
     }
     fn equipment(&self) -> &crate::rules::items::Equipment {
         &self.equipment
@@ -1005,7 +1013,9 @@ impl crate::rules::game_view::GameView for MicroGameState {
     }
     fn explored_pct(&self) -> u8 {
         let total = self.map.floor_count();
-        if total == 0 { return 0; }
+        if total == 0 {
+            return 0;
+        }
         let explored = self.fov.explored_floor_count(&self.map);
         ((explored as u32 * 100) / total as u32) as u8
     }

@@ -380,38 +380,102 @@ impl MicroGameStateAdapter {
 
 // Delegate all GameView methods to the inner MicroGameState.
 impl crate::rules::game_view::GameView for MicroGameStateAdapter {
-    fn map_dims(&self) -> (i32, i32) { self.game.map_dims() }
-    fn map_in_bounds(&self, x: i32, y: i32) -> bool { self.game.map_in_bounds(x, y) }
-    fn tile_at(&self, x: i32, y: i32) -> u8 { self.game.tile_at(x, y) }
-    fn is_visible(&self, x: i32, y: i32) -> bool { self.game.is_visible(x, y) }
-    fn is_explored(&self, x: i32, y: i32) -> bool { self.game.is_explored(x, y) }
-    fn player_xy(&self) -> (i32, i32) { self.game.player_xy() }
-    fn player_hp(&self) -> (u8, u8) { self.game.player_hp() }
-    fn effective_attack(&self) -> u8 { self.game.effective_attack() }
-    fn effective_defense(&self) -> u8 { self.game.effective_defense() }
-    fn entity_count(&self) -> usize { self.game.entity_count() }
-    fn entity_xy(&self, i: usize) -> (i32, i32) { self.game.entity_xy(i) }
-    fn entity_alive(&self, i: usize) -> bool { self.game.entity_alive(i) }
-    fn entity_kind(&self, i: usize) -> Option<crate::rules::monster_table::MonsterKind> { self.game.entity_kind(i) }
-    fn entity_hp(&self, i: usize) -> (u8, u8) { self.game.entity_hp(i) }
-    fn entity_at(&self, x: i32, y: i32) -> Option<u8> { self.game.entity_at(x, y) }
-    fn item_count(&self) -> usize { self.game.item_count() }
-    fn item_xy(&self, i: usize) -> (i32, i32) { self.game.item_xy(i) }
-    fn item_alive(&self, i: usize) -> bool { self.game.item_alive(i) }
-    fn item_kind_at(&self, i: usize) -> crate::rules::items::ItemKind { self.game.item_kind_at(i) }
-    fn item_at(&self, x: i32, y: i32) -> Option<u8> { self.game.item_at(x, y) }
-    fn equipment(&self) -> &crate::rules::items::Equipment { self.game.equipment() }
-    fn inventory(&self) -> &crate::rules::items::Inventory { self.game.inventory() }
-    fn depth(&self) -> u8 { self.game.depth() }
-    fn kills(&self) -> u8 { self.game.kills() }
-    fn turn_count(&self) -> u16 { self.game.turn_count() }
-    fn game_over(&self) -> bool { self.game.game_over() }
-    fn game_won(&self) -> bool { self.game.game_won() }
-    fn seed_u32(&self) -> u32 { self.game.seed_u32() }
-    fn explored_pct(&self) -> u8 { self.game.explored_pct() }
-    fn target_depth(&self) -> u8 { self.game.target_depth() }
-    fn recent_message(&self, n: u8) -> Option<crate::rules::message::GameEvent> { self.game.recent_message(n) }
-    fn step_view(&mut self, cmd: GameCommand) -> crate::rules::game_view::GameViewStep { self.game.step_view(cmd) }
+    fn map_dims(&self) -> (i32, i32) {
+        self.game.map_dims()
+    }
+    fn map_in_bounds(&self, x: i32, y: i32) -> bool {
+        self.game.map_in_bounds(x, y)
+    }
+    fn tile_at(&self, x: i32, y: i32) -> u8 {
+        self.game.tile_at(x, y)
+    }
+    fn is_visible(&self, x: i32, y: i32) -> bool {
+        self.game.is_visible(x, y)
+    }
+    fn is_explored(&self, x: i32, y: i32) -> bool {
+        self.game.is_explored(x, y)
+    }
+    fn player_xy(&self) -> (i32, i32) {
+        self.game.player_xy()
+    }
+    fn player_hp(&self) -> (u8, u8) {
+        self.game.player_hp()
+    }
+    fn effective_attack(&self) -> u8 {
+        self.game.effective_attack()
+    }
+    fn effective_defense(&self) -> u8 {
+        self.game.effective_defense()
+    }
+    fn entity_count(&self) -> usize {
+        self.game.entity_count()
+    }
+    fn entity_xy(&self, i: usize) -> (i32, i32) {
+        self.game.entity_xy(i)
+    }
+    fn entity_alive(&self, i: usize) -> bool {
+        self.game.entity_alive(i)
+    }
+    fn entity_kind(&self, i: usize) -> Option<crate::rules::monster_table::MonsterKind> {
+        self.game.entity_kind(i)
+    }
+    fn entity_hp(&self, i: usize) -> (u8, u8) {
+        self.game.entity_hp(i)
+    }
+    fn entity_at(&self, x: i32, y: i32) -> Option<u8> {
+        self.game.entity_at(x, y)
+    }
+    fn item_count(&self) -> usize {
+        self.game.item_count()
+    }
+    fn item_xy(&self, i: usize) -> (i32, i32) {
+        self.game.item_xy(i)
+    }
+    fn item_alive(&self, i: usize) -> bool {
+        self.game.item_alive(i)
+    }
+    fn item_kind_at(&self, i: usize) -> crate::rules::items::ItemKind {
+        self.game.item_kind_at(i)
+    }
+    fn item_at(&self, x: i32, y: i32) -> Option<u8> {
+        self.game.item_at(x, y)
+    }
+    fn equipment(&self) -> &crate::rules::items::Equipment {
+        self.game.equipment()
+    }
+    fn inventory(&self) -> &crate::rules::items::Inventory {
+        self.game.inventory()
+    }
+    fn depth(&self) -> u8 {
+        self.game.depth()
+    }
+    fn kills(&self) -> u8 {
+        self.game.kills()
+    }
+    fn turn_count(&self) -> u16 {
+        self.game.turn_count()
+    }
+    fn game_over(&self) -> bool {
+        self.game.game_over()
+    }
+    fn game_won(&self) -> bool {
+        self.game.game_won()
+    }
+    fn seed_u32(&self) -> u32 {
+        self.game.seed_u32()
+    }
+    fn explored_pct(&self) -> u8 {
+        self.game.explored_pct()
+    }
+    fn target_depth(&self) -> u8 {
+        self.game.target_depth()
+    }
+    fn recent_message(&self, n: u8) -> Option<crate::rules::message::GameEvent> {
+        self.game.recent_message(n)
+    }
+    fn step_view(&mut self, cmd: GameCommand) -> crate::rules::game_view::GameViewStep {
+        self.game.step_view(cmd)
+    }
 }
 
 impl GameStep for MicroGameStateAdapter {
@@ -617,7 +681,6 @@ impl GameStep for MicroGameStateAdapter {
             preset: None,
         })
     }
-
 }
 
 // ── Micro tier autorun ───────────────────────────────────────────────
@@ -1107,38 +1170,102 @@ impl CompactGameStateAdapter {
 
 // Delegate all GameView methods to the inner CompactGameState.
 impl crate::rules::game_view::GameView for CompactGameStateAdapter {
-    fn map_dims(&self) -> (i32, i32) { self.game.map_dims() }
-    fn map_in_bounds(&self, x: i32, y: i32) -> bool { self.game.map_in_bounds(x, y) }
-    fn tile_at(&self, x: i32, y: i32) -> u8 { self.game.tile_at(x, y) }
-    fn is_visible(&self, x: i32, y: i32) -> bool { self.game.is_visible(x, y) }
-    fn is_explored(&self, x: i32, y: i32) -> bool { self.game.is_explored(x, y) }
-    fn player_xy(&self) -> (i32, i32) { self.game.player_xy() }
-    fn player_hp(&self) -> (u8, u8) { self.game.player_hp() }
-    fn effective_attack(&self) -> u8 { self.game.effective_attack() }
-    fn effective_defense(&self) -> u8 { self.game.effective_defense() }
-    fn entity_count(&self) -> usize { self.game.entity_count() }
-    fn entity_xy(&self, i: usize) -> (i32, i32) { self.game.entity_xy(i) }
-    fn entity_alive(&self, i: usize) -> bool { self.game.entity_alive(i) }
-    fn entity_kind(&self, i: usize) -> Option<crate::rules::monster_table::MonsterKind> { self.game.entity_kind(i) }
-    fn entity_hp(&self, i: usize) -> (u8, u8) { self.game.entity_hp(i) }
-    fn entity_at(&self, x: i32, y: i32) -> Option<u8> { self.game.entity_at(x, y) }
-    fn item_count(&self) -> usize { self.game.item_count() }
-    fn item_xy(&self, i: usize) -> (i32, i32) { self.game.item_xy(i) }
-    fn item_alive(&self, i: usize) -> bool { self.game.item_alive(i) }
-    fn item_kind_at(&self, i: usize) -> crate::rules::items::ItemKind { self.game.item_kind_at(i) }
-    fn item_at(&self, x: i32, y: i32) -> Option<u8> { self.game.item_at(x, y) }
-    fn equipment(&self) -> &crate::rules::items::Equipment { self.game.equipment() }
-    fn inventory(&self) -> &crate::rules::items::Inventory { self.game.inventory() }
-    fn depth(&self) -> u8 { self.game.depth() }
-    fn kills(&self) -> u8 { self.game.kills() }
-    fn turn_count(&self) -> u16 { self.game.turn_count() }
-    fn game_over(&self) -> bool { self.game.game_over() }
-    fn game_won(&self) -> bool { self.game.game_won() }
-    fn seed_u32(&self) -> u32 { self.game.seed_u32() }
-    fn explored_pct(&self) -> u8 { self.game.explored_pct() }
-    fn target_depth(&self) -> u8 { self.game.target_depth() }
-    fn recent_message(&self, n: u8) -> Option<crate::rules::message::GameEvent> { self.game.recent_message(n) }
-    fn step_view(&mut self, cmd: GameCommand) -> crate::rules::game_view::GameViewStep { self.game.step_view(cmd) }
+    fn map_dims(&self) -> (i32, i32) {
+        self.game.map_dims()
+    }
+    fn map_in_bounds(&self, x: i32, y: i32) -> bool {
+        self.game.map_in_bounds(x, y)
+    }
+    fn tile_at(&self, x: i32, y: i32) -> u8 {
+        self.game.tile_at(x, y)
+    }
+    fn is_visible(&self, x: i32, y: i32) -> bool {
+        self.game.is_visible(x, y)
+    }
+    fn is_explored(&self, x: i32, y: i32) -> bool {
+        self.game.is_explored(x, y)
+    }
+    fn player_xy(&self) -> (i32, i32) {
+        self.game.player_xy()
+    }
+    fn player_hp(&self) -> (u8, u8) {
+        self.game.player_hp()
+    }
+    fn effective_attack(&self) -> u8 {
+        self.game.effective_attack()
+    }
+    fn effective_defense(&self) -> u8 {
+        self.game.effective_defense()
+    }
+    fn entity_count(&self) -> usize {
+        self.game.entity_count()
+    }
+    fn entity_xy(&self, i: usize) -> (i32, i32) {
+        self.game.entity_xy(i)
+    }
+    fn entity_alive(&self, i: usize) -> bool {
+        self.game.entity_alive(i)
+    }
+    fn entity_kind(&self, i: usize) -> Option<crate::rules::monster_table::MonsterKind> {
+        self.game.entity_kind(i)
+    }
+    fn entity_hp(&self, i: usize) -> (u8, u8) {
+        self.game.entity_hp(i)
+    }
+    fn entity_at(&self, x: i32, y: i32) -> Option<u8> {
+        self.game.entity_at(x, y)
+    }
+    fn item_count(&self) -> usize {
+        self.game.item_count()
+    }
+    fn item_xy(&self, i: usize) -> (i32, i32) {
+        self.game.item_xy(i)
+    }
+    fn item_alive(&self, i: usize) -> bool {
+        self.game.item_alive(i)
+    }
+    fn item_kind_at(&self, i: usize) -> crate::rules::items::ItemKind {
+        self.game.item_kind_at(i)
+    }
+    fn item_at(&self, x: i32, y: i32) -> Option<u8> {
+        self.game.item_at(x, y)
+    }
+    fn equipment(&self) -> &crate::rules::items::Equipment {
+        self.game.equipment()
+    }
+    fn inventory(&self) -> &crate::rules::items::Inventory {
+        self.game.inventory()
+    }
+    fn depth(&self) -> u8 {
+        self.game.depth()
+    }
+    fn kills(&self) -> u8 {
+        self.game.kills()
+    }
+    fn turn_count(&self) -> u16 {
+        self.game.turn_count()
+    }
+    fn game_over(&self) -> bool {
+        self.game.game_over()
+    }
+    fn game_won(&self) -> bool {
+        self.game.game_won()
+    }
+    fn seed_u32(&self) -> u32 {
+        self.game.seed_u32()
+    }
+    fn explored_pct(&self) -> u8 {
+        self.game.explored_pct()
+    }
+    fn target_depth(&self) -> u8 {
+        self.game.target_depth()
+    }
+    fn recent_message(&self, n: u8) -> Option<crate::rules::message::GameEvent> {
+        self.game.recent_message(n)
+    }
+    fn step_view(&mut self, cmd: GameCommand) -> crate::rules::game_view::GameViewStep {
+        self.game.step_view(cmd)
+    }
 }
 
 impl GameStep for CompactGameStateAdapter {
@@ -1322,7 +1449,6 @@ impl GameStep for CompactGameStateAdapter {
             preset: None,
         })
     }
-
 }
 
 // ── Compact adapter helpers ─────────────────────────────────────────

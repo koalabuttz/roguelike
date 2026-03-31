@@ -1002,13 +1002,7 @@ fn animate_stepper<W: Write, D: DevHooks>(
                 if dev.fov_disabled() {
                     dev.apply_fov_override(state);
                 }
-                render::render(
-                    w,
-                    state as &dyn GameStep,
-                    cols,
-                    rows,
-                    settings,
-                )?;
+                render::render(w, state as &dyn GameStep, cols, rows, settings)?;
                 let timeout = Duration::from_millis(settings.animation_speed_ms as u64);
                 if input.poll_animation_interrupt(timeout)? {
                     return Ok(());
@@ -1033,13 +1027,7 @@ fn animate_micro_stepper<W: Write>(
     loop {
         match stepper.next_step(adapter) {
             game::StepOutcome::Continue => {
-                render::render(
-                    w,
-                    adapter as &dyn GameStep,
-                    cols,
-                    rows,
-                    settings,
-                )?;
+                render::render(w, adapter as &dyn GameStep, cols, rows, settings)?;
                 let timeout = Duration::from_millis(settings.animation_speed_ms as u64);
                 if input.poll_animation_interrupt(timeout)? {
                     return Ok(());

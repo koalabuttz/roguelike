@@ -35,7 +35,7 @@ use crate::rules::items::{Equipment, InvSlot, Inventory, MAX_INVENTORY};
 use crate::rules::items::ItemKind;
 use crate::rules::save_common::*;
 
-pub use crate::rules::save_common::{crc16, crc16_update, SaveError, SAVE_MAGIC};
+pub use crate::rules::save_common::{SAVE_MAGIC, SaveError, crc16, crc16_update};
 
 pub const SAVE_VERSION: u8 = 2;
 
@@ -528,7 +528,6 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules::monster_table::{AiBehavior, MonsterKind};
     use crate::tier_micro::game::MicroGameState;
 
     /// Serialize a game state to a Vec<u8>.

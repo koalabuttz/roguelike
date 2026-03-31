@@ -42,7 +42,7 @@ use crate::rules::items::ItemKind;
 use crate::rules::save_common::*;
 use crate::rules::seed_code::Tier;
 
-pub use crate::rules::save_common::{crc16, crc16_update, SaveError, SAVE_MAGIC};
+pub use crate::rules::save_common::{SAVE_MAGIC, SaveError, crc16, crc16_update};
 
 /// Format version for compact tier saves.
 /// v1: fixed 80×40 dimensions (no width/height in header)
@@ -112,9 +112,8 @@ pub fn serialize<F: FnMut(u8)>(state: &CompactGameState, emit: &mut F) -> usize 
     wb!(state.kills);
 
     // --- Scalars (4 bytes) ---
-    let flags: u8 = (state.game_over as u8)
-        | ((state.game_won as u8) << 1)
-        | ((state.auto_pickup as u8) << 2);
+    let flags: u8 =
+        (state.game_over as u8) | ((state.game_won as u8) << 1) | ((state.auto_pickup as u8) << 2);
     wb!(flags);
     wb!(state.idle_count);
     wb!(state.wandering_spawned);
@@ -143,7 +142,7 @@ pub fn serialize<F: FnMut(u8)>(state: &CompactGameState, emit: &mut F) -> usize 
     }
 
     // --- Explored bitfield (visible is skipped — recomputed on load) ---
-    let bf_size = (tile_count + 7) / 8;
+    let bf_size = tile_count.div_ceil(8);
     let explored = state.fov.explored_bytes();
     i = 0;
     while i < bf_size {
@@ -390,7 +389,7 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
     }
 
     // --- Explored bitfield ---
-    let bf_size = ((width as usize) * (height as usize) + 7) / 8;
+    let bf_size = ((width as usize) * (height as usize)).div_ceil(8);
     state.fov = CompactFov::new(width, height);
     let explored = state.fov.explored_bytes_mut();
     i = 0;
@@ -577,10 +576,7 @@ mod tests {
         buf
     }
 
-    fn deserialize_from_slice(
-        state: &mut CompactGameState,
-        data: &[u8],
-    ) -> Result<(), SaveError> {
+    fn deserialize_from_slice(state: &mut CompactGameState, data: &[u8]) -> Result<(), SaveError> {
         let mut pos = 0;
         deserialize(state, &mut || {
             if pos < data.len() {
@@ -634,10 +630,7 @@ mod tests {
         );
 
         // Verify explored bitfield matches
-        assert_eq!(
-            loaded.fov.explored_bytes(),
-            original.fov.explored_bytes()
-        );
+        assert_eq!(loaded.fov.explored_bytes(), original.fov.explored_bytes());
     }
 
     #[test]

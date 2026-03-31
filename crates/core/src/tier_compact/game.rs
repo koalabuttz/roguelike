@@ -114,49 +114,53 @@ impl CompactGameState {
     pub unsafe fn new_into(dst: *mut Self, seed: u32, width: Coord, height: Coord) {
         use core::ptr::addr_of_mut;
 
-        // Use raw pointer field access throughout — no &mut to uninitialized memory.
-        addr_of_mut!((*dst).rng).write(LfsrRng32::new(seed));
-        addr_of_mut!((*dst).seed).write(seed);
+        // SAFETY: caller guarantees `dst` points to valid, writable memory of
+        // at least `size_of::<Self>()` bytes. All field writes use addr_of_mut!
+        // to avoid creating &mut references to uninitialized memory.
+        unsafe {
+            // Use raw pointer field access throughout — no &mut to uninitialized memory.
+            addr_of_mut!((*dst).rng).write(LfsrRng32::new(seed));
+            addr_of_mut!((*dst).seed).write(seed);
 
-        // Initialize map in-place, then generate.
-        addr_of_mut!((*dst).map).write(CompactMap::new(width, height));
-        let (sx, sy) = (*dst).map.generate(&mut (*dst).rng);
+            // Initialize map in-place, then generate.
+            addr_of_mut!((*dst).map).write(CompactMap::new(width, height));
+            let (sx, sy) = (*dst).map.generate(&mut (*dst).rng);
 
-        // Entities — spawn player + monsters.
-        addr_of_mut!((*dst).entities).write(EntityStore::new());
-        (*dst).entities.spawn_player(sx, sy);
+            // Entities — spawn player + monsters.
+            addr_of_mut!((*dst).entities).write(EntityStore::new());
+            (*dst).entities.spawn_player(sx, sy);
 
-        // Items.
-        addr_of_mut!((*dst).items).write(ItemStore::new());
-        spawn::spawn_monsters(&mut (*dst).entities, &(*dst).map, &mut (*dst).rng);
-        spawn::spawn_items(&mut (*dst).items, &(*dst).map, 1, &mut (*dst).rng);
-        spawn::apply_depth_scaling(&mut (*dst).entities, 1);
+            // Items.
+            addr_of_mut!((*dst).items).write(ItemStore::new());
+            spawn::spawn_monsters(&mut (*dst).entities, &(*dst).map, &mut (*dst).rng);
+            spawn::spawn_items(&mut (*dst).items, &(*dst).map, 1, &mut (*dst).rng);
+            spawn::apply_depth_scaling(&mut (*dst).entities, 1);
 
-        // FOV.
-        addr_of_mut!((*dst).fov).write(CompactFov::new(width, height));
-        (*dst)
-            .fov
-            .compute_fov(sx, sy, balance::FOV_RADIUS, &(*dst).map);
+            // FOV.
+            addr_of_mut!((*dst).fov).write(CompactFov::new(width, height));
+            (*dst)
+                .fov
+                .compute_fov(sx, sy, balance::FOV_RADIUS, &(*dst).map);
 
-        // Message log.
-        addr_of_mut!((*dst).log).write(CompactMessageLog::new());
-        (*dst).log.add(GameEvent::Welcome);
+            // Message log.
+            addr_of_mut!((*dst).log).write(CompactMessageLog::new());
+            (*dst).log.add(GameEvent::Welcome);
 
-        // Equipment + inventory.
-        addr_of_mut!((*dst).equipment).write(Equipment::default());
-        addr_of_mut!((*dst).inventory).write(Inventory::new());
+            // Equipment + inventory.
+            addr_of_mut!((*dst).equipment).write(Equipment::default());
+            addr_of_mut!((*dst).inventory).write(Inventory::new());
 
-        // Scalars.
-        addr_of_mut!((*dst).turn_count).write(0);
-        addr_of_mut!((*dst).kills).write(0);
-        addr_of_mut!((*dst).depth).write(1);
-        addr_of_mut!((*dst).game_over).write(false);
-        addr_of_mut!((*dst).game_won).write(false);
-        addr_of_mut!((*dst).idle_count).write(0);
-        addr_of_mut!((*dst).wandering_spawned).write(0);
-        addr_of_mut!((*dst).wandering_counter)
-            .write(balance::WANDERING_GRACE_PERIOD - 1);
-        addr_of_mut!((*dst).auto_pickup).write(false);
+            // Scalars.
+            addr_of_mut!((*dst).turn_count).write(0);
+            addr_of_mut!((*dst).kills).write(0);
+            addr_of_mut!((*dst).depth).write(1);
+            addr_of_mut!((*dst).game_over).write(false);
+            addr_of_mut!((*dst).game_won).write(false);
+            addr_of_mut!((*dst).idle_count).write(0);
+            addr_of_mut!((*dst).wandering_spawned).write(0);
+            addr_of_mut!((*dst).wandering_counter).write(balance::WANDERING_GRACE_PERIOD - 1);
+            addr_of_mut!((*dst).auto_pickup).write(false);
+        }
     }
 
     /// Effective attack: base + weapon bonus.
@@ -939,7 +943,11 @@ impl crate::rules::game_view::GameView for CompactGameState {
     }
     fn entity_at(&self, x: i32, y: i32) -> Option<u8> {
         let idx = self.entities.entity_at(x, y);
-        if idx == super::types::NO_ENTITY { None } else { Some(idx) }
+        if idx == super::types::NO_ENTITY {
+            None
+        } else {
+            Some(idx)
+        }
     }
     fn item_count(&self) -> usize {
         self.items.count as usize
@@ -955,7 +963,11 @@ impl crate::rules::game_view::GameView for CompactGameState {
     }
     fn item_at(&self, x: i32, y: i32) -> Option<u8> {
         let idx = self.items.item_at(x, y);
-        if idx == super::types::NO_ITEM { None } else { Some(idx) }
+        if idx == super::types::NO_ITEM {
+            None
+        } else {
+            Some(idx)
+        }
     }
     fn equipment(&self) -> &crate::rules::items::Equipment {
         &self.equipment
@@ -983,7 +995,9 @@ impl crate::rules::game_view::GameView for CompactGameState {
     }
     fn explored_pct(&self) -> u8 {
         let total = self.map.floor_count();
-        if total == 0 { return 0; }
+        if total == 0 {
+            return 0;
+        }
         let explored = self.fov.explored_floor_count(&self.map);
         ((explored as u32 * 100) / total as u32) as u8
     }

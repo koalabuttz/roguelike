@@ -46,7 +46,10 @@ impl MessageLog {
     /// Return the last `n` messages as strings (newest last).
     pub fn recent(&self, n: usize) -> Vec<String> {
         let start = self.entries.len().saturating_sub(n);
-        self.entries[start..].iter().map(|e| e.text.clone()).collect()
+        self.entries[start..]
+            .iter()
+            .map(|e| e.text.clone())
+            .collect()
     }
 
     /// Return the nth most recent GameEvent (0 = most recent).
@@ -76,7 +79,10 @@ impl MessageLog {
 
     /// Return all messages added since index `since` (exclusive).
     pub fn messages_since(&self, since: usize) -> Vec<String> {
-        self.entries[since..].iter().map(|e| e.text.clone()).collect()
+        self.entries[since..]
+            .iter()
+            .map(|e| e.text.clone())
+            .collect()
     }
 }
 

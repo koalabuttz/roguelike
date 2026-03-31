@@ -2068,6 +2068,12 @@ impl crate::rules::game_view::GameView for GameState {
     fn seed_u32(&self) -> u32 {
         self.seed as u32
     }
+    fn explored_pct(&self) -> u8 {
+        GameState::explored_pct(self) as u8
+    }
+    fn target_depth(&self) -> u8 {
+        self.target_depth as u8
+    }
     fn recent_message(&self, _n: u8) -> Option<crate::rules::message::GameEvent> {
         // Standard tier uses String messages via MessageLog.
         // GameEvent-based access is for micro/compact tiers.

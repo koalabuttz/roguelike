@@ -82,6 +82,10 @@ pub trait GameView {
     fn game_over(&self) -> bool;
     fn game_won(&self) -> bool;
     fn seed_u32(&self) -> u32;
+    /// Percentage of floor tiles explored (0–100).
+    fn explored_pct(&self) -> u8;
+    /// Target depth (win condition). 0 if not applicable.
+    fn target_depth(&self) -> u8;
 
     // -- Messages --
     fn recent_message(&self, n: u8) -> Option<GameEvent>;

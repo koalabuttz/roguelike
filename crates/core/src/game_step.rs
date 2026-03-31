@@ -63,14 +63,6 @@ pub trait GameStep: crate::rules::game_view::GameView + Send {
 
     /// Shareable seed code string (std-only, for TUI).
     fn seed_code_str(&self) -> String;
-
-    /// Explored floor percentage (0-100).
-    fn explored_pct(&self) -> i32;
-
-    /// Target depth (win condition). Returns 0 if not applicable.
-    fn target_depth(&self) -> i32 {
-        0
-    }
 }
 
 // ── Standard tier ────────────────────────────────────────────────────
@@ -106,14 +98,6 @@ impl GameStep for GameState {
 
     fn seed_code_str(&self) -> String {
         self.seed_code()
-    }
-
-    fn explored_pct(&self) -> i32 {
-        GameState::explored_pct(self)
-    }
-
-    fn target_depth(&self) -> i32 {
-        self.target_depth
     }
 }
 
@@ -424,6 +408,8 @@ impl crate::rules::game_view::GameView for MicroGameStateAdapter {
     fn game_over(&self) -> bool { self.game.game_over() }
     fn game_won(&self) -> bool { self.game.game_won() }
     fn seed_u32(&self) -> u32 { self.game.seed_u32() }
+    fn explored_pct(&self) -> u8 { self.game.explored_pct() }
+    fn target_depth(&self) -> u8 { self.game.target_depth() }
     fn recent_message(&self, n: u8) -> Option<crate::rules::message::GameEvent> { self.game.recent_message(n) }
     fn step_view(&mut self, cmd: GameCommand) -> crate::rules::game_view::GameViewStep { self.game.step_view(cmd) }
 }
@@ -632,19 +618,6 @@ impl GameStep for MicroGameStateAdapter {
         })
     }
 
-    fn explored_pct(&self) -> i32 {
-        let total_floor = self.game.map.floor_count();
-        let explored_floor = self.game.fov.explored_floor_count(&self.game.map);
-        if total_floor > 0 {
-            ((explored_floor as i32) * 100) / (total_floor as i32)
-        } else {
-            0
-        }
-    }
-
-    fn target_depth(&self) -> i32 {
-        balance::TARGET_DEPTH as i32
-    }
 }
 
 // ── Micro tier autorun ───────────────────────────────────────────────
@@ -1162,6 +1135,8 @@ impl crate::rules::game_view::GameView for CompactGameStateAdapter {
     fn game_over(&self) -> bool { self.game.game_over() }
     fn game_won(&self) -> bool { self.game.game_won() }
     fn seed_u32(&self) -> u32 { self.game.seed_u32() }
+    fn explored_pct(&self) -> u8 { self.game.explored_pct() }
+    fn target_depth(&self) -> u8 { self.game.target_depth() }
     fn recent_message(&self, n: u8) -> Option<crate::rules::message::GameEvent> { self.game.recent_message(n) }
     fn step_view(&mut self, cmd: GameCommand) -> crate::rules::game_view::GameViewStep { self.game.step_view(cmd) }
 }
@@ -1348,19 +1323,6 @@ impl GameStep for CompactGameStateAdapter {
         })
     }
 
-    fn explored_pct(&self) -> i32 {
-        let total_floor = self.game.map.floor_count();
-        let explored_floor = self.game.fov.explored_floor_count(&self.game.map);
-        if total_floor > 0 {
-            ((explored_floor as i32) * 100) / (total_floor as i32)
-        } else {
-            0
-        }
-    }
-
-    fn target_depth(&self) -> i32 {
-        balance::TARGET_DEPTH as i32
-    }
 }
 
 // ── Compact adapter helpers ─────────────────────────────────────────

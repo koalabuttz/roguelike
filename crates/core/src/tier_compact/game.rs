@@ -981,6 +981,15 @@ impl crate::rules::game_view::GameView for CompactGameState {
     fn seed_u32(&self) -> u32 {
         self.seed
     }
+    fn explored_pct(&self) -> u8 {
+        let total = self.map.floor_count();
+        if total == 0 { return 0; }
+        let explored = self.fov.explored_floor_count(&self.map);
+        ((explored as u32 * 100) / total as u32) as u8
+    }
+    fn target_depth(&self) -> u8 {
+        crate::rules::balance::TARGET_DEPTH
+    }
     fn recent_message(&self, n: u8) -> Option<GameEvent> {
         self.log.recent(n)
     }

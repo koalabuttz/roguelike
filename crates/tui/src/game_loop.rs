@@ -100,11 +100,10 @@ fn standard_state_mut(game: &mut dyn GameStep) -> Option<&mut GameState> {
     game.as_any_mut().downcast_mut::<GameState>()
 }
 
-/// Render any game tier through the unified `RenderSource` trait.
+/// Render any game tier through the unified `GameView` trait.
 ///
-/// Downcasts `&dyn GameStep` to either `GameState` or `MicroGameStateAdapter`
-/// and renders via `render::render(&dyn RenderSource, …)`. Falls back to the
-/// observation-based renderer for unknown tiers.
+/// `GameStep` extends `GameView`, so all rendering methods are available
+/// directly on `&dyn GameStep` — no downcasting needed.
 fn render_game<W: Write>(
     w: &mut W,
     game: &dyn GameStep,
@@ -125,21 +124,7 @@ fn render_game_focused<W: Write>(
     settings: &Settings,
     focus: Option<(Coord, Coord)>,
 ) -> io::Result<Viewport> {
-    if let Some(gs) = game.as_any().downcast_ref::<GameState>() {
-        render::render_focused(w, gs, cols, rows, settings, focus)
-    } else if let Some(adapter) = game.as_any().downcast_ref::<MicroGameStateAdapter>() {
-        render::render_focused(w, adapter, cols, rows, settings, focus)
-    } else {
-        // Unknown tier: fall back to observation-based render.
-        render::render_observation(
-            w,
-            &game.observe(),
-            cols,
-            rows,
-            settings.message_log_lines as Coord,
-        )?;
-        Ok(Viewport { x: 0, y: 0 })
-    }
+    render::render_focused(w, game, cols, rows, settings, focus)
 }
 
 /// Configuration for the game loop.
@@ -336,11 +321,11 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                     autosave_buf = None;
                 }
 
-                // Render via unified RenderSource trait.
+                // Render via unified GameView trait.
                 render_game(renderer.writer(), game.as_ref(), cols, rows, &settings)?;
                 dev.render_overlay(renderer.writer(), game.as_ref(), settings.color_palette)?;
 
-                if game.is_game_over() {
+                if game.is_terminal() {
                     // End-of-game menu: Play Again / Title Screen.
                     let mut end_menu = menu::end_screen_menu(platform);
                     loop {
@@ -730,7 +715,7 @@ fn run_look_mode<W: Write>(
     look_opts: &LookOptions,
     input: &mut dyn InputProvider,
 ) -> io::Result<()> {
-    let (px, py) = game.player_pos();
+    let (px, py) = game.player_xy();
     let mut cursor = LookCursor::new(px, py);
 
     // Standard tier: LookCursor with map-bounds checking.
@@ -1019,7 +1004,7 @@ fn animate_stepper<W: Write, D: DevHooks>(
                 }
                 render::render(
                     w,
-                    state as &dyn crate::render_source::RenderSource,
+                    state as &dyn GameStep,
                     cols,
                     rows,
                     settings,
@@ -1050,7 +1035,7 @@ fn animate_micro_stepper<W: Write>(
             game::StepOutcome::Continue => {
                 render::render(
                     w,
-                    adapter as &dyn crate::render_source::RenderSource,
+                    adapter as &dyn GameStep,
                     cols,
                     rows,
                     settings,

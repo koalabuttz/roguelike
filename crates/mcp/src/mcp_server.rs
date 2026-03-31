@@ -224,7 +224,7 @@ impl RoguelikeMcpServer {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
 
-        if session.game.is_game_over() {
+        if session.game.is_terminal() {
             return Err(McpError::invalid_request(
                 "Game is over. Call new_game to start a new game.",
                 None,
@@ -389,7 +389,7 @@ impl RoguelikeMcpServer {
                 None,
             ));
         };
-        let (px, py) = session.game.player_pos();
+        let (px, py) = session.game.player_xy();
         let frontier_exits: Vec<serde_json::Value> = frontier_tiles
             .iter()
             .map(|&(x, y)| serde_json::json!({"x": x, "y": y}))
@@ -447,7 +447,7 @@ impl RoguelikeMcpServer {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
 
-        if session.game.is_game_over() {
+        if session.game.is_terminal() {
             return Err(McpError::invalid_request(
                 "Game is over. Call new_game to start a new game.",
                 None,
@@ -507,7 +507,7 @@ impl RoguelikeMcpServer {
             McpError::invalid_request("No game in progress. Call new_game first.", None)
         })?;
 
-        if session.game.is_game_over() {
+        if session.game.is_terminal() {
             return Err(McpError::invalid_request(
                 "Game is over. Call new_game to start a new game.",
                 None,

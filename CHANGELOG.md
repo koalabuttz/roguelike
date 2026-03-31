@@ -83,6 +83,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Unify GameView/RenderSource/GameStep trait hierarchy (#240)
 - GBA: Route micro-tier seeds to MicroGameState via adapter (#237)
 - GBA debugging toolchain: logging, GDB workflow, enhanced panic handler, stack canary (#236)
 - Refactor compact tier counters from countdown to modulo (#221)

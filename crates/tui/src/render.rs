@@ -7,11 +7,11 @@ use crossterm::{
 };
 
 use roguelike_core::game::GameObservation;
+use roguelike_core::game_step::GameStep;
 use roguelike_core::platform::Renderer;
+use roguelike_core::rules::game_view::{GameView, TileVisibility};
 use roguelike_core::settings::{ColorPalette, Settings};
-use roguelike_core::types::{Coord, GameColor};
-
-use crate::render_source::{RenderSource, TileVisibility};
+use roguelike_core::types::{Coord, GameColor, Stat};
 
 #[cfg(all(debug_assertions, feature = "dev-tools"))]
 use roguelike_core::dev_tools::OverlayCell;
@@ -187,7 +187,7 @@ struct ViewportRect {
 
 pub fn render<W: Write>(
     w: &mut W,
-    source: &dyn RenderSource,
+    source: &dyn GameStep,
     screen_width: Coord,
     screen_height: Coord,
     settings: &Settings,
@@ -198,7 +198,7 @@ pub fn render<W: Write>(
 /// Like `render`, but centers the viewport on `focus` instead of the player.
 pub fn render_focused<W: Write>(
     w: &mut W,
-    source: &dyn RenderSource,
+    source: &dyn GameStep,
     screen_width: Coord,
     screen_height: Coord,
     settings: &Settings,
@@ -206,8 +206,8 @@ pub fn render_focused<W: Write>(
 ) -> std::io::Result<Viewport> {
     let pal = settings.color_palette;
     let msg_lines = settings.message_log_lines as Coord;
-    let (map_w, map_h) = source.map_size();
-    let (fx, fy) = focus.unwrap_or_else(|| source.player_pos());
+    let (map_w, map_h) = source.map_dims();
+    let (fx, fy) = focus.unwrap_or_else(|| source.player_xy());
 
     // Viewport: center on focus point when map exceeds screen.
     let map_rows = (screen_height - 1 - msg_lines).max(0) as usize;
@@ -250,11 +250,11 @@ pub fn render_focused<W: Write>(
 
 fn render_map<W: Write>(
     w: &mut W,
-    source: &dyn RenderSource,
+    source: &dyn GameStep,
     vp: &ViewportRect,
     pal: ColorPalette,
 ) -> std::io::Result<()> {
-    let (map_w, map_h) = source.map_size();
+    let (map_w, map_h) = source.map_dims();
     let bg = palette_color(GameColor::Black, pal);
 
     for screen_y in 0..vp.rows {
@@ -271,8 +271,9 @@ fn render_map<W: Write>(
             let vis = source.tile_visibility(world_x, world_y);
             match vis {
                 TileVisibility::Visible => {
-                    let tile = source.tile_at(world_x, world_y);
-                    if tile.glyph == '#' && !tile.structural {
+                    let (glyph, fg) = source.render_tile(world_x, world_y);
+                    let structural = source.tile_is_structural(world_x, world_y);
+                    if glyph == '#' && !structural {
                         queue!(
                             w,
                             cursor::MoveTo(screen_x as u16, screen_y as u16),
@@ -284,15 +285,16 @@ fn render_map<W: Write>(
                         queue!(
                             w,
                             cursor::MoveTo(screen_x as u16, screen_y as u16),
-                            SetForegroundColor(palette_color(tile.fg, pal)),
+                            SetForegroundColor(palette_color(fg, pal)),
                             SetBackgroundColor(bg),
-                            style::Print(tile.glyph)
+                            style::Print(glyph)
                         )?;
                     }
                 }
                 TileVisibility::Explored => {
-                    let tile = source.tile_at(world_x, world_y);
-                    if tile.glyph == '#' && !tile.structural {
+                    let (glyph, _fg) = source.render_tile(world_x, world_y);
+                    let structural = source.tile_is_structural(world_x, world_y);
+                    if glyph == '#' && !structural {
                         queue!(
                             w,
                             cursor::MoveTo(screen_x as u16, screen_y as u16),
@@ -310,7 +312,7 @@ fn render_map<W: Write>(
                             cursor::MoveTo(screen_x as u16, screen_y as u16),
                             SetForegroundColor(dim),
                             SetBackgroundColor(bg),
-                            style::Print(tile.glyph)
+                            style::Print(glyph)
                         )?;
                     }
                 }
@@ -331,73 +333,76 @@ fn render_map<W: Write>(
 
 fn render_items<W: Write>(
     w: &mut W,
-    source: &dyn RenderSource,
+    source: &dyn GameStep,
     vp: &ViewportRect,
     pal: ColorPalette,
 ) -> std::io::Result<()> {
     let bg = palette_color(GameColor::Black, pal);
-    source.for_each_visible_item(&mut |item| {
-        let sx = item.x as usize;
-        let sy = item.y as usize;
+    for i in 0..source.item_count() {
+        if !source.item_alive(i) {
+            continue;
+        }
+        let (ix, iy) = source.item_xy(i);
+        if !source.is_visible(ix, iy) {
+            continue;
+        }
+        let sx = ix as usize;
+        let sy = iy as usize;
         if sx >= vp.x && sx < vp.x + vp.cols && sy >= vp.y && sy < vp.y + vp.rows {
             let screen_x = (sx - vp.x) as u16;
             let screen_y = (sy - vp.y) as u16;
+            let (glyph, fg) = source.render_item(i);
             let _ = queue!(
                 w,
                 cursor::MoveTo(screen_x, screen_y),
-                SetForegroundColor(palette_color(item.fg, pal)),
+                SetForegroundColor(palette_color(fg, pal)),
                 SetBackgroundColor(bg),
-                style::Print(item.glyph)
+                style::Print(glyph)
             );
         }
-    });
+    }
     Ok(())
 }
 
 fn render_entities<W: Write>(
     w: &mut W,
-    source: &dyn RenderSource,
+    source: &dyn GameStep,
     vp: &ViewportRect,
     pal: ColorPalette,
 ) -> std::io::Result<()> {
     let bg = palette_color(GameColor::Black, pal);
 
-    // Collect entities so we can draw corpses first, then living entities on top.
-    let mut entities = Vec::new();
-    source.for_each_visible_entity(&mut |e| {
-        let sx = e.x as usize;
-        let sy = e.y as usize;
-        if sx >= vp.x && sx < vp.x + vp.cols && sy >= vp.y && sy < vp.y + vp.rows {
-            entities.push(e);
-        }
-    });
+    // Two passes: corpses first, then living entities on top.
+    for pass in 0..2u8 {
+        for i in 0..source.entity_count() {
+            let alive = source.entity_alive(i);
+            if pass == 0 && alive {
+                continue;
+            }
+            if pass == 1 && !alive {
+                continue;
+            }
 
-    // Corpses first (drawn under living entities).
-    {
-        for e in entities.iter().filter(|e| !e.alive) {
-            let screen_x = (e.x as usize - vp.x) as u16;
-            let screen_y = (e.y as usize - vp.y) as u16;
-            queue!(
-                w,
-                cursor::MoveTo(screen_x, screen_y),
-                SetForegroundColor(palette_color(e.fg, pal)),
-                SetBackgroundColor(bg),
-                style::Print(e.glyph)
-            )?;
-        }
-    }
+            let (ex, ey) = source.entity_xy(i);
+            if !source.is_visible(ex, ey) {
+                continue;
+            }
 
-    // Living entities on top.
-    for e in entities.iter().filter(|e| e.alive) {
-        let screen_x = (e.x as usize - vp.x) as u16;
-        let screen_y = (e.y as usize - vp.y) as u16;
-        queue!(
-            w,
-            cursor::MoveTo(screen_x, screen_y),
-            SetForegroundColor(palette_color(e.fg, pal)),
-            SetBackgroundColor(bg),
-            style::Print(e.glyph)
-        )?;
+            let sx = ex as usize;
+            let sy = ey as usize;
+            if sx >= vp.x && sx < vp.x + vp.cols && sy >= vp.y && sy < vp.y + vp.rows {
+                let screen_x = (sx - vp.x) as u16;
+                let screen_y = (sy - vp.y) as u16;
+                let (glyph, fg) = source.render_entity(i);
+                queue!(
+                    w,
+                    cursor::MoveTo(screen_x, screen_y),
+                    SetForegroundColor(palette_color(fg, pal)),
+                    SetBackgroundColor(bg),
+                    style::Print(glyph)
+                )?;
+            }
+        }
     }
 
     Ok(())
@@ -405,12 +410,14 @@ fn render_entities<W: Write>(
 
 fn render_status_bar<W: Write>(
     w: &mut W,
-    source: &dyn RenderSource,
+    source: &dyn GameStep,
     screen_width: Coord,
     screen_height: Coord,
     settings: &Settings,
 ) -> std::io::Result<()> {
-    let (hp, max_hp) = source.player_hp();
+    let (hp_u8, max_hp_u8) = source.player_hp();
+    let hp = hp_u8 as Stat;
+    let max_hp = max_hp_u8 as Stat;
     let bar_row = (screen_height - 1 - settings.message_log_lines as i32) as u16;
 
     let bar_width = 16;
@@ -439,15 +446,19 @@ fn render_status_bar<W: Write>(
     let bar_filled: String = "\u{2588}".repeat(fill as usize);
     let bar_empty: String = "\u{2591}".repeat(empty as usize);
 
-    let (px, py) = source.player_pos();
+    let (px, py) = source.player_xy();
     let coord_segment = if settings.show_coordinates {
         format!(" | ({},{})", px, py)
     } else {
         String::new()
     };
 
-    let (base_atk, atk_bonus) = source.player_atk();
-    let (base_def, def_bonus) = source.player_def();
+    let eff_atk = source.effective_attack() as Stat;
+    let eff_def = source.effective_defense() as Stat;
+    let atk_bonus = source.equipment().attack_bonus() as Stat;
+    let def_bonus = source.equipment().defense_bonus() as Stat;
+    let base_atk = eff_atk - atk_bonus;
+    let base_def = eff_def - def_bonus;
     let equip_segment = {
         let atk_str = if atk_bonus > 0 {
             format!("{}+{}", base_atk, atk_bonus)
@@ -480,7 +491,8 @@ fn render_status_bar<W: Write>(
         ""
     };
 
-    let (cur_depth, target_depth) = source.depth();
+    let cur_depth = source.depth() as Stat;
+    let target_depth = source.target_depth();
     let depth_segment = format!(" | Depth {}/{}", cur_depth, target_depth);
 
     let status = format!(
@@ -515,7 +527,7 @@ fn render_status_bar<W: Write>(
 
 fn render_message_log<W: Write>(
     w: &mut W,
-    source: &dyn RenderSource,
+    source: &dyn GameStep,
     screen_width: Coord,
     screen_height: Coord,
     settings: &Settings,
@@ -524,7 +536,7 @@ fn render_message_log<W: Write>(
     let message_log_lines = settings.message_log_lines;
     let n = message_log_lines as usize;
     let log_start_row = (screen_height - message_log_lines as i32) as u16;
-    let messages = source.recent_messages(n);
+    let messages = source.recent_messages_str(n);
 
     for i in 0..message_log_lines as u16 {
         let row = log_start_row + i;
@@ -587,7 +599,7 @@ fn render_message_log<W: Write>(
             style::Print(stats_msg)
         )?;
 
-        let seed_msg = format!("Seed: {}", source.seed_code());
+        let seed_msg = format!("Seed: {}", source.seed_code_str());
         let sx = (screen_width as usize).saturating_sub(seed_msg.len()) / 2;
         queue!(
             w,

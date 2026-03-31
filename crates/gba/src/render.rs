@@ -4,12 +4,7 @@
 //! - BG0 (screenblock 30): map viewport with tiles, items, entities
 //! - BG1 (screenblock 31): status bar + message log
 
-use roguelike_core::rules::balance::PLAYER_GLYPH;
-use roguelike_core::rules::color::GameColor;
 use roguelike_core::rules::game_view::GameView;
-use roguelike_core::rules::items as item_rules;
-use roguelike_core::rules::monster_table;
-use roguelike_core::rules::tiles as tile_rules;
 
 use crate::display::{self, MAP_ROWS, MSG_ROW, SCREEN_COLS, STATUS_ROW};
 use crate::format;
@@ -62,20 +57,15 @@ fn render_viewport(state: &impl GameView, vx: i32, vy: i32) {
                 continue;
             }
 
-            let tile_u8 = state.tile_at(wx, wy);
-            let (glyph, palbank) = match tile_rules::from_micro(tile_u8) {
-                Some(kind) => {
-                    let g = tile_rules::glyph(kind) as u8;
-                    // Non-structural walls render as blank space (invisible interior walls)
-                    if tile_u8 == 0 {
-                        (b' ', 0)
-                    } else if visible {
-                        (g, tile_rules::color(kind) as u16)
-                    } else {
-                        (g, PALBANK_DIM)
-                    }
-                }
-                None => (b' ', 0),
+            let (glyph_ch, color) = state.render_tile(wx, wy);
+            let structural = state.tile_is_structural(wx, wy);
+            let (glyph, palbank) = if glyph_ch == ' ' || (!structural && glyph_ch == '#') {
+                // Non-structural walls render as blank space
+                (b' ', 0)
+            } else if visible {
+                (glyph_ch as u8, color as u16)
+            } else {
+                (glyph_ch as u8, PALBANK_DIM)
             };
 
             display::write_map_tile(sx as usize, sy as usize, glyph, palbank);
@@ -101,10 +91,8 @@ fn render_items(state: &impl GameView, vx: i32, vy: i32) {
             continue;
         }
 
-        let kind = state.item_kind_at(i);
-        let glyph = item_rules::glyph(kind) as u8;
-        let palbank = item_rules::color(kind) as u16;
-        display::write_map_tile(sx as usize, sy as usize, glyph, palbank);
+        let (glyph_ch, color) = state.render_item(i);
+        display::write_map_tile(sx as usize, sy as usize, glyph_ch as u8, color as u16);
     }
 }
 
@@ -134,20 +122,8 @@ fn render_entities(state: &impl GameView, vx: i32, vy: i32) {
                 continue;
             }
 
-            let (glyph, palbank) = if i == 0 {
-                (PLAYER_GLYPH as u8, GameColor::Green as u16)
-            } else if !alive {
-                (b'%', GameColor::DarkRed as u16)
-            } else {
-                match state.entity_kind(i) {
-                    Some(kind) => {
-                        (monster_table::glyph(kind) as u8, monster_table::color(kind) as u16)
-                    }
-                    None => (b'?', GameColor::White as u16),
-                }
-            };
-
-            display::write_map_tile(sx as usize, sy as usize, glyph, palbank);
+            let (glyph_ch, color) = state.render_entity(i);
+            display::write_map_tile(sx as usize, sy as usize, glyph_ch as u8, color as u16);
         }
     }
 }

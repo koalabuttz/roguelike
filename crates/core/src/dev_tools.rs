@@ -637,7 +637,7 @@ impl Replay {
 
         let mut turns_played: Stat = 0;
         for &cmd in &self.commands {
-            if game.is_game_over() {
+            if game.is_terminal() {
                 break;
             }
             let result = game.step(cmd);
@@ -651,7 +651,7 @@ impl Replay {
         ReplayResult {
             turns_played,
             game_over: obs.game_over,
-            final_hp: hp,
+            final_hp: hp as Stat,
             final_turn: game.turn_count() as Stat,
             kills: obs.kills,
         }

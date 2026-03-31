@@ -1970,6 +1970,129 @@ impl GameState {
     }
 }
 
+// ---------------------------------------------------------------------------
+// GameView implementation
+// ---------------------------------------------------------------------------
+
+impl crate::rules::game_view::GameView for GameState {
+    fn map_dims(&self) -> (i32, i32) {
+        (self.map.width, self.map.height)
+    }
+    fn map_in_bounds(&self, x: i32, y: i32) -> bool {
+        self.map.in_bounds(x, y)
+    }
+    fn tile_at(&self, x: i32, y: i32) -> u8 {
+        let idx = self.map.idx(x, y);
+        match self.map.tiles[idx] {
+            map::Tile::Wall if self.map.structural[idx] => 1, // TILE_STRUCTURAL
+            map::Tile::Wall => 0,                              // TILE_WALL
+            map::Tile::Floor => 2,                             // TILE_FLOOR
+            map::Tile::StairsDown => 3,                        // TILE_STAIRS_DOWN
+        }
+    }
+    fn is_visible(&self, x: i32, y: i32) -> bool {
+        self.visible.contains(&(x, y))
+    }
+    fn is_explored(&self, x: i32, y: i32) -> bool {
+        self.explored.contains(&(x, y))
+    }
+    fn player_xy(&self) -> (i32, i32) {
+        (self.entities[0].x, self.entities[0].y)
+    }
+    fn player_hp(&self) -> (u8, u8) {
+        (self.entities[0].hp as u8, self.entities[0].max_hp as u8)
+    }
+    fn effective_attack(&self) -> u8 {
+        self.effective_attack() as u8
+    }
+    fn effective_defense(&self) -> u8 {
+        self.effective_defense() as u8
+    }
+    fn entity_count(&self) -> usize {
+        self.entities.len()
+    }
+    fn entity_xy(&self, i: usize) -> (i32, i32) {
+        (self.entities[i].x, self.entities[i].y)
+    }
+    fn entity_alive(&self, i: usize) -> bool {
+        self.entities[i].alive
+    }
+    fn entity_kind(&self, i: usize) -> Option<crate::rules::monster_table::MonsterKind> {
+        self.entities[i].monster_kind
+    }
+    fn entity_hp(&self, i: usize) -> (u8, u8) {
+        (self.entities[i].hp as u8, self.entities[i].max_hp as u8)
+    }
+    fn entity_at(&self, x: i32, y: i32) -> Option<u8> {
+        self.entity_at(x, y).map(|i| i as u8)
+    }
+    fn item_count(&self) -> usize {
+        self.ground_items.len()
+    }
+    fn item_xy(&self, i: usize) -> (i32, i32) {
+        (self.ground_items[i].x, self.ground_items[i].y)
+    }
+    fn item_alive(&self, _i: usize) -> bool {
+        true // Standard tier removes dead items from the Vec
+    }
+    fn item_kind_at(&self, i: usize) -> crate::rules::items::ItemKind {
+        self.ground_items[i].kind
+    }
+    fn item_at(&self, x: i32, y: i32) -> Option<u8> {
+        self.ground_items
+            .iter()
+            .position(|it| it.x == x && it.y == y)
+            .map(|i| i as u8)
+    }
+    fn equipment(&self) -> &crate::rules::items::Equipment {
+        &self.equipment
+    }
+    fn inventory(&self) -> &crate::rules::items::Inventory {
+        &self.inventory
+    }
+    fn depth(&self) -> u8 {
+        self.depth as u8
+    }
+    fn kills(&self) -> u8 {
+        self.kill_count() as u8
+    }
+    fn turn_count(&self) -> u16 {
+        self.turn_count as u16
+    }
+    fn game_over(&self) -> bool {
+        self.game_over
+    }
+    fn game_won(&self) -> bool {
+        self.game_won
+    }
+    fn seed_u32(&self) -> u32 {
+        self.seed as u32
+    }
+    fn recent_message(&self, _n: u8) -> Option<crate::rules::message::GameEvent> {
+        // Standard tier uses String messages via MessageLog.
+        // GameEvent-based access is for micro/compact tiers.
+        None
+    }
+    fn step_view(&mut self, cmd: GameCommand) -> crate::rules::game_view::GameViewStep {
+        let r = GameState::step(self, cmd);
+        crate::rules::game_view::GameViewStep {
+            action_taken: r.action_taken,
+            game_over: r.game_over,
+            game_won: r.game_won,
+        }
+    }
+
+    // Standard tier has per-entity glyph/color (not derived from MonsterKind).
+    fn render_entity(&self, i: usize) -> (char, crate::rules::color::GameColor) {
+        let e = &self.entities[i];
+        if e.alive {
+            (e.glyph, e.color)
+        } else {
+            ('%', crate::rules::color::GameColor::DarkRed)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

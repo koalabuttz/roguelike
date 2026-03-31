@@ -7,7 +7,7 @@
 use gba::prelude::*;
 
 use roguelike_core::command::GameCommand;
-use roguelike_core::rules::game_view::{GameView, GameViewStep};
+use roguelike_core::rules::game_view::GameView;
 use roguelike_core::rules::items::{
     attack_bonus, color, defense_bonus, heal_amount, is_armor, is_consumable, is_weapon, name,
     ItemKind,
@@ -182,10 +182,10 @@ fn execute_submenu(state: &mut impl GameView, cursor: u8, sel: u8, mode: &mut In
         if let Some(item) = item_at_cursor(state, cursor) {
             match item {
                 CursorItem::Equipped { is_weapon: true, .. } => {
-                    state.step(GameCommand::DropEquippedWeapon);
+                    state.step_view(GameCommand::DropEquippedWeapon);
                 }
                 CursorItem::Equipped { is_weapon: false, .. } => {
-                    state.step(GameCommand::DropEquippedArmor);
+                    state.step_view(GameCommand::DropEquippedArmor);
                 }
                 _ => {}
             }
@@ -196,7 +196,7 @@ fn execute_submenu(state: &mut impl GameView, cursor: u8, sel: u8, mode: &mut In
             0 => {
                 // Drop
                 if let Some(CursorItem::Inventory { slot_idx, .. }) = item_at_cursor(state, cursor) {
-                    state.step(GameCommand::DropItem(slot_idx));
+                    state.step_view(GameCommand::DropItem(slot_idx));
                 }
                 *mode = InvMode::Browse;
             }
@@ -222,7 +222,7 @@ fn execute_combine(state: &mut impl GameView, target_slot: u8, source_cursor: u8
     if let Some((source_slot_idx, _)) = state.inventory().nth_occupied(source_inv) {
         let source_slot = source_slot_idx as u8;
         if source_slot != target_slot {
-            state.step(GameCommand::Combine(target_slot, source_slot));
+            state.step_view(GameCommand::Combine(target_slot, source_slot));
         }
     }
 }
@@ -518,7 +518,7 @@ pub fn run_inventory(state: &mut impl GameView) {
                         }
                         InventoryInput::Primary => {
                             if let Some(cmd) = primary_action(state, inv.cursor) {
-                                state.step(cmd);
+                                state.step_view(cmd);
                                 clamp_cursor(state, &mut inv.cursor);
                                 inv.needs_redraw = true;
                                 if total_items(state) == 0 {

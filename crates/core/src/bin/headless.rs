@@ -563,7 +563,7 @@ fn run_and_save_golden(
 
             let mut commands: Vec<GameCommand> = Vec::new();
 
-            while !game.is_game_over() && game.turn_count() < max_turns as u32 {
+            while !game.is_terminal() && (game.turn_count() as u32) < max_turns as u32 {
                 let cmd = if let Some(adapter) =
                     game.as_any_mut().downcast_mut::<CompactGameStateAdapter>()
                 {

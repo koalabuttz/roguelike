@@ -984,7 +984,7 @@ impl crate::rules::game_view::GameView for CompactGameState {
     fn recent_message(&self, n: u8) -> Option<GameEvent> {
         self.log.recent(n)
     }
-    fn step(&mut self, cmd: GameCommand) -> crate::rules::game_view::GameViewStep {
+    fn step_view(&mut self, cmd: GameCommand) -> crate::rules::game_view::GameViewStep {
         let r = CompactGameState::step(self, cmd);
         crate::rules::game_view::GameViewStep {
             action_taken: r.action_taken,

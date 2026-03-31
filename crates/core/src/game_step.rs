@@ -37,8 +37,9 @@ use crate::types::{Coord, Stat};
 /// All coordinates use `i32` (widened from `u8`/`i16` for lower tiers).
 /// Return types are the standard-tier structs from `game.rs`, which
 /// adapters populate from their tier's internal representation.
-pub trait GameStep: Send {
+pub trait GameStep: crate::rules::game_view::GameView + Send {
     /// Execute one player command + monster turns.
+    /// Returns `StepResult` with `Vec<String>` messages (std-only).
     fn step(&mut self, cmd: GameCommand) -> StepResult;
 
     /// Produce a snapshot of the visible game state.
@@ -46,18 +47,6 @@ pub trait GameStep: Send {
 
     /// Query tile information at (x, y) for look mode.
     fn look_at(&self, x: i32, y: i32) -> TileInfo;
-
-    /// Player position as (x, y).
-    fn player_pos(&self) -> (i32, i32);
-
-    /// Player HP as (current, max).
-    fn player_hp(&self) -> (i32, i32);
-
-    /// Whether the game has ended (player died or won).
-    fn is_game_over(&self) -> bool;
-
-    /// Current turn count.
-    fn turn_count(&self) -> u32;
 
     /// Downcast to `&dyn Any` for tier-specific operations.
     fn as_any(&self) -> &dyn Any;
@@ -67,13 +56,28 @@ pub trait GameStep: Send {
 
     /// Enable or disable auto-pickup of consumable items.
     fn set_auto_pickup(&mut self, _enabled: bool) {}
+
+    /// Recent messages as formatted strings (std-only, for TUI).
+    /// Returns up to `n` messages, newest last.
+    fn recent_messages_str(&self, n: usize) -> Vec<String>;
+
+    /// Shareable seed code string (std-only, for TUI).
+    fn seed_code_str(&self) -> String;
+
+    /// Explored floor percentage (0-100).
+    fn explored_pct(&self) -> i32;
+
+    /// Target depth (win condition). Returns 0 if not applicable.
+    fn target_depth(&self) -> i32 {
+        0
+    }
 }
 
 // ── Standard tier ────────────────────────────────────────────────────
 
 impl GameStep for GameState {
     fn step(&mut self, cmd: GameCommand) -> StepResult {
-        self.step(cmd)
+        GameState::step(self, cmd)
     }
 
     fn observe(&self) -> GameObservation {
@@ -81,25 +85,7 @@ impl GameStep for GameState {
     }
 
     fn look_at(&self, x: i32, y: i32) -> TileInfo {
-        self.look_at(x, y)
-    }
-
-    fn player_pos(&self) -> (i32, i32) {
-        let p = &self.entities[0];
-        (p.x, p.y)
-    }
-
-    fn player_hp(&self) -> (i32, i32) {
-        let p = &self.entities[0];
-        (p.hp, p.max_hp)
-    }
-
-    fn is_game_over(&self) -> bool {
-        self.game_over || self.game_won
-    }
-
-    fn turn_count(&self) -> u32 {
-        self.turn_count as u32
+        GameState::look_at(self, x, y)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -112,6 +98,22 @@ impl GameStep for GameState {
 
     fn set_auto_pickup(&mut self, enabled: bool) {
         self.auto_pickup = enabled;
+    }
+
+    fn recent_messages_str(&self, n: usize) -> Vec<String> {
+        self.log.recent(n).iter().map(|s| s.to_string()).collect()
+    }
+
+    fn seed_code_str(&self) -> String {
+        self.seed_code()
+    }
+
+    fn explored_pct(&self) -> i32 {
+        GameState::explored_pct(self)
+    }
+
+    fn target_depth(&self) -> i32 {
+        self.target_depth
     }
 }
 
@@ -392,6 +394,40 @@ impl MicroGameStateAdapter {
     }
 }
 
+// Delegate all GameView methods to the inner MicroGameState.
+impl crate::rules::game_view::GameView for MicroGameStateAdapter {
+    fn map_dims(&self) -> (i32, i32) { self.game.map_dims() }
+    fn map_in_bounds(&self, x: i32, y: i32) -> bool { self.game.map_in_bounds(x, y) }
+    fn tile_at(&self, x: i32, y: i32) -> u8 { self.game.tile_at(x, y) }
+    fn is_visible(&self, x: i32, y: i32) -> bool { self.game.is_visible(x, y) }
+    fn is_explored(&self, x: i32, y: i32) -> bool { self.game.is_explored(x, y) }
+    fn player_xy(&self) -> (i32, i32) { self.game.player_xy() }
+    fn player_hp(&self) -> (u8, u8) { self.game.player_hp() }
+    fn effective_attack(&self) -> u8 { self.game.effective_attack() }
+    fn effective_defense(&self) -> u8 { self.game.effective_defense() }
+    fn entity_count(&self) -> usize { self.game.entity_count() }
+    fn entity_xy(&self, i: usize) -> (i32, i32) { self.game.entity_xy(i) }
+    fn entity_alive(&self, i: usize) -> bool { self.game.entity_alive(i) }
+    fn entity_kind(&self, i: usize) -> Option<crate::rules::monster_table::MonsterKind> { self.game.entity_kind(i) }
+    fn entity_hp(&self, i: usize) -> (u8, u8) { self.game.entity_hp(i) }
+    fn entity_at(&self, x: i32, y: i32) -> Option<u8> { self.game.entity_at(x, y) }
+    fn item_count(&self) -> usize { self.game.item_count() }
+    fn item_xy(&self, i: usize) -> (i32, i32) { self.game.item_xy(i) }
+    fn item_alive(&self, i: usize) -> bool { self.game.item_alive(i) }
+    fn item_kind_at(&self, i: usize) -> crate::rules::items::ItemKind { self.game.item_kind_at(i) }
+    fn item_at(&self, x: i32, y: i32) -> Option<u8> { self.game.item_at(x, y) }
+    fn equipment(&self) -> &crate::rules::items::Equipment { self.game.equipment() }
+    fn inventory(&self) -> &crate::rules::items::Inventory { self.game.inventory() }
+    fn depth(&self) -> u8 { self.game.depth() }
+    fn kills(&self) -> u8 { self.game.kills() }
+    fn turn_count(&self) -> u16 { self.game.turn_count() }
+    fn game_over(&self) -> bool { self.game.game_over() }
+    fn game_won(&self) -> bool { self.game.game_won() }
+    fn seed_u32(&self) -> u32 { self.game.seed_u32() }
+    fn recent_message(&self, n: u8) -> Option<crate::rules::message::GameEvent> { self.game.recent_message(n) }
+    fn step_view(&mut self, cmd: GameCommand) -> crate::rules::game_view::GameViewStep { self.game.step_view(cmd) }
+}
+
 impl GameStep for MicroGameStateAdapter {
     fn step(&mut self, cmd: GameCommand) -> StepResult {
         let msg_count_before = self.game.log.total();
@@ -571,30 +607,6 @@ impl GameStep for MicroGameStateAdapter {
         }
     }
 
-    fn player_pos(&self) -> (i32, i32) {
-        let pi = PLAYER_IDX as usize;
-        (
-            self.game.entities.x[pi] as i32,
-            self.game.entities.y[pi] as i32,
-        )
-    }
-
-    fn player_hp(&self) -> (i32, i32) {
-        let pi = PLAYER_IDX as usize;
-        (
-            self.game.entities.hp[pi] as i32,
-            self.game.entities.max_hp[pi] as i32,
-        )
-    }
-
-    fn is_game_over(&self) -> bool {
-        self.game.is_terminal()
-    }
-
-    fn turn_count(&self) -> u32 {
-        self.game.turn_count as u32
-    }
-
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -605,6 +617,33 @@ impl GameStep for MicroGameStateAdapter {
 
     fn set_auto_pickup(&mut self, enabled: bool) {
         self.game.auto_pickup = enabled;
+    }
+
+    fn recent_messages_str(&self, n: usize) -> Vec<String> {
+        build_micro_recent_messages_n(&self.game.log, n)
+    }
+
+    fn seed_code_str(&self) -> String {
+        seed_code::encode(&SeedParams {
+            seed: self.seed as u64,
+            width: self.game.map.width as i32,
+            height: self.game.map.height as i32,
+            preset: None,
+        })
+    }
+
+    fn explored_pct(&self) -> i32 {
+        let total_floor = self.game.map.floor_count();
+        let explored_floor = self.game.fov.explored_floor_count(&self.game.map);
+        if total_floor > 0 {
+            ((explored_floor as i32) * 100) / (total_floor as i32)
+        } else {
+            0
+        }
+    }
+
+    fn target_depth(&self) -> i32 {
+        balance::TARGET_DEPTH as i32
     }
 }
 
@@ -805,6 +844,20 @@ fn build_micro_recent_messages(log: &crate::tier_micro::msglog::MicroMessageLog)
     // Collect up to MSG_COUNT recent messages (oldest first).
     use crate::tier_micro::msglog::MSG_COUNT;
     for i in (0..MSG_COUNT as u8).rev() {
+        if let Some(event) = log.recent(i) {
+            messages.push(format_event(event));
+        }
+    }
+    messages
+}
+
+fn build_micro_recent_messages_n(
+    log: &crate::tier_micro::msglog::MicroMessageLog,
+    n: usize,
+) -> Vec<String> {
+    let mut messages = Vec::new();
+    let cap = n.min(crate::tier_micro::msglog::MSG_COUNT);
+    for i in (0..cap as u8).rev() {
         if let Some(event) = log.recent(i) {
             messages.push(format_event(event));
         }
@@ -1079,6 +1132,40 @@ impl CompactGameStateAdapter {
     }
 }
 
+// Delegate all GameView methods to the inner CompactGameState.
+impl crate::rules::game_view::GameView for CompactGameStateAdapter {
+    fn map_dims(&self) -> (i32, i32) { self.game.map_dims() }
+    fn map_in_bounds(&self, x: i32, y: i32) -> bool { self.game.map_in_bounds(x, y) }
+    fn tile_at(&self, x: i32, y: i32) -> u8 { self.game.tile_at(x, y) }
+    fn is_visible(&self, x: i32, y: i32) -> bool { self.game.is_visible(x, y) }
+    fn is_explored(&self, x: i32, y: i32) -> bool { self.game.is_explored(x, y) }
+    fn player_xy(&self) -> (i32, i32) { self.game.player_xy() }
+    fn player_hp(&self) -> (u8, u8) { self.game.player_hp() }
+    fn effective_attack(&self) -> u8 { self.game.effective_attack() }
+    fn effective_defense(&self) -> u8 { self.game.effective_defense() }
+    fn entity_count(&self) -> usize { self.game.entity_count() }
+    fn entity_xy(&self, i: usize) -> (i32, i32) { self.game.entity_xy(i) }
+    fn entity_alive(&self, i: usize) -> bool { self.game.entity_alive(i) }
+    fn entity_kind(&self, i: usize) -> Option<crate::rules::monster_table::MonsterKind> { self.game.entity_kind(i) }
+    fn entity_hp(&self, i: usize) -> (u8, u8) { self.game.entity_hp(i) }
+    fn entity_at(&self, x: i32, y: i32) -> Option<u8> { self.game.entity_at(x, y) }
+    fn item_count(&self) -> usize { self.game.item_count() }
+    fn item_xy(&self, i: usize) -> (i32, i32) { self.game.item_xy(i) }
+    fn item_alive(&self, i: usize) -> bool { self.game.item_alive(i) }
+    fn item_kind_at(&self, i: usize) -> crate::rules::items::ItemKind { self.game.item_kind_at(i) }
+    fn item_at(&self, x: i32, y: i32) -> Option<u8> { self.game.item_at(x, y) }
+    fn equipment(&self) -> &crate::rules::items::Equipment { self.game.equipment() }
+    fn inventory(&self) -> &crate::rules::items::Inventory { self.game.inventory() }
+    fn depth(&self) -> u8 { self.game.depth() }
+    fn kills(&self) -> u8 { self.game.kills() }
+    fn turn_count(&self) -> u16 { self.game.turn_count() }
+    fn game_over(&self) -> bool { self.game.game_over() }
+    fn game_won(&self) -> bool { self.game.game_won() }
+    fn seed_u32(&self) -> u32 { self.game.seed_u32() }
+    fn recent_message(&self, n: u8) -> Option<crate::rules::message::GameEvent> { self.game.recent_message(n) }
+    fn step_view(&mut self, cmd: GameCommand) -> crate::rules::game_view::GameViewStep { self.game.step_view(cmd) }
+}
+
 impl GameStep for CompactGameStateAdapter {
     fn step(&mut self, cmd: GameCommand) -> StepResult {
         let msg_before = self.game.log.total();
@@ -1236,27 +1323,6 @@ impl GameStep for CompactGameStateAdapter {
         }
     }
 
-    fn player_pos(&self) -> (i32, i32) {
-        let pi = crate::tier_compact::types::PLAYER_IDX as usize;
-        (self.game.entities.x[pi], self.game.entities.y[pi])
-    }
-
-    fn player_hp(&self) -> (i32, i32) {
-        let pi = crate::tier_compact::types::PLAYER_IDX as usize;
-        (
-            self.game.entities.hp[pi] as i32,
-            self.game.entities.max_hp[pi] as i32,
-        )
-    }
-
-    fn is_game_over(&self) -> bool {
-        self.game.game_over || self.game.game_won
-    }
-
-    fn turn_count(&self) -> u32 {
-        self.game.turn_count as u32
-    }
-
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -1267,6 +1333,33 @@ impl GameStep for CompactGameStateAdapter {
 
     fn set_auto_pickup(&mut self, enabled: bool) {
         self.game.auto_pickup = enabled;
+    }
+
+    fn recent_messages_str(&self, n: usize) -> Vec<String> {
+        build_compact_recent_messages_n(&self.game.log, n)
+    }
+
+    fn seed_code_str(&self) -> String {
+        seed_code::encode(&SeedParams {
+            seed: self.seed as u64,
+            width: self.game.map.width,
+            height: self.game.map.height,
+            preset: None,
+        })
+    }
+
+    fn explored_pct(&self) -> i32 {
+        let total_floor = self.game.map.floor_count();
+        let explored_floor = self.game.fov.explored_floor_count(&self.game.map);
+        if total_floor > 0 {
+            ((explored_floor as i32) * 100) / (total_floor as i32)
+        } else {
+            0
+        }
+    }
+
+    fn target_depth(&self) -> i32 {
+        balance::TARGET_DEPTH as i32
     }
 }
 
@@ -1387,6 +1480,20 @@ fn build_compact_recent_messages(
     messages
 }
 
+fn build_compact_recent_messages_n(
+    log: &crate::tier_compact::msglog::CompactMessageLog,
+    n: usize,
+) -> Vec<String> {
+    let mut messages = Vec::new();
+    let cap = n.min(8);
+    for i in (0..cap as u8).rev() {
+        if let Some(event) = log.recent(i) {
+            messages.push(format_event(event));
+        }
+    }
+    messages
+}
+
 fn compact_entity_info_at(
     entities: &crate::tier_compact::entity::EntityStore,
     x: i32,
@@ -1468,6 +1575,7 @@ fn find_compact_explored_stairs(
 mod tests {
     use super::*;
     use crate::data;
+    use crate::rules::game_view::GameView;
 
     fn test_standard_game() -> GameState {
         let gd = data::load_game_data();
@@ -1481,14 +1589,14 @@ mod tests {
         let mut state = test_standard_game();
         let game: &mut dyn GameStep = &mut state;
 
-        let (px, py) = game.player_pos();
+        let (px, py) = game.player_xy();
         assert!(px >= 0 && py >= 0);
 
         let (hp, max_hp) = game.player_hp();
         assert!(hp > 0 && max_hp > 0);
         assert!(hp <= max_hp);
 
-        assert!(!game.is_game_over());
+        assert!(!game.is_terminal());
         assert_eq!(game.turn_count(), 0);
 
         let obs = game.observe();
@@ -1510,14 +1618,14 @@ mod tests {
         let mut adapter = MicroGameStateAdapter::new(42, 80, 40);
         let game: &mut dyn GameStep = &mut adapter;
 
-        let (px, py) = game.player_pos();
+        let (px, py) = game.player_xy();
         assert!(px >= 0 && py >= 0);
 
         let (hp, max_hp) = game.player_hp();
         assert!(hp > 0 && max_hp > 0);
         assert!(hp <= max_hp);
 
-        assert!(!game.is_game_over());
+        assert!(!game.is_terminal());
         assert_eq!(game.turn_count(), 0);
 
         let obs = game.observe();
@@ -1571,7 +1679,7 @@ mod tests {
     #[test]
     fn micro_adapter_look_at_player_tile() {
         let adapter = MicroGameStateAdapter::new(42, 80, 40);
-        let (px, py) = adapter.player_pos();
+        let (px, py) = adapter.player_xy();
         let tile = adapter.look_at(px, py);
         assert!(tile.visible);
         assert!(tile.explored);
@@ -1606,13 +1714,13 @@ mod tests {
         let games: Vec<&mut dyn GameStep> = vec![&mut standard, &mut micro];
 
         for game in games {
-            let (px, py) = game.player_pos();
+            let (px, py) = game.player_xy();
             assert!(px >= 0 && py >= 0);
 
             let (hp, max_hp) = game.player_hp();
             assert!(hp > 0 && max_hp > 0);
 
-            assert!(!game.is_game_over());
+            assert!(!game.is_terminal());
 
             let result = game.step(GameCommand::Wait);
             assert!(result.action_taken);
@@ -1662,7 +1770,7 @@ mod tests {
         let gd = data::load_game_data();
         // Seed > 0xFFFF_FFFF → standard tier.
         let game = create_game(0x1_0000_0000, 40, 30, None, &gd).unwrap();
-        assert!(!game.is_game_over());
+        assert!(!game.is_terminal());
         assert!(game.as_any().downcast_ref::<GameState>().is_some());
     }
 
@@ -1671,7 +1779,7 @@ mod tests {
         let gd = data::load_game_data();
         // Seed 0x10000..=0xFFFF_FFFF → compact tier.
         let game = create_game(0x10000, 80, 40, None, &gd).unwrap();
-        assert!(!game.is_game_over());
+        assert!(!game.is_terminal());
         assert!(
             game.as_any()
                 .downcast_ref::<CompactGameStateAdapter>()
@@ -1683,7 +1791,7 @@ mod tests {
     fn create_game_micro_tier() {
         let gd = data::load_game_data();
         let game = create_game(42, 80, 40, None, &gd).unwrap();
-        assert!(!game.is_game_over());
+        assert!(!game.is_terminal());
         // Should downcast to MicroGameStateAdapter (micro tier).
         assert!(
             game.as_any()
@@ -1696,7 +1804,7 @@ mod tests {
     fn create_random_game_is_standard() {
         let gd = data::load_game_data();
         let game = create_random_game(40, 30, &gd).unwrap();
-        assert!(!game.is_game_over());
+        assert!(!game.is_terminal());
         assert!(game.as_any().downcast_ref::<GameState>().is_some());
     }
 

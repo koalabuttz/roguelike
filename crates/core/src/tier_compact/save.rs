@@ -45,7 +45,9 @@ use crate::rules::seed_code::Tier;
 pub use crate::rules::save_common::{crc16, crc16_update, SaveError, SAVE_MAGIC};
 
 /// Format version for compact tier saves.
-pub const SAVE_VERSION: u8 = 1;
+/// v1: fixed 80×40 dimensions (no width/height in header)
+/// v2: variable dimensions (width + height stored as LE i32 after seed)
+pub const SAVE_VERSION: u8 = 2;
 
 // ---------------------------------------------------------------------------
 // Serialize
@@ -101,8 +103,10 @@ pub fn serialize<F: FnMut(u8)>(state: &CompactGameState, emit: &mut F) -> usize 
     wb!(SAVE_VERSION);
     wb!(Tier::Compact as u8);
 
-    // --- Header (8 bytes) ---
+    // --- Header (16 bytes) ---
     wb_u32!(state.seed);
+    wb_i32!(state.map.width);
+    wb_i32!(state.map.height);
     wb!(state.depth);
     wb_u16!(state.turn_count);
     wb!(state.kills);
@@ -139,9 +143,10 @@ pub fn serialize<F: FnMut(u8)>(state: &CompactGameState, emit: &mut F) -> usize 
     }
 
     // --- Explored bitfield (visible is skipped — recomputed on load) ---
+    let bf_size = (tile_count + 7) / 8;
     let explored = state.fov.explored_bytes();
     i = 0;
-    while i < BITFIELD_SIZE {
+    while i < bf_size {
         wb!(explored[i]);
         i += 1;
     }
@@ -338,6 +343,11 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
 
     // --- Header ---
     let seed = rb_u32!();
+    let width = rb_i32!();
+    let height = rb_i32!();
+    if width <= 0 || height <= 0 || (width as usize) * (height as usize) > MAP_SIZE {
+        return Err(SaveError::BadData);
+    }
     let depth = rb!();
     let turn_count = rb_u16!();
     let kills = rb!();
@@ -359,7 +369,7 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
     if room_count as usize > MAX_ROOMS {
         return Err(SaveError::BadData);
     }
-    state.map = CompactMap::new(MAP_WIDTH, MAP_HEIGHT);
+    state.map = CompactMap::new(width, height);
     state.map.room_count = room_count;
     let mut i: usize = 0;
     let rc = room_count as usize;
@@ -372,7 +382,7 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
         };
         i += 1;
     }
-    let tile_count = (MAP_WIDTH as usize) * (MAP_HEIGHT as usize);
+    let tile_count = (width as usize) * (height as usize);
     i = 0;
     while i < tile_count {
         state.map.tiles[i] = rb!();
@@ -380,10 +390,11 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
     }
 
     // --- Explored bitfield ---
-    state.fov = CompactFov::new(MAP_WIDTH, MAP_HEIGHT);
+    let bf_size = ((width as usize) * (height as usize) + 7) / 8;
+    state.fov = CompactFov::new(width, height);
     let explored = state.fov.explored_bytes_mut();
     i = 0;
-    while i < BITFIELD_SIZE {
+    while i < bf_size {
         explored[i] = rb!();
         i += 1;
     }
@@ -721,7 +732,8 @@ mod tests {
     fn bad_checksum_rejected() {
         let state = new_game(1);
         let mut bytes = serialize_to_vec(&state);
-        bytes[10] ^= 0xFF;
+        // Corrupt a byte in the map data (well past the 20-byte header)
+        bytes[30] ^= 0xFF;
         let mut loaded = new_game(0);
         assert_eq!(
             deserialize_from_slice(&mut loaded, &bytes),

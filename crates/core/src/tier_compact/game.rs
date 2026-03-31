@@ -884,6 +884,116 @@ impl CompactGameState {
     }
 }
 
+// ---------------------------------------------------------------------------
+// GameView implementation
+// ---------------------------------------------------------------------------
+
+impl crate::rules::game_view::GameView for CompactGameState {
+    fn map_dims(&self) -> (i32, i32) {
+        (self.map.width, self.map.height)
+    }
+    fn map_in_bounds(&self, x: i32, y: i32) -> bool {
+        self.map.in_bounds(x, y)
+    }
+    fn tile_at(&self, x: i32, y: i32) -> u8 {
+        self.map.tile_at(x, y)
+    }
+    fn is_visible(&self, x: i32, y: i32) -> bool {
+        self.fov.is_visible(x, y)
+    }
+    fn is_explored(&self, x: i32, y: i32) -> bool {
+        self.fov.is_explored(x, y)
+    }
+    fn player_xy(&self) -> (i32, i32) {
+        (
+            self.entities.x[PLAYER_IDX as usize],
+            self.entities.y[PLAYER_IDX as usize],
+        )
+    }
+    fn player_hp(&self) -> (u8, u8) {
+        (
+            self.entities.hp[PLAYER_IDX as usize],
+            self.entities.max_hp[PLAYER_IDX as usize],
+        )
+    }
+    fn effective_attack(&self) -> u8 {
+        self.effective_attack()
+    }
+    fn effective_defense(&self) -> u8 {
+        self.effective_defense()
+    }
+    fn entity_count(&self) -> usize {
+        self.entities.count as usize
+    }
+    fn entity_xy(&self, i: usize) -> (i32, i32) {
+        (self.entities.x[i], self.entities.y[i])
+    }
+    fn entity_alive(&self, i: usize) -> bool {
+        self.entities.alive[i]
+    }
+    fn entity_kind(&self, i: usize) -> Option<MonsterKind> {
+        self.entities.kind[i]
+    }
+    fn entity_hp(&self, i: usize) -> (u8, u8) {
+        (self.entities.hp[i], self.entities.max_hp[i])
+    }
+    fn entity_at(&self, x: i32, y: i32) -> Option<u8> {
+        let idx = self.entities.entity_at(x, y);
+        if idx == super::types::NO_ENTITY { None } else { Some(idx) }
+    }
+    fn item_count(&self) -> usize {
+        self.items.count as usize
+    }
+    fn item_xy(&self, i: usize) -> (i32, i32) {
+        (self.items.x[i], self.items.y[i])
+    }
+    fn item_alive(&self, i: usize) -> bool {
+        self.items.alive[i]
+    }
+    fn item_kind_at(&self, i: usize) -> crate::rules::items::ItemKind {
+        self.items.kind[i]
+    }
+    fn item_at(&self, x: i32, y: i32) -> Option<u8> {
+        let idx = self.items.item_at(x, y);
+        if idx == super::types::NO_ITEM { None } else { Some(idx) }
+    }
+    fn equipment(&self) -> &crate::rules::items::Equipment {
+        &self.equipment
+    }
+    fn inventory(&self) -> &crate::rules::items::Inventory {
+        &self.inventory
+    }
+    fn depth(&self) -> u8 {
+        self.depth
+    }
+    fn kills(&self) -> u8 {
+        self.kills
+    }
+    fn turn_count(&self) -> u16 {
+        self.turn_count
+    }
+    fn game_over(&self) -> bool {
+        self.game_over
+    }
+    fn game_won(&self) -> bool {
+        self.game_won
+    }
+    fn seed_u32(&self) -> u32 {
+        self.seed
+    }
+    fn recent_message(&self, n: u8) -> Option<GameEvent> {
+        self.log.recent(n)
+    }
+    fn step(&mut self, cmd: GameCommand) -> crate::rules::game_view::GameViewStep {
+        let r = CompactGameState::step(self, cmd);
+        crate::rules::game_view::GameViewStep {
+            action_taken: r.action_taken,
+            game_over: r.game_over,
+            game_won: r.game_won,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

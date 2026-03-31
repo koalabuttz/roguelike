@@ -1,19 +1,19 @@
 //! GBA SRAM save/load wrapper.
 //!
 //! Cartridge SRAM is 32 KB at `0x0E00_0000`, 8-bit bus — all accesses must
-//! be byte-by-byte volatile reads/writes. Uses the compact tier's streaming
-//! serializer directly: each `emit(byte)` writes one byte to SRAM.
-//!
-//! Single auto-save slot for now (slot 0). Multi-slot UI can come later.
+//! be byte-by-byte volatile reads/writes. Supports both compact and micro
+//! tier saves via the tier byte in the save envelope.
 
+use roguelike_core::rules::save_common::SaveError;
+use roguelike_core::rules::seed_code::Tier;
 use roguelike_core::tier_compact::game::CompactGameState;
-use roguelike_core::tier_compact::save::{self, SaveError};
+use roguelike_core::tier_compact::save as compact_save;
+use roguelike_core::tier_micro::game::MicroGameState;
+use roguelike_core::tier_micro::save as micro_save;
 
 const SRAM_BASE: usize = 0x0E00_0000;
 
 /// Maximum bytes for one save slot.
-/// Compact tier: 80×40 map = 3200 tiles + 400 explored + entities + items + overhead.
-/// Measured at ~4500 bytes typical, allowing up to 6144 for headroom.
 const SLOT_SIZE: usize = 6144;
 
 /// Header at SRAM offset 0: 4-byte magic + validity marker.
@@ -39,51 +39,39 @@ fn sram_read(offset: usize) -> u8 {
     unsafe { ((SRAM_BASE + offset) as *const u8).read_volatile() }
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/// Save game state to SRAM slot 0. Returns number of bytes written.
-pub fn save_to_sram(state: &CompactGameState) -> usize {
-    let mut offset = SLOT0_OFFSET;
-    let size = save::serialize(state, &mut |byte| {
-        sram_write(offset, byte);
-        offset += 1;
-    });
-
-    // Write header: magic + save size
+fn write_header(size: usize) {
     sram_write(0, HEADER_MAGIC[0]);
     sram_write(1, HEADER_MAGIC[1]);
     sram_write(2, HEADER_MAGIC[2]);
     sram_write(3, HEADER_MAGIC[3]);
     sram_write(4, size as u8);
     sram_write(5, (size >> 8) as u8);
-    sram_write(6, 0); // reserved
+    sram_write(6, 0);
     sram_write(7, 0);
+}
 
+// ---------------------------------------------------------------------------
+// Compact tier save/load
+// ---------------------------------------------------------------------------
+
+fn save_compact_to_sram(state: &CompactGameState) -> usize {
+    let mut offset = SLOT0_OFFSET;
+    let size = compact_save::serialize(state, &mut |byte| {
+        sram_write(offset, byte);
+        offset += 1;
+    });
+    write_header(size);
     size
 }
 
-/// Load game state from SRAM slot 0. Returns Ok(()) if valid save found.
-/// FOV visible bitfield is NOT restored — caller must recompute.
-pub fn load_from_sram(state: &mut CompactGameState) -> Result<(), SaveError> {
-    // Check header magic
-    if sram_read(0) != HEADER_MAGIC[0]
-        || sram_read(1) != HEADER_MAGIC[1]
-        || sram_read(2) != HEADER_MAGIC[2]
-        || sram_read(3) != HEADER_MAGIC[3]
-    {
-        return Err(SaveError::BadMagic);
-    }
-
+fn load_compact_from_sram(state: &mut CompactGameState) -> Result<(), SaveError> {
     let save_size = sram_read(4) as usize | ((sram_read(5) as usize) << 8);
     if save_size == 0 || save_size > SLOT_SIZE {
         return Err(SaveError::BadData);
     }
-
     let mut offset = SLOT0_OFFSET;
     let end = SLOT0_OFFSET + save_size;
-    save::deserialize(state, &mut || {
+    compact_save::deserialize(state, &mut || {
         if offset < end {
             let b = sram_read(offset);
             offset += 1;
@@ -92,6 +80,74 @@ pub fn load_from_sram(state: &mut CompactGameState) -> Result<(), SaveError> {
             None
         }
     })
+}
+
+// ---------------------------------------------------------------------------
+// Micro tier save/load
+// ---------------------------------------------------------------------------
+
+fn save_micro_to_sram(state: &MicroGameState) -> usize {
+    let mut offset = SLOT0_OFFSET;
+    let size = micro_save::serialize(state, &mut |byte| {
+        sram_write(offset, byte);
+        offset += 1;
+    });
+    write_header(size);
+    size
+}
+
+fn load_micro_from_sram(state: &mut MicroGameState) -> Result<(), SaveError> {
+    let save_size = sram_read(4) as usize | ((sram_read(5) as usize) << 8);
+    if save_size == 0 || save_size > SLOT_SIZE {
+        return Err(SaveError::BadData);
+    }
+    let mut offset = SLOT0_OFFSET;
+    let end = SLOT0_OFFSET + save_size;
+    micro_save::deserialize(state, &mut || {
+        if offset < end {
+            let b = sram_read(offset);
+            offset += 1;
+            Some(b)
+        } else {
+            None
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Tier-aware dispatch
+// ---------------------------------------------------------------------------
+
+/// Save the active game to SRAM. Dispatches based on IS_MICRO flag.
+pub fn save_dispatch() -> usize {
+    if super::game_loop::is_micro() {
+        save_micro_to_sram(super::game_loop::game_micro())
+    } else {
+        save_compact_to_sram(super::game_loop::game_compact())
+    }
+}
+
+/// Load a game from SRAM. Auto-detects tier from the save envelope.
+/// Sets IS_MICRO and loads into the correct union variant.
+/// Returns true on success.
+pub fn load_dispatch() -> bool {
+    if !has_save() {
+        return false;
+    }
+
+    // Peek at the tier byte in the save envelope (byte 3 of the save data).
+    let tier_byte = sram_read(SLOT0_OFFSET + 3);
+    match tier_byte {
+        t if t == Tier::Micro as u8 => {
+            unsafe { super::game_loop::set_micro(true) };
+            load_micro_from_sram(super::game_loop::game_micro()).is_ok()
+        }
+        t if t == Tier::Compact as u8 => {
+            unsafe { super::game_loop::set_micro(false) };
+            load_compact_from_sram(super::game_loop::game_compact()).is_ok()
+        }
+        _ => false,
+    }
 }
 
 /// Check if SRAM contains a valid save (header magic present).

@@ -7,11 +7,11 @@
 use gba::prelude::*;
 
 use roguelike_core::command::GameCommand;
+use roguelike_core::rules::game_view::{GameView, GameViewStep};
 use roguelike_core::rules::items::{
     attack_bonus, color, defense_bonus, heal_amount, is_armor, is_consumable, is_weapon, name,
     ItemKind,
 };
-use roguelike_core::tier_compact::game::CompactGameState;
 
 use crate::display;
 use crate::format;
@@ -96,16 +96,16 @@ fn cleanup() {
 // Item list helpers
 // ---------------------------------------------------------------------------
 
-fn equip_count(state: &CompactGameState) -> u8 {
-    state.equipment.weapon.is_some() as u8 + state.equipment.armor.is_some() as u8
+fn equip_count(state: &impl GameView) -> u8 {
+    state.equipment().weapon.is_some() as u8 + state.equipment().armor.is_some() as u8
 }
 
-fn total_items(state: &CompactGameState) -> u8 {
-    equip_count(state) + state.inventory.len() as u8
+fn total_items(state: &impl GameView) -> u8 {
+    equip_count(state) + state.inventory().len() as u8
 }
 
 /// Clamp cursor to valid range after items change.
-fn clamp_cursor(state: &CompactGameState, cursor: &mut u8) {
+fn clamp_cursor(state: &impl GameView, cursor: &mut u8) {
     let total = total_items(state);
     if total == 0 {
         *cursor = 0;
@@ -115,18 +115,18 @@ fn clamp_cursor(state: &CompactGameState, cursor: &mut u8) {
 }
 
 /// Get the item kind and whether it's equipped, for a given visual cursor position.
-fn item_at_cursor(state: &CompactGameState, cursor: u8) -> Option<CursorItem> {
+fn item_at_cursor(state: &impl GameView, cursor: u8) -> Option<CursorItem> {
     let ec = equip_count(state);
     if cursor < ec {
         // Equipped item
         let mut idx = 0u8;
-        if let Some(kind) = state.equipment.weapon {
+        if let Some(kind) = state.equipment().weapon {
             if cursor == idx {
                 return Some(CursorItem::Equipped { kind, is_weapon: true });
             }
             idx += 1;
         }
-        if let Some(kind) = state.equipment.armor {
+        if let Some(kind) = state.equipment().armor {
             if cursor == idx {
                 return Some(CursorItem::Equipped { kind, is_weapon: false });
             }
@@ -135,7 +135,7 @@ fn item_at_cursor(state: &CompactGameState, cursor: u8) -> Option<CursorItem> {
     } else {
         let inv_idx = (cursor - ec) as usize;
         state
-            .inventory
+            .inventory()
             .nth_occupied(inv_idx)
             .map(|(slot_idx, slot)| CursorItem::Inventory {
                 slot_idx: slot_idx as u8,
@@ -154,7 +154,7 @@ enum CursorItem {
 // ---------------------------------------------------------------------------
 
 /// A-button: context-smart primary action.
-fn primary_action(state: &CompactGameState, cursor: u8) -> Option<GameCommand> {
+fn primary_action(state: &impl GameView, cursor: u8) -> Option<GameCommand> {
     match item_at_cursor(state, cursor)? {
         CursorItem::Equipped { is_weapon: true, .. } => Some(GameCommand::UnequipWeapon),
         CursorItem::Equipped { is_weapon: false, .. } => Some(GameCommand::UnequipArmor),
@@ -169,13 +169,13 @@ fn primary_action(state: &CompactGameState, cursor: u8) -> Option<GameCommand> {
 }
 
 /// Number of submenu options for the item at cursor.
-fn submenu_count(state: &CompactGameState, cursor: u8) -> u8 {
+fn submenu_count(state: &impl GameView, cursor: u8) -> u8 {
     let ec = equip_count(state);
     if cursor < ec { 1 } else { 2 } // Equipped: [Drop]. Inventory: [Drop, Combine].
 }
 
 /// Execute a submenu option. Returns true if the inventory modal should continue.
-fn execute_submenu(state: &mut CompactGameState, cursor: u8, sel: u8, mode: &mut InvMode) {
+fn execute_submenu(state: &mut impl GameView, cursor: u8, sel: u8, mode: &mut InvMode) {
     let ec = equip_count(state);
     if cursor < ec {
         // Equipped item — only option is Drop (sel=0)
@@ -213,13 +213,13 @@ fn execute_submenu(state: &mut CompactGameState, cursor: u8, sel: u8, mode: &mut
     }
 }
 
-fn execute_combine(state: &mut CompactGameState, target_slot: u8, source_cursor: u8) {
+fn execute_combine(state: &mut impl GameView, target_slot: u8, source_cursor: u8) {
     let ec = equip_count(state);
     if source_cursor < ec {
         return; // Can't combine with equipped items
     }
     let source_inv = (source_cursor - ec) as usize;
-    if let Some((source_slot_idx, _)) = state.inventory.nth_occupied(source_inv) {
+    if let Some((source_slot_idx, _)) = state.inventory().nth_occupied(source_inv) {
         let source_slot = source_slot_idx as u8;
         if source_slot != target_slot {
             state.step(GameCommand::Combine(target_slot, source_slot));
@@ -231,7 +231,7 @@ fn execute_combine(state: &mut CompactGameState, target_slot: u8, source_cursor:
 // Rendering
 // ---------------------------------------------------------------------------
 
-fn render_screen(state: &CompactGameState, inv: &InvState) {
+fn render_screen(state: &impl GameView, inv: &InvState) {
     display::clear_hud();
 
     // Title
@@ -243,7 +243,7 @@ fn render_screen(state: &CompactGameState, inv: &InvState) {
     // Equipped items
     if ec > 0 {
         let mut equip_vis: u8 = 0;
-        if let Some(kind) = state.equipment.weapon {
+        if let Some(kind) = state.equipment().weapon {
             let selected = inv.cursor == equip_vis;
             let pal = if selected { PALBANK_SEL } else { color(kind) as u16 };
             display::write_hud_string(1, row, "W:", pal);
@@ -252,7 +252,7 @@ fn render_screen(state: &CompactGameState, inv: &InvState) {
             row += 1;
             equip_vis += 1;
         }
-        if let Some(kind) = state.equipment.armor {
+        if let Some(kind) = state.equipment().armor {
             let selected = inv.cursor == equip_vis;
             let pal = if selected { PALBANK_SEL } else { color(kind) as u16 };
             display::write_hud_string(1, row, "A:", pal);
@@ -266,7 +266,7 @@ fn render_screen(state: &CompactGameState, inv: &InvState) {
     // Inventory items
     let max_visible = DETAIL_SEP_ROW.saturating_sub(row);
     for vis_idx in 0..max_visible {
-        if let Some((_slot_idx, slot)) = state.inventory.nth_occupied(vis_idx) {
+        if let Some((_slot_idx, slot)) = state.inventory().nth_occupied(vis_idx) {
             let visual = ec as usize + vis_idx;
             let selected = inv.cursor as usize == visual;
             let pal = if selected { PALBANK_SEL } else { color(slot.kind) as u16 };
@@ -345,7 +345,7 @@ fn write_equip_stat_suffix(row: usize, kind: ItemKind, weapon: bool) {
     }
 }
 
-fn render_detail(state: &CompactGameState, cursor: u8) {
+fn render_detail(state: &impl GameView, cursor: u8) {
     let item = match item_at_cursor(state, cursor) {
         Some(i) => i,
         None => return,
@@ -402,7 +402,7 @@ fn render_detail(state: &CompactGameState, cursor: u8) {
     }
 }
 
-fn render_hints(state: &CompactGameState, inv: &InvState) {
+fn render_hints(state: &impl GameView, inv: &InvState) {
     if total_items(state) == 0 {
         display::write_hud_string(1, HINTS_ROW, "B:Close", PALBANK_DIM);
         return;
@@ -429,7 +429,7 @@ fn render_hints(state: &CompactGameState, inv: &InvState) {
     }
 }
 
-fn render_submenu(state: &CompactGameState, cursor: u8, sel: u8) {
+fn render_submenu(state: &impl GameView, cursor: u8, sel: u8) {
     let ec = equip_count(state);
     let is_equipped = cursor < ec;
 
@@ -453,7 +453,7 @@ fn render_submenu(state: &CompactGameState, cursor: u8, sel: u8) {
 
 /// Run the inventory modal. Blocks until the player closes it.
 #[inline(never)]
-pub fn run_inventory(state: &mut CompactGameState) {
+pub fn run_inventory(state: &mut impl GameView) {
     let mut inv = InvState {
         mode: InvMode::SlideIn { frame: 0 },
         cursor: 0,

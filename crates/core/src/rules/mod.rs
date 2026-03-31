@@ -9,6 +9,7 @@ pub mod color;
 pub mod combat;
 pub mod damage;
 pub mod direction;
+pub mod game_view;
 pub mod health;
 pub mod interactions;
 pub mod items;

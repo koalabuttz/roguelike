@@ -133,7 +133,12 @@ pub fn run() -> ! {
                     _ => {}
                 }
 
-                let result = state.step(cmd);
+                let mut result = state.step(cmd);
+
+                // A button sends Pickup; if nothing to pick up, try Descend.
+                if !result.action_taken && matches!(cmd, GameCommand::Pickup) {
+                    result = state.step(GameCommand::Descend);
+                }
 
                 if !result.action_taken {
                     continue;

@@ -27,13 +27,7 @@ const PALBANK_SEL: u16 = 8; // GameColor::Yellow
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Cursor glyph: CP437 0x10 = right-pointing triangle ►
-const CURSOR_GLYPH: u16 = 0x10;
-
-/// Cursor X position in pixels (tile column 0 = pixel 0).
-const CURSOR_X_BASE: u16 = 0;
-
-/// First row of the item list (pixel Y = row * 8).
+/// First row of the item list.
 const LIST_ROW_START: usize = 2;
 
 /// Row for the detail panel separator.
@@ -46,9 +40,6 @@ const HINTS_ROW: usize = 18;
 /// Slide transition: frames and pixels per frame.
 const SLIDE_FRAMES: u8 = 6;
 const SLIDE_PX_PER_FRAME: u16 = 40;
-
-/// Cursor bob animation offsets (indexed by (frame_counter >> 2) & 7).
-const CURSOR_BOB: [u16; 8] = [0, 1, 2, 2, 2, 1, 0, 0];
 
 /// Submenu X position (tile column).
 const SUBMENU_X: usize = 20;
@@ -73,40 +64,6 @@ struct InvState {
 }
 
 // ---------------------------------------------------------------------------
-// OAM sprite cursor
-// ---------------------------------------------------------------------------
-
-fn init_cursor_sprite() {
-    // Copy the cursor glyph tile from BG charblock 0 → OBJ tile 0.
-    let src: [u32; 8] = CHARBLOCK0_4BPP.index(CURSOR_GLYPH as usize).read();
-    OBJ_TILES.index(0).write(src);
-
-    // Set up OBJ palette bank 0: index 0 = transparent, index 1 = yellow.
-    let pal = obj_palbank(0);
-    pal.index(1).write(Color::from_rgb(31, 31, 0));
-
-    // Enable OBJ layer with 1D tile mapping.
-    let dc = DISPCNT.read();
-    DISPCNT.write(dc.with_show_obj(true).with_obj_vram_1d(true));
-}
-
-fn update_cursor_oam(row: u8, frame_counter: u16, slide_offset: u16) {
-    let bob = CURSOR_BOB[((frame_counter >> 2) as usize) & 7];
-    let px = CURSOR_X_BASE.wrapping_add(bob).wrapping_sub(slide_offset);
-    let py = (LIST_ROW_START as u16 + row as u16) * 8;
-
-    OBJ_ATTR0.index(0).write(ObjAttr0::new().with_y(py & 0xFF));
-    OBJ_ATTR1.index(0).write(ObjAttr1::new().with_x(px & 0x1FF));
-    OBJ_ATTR2.index(0).write(ObjAttr2::new().with_tile_id(0).with_palbank(0));
-}
-
-fn hide_cursor_sprite() {
-    OBJ_ATTR0
-        .index(0)
-        .write(ObjAttr0::new().with_style(ObjDisplayStyle::NotDisplayed));
-}
-
-// ---------------------------------------------------------------------------
 // Hardware blend (darken BG0)
 // ---------------------------------------------------------------------------
 
@@ -128,9 +85,8 @@ fn disable_dim() {
 // ---------------------------------------------------------------------------
 
 fn cleanup() {
-    hide_cursor_sprite();
-    let dc = DISPCNT.read();
-    DISPCNT.write(dc.with_show_obj(false));
+    crate::cursor::hide();
+    crate::cursor::disable_obj_layer();
     disable_dim();
     BG1HOFS.write(0);
     display::clear_hud();
@@ -505,14 +461,14 @@ pub fn run_inventory(state: &mut CompactGameState) {
         needs_redraw: true,
     };
 
-    init_cursor_sprite();
+    crate::cursor::init();
     enable_dim();
 
     // Pre-render content for slide-in
     render_screen(state, &inv);
 
     loop {
-        vblank_wait();
+        display::vblank_wait();
         inv.frame_counter = inv.frame_counter.wrapping_add(1);
 
         match inv.mode {
@@ -520,7 +476,7 @@ pub fn run_inventory(state: &mut CompactGameState) {
                 let remaining = SLIDE_FRAMES - *frame;
                 let offset = remaining as u16 * SLIDE_PX_PER_FRAME;
                 BG1HOFS.write(offset);
-                update_cursor_oam(inv.cursor, inv.frame_counter, offset);
+                crate::cursor::update(0, LIST_ROW_START + inv.cursor as usize, inv.frame_counter, offset);
                 *frame += 1;
                 if *frame >= SLIDE_FRAMES {
                     BG1HOFS.write(0);
@@ -531,7 +487,7 @@ pub fn run_inventory(state: &mut CompactGameState) {
             InvMode::SlideOut { ref mut frame } => {
                 let offset = (*frame as u16 + 1) * SLIDE_PX_PER_FRAME;
                 BG1HOFS.write(offset);
-                update_cursor_oam(inv.cursor, inv.frame_counter, offset);
+                crate::cursor::update(0, LIST_ROW_START + inv.cursor as usize, inv.frame_counter, offset);
                 *frame += 1;
                 if *frame >= SLIDE_FRAMES {
                     break;
@@ -543,7 +499,7 @@ pub fn run_inventory(state: &mut CompactGameState) {
                     render_screen(state, &inv);
                     inv.needs_redraw = false;
                 }
-                update_cursor_oam(inv.cursor, inv.frame_counter, 0);
+                crate::cursor::update(0, LIST_ROW_START + inv.cursor as usize, inv.frame_counter, 0);
 
                 if let Some(input) = input::read_inventory_input() {
                     match input {
@@ -594,7 +550,7 @@ pub fn run_inventory(state: &mut CompactGameState) {
                     render_screen(state, &inv);
                     inv.needs_redraw = false;
                 }
-                update_cursor_oam(inv.cursor, inv.frame_counter, 0);
+                crate::cursor::update(0, LIST_ROW_START + inv.cursor as usize, inv.frame_counter, 0);
 
                 if let Some(input) = input::read_submenu_input() {
                     let max = submenu_count(state, inv.cursor);
@@ -634,7 +590,7 @@ pub fn run_inventory(state: &mut CompactGameState) {
                     render_screen(state, &inv);
                     inv.needs_redraw = false;
                 }
-                update_cursor_oam(inv.cursor, inv.frame_counter, 0);
+                crate::cursor::update(0, LIST_ROW_START + inv.cursor as usize, inv.frame_counter, 0);
 
                 if let Some(input) = input::read_inventory_input() {
                     match input {
@@ -669,10 +625,4 @@ pub fn run_inventory(state: &mut CompactGameState) {
     }
 
     cleanup();
-}
-
-/// VBlank wait (duplicated from game_loop — inventory owns its own frame loop).
-fn vblank_wait() {
-    while VCOUNT.read() < 160 {}
-    while VCOUNT.read() >= 160 {}
 }

@@ -31,12 +31,6 @@ enum AppState {
     GameOver,
 }
 
-/// Wait for VBlank (scanline >= 160), then wait for it to end.
-fn vblank_wait() {
-    while VCOUNT.read() < 160 {}
-    while VCOUNT.read() >= 160 {}
-}
-
 /// Start a new game directly in EWRAM, avoiding large stack allocation.
 fn start_game(seed: u32) {
     let ptr = unsafe { (&raw mut GAME).cast::<CompactGameState>() };
@@ -66,7 +60,7 @@ fn read_timer_seed() -> u32 {
     TIMER0_CONTROL.write(TimerControl::new().with_enabled(true));
 
     let lo = TIMER0_COUNT.read() as u32;
-    vblank_wait();
+    display::vblank_wait();
     let hi = TIMER0_COUNT.read() as u32;
 
     // Combine into a non-zero 32-bit seed (LFSR requires non-zero)
@@ -77,7 +71,7 @@ fn read_timer_seed() -> u32 {
 fn wait_for_key() {
     let mut prev: u16 = 0;
     loop {
-        vblank_wait();
+        display::vblank_wait();
         let pressed = !KEYINPUT.read().to_u16() & 0x03FF;
         let edges = pressed & !prev;
         prev = pressed;
@@ -96,7 +90,7 @@ pub fn run() -> ! {
     let mut app_state = AppState::Playing;
 
     loop {
-        vblank_wait();
+        display::vblank_wait();
 
         #[cfg(feature = "dev")]
         if !crate::stack_check::check_canary() {
@@ -272,9 +266,7 @@ fn render_look_description(state: &CompactGameState, cx: i32, cy: i32) {
     let _ = p;
 
     // Clear message row and write description
-    for x in 0..display::SCREEN_COLS {
-        display::write_hud_tile(x, display::MSG_ROW, b' ', 0);
-    }
+    display::clear_hud_row(display::MSG_ROW);
     if let Ok(s) = core::str::from_utf8(&buf) {
         display::write_hud_string(0, display::MSG_ROW, s.trim_end(), crate::palette::PALBANK_MSG);
     }
@@ -287,8 +279,7 @@ fn show_game_over(state: &CompactGameState) {
     } else {
         "You have been slain..."
     };
-    let x = (30 - msg.len()) / 2;
-    display::write_map_string(x, 8, msg, GameColor::Red as u16);
+    display::write_map_centered(8, msg, GameColor::Red as u16);
 
     let mut buf = [b' '; 30];
     let mut p = 0;
@@ -300,8 +291,7 @@ fn show_game_over(state: &CompactGameState) {
     let _ = crate::format::write_u16(&mut buf, p, state.turn_count);
 
     let stats = core::str::from_utf8(&buf).unwrap_or("");
-    let sx = (30usize).saturating_sub(stats.trim_end().len()) / 2;
-    display::write_map_string(sx, 10, stats.trim_end(), GameColor::Grey as u16);
+    display::write_map_centered(10, stats.trim_end(), GameColor::Grey as u16);
 
     display::write_map_string(4, 13, "Press any key to continue", GameColor::DarkGrey as u16);
 }

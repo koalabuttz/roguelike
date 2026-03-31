@@ -14,7 +14,6 @@ use roguelike_core::tier_compact::prng::LfsrRng32;
 use roguelike_core::tier_compact::types::{MAP_HEIGHT, MAP_WIDTH};
 
 use crate::display;
-use crate::format;
 use crate::palette;
 
 // ---------------------------------------------------------------------------
@@ -105,10 +104,8 @@ pub fn run_title() -> TitleAction {
     let bg0 = BG0CNT.read();
     BG0CNT.write(bg0.with_mosaic(true));
 
-    // OAM cursor setup (reuse inventory pattern).
-    init_cursor_sprite();
-    // Hide cursor until entrance animation finishes.
-    hide_cursor();
+    // OAM cursor setup.
+    crate::cursor::init();
 
     let action = run_main_loop();
 
@@ -127,7 +124,7 @@ fn run_main_loop() -> TitleAction {
     let mut entrance_done = false;
 
     loop {
-        vblank_wait();
+        display::vblank_wait();
 
         // -- Entrance animation --
         if !entrance_done {
@@ -188,7 +185,7 @@ fn run_main_loop() -> TitleAction {
 
         // Cursor animation.
         if entrance_done {
-            update_cursor_oam(sel, frame);
+            crate::cursor::update(MENU_X - 2, MENU_ROW + sel as usize * MENU_SPACING, frame, 0);
         }
 
         frame = frame.wrapping_add(1);
@@ -406,47 +403,6 @@ fn render_menu(sel: u8) {
 }
 
 // ---------------------------------------------------------------------------
-// OAM cursor (same pattern as inventory_ui)
-// ---------------------------------------------------------------------------
-
-const CURSOR_GLYPH: u16 = 0x10; // ►
-const CURSOR_BOB: [u16; 8] = [0, 1, 2, 2, 2, 1, 0, 0];
-
-fn init_cursor_sprite() {
-    let src: [u32; 8] = CHARBLOCK0_4BPP.index(CURSOR_GLYPH as usize).read();
-    OBJ_TILES.index(0).write(src);
-
-    let pal = obj_palbank(0);
-    pal.index(1).write(Color::from_rgb(31, 31, 0)); // yellow
-
-    // Hide all 128 OAM entries to prevent stale sprites from appearing.
-    for i in 0..128 {
-        OBJ_ATTR0
-            .index(i)
-            .write(ObjAttr0::new().with_style(ObjDisplayStyle::NotDisplayed));
-    }
-
-    let dc = DISPCNT.read();
-    DISPCNT.write(dc.with_show_obj(true).with_obj_vram_1d(true));
-}
-
-fn update_cursor_oam(sel: u8, frame: u16) {
-    let bob = CURSOR_BOB[((frame >> 2) as usize) & 7];
-    let px = ((MENU_X as u16).saturating_sub(2)) * 8 + bob;
-    let py = (MENU_ROW as u16 + sel as u16 * MENU_SPACING as u16) * 8;
-
-    OBJ_ATTR0.index(0).write(ObjAttr0::new().with_y(py & 0xFF));
-    OBJ_ATTR1.index(0).write(ObjAttr1::new().with_x(px & 0x1FF));
-    OBJ_ATTR2.index(0).write(ObjAttr2::new().with_tile_id(0).with_palbank(0));
-}
-
-fn hide_cursor() {
-    OBJ_ATTR0
-        .index(0)
-        .write(ObjAttr0::new().with_style(ObjDisplayStyle::NotDisplayed));
-}
-
-// ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
 
@@ -494,7 +450,7 @@ fn run_seed_entry(mut frame: u16) -> Option<u32> {
 
     // Clear HUD for seed entry and hide menu cursor.
     display::clear_hud();
-    hide_cursor();
+    crate::cursor::hide();
     render_torches();
 
     // "ENTER SEED CODE" = 15 chars, centered between torches (cols 5-25).
@@ -511,11 +467,11 @@ fn run_seed_entry(mut frame: u16) -> Option<u32> {
     display::write_hud_string(5, 14, "A:confirm  B:cancel", 2);
 
     // Wait one frame to consume the A press that entered this screen.
-    vblank_wait();
+    display::vblank_wait();
     let _ = read_seed_input();
 
     loop {
-        vblank_wait();
+        display::vblank_wait();
         frame = frame.wrapping_add(1);
         animate_palettes(frame);
 
@@ -564,7 +520,7 @@ fn run_seed_entry(mut frame: u16) -> Option<u32> {
                             // Invalid or zero seed — flash error.
                             display::write_hud_string(8, 10, "Invalid seed!", 4);
                             for _ in 0..30 {
-                                vblank_wait();
+                                display::vblank_wait();
                             }
                             for x in 0..30 {
                                 display::write_hud_tile(x, 10, b' ', 0);
@@ -639,9 +595,8 @@ fn read_seed_input() -> Option<SeedInput> {
 // ---------------------------------------------------------------------------
 
 fn cleanup() {
-    hide_cursor();
-    let dc = DISPCNT.read();
-    DISPCNT.write(dc.with_show_obj(false));
+    crate::cursor::hide();
+    crate::cursor::disable_obj_layer();
 
     // Reset scroll, mosaic, and blend.
     BG0HOFS.write(0);
@@ -666,9 +621,4 @@ fn cleanup() {
             row.index(x).write(empty);
         }
     }
-}
-
-fn vblank_wait() {
-    while VCOUNT.read() < 160 {}
-    while VCOUNT.read() >= 160 {}
 }

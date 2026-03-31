@@ -64,6 +64,23 @@ pub fn init_palette() {
     }
 }
 
+/// Linearly interpolate between two RGB555 colors.
+/// `t` ranges from 0 (= color `a`) to 31 (= color `b`). All math in u32.
+pub fn lerp_color(a: Color, b: Color, t: u32) -> Color {
+    let a0 = a.0 as u32;
+    let b0 = b.0 as u32;
+    let ar = a0 & 0x1F;
+    let ag = (a0 >> 5) & 0x1F;
+    let ab = (a0 >> 10) & 0x1F;
+    let br = b0 & 0x1F;
+    let bg = (b0 >> 5) & 0x1F;
+    let bb = (b0 >> 10) & 0x1F;
+    let r = (ar * (31 - t) + br * t) / 31;
+    let g = (ag * (31 - t) + bg * t) / 31;
+    let b_ch = (ab * (31 - t) + bb * t) / 31;
+    Color::from_rgb(r as u16, g as u16, b_ch as u16)
+}
+
 /// Convert a `GameColor` + visibility state to a palbank index.
 ///
 /// For visible tiles, the palbank is the `GameColor` discriminant directly.

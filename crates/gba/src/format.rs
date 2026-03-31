@@ -6,6 +6,60 @@
 use roguelike_core::rules::health::HealthTier;
 use roguelike_core::rules::message::{Combatant, GameEvent};
 
+// ---------------------------------------------------------------------------
+// LineBuf — ergonomic buffer for the write_str/write_u16/display pattern
+// ---------------------------------------------------------------------------
+
+/// A 30-byte line buffer for building formatted text without allocation.
+///
+/// ```ignore
+/// let mut line = LineBuf::new();
+/// line.str("ATK+");
+/// line.u16(5);
+/// display::write_hud_right_aligned(row, line.as_str(), pal, 1);
+/// ```
+pub struct LineBuf {
+    buf: [u8; 30],
+    pos: usize,
+}
+
+impl LineBuf {
+    pub fn new() -> Self {
+        Self {
+            buf: [b' '; 30],
+            pos: 0,
+        }
+    }
+
+    /// Append a string.
+    pub fn str(&mut self, s: &str) {
+        self.pos = write_str(&mut self.buf, self.pos, s);
+    }
+
+    /// Append a u16 as decimal digits.
+    pub fn u16(&mut self, val: u16) {
+        self.pos = write_u16(&mut self.buf, self.pos, val);
+    }
+
+    /// Append a single byte.
+    pub fn byte(&mut self, b: u8) {
+        if self.pos < self.buf.len() {
+            self.buf[self.pos] = b;
+            self.pos += 1;
+        }
+    }
+
+    /// Get the written content as a &str (trimmed).
+    pub fn as_str(&self) -> &str {
+        core::str::from_utf8(&self.buf[..self.pos]).unwrap_or("")
+    }
+
+    /// Number of bytes written.
+    pub fn len(&self) -> usize {
+        self.pos
+    }
+}
+
 /// Write a u32 as 8-digit uppercase hexadecimal into `buf` starting at `pos`.
 /// Returns the new position after the 8 hex digits.
 pub fn write_hex(buf: &mut [u8], pos: usize, val: u32) -> usize {

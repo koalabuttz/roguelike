@@ -135,3 +135,59 @@ pub fn clear_hud() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Layout helpers
+// ---------------------------------------------------------------------------
+
+/// Clear a single row on the HUD layer.
+pub fn clear_hud_row(y: usize) {
+    for x in 0..SCREEN_COLS {
+        write_hud_tile(x, y, b' ', 0);
+    }
+}
+
+/// Write a string centered on the HUD layer at row y.
+/// Returns the X position used (for aligning related elements).
+pub fn write_hud_centered(y: usize, s: &str, palbank: u16) -> usize {
+    let x = SCREEN_COLS.saturating_sub(s.len()) / 2;
+    write_hud_string(x, y, s, palbank);
+    x
+}
+
+/// Write a string centered on the map layer at row y.
+/// Returns the X position used.
+pub fn write_map_centered(y: usize, s: &str, palbank: u16) -> usize {
+    let x = SCREEN_COLS.saturating_sub(s.len()) / 2;
+    write_map_string(x, y, s, palbank);
+    x
+}
+
+/// Write a string right-aligned on the HUD layer at row y.
+/// The string ends at column `SCREEN_COLS - 1 - margin`.
+pub fn write_hud_right_aligned(y: usize, s: &str, palbank: u16, margin: usize) {
+    let x = SCREEN_COLS.saturating_sub(s.len() + margin);
+    write_hud_string(x, y, s, palbank);
+}
+
+/// Draw a horizontal separator line (─) on the HUD layer.
+pub fn write_hud_separator(y: usize, x_start: usize, x_end: usize, palbank: u16) {
+    for x in x_start..x_end {
+        write_hud_tile(x, y, 0xC4, palbank);
+    }
+}
+
+/// Fill a rectangular region on the HUD layer with a glyph.
+pub fn fill_hud_rect(x: usize, y: usize, w: usize, h: usize, glyph: u8, palbank: u16) {
+    for ry in y..y + h {
+        for rx in x..x + w {
+            write_hud_tile(rx, ry, glyph, palbank);
+        }
+    }
+}
+
+/// Wait for VBlank (scanline >= 160), then wait for it to end.
+pub fn vblank_wait() {
+    while VCOUNT.read() < 160 {}
+    while VCOUNT.read() >= 160 {}
+}

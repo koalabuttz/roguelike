@@ -1,69 +1,60 @@
-//! Structured binary save/load for the micro tier.
+//! Structured binary save/load for the compact tier (GBA).
 //!
-//! Defines a versioned binary format with magic bytes, explicit field
-//! ordering, and CRC-16 checksum. The format is independent of Rust
-//! struct layout — saves survive recompilation.
+//! Follows the same streaming pattern as `tier_micro/save.rs`: versioned
+//! binary format with magic bytes, explicit field ordering, CRC-16 checksum,
+//! and a tier byte in the envelope so any platform can detect the save type.
 //!
-//! Serialization uses streaming callbacks (`FnMut`) so the C64 can
-//! write directly to disk via KERNAL CHROUT without a RAM buffer.
+//! Key differences from micro format:
+//! - Tier byte (1) after version in envelope
+//! - i32 coords (4 bytes LE) for entities, items, and rooms
+//! - Unpacked tiles (one byte per tile, no nibble packing)
+//! - u32 seed and RNG state (4 bytes LE each)
+//! - Fixed map dimensions (MAP_WIDTH × MAP_HEIGHT) — not stored per-save
 //!
 //! # Format (v1)
 //!
 //! ```text
-//! Header (8B): magic "RG" | version | width | height | seed (LE u16) | depth
-//! Scalars (12B): turn_count (LE u16) | kills | flags | counters | rng (LE u16)
-//! Map: room_count | rooms × {x,y,w,h} | packed tiles
-//! Explored: bitfield bytes (visible is skipped — recomputed on load)
-//! Entities: count | 10 parallel arrays × count
-//! Items: count | 4 parallel arrays × count
-//! Equipment: weapon | armor (0xFF = None)
-//! Inventory: 26 × {kind, count, props[8]} (0xFF = empty slot, 10 bytes each)
-//! CRC-16 (2B): CCITT over all preceding bytes
+//! Envelope (4B): magic "RG" | version(1) | tier(1)
+//! Header (8B):   seed (LE u32) | depth | turn_count (LE u16) | kills
+//! Scalars (4B):  flags(game_over,game_won,auto_pickup) | idle | wander_spawned | wander_counter
+//! RNG (4B):      rng state (LE u32)
+//! Map:           room_count | rooms[count × 16B] | tiles[MAP_SIZE]
+//! Explored:      bitfield[BITFIELD_SIZE]
+//! Entities:      count | parallel arrays (i32 coords = 4B LE each)
+//! Items:         count | parallel arrays (i32 coords = 4B LE each)
+//! Equipment:     weapon(1) | weapon_props(8) | armor(1) | armor_props(8)
+//! Inventory:     26 × {kind(1) | count(1) | props(8)}
+//! CRC-16 (2B):   CCITT over all preceding bytes
 //! ```
 
 use super::entity::EntityStore;
-use super::fov::MicroFov;
-use super::game::MicroGameState;
-use super::item_store::{ItemStore, MAX_ITEMS};
-use super::map::{MicroMap, Room};
-use super::msglog::MicroMessageLog;
-use super::prng::LfsrRng16;
+use super::fov::CompactFov;
+use super::game::CompactGameState;
+use super::item_store::ItemStore;
+use super::map::{CompactMap, Room};
+use super::msglog::CompactMessageLog;
+use super::prng::LfsrRng32;
 use super::types::*;
 use crate::rules::items::{Equipment, InvSlot, Inventory, MAX_INVENTORY};
 // ItemKind used in tests via `use super::*` + save_common glob.
 #[cfg(test)]
 use crate::rules::items::ItemKind;
 use crate::rules::save_common::*;
+use crate::rules::seed_code::Tier;
 
 pub use crate::rules::save_common::{crc16, crc16_update, SaveError, SAVE_MAGIC};
 
-pub const SAVE_VERSION: u8 = 2;
-
-// ---------------------------------------------------------------------------
-// Size helpers
-// ---------------------------------------------------------------------------
-
-/// Number of bytes in the packed tile array for the given dimensions.
-fn packed_tile_count(width: u8, height: u8) -> usize {
-    let tiles = (width as usize) * (height as usize);
-    (tiles + 1) >> 1
-}
-
-/// Number of bytes in the explored bitfield for the given dimensions.
-fn bitfield_byte_count(width: u8, height: u8) -> usize {
-    let tiles = (width as usize) * (height as usize);
-    (tiles + 7) >> 3
-}
+/// Format version for compact tier saves.
+pub const SAVE_VERSION: u8 = 1;
 
 // ---------------------------------------------------------------------------
 // Serialize
 // ---------------------------------------------------------------------------
 
-/// Serialize `MicroGameState` to a byte stream via the `emit` callback.
+/// Serialize `CompactGameState` to a byte stream via the `emit` callback.
 ///
-/// Appends a CRC-16 checksum at the end (not included in the CRC itself).
-/// Returns the total number of bytes emitted (including CRC).
-pub fn serialize<F: FnMut(u8)>(state: &MicroGameState, emit: &mut F) -> usize {
+/// Appends a CRC-16 checksum at the end. Returns total bytes emitted.
+pub fn serialize<F: FnMut(u8)>(state: &CompactGameState, emit: &mut F) -> usize {
     let mut crc: u16 = 0xFFFF;
     let mut n: usize = 0;
 
@@ -84,50 +75,73 @@ pub fn serialize<F: FnMut(u8)>(state: &MicroGameState, emit: &mut F) -> usize {
         }};
     }
 
-    // --- Header (8 bytes) ---
+    macro_rules! wb_i32 {
+        ($v:expr) => {{
+            let val: u32 = $v as u32;
+            wb!(val as u8);
+            wb!((val >> 8) as u8);
+            wb!((val >> 16) as u8);
+            wb!((val >> 24) as u8);
+        }};
+    }
+
+    macro_rules! wb_u32 {
+        ($v:expr) => {{
+            let val: u32 = $v;
+            wb!(val as u8);
+            wb!((val >> 8) as u8);
+            wb!((val >> 16) as u8);
+            wb!((val >> 24) as u8);
+        }};
+    }
+
+    // --- Envelope (4 bytes) ---
     wb!(SAVE_MAGIC[0]);
     wb!(SAVE_MAGIC[1]);
     wb!(SAVE_VERSION);
-    wb!(state.map.width);
-    wb!(state.map.height);
-    wb_u16!(state.seed);
-    wb!(state.depth);
+    wb!(Tier::Compact as u8);
 
-    // --- Scalars (12 bytes) ---
+    // --- Header (8 bytes) ---
+    wb_u32!(state.seed);
+    wb!(state.depth);
     wb_u16!(state.turn_count);
     wb!(state.kills);
-    wb!(state.game_over as u8);
-    wb!(state.game_won as u8);
+
+    // --- Scalars (4 bytes) ---
+    let flags: u8 = (state.game_over as u8)
+        | ((state.game_won as u8) << 1)
+        | ((state.auto_pickup as u8) << 2);
+    wb!(flags);
     wb!(state.idle_count);
     wb!(state.wandering_spawned);
-    wb!(state.regen_counter);
     wb!(state.wandering_counter);
-    wb!(state.ambient_sound_counter);
-    wb_u16!(state.rng.state());
+
+    // --- RNG (4 bytes) ---
+    wb_u32!(state.rng.state());
 
     // --- Map ---
     wb!(state.map.room_count);
     let rc = state.map.room_count as usize;
     let mut i = 0;
     while i < rc {
-        wb!(state.map.rooms[i].x);
-        wb!(state.map.rooms[i].y);
-        wb!(state.map.rooms[i].w);
-        wb!(state.map.rooms[i].h);
+        wb_i32!(state.map.rooms[i].x);
+        wb_i32!(state.map.rooms[i].y);
+        wb_i32!(state.map.rooms[i].w);
+        wb_i32!(state.map.rooms[i].h);
         i += 1;
     }
-    let packed = packed_tile_count(state.map.width, state.map.height);
+    // Unpacked tiles — one byte per tile
+    let tile_count = (state.map.width as usize) * (state.map.height as usize);
     i = 0;
-    while i < packed {
+    while i < tile_count {
         wb!(state.map.tiles[i]);
         i += 1;
     }
 
     // --- Explored bitfield (visible is skipped — recomputed on load) ---
-    let bf_size = bitfield_byte_count(state.map.width, state.map.height);
     let explored = state.fov.explored_bytes();
     i = 0;
-    while i < bf_size {
+    while i < BITFIELD_SIZE {
         wb!(explored[i]);
         i += 1;
     }
@@ -137,12 +151,12 @@ pub fn serialize<F: FnMut(u8)>(state: &MicroGameState, emit: &mut F) -> usize {
     wb!(state.entities.count);
     i = 0;
     while i < ec {
-        wb!(state.entities.x[i]);
+        wb_i32!(state.entities.x[i]);
         i += 1;
     }
     i = 0;
     while i < ec {
-        wb!(state.entities.y[i]);
+        wb_i32!(state.entities.y[i]);
         i += 1;
     }
     i = 0;
@@ -191,12 +205,12 @@ pub fn serialize<F: FnMut(u8)>(state: &MicroGameState, emit: &mut F) -> usize {
     wb!(state.items.count);
     i = 0;
     while i < ic {
-        wb!(state.items.x[i]);
+        wb_i32!(state.items.x[i]);
         i += 1;
     }
     i = 0;
     while i < ic {
-        wb!(state.items.y[i]);
+        wb_i32!(state.items.y[i]);
         i += 1;
     }
     i = 0;
@@ -266,14 +280,14 @@ pub fn serialize<F: FnMut(u8)>(state: &MicroGameState, emit: &mut F) -> usize {
 // Deserialize
 // ---------------------------------------------------------------------------
 
-/// Deserialize a byte stream into `MicroGameState`.
+/// Deserialize a byte stream into `CompactGameState`.
 ///
 /// The `read` callback must return `Some(byte)` for each byte, or `None`
 /// on EOF/error. All fields of `state` are overwritten — including the
 /// message log, which is reset. FOV visible bitfield is NOT restored;
 /// the caller must call `compute_fov()` after a successful load.
 pub fn deserialize<F: FnMut() -> Option<u8>>(
-    state: &mut MicroGameState,
+    state: &mut CompactGameState,
     read: &mut F,
 ) -> Result<(), SaveError> {
     let mut crc: u16 = 0xFFFF;
@@ -294,64 +308,82 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
         }};
     }
 
-    // --- Header ---
+    macro_rules! rb_u32 {
+        () => {{
+            let b0 = rb!() as u32;
+            let b1 = rb!() as u32;
+            let b2 = rb!() as u32;
+            let b3 = rb!() as u32;
+            b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+        }};
+    }
+
+    macro_rules! rb_i32 {
+        () => {
+            rb_u32!() as i32
+        };
+    }
+
+    // --- Envelope ---
     if rb!() != SAVE_MAGIC[0] || rb!() != SAVE_MAGIC[1] {
         return Err(SaveError::BadMagic);
     }
     if rb!() != SAVE_VERSION {
         return Err(SaveError::BadVersion);
     }
-    let width = rb!();
-    let height = rb!();
-    if width > MAX_MAP_WIDTH || height > MAX_MAP_HEIGHT || width == 0 || height == 0 {
+    let tier = rb!();
+    if tier != Tier::Compact as u8 {
         return Err(SaveError::BadData);
     }
-    let seed = rb_u16!();
-    let depth = rb!();
 
-    // --- Scalars ---
+    // --- Header ---
+    let seed = rb_u32!();
+    let depth = rb!();
     let turn_count = rb_u16!();
     let kills = rb!();
-    let game_over = rb!() != 0;
-    let game_won = rb!() != 0;
+
+    // --- Scalars ---
+    let flags = rb!();
+    let game_over = flags & 1 != 0;
+    let game_won = flags & 2 != 0;
+    let auto_pickup = flags & 4 != 0;
     let idle_count = rb!();
     let wandering_spawned = rb!();
-    let regen_counter = rb!();
     let wandering_counter = rb!();
-    let ambient_sound_counter = rb!();
-    let rng_state = rb_u16!();
+
+    // --- RNG ---
+    let rng_state = rb_u32!();
 
     // --- Map ---
     let room_count = rb!();
     if room_count as usize > MAX_ROOMS {
         return Err(SaveError::BadData);
     }
-    state.map = MicroMap::new(width, height);
+    state.map = CompactMap::new(MAP_WIDTH, MAP_HEIGHT);
     state.map.room_count = room_count;
     let mut i: usize = 0;
     let rc = room_count as usize;
     while i < rc {
         state.map.rooms[i] = Room {
-            x: rb!(),
-            y: rb!(),
-            w: rb!(),
-            h: rb!(),
+            x: rb_i32!(),
+            y: rb_i32!(),
+            w: rb_i32!(),
+            h: rb_i32!(),
         };
         i += 1;
     }
-    let packed = packed_tile_count(width, height);
+    let tile_count = (MAP_WIDTH as usize) * (MAP_HEIGHT as usize);
     i = 0;
-    while i < packed {
+    while i < tile_count {
         state.map.tiles[i] = rb!();
         i += 1;
     }
 
     // --- Explored bitfield ---
-    state.fov = MicroFov::new(width, height);
-    let bf_size = bitfield_byte_count(width, height);
+    state.fov = CompactFov::new(MAP_WIDTH, MAP_HEIGHT);
     let explored = state.fov.explored_bytes_mut();
     i = 0;
-    while i < bf_size {
+    while i < BITFIELD_SIZE {
         explored[i] = rb!();
         i += 1;
     }
@@ -365,12 +397,12 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
     state.entities.count = ec as u8;
     i = 0;
     while i < ec {
-        state.entities.x[i] = rb!();
+        state.entities.x[i] = rb_i32!();
         i += 1;
     }
     i = 0;
     while i < ec {
-        state.entities.y[i] = rb!();
+        state.entities.y[i] = rb_i32!();
         i += 1;
     }
     i = 0;
@@ -423,12 +455,12 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
     state.items.count = ic as u8;
     i = 0;
     while i < ic {
-        state.items.x[i] = rb!();
+        state.items.x[i] = rb_i32!();
         i += 1;
     }
     i = 0;
     while i < ic {
-        state.items.y[i] = rb!();
+        state.items.y[i] = rb_i32!();
         i += 1;
     }
     i = 0;
@@ -467,8 +499,6 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
         weapon_props,
         armor_props,
     };
-    // Note: no fixup_empty_bags() needed here — the version check at the
-    // top rejects v1 saves, and v2 saves always include property bag bytes.
 
     // --- Inventory (10 bytes per slot: kind + count + 8 props) ---
     state.inventory = Inventory::new();
@@ -502,13 +532,12 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
     state.kills = kills;
     state.game_over = game_over;
     state.game_won = game_won;
+    state.auto_pickup = auto_pickup;
     state.idle_count = idle_count;
     state.wandering_spawned = wandering_spawned;
-    state.regen_counter = regen_counter;
     state.wandering_counter = wandering_counter;
-    state.ambient_sound_counter = ambient_sound_counter;
-    state.rng = LfsrRng16::from_raw_state(rng_state);
-    state.log = MicroMessageLog::new();
+    state.rng = LfsrRng32::from_raw_state(rng_state);
+    state.log = CompactMessageLog::new();
 
     // --- CRC verification ---
     let stored_lo = read().ok_or(SaveError::UnexpectedEof)?;
@@ -528,18 +557,19 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules::monster_table::{AiBehavior, MonsterKind};
-    use crate::tier_micro::game::MicroGameState;
+    use crate::rules::items;
+    use crate::tier_compact::game::CompactGameState;
 
-    /// Serialize a game state to a Vec<u8>.
-    fn serialize_to_vec(state: &MicroGameState) -> Vec<u8> {
+    fn serialize_to_vec(state: &CompactGameState) -> Vec<u8> {
         let mut buf = Vec::new();
         serialize(state, &mut |b| buf.push(b));
         buf
     }
 
-    /// Deserialize from a byte slice into a MicroGameState.
-    fn deserialize_from_slice(state: &mut MicroGameState, data: &[u8]) -> Result<(), SaveError> {
+    fn deserialize_from_slice(
+        state: &mut CompactGameState,
+        data: &[u8],
+    ) -> Result<(), SaveError> {
         let mut pos = 0;
         deserialize(state, &mut || {
             if pos < data.len() {
@@ -552,30 +582,32 @@ mod tests {
         })
     }
 
+    fn new_game(seed: u32) -> CompactGameState {
+        CompactGameState::new(seed, MAP_WIDTH, MAP_HEIGHT)
+    }
+
     #[test]
     fn round_trip_default_game() {
-        let original = MicroGameState::new_default(42);
+        let original = new_game(42);
         let bytes = serialize_to_vec(&original);
 
-        let mut loaded = MicroGameState::new_default(0);
+        let mut loaded = new_game(0);
         deserialize_from_slice(&mut loaded, &bytes).unwrap();
 
-        // Verify key fields match
         assert_eq!(loaded.seed, original.seed);
         assert_eq!(loaded.depth, original.depth);
         assert_eq!(loaded.turn_count, original.turn_count);
         assert_eq!(loaded.kills, original.kills);
         assert_eq!(loaded.game_over, original.game_over);
         assert_eq!(loaded.game_won, original.game_won);
+        assert_eq!(loaded.auto_pickup, original.auto_pickup);
         assert_eq!(loaded.rng.state(), original.rng.state());
-        assert_eq!(loaded.map.width, original.map.width);
-        assert_eq!(loaded.map.height, original.map.height);
         assert_eq!(loaded.map.room_count, original.map.room_count);
         assert_eq!(loaded.entities.count, original.entities.count);
         assert_eq!(loaded.items.count, original.items.count);
         assert_eq!(loaded.equipment, original.equipment);
 
-        // Verify entity arrays match for alive entities
+        // Verify entity arrays match
         let ec = original.entities.count as usize;
         assert_eq!(&loaded.entities.x[..ec], &original.entities.x[..ec]);
         assert_eq!(&loaded.entities.y[..ec], &original.entities.y[..ec]);
@@ -584,26 +616,25 @@ mod tests {
         assert_eq!(&loaded.entities.kind[..ec], &original.entities.kind[..ec]);
 
         // Verify map tiles match
-        let packed = packed_tile_count(original.map.width, original.map.height);
-        assert_eq!(&loaded.map.tiles[..packed], &original.map.tiles[..packed]);
+        let tile_count = (original.map.width as usize) * (original.map.height as usize);
+        assert_eq!(
+            &loaded.map.tiles[..tile_count],
+            &original.map.tiles[..tile_count]
+        );
 
         // Verify explored bitfield matches
-        let bf = bitfield_byte_count(original.map.width, original.map.height);
         assert_eq!(
-            &loaded.fov.explored_bytes()[..bf],
-            &original.fov.explored_bytes()[..bf]
+            loaded.fov.explored_bytes(),
+            original.fov.explored_bytes()
         );
     }
 
     #[test]
     fn round_trip_byte_stream_identical() {
-        // Serialize twice via round-trip and compare byte streams.
-        // This catches any field that serialize writes but deserialize
-        // doesn't restore (or vice versa).
-        let original = MicroGameState::new_default(12345);
+        let original = new_game(12345);
         let bytes1 = serialize_to_vec(&original);
 
-        let mut loaded = MicroGameState::new_default(0);
+        let mut loaded = new_game(0);
         deserialize_from_slice(&mut loaded, &bytes1).unwrap();
         let bytes2 = serialize_to_vec(&loaded);
 
@@ -615,24 +646,23 @@ mod tests {
 
     #[test]
     fn round_trip_with_inventory() {
-        let mut state = MicroGameState::new_default(99);
+        let mut state = new_game(99);
         state.inventory.add(ItemKind::HealthPotion);
         state.inventory.add(ItemKind::HealthPotion);
         state.inventory.add(ItemKind::ShortSword);
         state.equipment = Equipment {
             weapon: Some(ItemKind::ShortSword),
-            weapon_props: crate::rules::items::default_properties(ItemKind::ShortSword),
+            weapon_props: items::default_properties(ItemKind::ShortSword),
             armor: Some(ItemKind::LeatherArmor),
-            armor_props: crate::rules::items::default_properties(ItemKind::LeatherArmor),
+            armor_props: items::default_properties(ItemKind::LeatherArmor),
         };
 
         let bytes = serialize_to_vec(&state);
-        let mut loaded = MicroGameState::new_default(0);
+        let mut loaded = new_game(0);
         deserialize_from_slice(&mut loaded, &bytes).unwrap();
 
         assert_eq!(loaded.equipment, state.equipment);
         assert_eq!(loaded.inventory.len(), state.inventory.len());
-        // Potions should be stacked (count=2)
         assert_eq!(loaded.inventory.get(0).unwrap().count, 2);
         assert_eq!(
             loaded.inventory.get(0).unwrap().kind,
@@ -643,10 +673,10 @@ mod tests {
 
     #[test]
     fn bad_magic_rejected() {
-        let state = MicroGameState::new_default(1);
+        let state = new_game(1);
         let mut bytes = serialize_to_vec(&state);
-        bytes[0] = b'X'; // corrupt magic
-        let mut loaded = MicroGameState::new_default(0);
+        bytes[0] = b'X';
+        let mut loaded = new_game(0);
         assert_eq!(
             deserialize_from_slice(&mut loaded, &bytes),
             Err(SaveError::BadMagic)
@@ -655,16 +685,15 @@ mod tests {
 
     #[test]
     fn bad_version_rejected() {
-        let state = MicroGameState::new_default(1);
+        let state = new_game(1);
         let mut bytes = serialize_to_vec(&state);
         bytes[2] = 99; // future version
-        // Fix CRC for the corrupted data so we test version check, not CRC
         let data_len = bytes.len() - 2;
         let new_crc = crc16(&bytes[..data_len]);
         bytes[data_len] = new_crc as u8;
         bytes[data_len + 1] = (new_crc >> 8) as u8;
 
-        let mut loaded = MicroGameState::new_default(0);
+        let mut loaded = new_game(0);
         assert_eq!(
             deserialize_from_slice(&mut loaded, &bytes),
             Err(SaveError::BadVersion)
@@ -672,12 +701,28 @@ mod tests {
     }
 
     #[test]
-    fn bad_checksum_rejected() {
-        let state = MicroGameState::new_default(1);
+    fn wrong_tier_rejected() {
+        let state = new_game(1);
         let mut bytes = serialize_to_vec(&state);
-        // Corrupt a data byte (not the CRC bytes)
+        bytes[3] = Tier::Micro as u8; // wrong tier
+        let data_len = bytes.len() - 2;
+        let new_crc = crc16(&bytes[..data_len]);
+        bytes[data_len] = new_crc as u8;
+        bytes[data_len + 1] = (new_crc >> 8) as u8;
+
+        let mut loaded = new_game(0);
+        assert_eq!(
+            deserialize_from_slice(&mut loaded, &bytes),
+            Err(SaveError::BadData)
+        );
+    }
+
+    #[test]
+    fn bad_checksum_rejected() {
+        let state = new_game(1);
+        let mut bytes = serialize_to_vec(&state);
         bytes[10] ^= 0xFF;
-        let mut loaded = MicroGameState::new_default(0);
+        let mut loaded = new_game(0);
         assert_eq!(
             deserialize_from_slice(&mut loaded, &bytes),
             Err(SaveError::BadChecksum)
@@ -686,11 +731,10 @@ mod tests {
 
     #[test]
     fn truncated_file_rejected() {
-        let state = MicroGameState::new_default(1);
+        let state = new_game(1);
         let bytes = serialize_to_vec(&state);
-        // Cut off halfway
         let truncated = &bytes[..bytes.len() / 2];
-        let mut loaded = MicroGameState::new_default(0);
+        let mut loaded = new_game(0);
         assert_eq!(
             deserialize_from_slice(&mut loaded, truncated),
             Err(SaveError::UnexpectedEof)
@@ -699,7 +743,7 @@ mod tests {
 
     #[test]
     fn empty_file_rejected() {
-        let mut loaded = MicroGameState::new_default(0);
+        let mut loaded = new_game(0);
         assert_eq!(
             deserialize_from_slice(&mut loaded, &[]),
             Err(SaveError::UnexpectedEof)
@@ -708,11 +752,11 @@ mod tests {
 
     #[test]
     fn save_size_reasonable() {
-        let state = MicroGameState::new_default(42);
+        let state = new_game(42);
         let bytes = serialize_to_vec(&state);
-        // 64×48 map: ~2000-2500 bytes typical
+        // 80×40 map: ~4000-6000 bytes typical
         assert!(
-            bytes.len() > 1500 && bytes.len() < 4000,
+            bytes.len() > 3000 && bytes.len() < 8000,
             "save size {} outside expected range",
             bytes.len()
         );
@@ -720,67 +764,46 @@ mod tests {
 
     #[test]
     fn multiple_seeds_round_trip() {
-        for seed in [1, 100, 1000, 0xFFFF, 0xACE1] {
-            let original = MicroGameState::new_default(seed);
+        for seed in [1u32, 100, 1000, 0xFFFF, 0xACE1_CAFE] {
+            let original = new_game(seed);
             let bytes = serialize_to_vec(&original);
-            let mut loaded = MicroGameState::new_default(0);
+            let mut loaded = new_game(0);
             deserialize_from_slice(&mut loaded, &bytes).unwrap();
             assert_eq!(loaded.seed, original.seed);
             assert_eq!(loaded.rng.state(), original.rng.state());
 
-            // Re-serialize and verify identical
             let bytes2 = serialize_to_vec(&loaded);
             assert_eq!(bytes, bytes2);
         }
     }
 
     #[test]
-    fn round_trip_custom_dimensions() {
-        let original = MicroGameState::new(42, 32, 24);
-        let bytes = serialize_to_vec(&original);
-        let mut loaded = MicroGameState::new_default(0);
+    fn flags_round_trip() {
+        let mut state = new_game(42);
+        state.game_over = true;
+        state.game_won = true;
+        state.auto_pickup = true;
+        state.idle_count = 7;
+        state.wandering_spawned = 3;
+
+        let bytes = serialize_to_vec(&state);
+        let mut loaded = new_game(0);
         deserialize_from_slice(&mut loaded, &bytes).unwrap();
 
-        assert_eq!(loaded.map.width, 32);
-        assert_eq!(loaded.map.height, 24);
-        let bytes2 = serialize_to_vec(&loaded);
-        assert_eq!(bytes, bytes2);
+        assert!(loaded.game_over);
+        assert!(loaded.game_won);
+        assert!(loaded.auto_pickup);
+        assert_eq!(loaded.idle_count, 7);
+        assert_eq!(loaded.wandering_spawned, 3);
     }
 
     #[test]
-    fn bad_dimensions_rejected() {
-        let state = MicroGameState::new_default(1);
-        let mut bytes = serialize_to_vec(&state);
-        // Set width to 0 (invalid)
-        bytes[3] = 0;
-        // Fix CRC
-        let data_len = bytes.len() - 2;
-        let new_crc = crc16(&bytes[..data_len]);
-        bytes[data_len] = new_crc as u8;
-        bytes[data_len + 1] = (new_crc >> 8) as u8;
-
-        let mut loaded = MicroGameState::new_default(0);
-        assert_eq!(
-            deserialize_from_slice(&mut loaded, &bytes),
-            Err(SaveError::BadData)
-        );
-    }
-
-    #[test]
-    fn private_counters_preserved() {
-        let mut original = MicroGameState::new_default(42);
-        // Advance the game a few turns to change counter values
-        use crate::command::GameCommand;
-        for _ in 0..5 {
-            original.step(GameCommand::Wait);
-        }
-
-        let bytes = serialize_to_vec(&original);
-        let mut loaded = MicroGameState::new_default(0);
-        deserialize_from_slice(&mut loaded, &bytes).unwrap();
-
-        assert_eq!(loaded.regen_counter, original.regen_counter);
-        assert_eq!(loaded.wandering_counter, original.wandering_counter);
-        assert_eq!(loaded.ambient_sound_counter, original.ambient_sound_counter);
+    fn envelope_has_tier_byte() {
+        let state = new_game(42);
+        let bytes = serialize_to_vec(&state);
+        assert_eq!(bytes[0], b'R');
+        assert_eq!(bytes[1], b'G');
+        assert_eq!(bytes[2], SAVE_VERSION);
+        assert_eq!(bytes[3], Tier::Compact as u8);
     }
 }

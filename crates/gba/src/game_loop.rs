@@ -8,9 +8,11 @@ use core::mem::MaybeUninit;
 use gba::prelude::*;
 
 use roguelike_core::command::GameCommand;
+use roguelike_core::rules::balance;
 use roguelike_core::rules::color::GameColor;
 use roguelike_core::rules::health::{self, HealthTier};
 use roguelike_core::rules::items as rules_items;
+use roguelike_core::rules::message::GameEvent;
 use roguelike_core::rules::monster_table;
 use roguelike_core::tier_compact::game::CompactGameState;
 use roguelike_core::tier_compact::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_STRUCTURAL};
@@ -44,13 +46,39 @@ fn game() -> &'static mut CompactGameState {
     unsafe { &mut *(&raw mut GAME).cast::<CompactGameState>() }
 }
 
-/// Run the title screen and return a seed (either random or user-entered).
-fn run_title_and_get_seed() -> u32 {
+/// What the title screen resolved to.
+enum TitleResult {
+    /// Start a fresh game with this seed.
+    NewGame(u32),
+    /// Continue from SRAM save.
+    Continue,
+}
+
+/// Run the title screen and return the chosen action.
+fn run_title_screen() -> TitleResult {
+    let has_save = crate::saves::has_save();
     loop {
-        match crate::title_screen::run_title() {
-            crate::title_screen::TitleAction::NewGame => return read_timer_seed(),
-            crate::title_screen::TitleAction::Seed(s) => return s,
+        match crate::title_screen::run_title(has_save) {
+            crate::title_screen::TitleAction::NewGame => return TitleResult::NewGame(read_timer_seed()),
+            crate::title_screen::TitleAction::Seed(s) => return TitleResult::NewGame(s),
+            crate::title_screen::TitleAction::Continue => return TitleResult::Continue,
         }
+    }
+}
+
+/// Load a saved game from SRAM into the EWRAM game state.
+/// Returns true on success.
+fn load_game() -> bool {
+    let state = game();
+    if crate::saves::load_from_sram(state).is_ok() {
+        // Recompute FOV from player position (visible bitfield not saved).
+        let px = state.entities.x[PLAYER_IDX as usize];
+        let py = state.entities.y[PLAYER_IDX as usize];
+        state.fov.compute_fov(px, py, balance::FOV_RADIUS, &state.map);
+        state.log.add(GameEvent::Welcome);
+        true
+    } else {
+        false
     }
 }
 
@@ -83,10 +111,29 @@ fn wait_for_key() {
 
 /// Main entry point — runs forever.
 pub fn run() -> ! {
-    let seed = run_title_and_get_seed();
-    start_game(seed);
-    render::render_game(game());
+    loop {
+        match run_title_screen() {
+            TitleResult::NewGame(seed) => {
+                start_game(seed);
+            }
+            TitleResult::Continue => {
+                // load_game writes into the EWRAM static directly.
+                if !load_game() {
+                    // Save was corrupt — fall back to new game.
+                    crate::saves::erase_save();
+                    continue; // Re-show title (now without Continue)
+                }
+                crate::debug::debug_log!("Game loaded from SRAM");
+            }
+        }
 
+        render::render_game(game());
+        run_play_loop();
+    }
+}
+
+/// The inner play loop — returns when the player quits or game ends.
+fn run_play_loop() {
     let mut app_state = AppState::Playing;
 
     loop {
@@ -119,11 +166,10 @@ pub fn run() -> ! {
                         continue;
                     }
                     GameCommand::Quit => {
-                        let seed = run_title_and_get_seed();
-                        start_game(seed);
-                        render::render_game(game());
-                        app_state = AppState::Playing;
-                        continue;
+                        // Save before returning to title.
+                        crate::saves::save_to_sram(state);
+                        crate::debug::debug_log!("Game saved to SRAM (quit)");
+                        return;
                     }
                     GameCommand::OpenInventory => {
                         crate::inventory_ui::run_inventory(game());
@@ -133,6 +179,7 @@ pub fn run() -> ! {
                     _ => {}
                 }
 
+                let depth_before = state.depth;
                 let mut result = state.step(cmd);
 
                 // A button sends Pickup; if nothing to pick up, try Descend.
@@ -142,6 +189,12 @@ pub fn run() -> ! {
 
                 if !result.action_taken {
                     continue;
+                }
+
+                // Auto-save after descending stairs (depth increased).
+                if state.depth > depth_before {
+                    crate::saves::save_to_sram(state);
+                    crate::debug::debug_log!("Auto-saved to SRAM (depth {})", state.depth);
                 }
 
                 render::render_game(state);
@@ -174,13 +227,13 @@ pub fn run() -> ! {
             }
 
             AppState::GameOver => {
+                // Erase save — permadeath, no reloading after death.
+                crate::saves::erase_save();
+                crate::debug::debug_log!("Save erased (game over)");
+
                 show_game_over(game());
                 wait_for_key();
-
-                let seed = run_title_and_get_seed();
-                start_game(seed);
-                render::render_game(game());
-                app_state = AppState::Playing;
+                return;
             }
         }
     }

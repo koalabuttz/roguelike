@@ -74,6 +74,14 @@ impl LfsrRng32 {
     pub const fn state(&self) -> u32 {
         self.state
     }
+
+    /// Restore RNG from a previously saved `state()` value.
+    /// Zero is replaced with a default (LFSR must never be zero).
+    pub const fn from_raw_state(raw: u32) -> Self {
+        Self {
+            state: if raw == 0 { 0xDEAD_BEEF } else { raw },
+        }
+    }
 }
 
 #[cfg(test)]

@@ -14,5 +14,6 @@ pub mod map;
 pub mod msglog;
 pub mod pathfinding;
 pub mod prng;
+pub mod save;
 pub mod spawn;
 pub mod types;

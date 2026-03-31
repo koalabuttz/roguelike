@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.5.0] - 2026-03-18
 
 ### Added
+- GBA: Decide save system format — postcard vs custom binary (#204)
+- GBA: Add title screen with seed selection (#232)
+- Add GBA display helpers, cursor module, LineBuf, and palette lerp (#238)
 - GBA: Add message formatting for all GameEvent variants (#234)
 - GBA: Add look mode with tile descriptions (#233)
 - GBA: Add inventory UI modal screen (#231)

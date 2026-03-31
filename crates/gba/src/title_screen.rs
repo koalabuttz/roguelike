@@ -37,8 +37,6 @@ const PALBANK_LINE: u16 = 11; // DIM
 const TITLE_ROW: usize = 5;
 /// Menu start row.
 const MENU_ROW: usize = 8;
-/// Menu item count.
-const MENU_COUNT: u8 = 3;
 /// Title text (spaced).
 const TITLE_TEXT: &str = "R O G U E L I K E";
 /// Title X position (centered: (30 - 17) / 2 = 6.5, round to 7).
@@ -81,11 +79,14 @@ pub enum TitleAction {
     NewGame,
     /// Start a game with a specific seed.
     Seed(u32),
+    /// Continue from a saved game.
+    Continue,
 }
 
 /// Run the title screen. Blocks until the player picks an action.
+/// `has_save` controls whether "Continue" appears in the menu.
 #[inline(never)]
-pub fn run_title() -> TitleAction {
+pub fn run_title(has_save: bool) -> TitleAction {
     // Clear both layers — gameplay HUD/map may still be visible.
     display::clear_hud();
 
@@ -107,7 +108,7 @@ pub fn run_title() -> TitleAction {
     // OAM cursor setup.
     crate::cursor::init();
 
-    let action = run_main_loop();
+    let action = run_main_loop(has_save);
 
     // Cleanup: restore gameplay state.
     cleanup();
@@ -118,7 +119,10 @@ pub fn run_title() -> TitleAction {
 // Main loop
 // ---------------------------------------------------------------------------
 
-fn run_main_loop() -> TitleAction {
+fn run_main_loop(has_save: bool) -> TitleAction {
+    let menu_count: u8 = if has_save { 4 } else { 3 };
+    // Menu item indices: with save = [Continue, New Game, Enter Seed, Settings]
+    //                    no save   = [New Game, Enter Seed, Settings]
     let mut frame: u16 = 0;
     let mut sel: u8 = 0;
     let mut entrance_done = false;
@@ -161,7 +165,7 @@ fn run_main_loop() -> TitleAction {
 
             // Menu fades in at frame 28.
             if frame == 28 {
-                render_menu(sel);
+                render_menu(sel, has_save);
             }
 
             if frame >= 34 {
@@ -200,19 +204,23 @@ fn run_main_loop() -> TitleAction {
                 TitleInput::Up => {
                     if sel > 0 {
                         sel -= 1;
-                        render_menu(sel);
+                        render_menu(sel, has_save);
                     }
                 }
                 TitleInput::Down => {
-                    if sel < MENU_COUNT - 1 {
+                    if sel < menu_count - 1 {
                         sel += 1;
-                        render_menu(sel);
+                        render_menu(sel, has_save);
                     }
                 }
                 TitleInput::Confirm => {
-                    match sel {
-                        0 => return TitleAction::NewGame,
-                        1 => {
+                    // Resolve menu index to action. With save: 0=Continue,
+                    // 1=New, 2=Seed, 3=Settings. Without: 0=New, 1=Seed, 2=Settings.
+                    let action_idx = if has_save { sel } else { sel + 1 };
+                    match action_idx {
+                        0 => return TitleAction::Continue,
+                        1 => return TitleAction::NewGame,
+                        2 => {
                             if let Some(seed) = run_seed_entry(frame) {
                                 return TitleAction::Seed(seed);
                             }
@@ -225,9 +233,9 @@ fn run_main_loop() -> TitleAction {
                                 display::write_hud_tile(x, TITLE_ROW + 1, 0xC4, PALBANK_LINE);
                             }
                             render_torches();
-                            render_menu(sel);
+                            render_menu(sel, has_save);
                         }
-                        2 => {
+                        3 => {
                             // Settings stub — do nothing.
                         }
                         _ => {}
@@ -381,14 +389,21 @@ fn render_torches() {
 // Menu
 // ---------------------------------------------------------------------------
 
-const MENU_ITEMS: [&str; 3] = ["New Game", "Enter Seed", "Settings"];
+const MENU_ITEMS_SAVE: [&str; 4] = ["Continue", "New Game", "Enter Seed", "Settings"];
+const MENU_ITEMS_NO_SAVE: [&str; 3] = ["New Game", "Enter Seed", "Settings"];
 /// Menu X: centered-ish between torches, left-justified.
 const MENU_X: usize = 10;
 /// Vertical spacing between menu items (every other row).
 const MENU_SPACING: usize = 2;
 
-fn render_menu(sel: u8) {
-    for (i, &label) in MENU_ITEMS.iter().enumerate() {
+fn render_menu(sel: u8, has_save: bool) {
+    let count = if has_save { 4usize } else { 3 };
+    for i in 0..count {
+        let label = if has_save {
+            MENU_ITEMS_SAVE[i]
+        } else {
+            MENU_ITEMS_NO_SAVE[i]
+        };
         let row = MENU_ROW + i * MENU_SPACING;
         let pal = if i as u8 == sel {
             PALBANK_NEON
@@ -399,6 +414,13 @@ fn render_menu(sel: u8) {
             display::write_hud_tile(x, row, b' ', 0);
         }
         display::write_hud_string(MENU_X, row, label, pal);
+    }
+    // Clear any leftover row from a previous 4-item render when now showing 3.
+    if !has_save {
+        let row = MENU_ROW + 3 * MENU_SPACING;
+        for x in MENU_X..29 {
+            display::write_hud_tile(x, row, b' ', 0);
+        }
     }
 }
 

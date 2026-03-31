@@ -179,7 +179,9 @@ mod tests {
         let mut input = make_input(&rx, &mut parser, &mut size_rx);
 
         // With no data sent, poll should time out and return false.
-        let result = input.poll_animation_interrupt(Duration::from_millis(10)).unwrap();
+        let result = input
+            .poll_animation_interrupt(Duration::from_millis(10))
+            .unwrap();
         assert!(!result);
     }
 
@@ -193,7 +195,9 @@ mod tests {
         drop(tx);
 
         let mut input = make_input(&rx, &mut parser, &mut size_rx);
-        let result = input.poll_animation_interrupt(Duration::from_millis(10)).unwrap();
+        let result = input
+            .poll_animation_interrupt(Duration::from_millis(10))
+            .unwrap();
         assert!(result);
     }
 }

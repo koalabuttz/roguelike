@@ -236,7 +236,25 @@ fn run_main_loop(has_save: bool) -> TitleAction {
                             render_menu(sel, has_save);
                         }
                         3 => {
-                            // Settings stub — do nothing.
+                            crate::settings_menu::run_settings();
+                            // Restore title screen state after settings closes.
+                            // Settings cleanup resets BLDCNT and OAM.
+                            crate::cursor::init();
+                            BLDCNT.write(
+                                BlendControl::new()
+                                    .with_mode(ColorEffectMode::Darken)
+                                    .with_target1_bg0(true),
+                            );
+                            BLDY.write(8);
+                            display::clear_hud();
+                            display::write_hud_string(
+                                TITLE_X, TITLE_ROW, TITLE_TEXT, PALBANK_NEON,
+                            );
+                            for x in TITLE_X..(TITLE_X + TITLE_TEXT.len()) {
+                                display::write_hud_tile(x, TITLE_ROW + 1, 0xC4, PALBANK_LINE);
+                            }
+                            render_torches();
+                            render_menu(sel, has_save);
                         }
                         _ => {}
                     }

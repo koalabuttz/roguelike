@@ -165,3 +165,73 @@ pub fn erase_save() {
     sram_write(2, 0xFF);
     sram_write(3, 0xFF);
 }
+
+// ---------------------------------------------------------------------------
+// Persistent settings (independent of game saves)
+// ---------------------------------------------------------------------------
+
+/// Settings live at a fixed SRAM offset well past the game save area.
+const SETTINGS_OFFSET: usize = 8192;
+/// 4-byte magic to validate the settings block.
+const SETTINGS_MAGIC: [u8; 4] = *b"RGST";
+
+/// GBA-specific persistent settings. Stored in SRAM independently of game saves
+/// so they survive character death and console restarts.
+#[derive(Clone, Copy)]
+pub struct GbaSettings {
+    pub auto_pickup: bool,
+}
+
+impl GbaSettings {
+    const fn default() -> Self {
+        Self { auto_pickup: false }
+    }
+}
+
+static mut SETTINGS: GbaSettings = GbaSettings::default();
+
+/// Read the current settings (from the in-memory cache).
+pub fn settings() -> GbaSettings {
+    unsafe { SETTINGS }
+}
+
+/// Update a setting, save to SRAM, and sync to the active game state.
+pub fn update_settings(s: GbaSettings) {
+    unsafe { SETTINGS = s };
+    save_settings_to_sram();
+    apply_settings_to_game();
+}
+
+/// Load settings from SRAM into the in-memory cache. Call once at boot.
+pub fn load_settings() {
+    let ok = sram_read(SETTINGS_OFFSET) == SETTINGS_MAGIC[0]
+        && sram_read(SETTINGS_OFFSET + 1) == SETTINGS_MAGIC[1]
+        && sram_read(SETTINGS_OFFSET + 2) == SETTINGS_MAGIC[2]
+        && sram_read(SETTINGS_OFFSET + 3) == SETTINGS_MAGIC[3];
+    if ok {
+        let flags = sram_read(SETTINGS_OFFSET + 4);
+        unsafe {
+            SETTINGS.auto_pickup = flags & 1 != 0;
+        }
+    }
+    // If no valid settings block, keep defaults.
+}
+
+/// Apply cached settings to whichever game state is currently active.
+pub fn apply_settings_to_game() {
+    let s = unsafe { SETTINGS };
+    if super::game_loop::is_micro() {
+        super::game_loop::game_micro().auto_pickup = s.auto_pickup;
+    } else {
+        super::game_loop::game_compact().auto_pickup = s.auto_pickup;
+    }
+}
+
+fn save_settings_to_sram() {
+    let s = unsafe { SETTINGS };
+    sram_write(SETTINGS_OFFSET, SETTINGS_MAGIC[0]);
+    sram_write(SETTINGS_OFFSET + 1, SETTINGS_MAGIC[1]);
+    sram_write(SETTINGS_OFFSET + 2, SETTINGS_MAGIC[2]);
+    sram_write(SETTINGS_OFFSET + 3, SETTINGS_MAGIC[3]);
+    sram_write(SETTINGS_OFFSET + 4, s.auto_pickup as u8);
+}

@@ -83,6 +83,7 @@ pub fn run_menu(config: &MenuConfig) -> MenuResult {
     let mut needs_redraw = true;
 
     // Setup
+    input::flush(); // consume stale edges from the previous screen
     crate::cursor::init();
     if config.dim_bg0 {
         enable_dim();
@@ -123,7 +124,7 @@ pub fn run_menu(config: &MenuConfig) -> MenuResult {
                     cleanup(config);
                     return MenuResult::Selected(selected);
                 }
-                MenuCommand::Back => {
+                MenuCommand::Back | MenuCommand::Start => {
                     cleanup(config);
                     return MenuResult::Cancelled;
                 }

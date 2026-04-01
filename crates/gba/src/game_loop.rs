@@ -188,6 +188,9 @@ enum AppState {
 
 /// Main entry point — runs forever.
 pub fn run() -> ! {
+    // Load persistent settings from SRAM (survives death + restarts).
+    crate::saves::load_settings();
+
     loop {
         match run_title_screen() {
             TitleResult::NewGameCompact(seed) => {
@@ -204,6 +207,9 @@ pub fn run() -> ! {
             }
         }
 
+        // Apply persistent settings to the active game state.
+        crate::saves::apply_settings_to_game();
+
         // Render initial frame and run the play loop
         if is_micro() {
             render::render_game(game_micro());
@@ -211,6 +217,34 @@ pub fn run() -> ! {
         } else {
             render::render_game(game_compact());
             run_play_loop(game_compact());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pause flow — loops between pause menu and settings
+// ---------------------------------------------------------------------------
+
+enum PauseAction {
+    Resume,
+    SaveAndQuit,
+    TitleScreen,
+}
+
+/// Run the pause menu, looping back when sub-menus (settings) return via B.
+/// START from any sub-menu resumes gameplay directly.
+fn run_pause_flow() -> PauseAction {
+    loop {
+        match crate::pause_menu::run_pause() {
+            crate::pause_menu::PauseResult::Resume => return PauseAction::Resume,
+            crate::pause_menu::PauseResult::Settings => {
+                match crate::settings_menu::run_settings() {
+                    crate::settings_menu::SettingsResult::Back => {} // loop to pause menu
+                    crate::settings_menu::SettingsResult::Resume => return PauseAction::Resume,
+                }
+            }
+            crate::pause_menu::PauseResult::SaveAndQuit => return PauseAction::SaveAndQuit,
+            crate::pause_menu::PauseResult::TitleScreen => return PauseAction::TitleScreen,
         }
     }
 }
@@ -249,22 +283,17 @@ fn run_play_loop(state: &mut impl GameView) {
                         continue;
                     }
                     GameCommand::Quit => {
-                        match crate::pause_menu::run_pause() {
-                            crate::pause_menu::PauseResult::Resume => {
+                        match run_pause_flow() {
+                            PauseAction::Resume => {
                                 render::render_game(state);
                                 continue;
                             }
-                            crate::pause_menu::PauseResult::Settings => {
-                                crate::settings_menu::run_settings();
-                                render::render_game(state);
-                                continue;
-                            }
-                            crate::pause_menu::PauseResult::SaveAndQuit => {
+                            PauseAction::SaveAndQuit => {
                                 crate::saves::save_dispatch();
                                 crate::debug::debug_log!("Game saved to SRAM (pause menu)");
                                 return;
                             }
-                            crate::pause_menu::PauseResult::TitleScreen => {
+                            PauseAction::TitleScreen => {
                                 return;
                             }
                         }

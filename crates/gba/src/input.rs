@@ -20,6 +20,8 @@ pub enum MenuCommand {
     Down,
     Select,
     Back,
+    /// START button — used to dismiss nested menus and resume gameplay.
+    Start,
 }
 
 /// Inventory modal input.
@@ -82,6 +84,15 @@ impl InputState {
 /// Inverts the raw low-active KEYINPUT register.
 fn read_pressed() -> u16 {
     !KEYINPUT.read().to_u16() & 0x03FF // mask to 10 button bits
+}
+
+/// Consume any pending edges by snapshotting the current pressed state.
+/// Call at the start of a new screen/modal to prevent input bleed-through.
+pub fn flush() {
+    let s = state();
+    s.prev_pressed = read_pressed();
+    s.repeat_counter = 0;
+    s.repeating = false;
 }
 
 // Bit positions matching KeyInput field order.
@@ -213,6 +224,9 @@ pub fn read_menu_input() -> Option<MenuCommand> {
     }
     if edges & BIT_B != 0 {
         return Some(MenuCommand::Back);
+    }
+    if edges & BIT_START != 0 {
+        return Some(MenuCommand::Start);
     }
 
     None

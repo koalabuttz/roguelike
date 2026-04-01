@@ -1,13 +1,15 @@
-//! GBA settings screen — toggle options with A, exit with B.
+//! GBA settings screen — toggle options with A, exit with B or START.
 //!
 //! Uses the shared dim/cursor helpers from [`menu`] but has its own input loop
 //! because settings toggle in-place rather than selecting-and-exiting.
+//!
+//! B returns to the parent menu. START dismisses everything and resumes gameplay.
 
 use crate::display;
-use crate::game_loop;
 use crate::input::{self, MenuCommand};
 use crate::menu;
 use crate::palette::{PALBANK_DIM, PALBANK_MSG};
+use crate::saves;
 
 /// Palbank for the selected setting row.
 const PALBANK_SEL: u16 = 8; // Yellow
@@ -25,13 +27,23 @@ const HINT_ROW: usize = 16;
 /// Number of toggleable settings.
 const SETTING_COUNT: u8 = 1;
 
-/// Run the settings screen. Blocks until the player presses B.
+/// How the settings screen was dismissed.
+pub enum SettingsResult {
+    /// B pressed — return to parent menu.
+    Back,
+    /// START pressed — dismiss all menus and resume gameplay.
+    Resume,
+}
+
+/// Run the settings screen. Blocks until the player presses B or START.
 #[inline(never)]
-pub fn run_settings() {
+pub fn run_settings() -> SettingsResult {
     let mut selected: u8 = 0;
     let mut frame: u16 = 0;
     let mut needs_redraw = true;
+    let mut result = SettingsResult::Back;
 
+    input::flush(); // consume stale edges from the pause menu
     crate::cursor::init();
     menu::enable_dim();
     display::clear_hud();
@@ -72,6 +84,10 @@ pub fn run_settings() {
                     needs_redraw = true;
                 }
                 MenuCommand::Back => break,
+                MenuCommand::Start => {
+                    result = SettingsResult::Resume;
+                    break;
+                }
             }
         }
     }
@@ -81,33 +97,21 @@ pub fn run_settings() {
     crate::cursor::disable_obj_layer();
     menu::disable_dim();
     display::clear_hud();
+
+    result
 }
 
 // ---------------------------------------------------------------------------
-// Setting access
+// Setting access (reads/writes persistent SRAM settings)
 // ---------------------------------------------------------------------------
-
-fn get_auto_pickup() -> bool {
-    if game_loop::is_micro() {
-        game_loop::game_micro().auto_pickup
-    } else {
-        game_loop::game_compact().auto_pickup
-    }
-}
-
-fn set_auto_pickup(val: bool) {
-    if game_loop::is_micro() {
-        game_loop::game_micro().auto_pickup = val;
-    } else {
-        game_loop::game_compact().auto_pickup = val;
-    }
-}
 
 fn toggle_setting(index: u8) {
+    let mut s = saves::settings();
     match index {
-        0 => set_auto_pickup(!get_auto_pickup()),
+        0 => s.auto_pickup = !s.auto_pickup,
         _ => {}
     }
+    saves::update_settings(s);
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +130,7 @@ fn render_settings(selected: u8) {
     }
 
     display::write_hud_string(MENU_X + 2, row, "Auto-pickup", pal);
-    if get_auto_pickup() {
+    if saves::settings().auto_pickup {
         display::write_hud_string(MENU_X + 17, row, "ON", val_pal);
     } else {
         display::write_hud_string(MENU_X + 17, row, "OFF", val_pal);

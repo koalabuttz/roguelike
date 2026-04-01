@@ -1739,22 +1739,28 @@ impl GameState {
         (explored_floors * 100) / floor_count
     }
 
+    /// Whether any of the 8 neighbors of (x, y) is unexplored.
+    fn has_unexplored_neighbor(&self, x: Coord, y: Coord) -> bool {
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                if (dx != 0 || dy != 0)
+                    && self.map.in_bounds(x + dx, y + dy)
+                    && !self.explored.contains(&(x + dx, y + dy))
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Find frontier tiles: explored floor tiles adjacent to at least one
     /// unexplored tile. These mark the boundary of explored territory and
     /// indicate where further exploration is possible.
     pub fn frontier_tiles(&self) -> Vec<Pos> {
         self.explored
             .iter()
-            .filter(|&&(x, y)| {
-                self.map.is_walkable(x, y)
-                    && (-1..=1i32).any(|dy| {
-                        (-1..=1i32).any(|dx| {
-                            (dx != 0 || dy != 0)
-                                && self.map.in_bounds(x + dx, y + dy)
-                                && !self.explored.contains(&(x + dx, y + dy))
-                        })
-                    })
-            })
+            .filter(|&&(x, y)| self.map.is_walkable(x, y) && self.has_unexplored_neighbor(x, y))
             .copied()
             .collect()
     }

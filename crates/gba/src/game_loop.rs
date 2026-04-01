@@ -9,7 +9,6 @@ use gba::prelude::*;
 
 use roguelike_core::command::GameCommand;
 use roguelike_core::rules::balance;
-use roguelike_core::rules::color::GameColor;
 use roguelike_core::rules::game_view::GameView;
 use roguelike_core::rules::health::{self, HealthTier};
 use roguelike_core::rules::items as rules_items;
@@ -160,20 +159,6 @@ fn load_game() -> bool {
     }
     crate::debug::debug_log!("Game loaded from SRAM (micro={})", is_micro());
     true
-}
-
-/// Wait until any key is newly pressed (rising edge detection).
-fn wait_for_key() {
-    let mut prev: u16 = 0;
-    loop {
-        display::vblank_wait();
-        let pressed = !KEYINPUT.read().to_u16() & 0x03FF;
-        let edges = pressed & !prev;
-        prev = pressed;
-        if edges != 0 {
-            break;
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -359,9 +344,30 @@ fn run_play_loop(state: &mut impl GameView) {
                 crate::saves::erase_save();
                 crate::debug::debug_log!("Save erased (game over)");
 
-                show_game_over(state);
-                wait_for_key();
-                return;
+                match crate::game_over::run_game_over(state) {
+                    crate::game_over::GameOverAction::TitleScreen => return,
+                    crate::game_over::GameOverAction::PlayAgain => {
+                        // Start a new game with a fresh seed (same tier)
+                        if is_micro() {
+                            let seed = read_timer_seed() as u16;
+                            start_game_micro(
+                                seed,
+                                MICRO_MAP_WIDTH,
+                                MICRO_MAP_HEIGHT,
+                            );
+                            crate::saves::apply_settings_to_game();
+                            render::render_game(game_micro());
+                            // Can't reuse `state` — reborrow the new game
+                            return run_play_loop(game_micro());
+                        } else {
+                            let seed = read_timer_seed();
+                            start_game_compact(seed, MAP_WIDTH, MAP_HEIGHT);
+                            crate::saves::apply_settings_to_game();
+                            render::render_game(game_compact());
+                            return run_play_loop(game_compact());
+                        }
+                    }
+                }
             }
         }
     }
@@ -469,29 +475,3 @@ fn render_look_description(state: &impl GameView, cx: i32, cy: i32) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Game over screen — generic over GameView
-// ---------------------------------------------------------------------------
-
-fn show_game_over(state: &impl GameView) {
-    let msg = if state.game_won() {
-        "You escaped!"
-    } else {
-        "You have been slain..."
-    };
-    display::write_map_centered(8, msg, GameColor::Red as u16);
-
-    let mut buf = [b' '; 30];
-    let mut p = 0;
-    p = crate::format::write_str(&mut buf, p, "Depth:");
-    p = crate::format::write_u16(&mut buf, p, state.depth() as u16);
-    p = crate::format::write_str(&mut buf, p, " Kills:");
-    p = crate::format::write_u16(&mut buf, p, state.kills() as u16);
-    p = crate::format::write_str(&mut buf, p, " Turns:");
-    let _ = crate::format::write_u16(&mut buf, p, state.turn_count());
-
-    let stats = core::str::from_utf8(&buf).unwrap_or("");
-    display::write_map_centered(10, stats.trim_end(), GameColor::Grey as u16);
-
-    display::write_map_string(4, 13, "Press any key to continue", GameColor::DarkGrey as u16);
-}

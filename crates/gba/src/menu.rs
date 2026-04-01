@@ -13,14 +13,21 @@ use crate::input::{self, MenuCommand};
 // Shared dim helpers (also used by inventory_ui)
 // ---------------------------------------------------------------------------
 
-/// Darken BG0 (map layer) using hardware blend. BLDY=10 ≈ 62% brightness drop.
-pub(crate) fn enable_dim() {
+/// Darken BG0 (map layer) using hardware blend at the given percentage (0–100).
+/// Clamped to the BLDY range of 0–16 (each unit ≈ 6.25%).
+pub(crate) fn enable_dim_pct(pct: u16) {
     BLDCNT.write(
         BlendControl::new()
             .with_mode(ColorEffectMode::Darken)
             .with_target1_bg0(true),
     );
-    BLDY.write(10);
+    // Map 0–100% to BLDY 0–16
+    BLDY.write((pct * 16 / 100).min(16) as u8);
+}
+
+/// Darken BG0 at the default 62% level (BLDY=10). Convenience wrapper.
+pub(crate) fn enable_dim() {
+    enable_dim_pct(62);
 }
 
 /// Disable hardware blend (restore normal BG0 brightness).

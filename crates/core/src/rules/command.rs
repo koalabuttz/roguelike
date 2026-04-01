@@ -14,6 +14,9 @@ pub enum GameCommand {
     AutoExplore,
     Descend,
     Pickup,
+    /// Context-sensitive tile interaction: tries Pickup, then Descend.
+    /// Used by constrained-input platforms (GBA A button, C64 joystick fire).
+    Interact,
     UseItem(u8),
     DropItem(u8),
     EquipItem(u8),

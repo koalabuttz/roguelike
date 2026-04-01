@@ -270,7 +270,7 @@ pub fn wait_for_input() -> GameCommand {
         if let Some(bits) = joy_repeat() {
             let (dir, fire) = decode_joy(bits);
             if fire && dir.is_none() {
-                return GameCommand::Wait;
+                return GameCommand::Interact;
             }
             if let Some(d) = dir {
                 return if fire {

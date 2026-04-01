@@ -262,12 +262,7 @@ fn run_play_loop(state: &mut impl GameView) {
                 }
 
                 let depth_before = state.depth();
-                let mut result = state.step_view(cmd);
-
-                // A button sends Pickup; if nothing to pick up, try Descend.
-                if !result.action_taken && matches!(cmd, GameCommand::Pickup) {
-                    result = state.step_view(GameCommand::Descend);
-                }
+                let result = state.step_view(cmd);
 
                 if !result.action_taken {
                     continue;

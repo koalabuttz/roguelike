@@ -1156,9 +1156,32 @@ impl GameState {
         true
     }
 
+    /// Resolve Interact to a concrete command by checking tile state.
+    fn resolve_interact(&self) -> Option<GameCommand> {
+        let px = self.entities[0].x;
+        let py = self.entities[0].y;
+        if self.ground_items.iter().any(|it| it.x == px && it.y == py) {
+            return Some(GameCommand::Pickup);
+        }
+        let idx = self.map.idx(px, py);
+        if self.map.tiles[idx] == map::Tile::StairsDown {
+            return Some(GameCommand::Descend);
+        }
+        None
+    }
+
     /// Dispatch a game command. Returns `true` if the player took an action
     /// (i.e. a turn was consumed), `false` otherwise.
     pub fn handle_command(&mut self, cmd: GameCommand) -> bool {
+        // Resolve Interact to a concrete command before dispatch.
+        let cmd = if matches!(cmd, GameCommand::Interact) {
+            match self.resolve_interact() {
+                Some(c) => c,
+                None => return false,
+            }
+        } else {
+            cmd
+        };
         match cmd {
             GameCommand::Move(dir) => {
                 let (dx, dy) = dir.to_offset();
@@ -1182,7 +1205,8 @@ impl GameState {
             | GameCommand::Look
             | GameCommand::Help
             | GameCommand::MessageHistory
-            | GameCommand::Quit => false,
+            | GameCommand::Quit
+            | GameCommand::Interact => false,
         }
     }
 
@@ -4417,5 +4441,78 @@ mod tests {
             gs.inventory.get(1).is_none(),
             "non-consumable source with dead material should be destroyed"
         );
+    }
+
+    // ── Interact tests ───────────────────────────────────────────────
+
+    #[test]
+    fn interact_picks_up_item() {
+        let mut gs = test_game();
+        gs.ground_items.push(Item {
+            x: 5,
+            y: 5,
+            kind: ItemKind::HealthPotion,
+        });
+        let result = gs.step(GameCommand::Interact);
+        assert!(result.action_taken);
+        assert!(gs.ground_items.is_empty());
+        assert_eq!(gs.inventory.len(), 1);
+    }
+
+    #[test]
+    fn interact_descends_stairs() {
+        let mut gs = test_game();
+        let idx = gs.map.idx(5, 5);
+        gs.map.tiles[idx] = Tile::StairsDown;
+        let result = gs.step(GameCommand::Interact);
+        assert!(result.action_taken);
+        assert_eq!(gs.depth, 2);
+    }
+
+    #[test]
+    fn interact_prefers_pickup_over_descend() {
+        let mut gs = test_game();
+        let idx = gs.map.idx(5, 5);
+        gs.map.tiles[idx] = Tile::StairsDown;
+        gs.ground_items.push(Item {
+            x: 5,
+            y: 5,
+            kind: ItemKind::HealthPotion,
+        });
+        let result = gs.step(GameCommand::Interact);
+        assert!(result.action_taken);
+        assert_eq!(gs.depth, 1, "should not have descended");
+        assert_eq!(gs.inventory.len(), 1, "should have picked up item");
+    }
+
+    #[test]
+    fn interact_on_empty_floor() {
+        let mut gs = test_game();
+        let msg_count = gs.log.len();
+        let result = gs.step(GameCommand::Interact);
+        assert!(!result.action_taken);
+        assert_eq!(
+            gs.log.len(),
+            msg_count,
+            "should not have logged any message"
+        );
+    }
+
+    #[test]
+    fn interact_full_inventory_on_item() {
+        let mut gs = test_game();
+        let idx = gs.map.idx(5, 5);
+        gs.map.tiles[idx] = Tile::StairsDown;
+        for _ in 0..rules_items::MAX_INVENTORY {
+            gs.inventory.add(ItemKind::ShortSword);
+        }
+        gs.ground_items.push(Item {
+            x: 5,
+            y: 5,
+            kind: ItemKind::ShortSword,
+        });
+        let result = gs.step(GameCommand::Interact);
+        assert!(result.action_taken, "InventoryFull consumes turn");
+        assert_eq!(gs.depth, 1, "should not have descended");
     }
 }

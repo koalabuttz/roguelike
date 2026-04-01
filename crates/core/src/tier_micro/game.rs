@@ -141,6 +141,22 @@ impl MicroGameState {
         self.step_inner(cmd, true)
     }
 
+    /// Resolve Interact to a concrete command by checking tile state.
+    fn resolve_interact(&self) -> Option<GameCommand> {
+        let pi = PLAYER_IDX as usize;
+        let px = self.entities.x[pi];
+        let py = self.entities.y[pi];
+        for i in 0..self.items.count as usize {
+            if self.items.alive[i] && self.items.x[i] == px && self.items.y[i] == py {
+                return Some(GameCommand::Pickup);
+            }
+        }
+        if self.map.tile_at(px, py) == TILE_STAIRS_DOWN {
+            return Some(GameCommand::Descend);
+        }
+        None
+    }
+
     fn step_inner(&mut self, cmd: GameCommand, compute_fov: bool) -> MicroStepResult {
         if self.is_terminal() {
             return MicroStepResult {
@@ -149,6 +165,22 @@ impl MicroGameState {
                 game_won: self.game_won,
             };
         }
+
+        // Resolve Interact to a concrete command before dispatch.
+        let cmd = if matches!(cmd, GameCommand::Interact) {
+            match self.resolve_interact() {
+                Some(c) => c,
+                None => {
+                    return MicroStepResult {
+                        action_taken: false,
+                        game_over: false,
+                        game_won: false,
+                    };
+                }
+            }
+        } else {
+            cmd
+        };
 
         // Descent is handled separately — it rebuilds the level and FOV.
         if matches!(cmd, GameCommand::Descend) {
@@ -187,7 +219,8 @@ impl MicroGameState {
             | GameCommand::Help
             | GameCommand::MessageHistory
             | GameCommand::Quit
-            | GameCommand::Descend => false,
+            | GameCommand::Descend
+            | GameCommand::Interact => false,
         };
 
         if action_taken {
@@ -1925,5 +1958,78 @@ mod tests {
             g.inventory.get(1).is_none(),
             "non-consumable source with dead material should be destroyed"
         );
+    }
+
+    // ── Interact tests ───────────────────────────────────────────────
+
+    #[test]
+    fn interact_picks_up_item() {
+        let mut g = MicroGameState::new_default(42);
+        g.items = ItemStore::new();
+        place_item_at_player(&mut g, ItemKind::HealthPotion);
+        let result = g.step(GameCommand::Interact);
+        assert!(result.action_taken);
+        assert_eq!(g.inventory.len(), 1);
+        assert_eq!(g.inventory.get(0).unwrap().kind, ItemKind::HealthPotion);
+    }
+
+    #[test]
+    fn interact_descends_stairs() {
+        let mut g = MicroGameState::new_default(42);
+        g.items = ItemStore::new(); // clear items so Interact won't try Pickup
+        let last = g.map.rooms[(g.map.room_count - 1) as usize];
+        g.entities.x[0] = last.cx();
+        g.entities.y[0] = last.cy();
+        let result = g.step(GameCommand::Interact);
+        assert!(result.action_taken);
+        assert_eq!(g.depth, 2);
+    }
+
+    #[test]
+    fn interact_prefers_pickup_over_descend() {
+        let mut g = MicroGameState::new_default(42);
+        g.items = ItemStore::new();
+        // Teleport to stairs
+        let last = g.map.rooms[(g.map.room_count - 1) as usize];
+        g.entities.x[0] = last.cx();
+        g.entities.y[0] = last.cy();
+        // Place item on the stairs tile
+        g.items.spawn(last.cx(), last.cy(), ItemKind::HealthPotion);
+        let result = g.step(GameCommand::Interact);
+        assert!(result.action_taken);
+        assert_eq!(g.depth, 1, "should not have descended");
+        assert_eq!(g.inventory.len(), 1, "should have picked up item");
+    }
+
+    #[test]
+    fn interact_on_empty_floor() {
+        let mut g = MicroGameState::new_default(42);
+        g.items = ItemStore::new(); // no items anywhere
+        // Player starts in room 0, on floor (not stairs)
+        let msg_before = g.log.total();
+        let result = g.step(GameCommand::Interact);
+        assert!(!result.action_taken);
+        assert_eq!(
+            g.log.total(),
+            msg_before,
+            "should not have logged any message"
+        );
+    }
+
+    #[test]
+    fn interact_full_inventory_on_item() {
+        let mut g = MicroGameState::new_default(42);
+        g.items = ItemStore::new();
+        for _ in 0..rules_items::MAX_INVENTORY {
+            g.inventory.add(ItemKind::ShortSword);
+        }
+        // Teleport to stairs and place item there
+        let last = g.map.rooms[(g.map.room_count - 1) as usize];
+        g.entities.x[0] = last.cx();
+        g.entities.y[0] = last.cy();
+        g.items.spawn(last.cx(), last.cy(), ItemKind::ShortSword);
+        let result = g.step(GameCommand::Interact);
+        assert!(result.action_taken, "InventoryFull consumes turn");
+        assert_eq!(g.depth, 1, "should not have descended");
     }
 }

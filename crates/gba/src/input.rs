@@ -173,7 +173,7 @@ pub fn read_game_input() -> Option<GameCommand> {
 
     // Edge-triggered action buttons
     if edges & BIT_A != 0 {
-        return Some(GameCommand::Pickup);
+        return Some(GameCommand::Interact);
     }
     if edges & BIT_B != 0 {
         return Some(GameCommand::Quit);

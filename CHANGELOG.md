@@ -6,7 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.5.0] - 2026-03-18
 
+### Security
+- No minimum password length in SSH accounts (#247)
+- Enforce idle timeout for SSH sessions (#246)
+- Auth error messages leak account existence (#244)
+- ANSI CSI parser unbounded buffer (DoS) (#243)
+
 ### Added
+- Add GameCommand::Interact for constrained-input platforms (#257)
 - Migrate standard tier MessageLog to store GameEvent values (#242)
 - GBA: Decide save system format — postcard vs custom binary (#204)
 - GBA: Add title screen with seed selection (#232)
@@ -84,6 +91,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Dev hooks: 8 unwraps on overlay cursors (#250)
+- frontier_tiles() 8 levels of nesting (#253)
+- SSH SaveBackend returns concrete GameState (#249)
+- 4 rules/types modules without tests (#255)
+- SSH swallowed I/O errors (15+ let _ = sites) (#256)
+- tier_micro panic in find_spawn_point (#251)
+- Move GameCommand enum into rules/ module (#245)
 - Move explored_pct and target_depth from GameStep to GameView (#241)
 - Unify GameView/RenderSource/GameStep trait hierarchy (#240)
 - GBA: Route micro-tier seeds to MicroGameState via adapter (#237)

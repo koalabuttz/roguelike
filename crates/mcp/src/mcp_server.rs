@@ -825,6 +825,7 @@ pub fn parse_action(action: &str) -> Option<GameCommand> {
         "wait" => Some(GameCommand::Wait),
         "descend" => Some(GameCommand::Descend),
         "pickup" => Some(GameCommand::Pickup),
+        "interact" => Some(GameCommand::Interact),
         _ if action.starts_with("use_item_") => {
             parse_slot_letter(action, "use_item_").map(GameCommand::UseItem)
         }

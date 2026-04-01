@@ -185,6 +185,22 @@ impl CompactGameState {
         self.step_inner(cmd, false)
     }
 
+    /// Resolve Interact to a concrete command by checking tile state.
+    fn resolve_interact(&self) -> Option<GameCommand> {
+        let pi = PLAYER_IDX as usize;
+        let px = self.entities.x[pi];
+        let py = self.entities.y[pi];
+        for i in 0..self.items.count as usize {
+            if self.items.alive[i] && self.items.x[i] == px && self.items.y[i] == py {
+                return Some(GameCommand::Pickup);
+            }
+        }
+        if self.map.tile_at(px, py) == TILE_STAIRS_DOWN {
+            return Some(GameCommand::Descend);
+        }
+        None
+    }
+
     fn step_inner(&mut self, cmd: GameCommand, compute_fov: bool) -> CompactStepResult {
         if self.game_over || self.game_won {
             return CompactStepResult {
@@ -193,6 +209,22 @@ impl CompactGameState {
                 game_won: self.game_won,
             };
         }
+
+        // Resolve Interact to a concrete command before dispatch.
+        let cmd = if matches!(cmd, GameCommand::Interact) {
+            match self.resolve_interact() {
+                Some(c) => c,
+                None => {
+                    return CompactStepResult {
+                        action_taken: false,
+                        game_over: false,
+                        game_won: false,
+                    };
+                }
+            }
+        } else {
+            cmd
+        };
 
         // Descent is handled separately — it rebuilds the level and FOV.
         if matches!(cmd, GameCommand::Descend) {
@@ -232,7 +264,8 @@ impl CompactGameState {
             | GameCommand::Help
             | GameCommand::MessageHistory
             | GameCommand::Quit
-            | GameCommand::Descend => false,
+            | GameCommand::Descend
+            | GameCommand::Interact => false,
         };
 
         if action_taken {
@@ -1354,5 +1387,85 @@ mod tests {
         assert!(result.is_some());
         let r = result.unwrap();
         assert!(r.target_killed);
+    }
+
+    // ── Interact tests ───────────────────────────────────────────────
+
+    fn place_item_at_player(state: &mut CompactGameState, kind: rules_items::ItemKind) {
+        let pi = PLAYER_IDX as usize;
+        let px = state.entities.x[pi];
+        let py = state.entities.y[pi];
+        state.items.spawn(px, py, kind);
+    }
+
+    #[test]
+    fn interact_picks_up_item() {
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
+        state.items = ItemStore::new();
+        place_item_at_player(&mut state, rules_items::ItemKind::HealthPotion);
+        let r = state.step(GameCommand::Interact);
+        assert!(r.action_taken);
+        assert!(state.inventory.get(0).is_some());
+    }
+
+    #[test]
+    fn interact_descends_stairs() {
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
+        state.items = ItemStore::new();
+        walk_to_stairs(&mut state);
+        let r = state.step(GameCommand::Interact);
+        assert!(r.action_taken);
+        assert_eq!(state.depth, 2);
+    }
+
+    #[test]
+    fn interact_prefers_pickup_over_descend() {
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
+        state.items = ItemStore::new();
+        walk_to_stairs(&mut state);
+        let pi = PLAYER_IDX as usize;
+        let px = state.entities.x[pi];
+        let py = state.entities.y[pi];
+        state
+            .items
+            .spawn(px, py, rules_items::ItemKind::HealthPotion);
+        let r = state.step(GameCommand::Interact);
+        assert!(r.action_taken);
+        assert_eq!(state.depth, 1, "should not have descended");
+        assert!(
+            state.inventory.get(0).is_some(),
+            "should have picked up item"
+        );
+    }
+
+    #[test]
+    fn interact_on_empty_floor() {
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
+        state.items = ItemStore::new();
+        let msg_before = state.log.total();
+        let r = state.step(GameCommand::Interact);
+        assert!(!r.action_taken);
+        assert_eq!(
+            state.log.total(),
+            msg_before,
+            "should not have logged any message"
+        );
+    }
+
+    #[test]
+    fn interact_full_inventory_on_item() {
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
+        state.items = ItemStore::new();
+        for _ in 0..rules_items::MAX_INVENTORY {
+            state.inventory.add(rules_items::ItemKind::ShortSword);
+        }
+        walk_to_stairs(&mut state);
+        let pi = PLAYER_IDX as usize;
+        let px = state.entities.x[pi];
+        let py = state.entities.y[pi];
+        state.items.spawn(px, py, rules_items::ItemKind::ShortSword);
+        let r = state.step(GameCommand::Interact);
+        assert!(r.action_taken, "InventoryFull consumes turn");
+        assert_eq!(state.depth, 1, "should not have descended");
     }
 }

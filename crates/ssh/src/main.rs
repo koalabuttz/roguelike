@@ -148,8 +148,15 @@ fn load_or_generate_host_key(data_dir: &std::path::Path) -> PrivateKey {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    let _ =
-                        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+                    if let Err(e) = std::fs::set_permissions(
+                        &key_path,
+                        std::fs::Permissions::from_mode(0o600),
+                    ) {
+                        tracing::warn!(
+                            "Failed to set host key permissions to 0600: {}",
+                            e
+                        );
+                    }
                 }
                 tracing::info!("Saved host key to {}", key_path.display());
             }

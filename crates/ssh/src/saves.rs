@@ -52,9 +52,13 @@ impl SaveManager {
     }
 
     pub fn write_autosave(&self, json: &str, meta: &SlotMetadata) {
-        let _ = std::fs::write(self.save_path(), json);
-        if let Ok(meta_json) = serde_json::to_string(meta) {
-            let _ = std::fs::write(self.autosave_meta_path(), meta_json);
+        if let Err(e) = std::fs::write(self.save_path(), json) {
+            tracing::warn!("Failed to write autosave: {}", e);
+        }
+        if let Ok(meta_json) = serde_json::to_string(meta)
+            && let Err(e) = std::fs::write(self.autosave_meta_path(), meta_json)
+        {
+            tracing::warn!("Failed to write autosave metadata: {}", e);
         }
     }
 
@@ -85,8 +89,10 @@ impl SaveManager {
                     if !player_name.is_empty() {
                         meta.player_name = Some(player_name.to_string());
                     }
-                    if let Ok(meta_json) = serde_json::to_string(&meta) {
-                        let _ = std::fs::write(self.slot_meta_path(slot), meta_json);
+                    if let Ok(meta_json) = serde_json::to_string(&meta)
+                        && let Err(e) = std::fs::write(self.slot_meta_path(slot), meta_json)
+                    {
+                        tracing::warn!("Failed to write slot {} metadata: {}", slot + 1, e);
                     }
                     "Game saved.".to_string()
                 }
@@ -144,8 +150,10 @@ impl SaveManager {
     }
 
     pub fn save_settings(&self, settings: &Settings) {
-        if let Ok(json) = serde_json::to_string_pretty(settings) {
-            let _ = std::fs::write(self.settings_path(), json);
+        if let Ok(json) = serde_json::to_string_pretty(settings)
+            && let Err(e) = std::fs::write(self.settings_path(), json)
+        {
+            tracing::warn!("Failed to save settings: {}", e);
         }
     }
 }

@@ -80,8 +80,10 @@ impl AccountStore {
 
         // Update last_login timestamp.
         account.last_login = chrono_now();
-        if let Ok(updated_json) = serde_json::to_string_pretty(&account) {
-            let _ = std::fs::write(&path, updated_json);
+        if let Ok(updated_json) = serde_json::to_string_pretty(&account)
+            && let Err(e) = std::fs::write(&path, updated_json)
+        {
+            tracing::warn!("Failed to update last_login for '{}': {}", username, e);
         }
 
         Ok(())

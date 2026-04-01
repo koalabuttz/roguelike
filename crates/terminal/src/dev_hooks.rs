@@ -41,22 +41,22 @@ mod inner {
             let session = &mut self.session;
 
             // Overlay cursor mode: arrow keys move cursor, Esc exits.
-            if session.overlay_cursor.is_some() {
+            if let Some(cursor) = &mut session.overlay_cursor {
                 let handled = match key.code {
                     KeyCode::Up => {
-                        session.overlay_cursor.as_mut().unwrap().1 -= 1;
+                        cursor.1 -= 1;
                         true
                     }
                     KeyCode::Down => {
-                        session.overlay_cursor.as_mut().unwrap().1 += 1;
+                        cursor.1 += 1;
                         true
                     }
                     KeyCode::Left => {
-                        session.overlay_cursor.as_mut().unwrap().0 -= 1;
+                        cursor.0 -= 1;
                         true
                     }
                     KeyCode::Right => {
-                        session.overlay_cursor.as_mut().unwrap().0 += 1;
+                        cursor.0 += 1;
                         true
                     }
                     KeyCode::Esc => {
@@ -72,22 +72,22 @@ mod inner {
             }
 
             // Monster FOV cursor mode.
-            if session.monster_fov_cursor.is_some() {
+            if let Some(cursor) = &mut session.monster_fov_cursor {
                 let handled = match key.code {
                     KeyCode::Up => {
-                        session.monster_fov_cursor.as_mut().unwrap().1 -= 1;
+                        cursor.1 -= 1;
                         true
                     }
                     KeyCode::Down => {
-                        session.monster_fov_cursor.as_mut().unwrap().1 += 1;
+                        cursor.1 += 1;
                         true
                     }
                     KeyCode::Left => {
-                        session.monster_fov_cursor.as_mut().unwrap().0 -= 1;
+                        cursor.0 -= 1;
                         true
                     }
                     KeyCode::Right => {
-                        session.monster_fov_cursor.as_mut().unwrap().0 += 1;
+                        cursor.0 += 1;
                         true
                     }
                     KeyCode::Esc => {

@@ -156,7 +156,11 @@ fn render_status_bar(state: &impl GameView) {
 
     // Depth
     p = format::write_str(&mut buf, p, " F:");
-    let _ = format::write_u16(&mut buf, p, state.depth() as u16);
+    p = format::write_u16(&mut buf, p, state.depth() as u16);
+
+    // Turns
+    p = format::write_str(&mut buf, p, " T:");
+    let _ = format::write_u16(&mut buf, p, state.turn_count());
 
     display::write_hud_string(0, STATUS_ROW, core::str::from_utf8(&buf).unwrap_or(""), PALBANK_STATUS);
 }

@@ -6,8 +6,8 @@
 
 pub mod balance;
 pub mod color;
-pub mod command;
 pub mod combat;
+pub mod command;
 pub mod damage;
 pub mod direction;
 pub mod game_view;

@@ -79,8 +79,7 @@ impl SaveManager {
     // --- Slot saves ---
 
     pub fn write_slot(&self, json: &str, meta: &SlotMetadata, slot: u8) -> Result<(), String> {
-        std::fs::write(self.slot_save_path(slot), json)
-            .map_err(|e| format!("Save failed: {e}"))?;
+        std::fs::write(self.slot_save_path(slot), json).map_err(|e| format!("Save failed: {e}"))?;
         if let Ok(meta_json) = serde_json::to_string(meta)
             && let Err(e) = std::fs::write(self.slot_meta_path(slot), meta_json)
         {
@@ -90,8 +89,7 @@ impl SaveManager {
     }
 
     pub fn load_slot_json(&self, slot: u8) -> Result<String, String> {
-        std::fs::read_to_string(self.slot_save_path(slot))
-            .map_err(|e| format!("Load failed: {e}"))
+        std::fs::read_to_string(self.slot_save_path(slot)).map_err(|e| format!("Load failed: {e}"))
     }
 
     pub fn load_slot_metadata(&self, slot: u8) -> Option<SlotMetadata> {

@@ -18,6 +18,7 @@ use crate::message_log::format_event;
 use crate::rules::color::GameColor;
 use crate::rules::items as rules_items;
 use crate::rules::{balance, monster_table};
+use crate::saves::SlotMetadata;
 use crate::seed_code::{self, SeedParams};
 use crate::tier_compact::autorun::{
     CompactAutorunStepper, CompactAutorunStop, CompactBfsStepper, CompactStepOutcome,
@@ -30,7 +31,6 @@ use crate::tier_micro::game::MicroGameState;
 use crate::tier_micro::item_store::ItemStore;
 use crate::tier_micro::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_STRUCTURAL, TILE_WALL};
 use crate::tier_micro::types::PLAYER_IDX;
-use crate::saves::SlotMetadata;
 use crate::types::{Coord, Stat};
 
 /// Uniform interface for driving a game of any capability tier.

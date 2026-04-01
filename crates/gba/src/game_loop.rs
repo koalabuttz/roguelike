@@ -249,9 +249,25 @@ fn run_play_loop(state: &mut impl GameView) {
                         continue;
                     }
                     GameCommand::Quit => {
-                        crate::saves::save_dispatch();
-                        crate::debug::debug_log!("Game saved to SRAM (quit)");
-                        return;
+                        match crate::pause_menu::run_pause() {
+                            crate::pause_menu::PauseResult::Resume => {
+                                render::render_game(state);
+                                continue;
+                            }
+                            crate::pause_menu::PauseResult::Inventory => {
+                                crate::inventory_ui::run_inventory(state);
+                                render::render_game(state);
+                                continue;
+                            }
+                            crate::pause_menu::PauseResult::SaveAndQuit => {
+                                crate::saves::save_dispatch();
+                                crate::debug::debug_log!("Game saved to SRAM (pause menu)");
+                                return;
+                            }
+                            crate::pause_menu::PauseResult::TitleScreen => {
+                                return;
+                            }
+                        }
                     }
                     GameCommand::OpenInventory => {
                         crate::inventory_ui::run_inventory(state);

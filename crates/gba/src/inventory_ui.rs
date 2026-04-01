@@ -64,30 +64,13 @@ struct InvState {
 }
 
 // ---------------------------------------------------------------------------
-// Hardware blend (darken BG0)
-// ---------------------------------------------------------------------------
-
-fn enable_dim() {
-    BLDCNT.write(
-        BlendControl::new()
-            .with_mode(ColorEffectMode::Darken)
-            .with_target1_bg0(true),
-    );
-    BLDY.write(10); // 10/16 ≈ 62% brightness decrease
-}
-
-fn disable_dim() {
-    BLDCNT.write(BlendControl::new());
-}
-
-// ---------------------------------------------------------------------------
 // Cleanup
 // ---------------------------------------------------------------------------
 
 fn cleanup() {
     crate::cursor::hide();
     crate::cursor::disable_obj_layer();
-    disable_dim();
+    crate::menu::disable_dim();
     BG1HOFS.write(0);
     display::clear_hud();
 }
@@ -462,7 +445,7 @@ pub fn run_inventory(state: &mut impl GameView) {
     };
 
     crate::cursor::init();
-    enable_dim();
+    crate::menu::enable_dim();
 
     // Pre-render content for slide-in
     render_screen(state, &inv);

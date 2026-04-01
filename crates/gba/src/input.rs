@@ -175,14 +175,14 @@ pub fn read_game_input() -> Option<GameCommand> {
     if edges & BIT_A != 0 {
         return Some(GameCommand::Interact);
     }
-    if edges & BIT_B != 0 {
-        return Some(GameCommand::Quit);
-    }
     if edges & BIT_START != 0 {
-        return Some(GameCommand::OpenInventory);
+        return Some(GameCommand::Quit); // opens pause menu (handled in game_loop)
+    }
+    if edges & BIT_B != 0 {
+        return Some(GameCommand::Look);
     }
     if edges & BIT_SELECT != 0 {
-        return Some(GameCommand::Look);
+        return Some(GameCommand::OpenInventory);
     }
     if edges & BIT_R != 0 {
         return Some(GameCommand::AutoExplore);

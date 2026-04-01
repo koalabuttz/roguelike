@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use roguelike_core::game::GameState;
 use roguelike_core::saves::SlotMetadata;
 use roguelike_core::settings::Settings;
 
@@ -62,10 +61,8 @@ impl SaveManager {
         }
     }
 
-    pub fn load_autosave(&self) -> Result<GameState, String> {
-        let json =
-            std::fs::read_to_string(self.save_path()).map_err(|e| format!("Load failed: {e}"))?;
-        GameState::load_from_json(&json).map_err(|e| format!("Load failed: {e}"))
+    pub fn load_autosave_json(&self) -> Result<String, String> {
+        std::fs::read_to_string(self.save_path()).map_err(|e| format!("Load failed: {e}"))
     }
 
     pub fn load_autosave_metadata(&self) -> Option<SlotMetadata> {
@@ -81,31 +78,20 @@ impl SaveManager {
 
     // --- Slot saves ---
 
-    pub fn save_to_slot(&self, state: &GameState, slot: u8, player_name: &str) -> String {
-        match state.save_to_json() {
-            Ok(json) => match std::fs::write(self.slot_save_path(slot), json) {
-                Ok(()) => {
-                    let mut meta = state.extract_metadata();
-                    if !player_name.is_empty() {
-                        meta.player_name = Some(player_name.to_string());
-                    }
-                    if let Ok(meta_json) = serde_json::to_string(&meta)
-                        && let Err(e) = std::fs::write(self.slot_meta_path(slot), meta_json)
-                    {
-                        tracing::warn!("Failed to write slot {} metadata: {}", slot + 1, e);
-                    }
-                    "Game saved.".to_string()
-                }
-                Err(e) => format!("Save failed: {e}"),
-            },
-            Err(e) => format!("Save failed: {e}"),
+    pub fn write_slot(&self, json: &str, meta: &SlotMetadata, slot: u8) -> Result<(), String> {
+        std::fs::write(self.slot_save_path(slot), json)
+            .map_err(|e| format!("Save failed: {e}"))?;
+        if let Ok(meta_json) = serde_json::to_string(meta)
+            && let Err(e) = std::fs::write(self.slot_meta_path(slot), meta_json)
+        {
+            tracing::warn!("Failed to write slot {} metadata: {}", slot + 1, e);
         }
+        Ok(())
     }
 
-    pub fn load_from_slot(&self, slot: u8) -> Result<GameState, String> {
-        let json = std::fs::read_to_string(self.slot_save_path(slot))
-            .map_err(|e| format!("Load failed: {e}"))?;
-        GameState::load_from_json(&json).map_err(|e| format!("Load failed: {e}"))
+    pub fn load_slot_json(&self, slot: u8) -> Result<String, String> {
+        std::fs::read_to_string(self.slot_save_path(slot))
+            .map_err(|e| format!("Load failed: {e}"))
     }
 
     pub fn load_slot_metadata(&self, slot: u8) -> Option<SlotMetadata> {
@@ -162,8 +148,8 @@ impl roguelike_saves::SaveBackend for SaveManager {
     fn has_autosave(&self) -> bool {
         self.has_autosave()
     }
-    fn load_autosave(&self) -> Result<GameState, String> {
-        self.load_autosave()
+    fn load_autosave_json(&self) -> Result<String, String> {
+        self.load_autosave_json()
     }
     fn write_autosave(&self, json: &str, meta: &SlotMetadata) {
         self.write_autosave(json, meta);
@@ -174,11 +160,11 @@ impl roguelike_saves::SaveBackend for SaveManager {
     fn load_autosave_metadata(&self) -> Option<SlotMetadata> {
         self.load_autosave_metadata()
     }
-    fn save_to_slot(&self, state: &GameState, slot: u8, player_name: &str) -> String {
-        self.save_to_slot(state, slot, player_name)
+    fn write_slot(&self, json: &str, meta: &SlotMetadata, slot: u8) -> Result<(), String> {
+        self.write_slot(json, meta, slot)
     }
-    fn load_from_slot(&self, slot: u8) -> Result<GameState, String> {
-        self.load_from_slot(slot)
+    fn load_slot_json(&self, slot: u8) -> Result<String, String> {
+        self.load_slot_json(slot)
     }
     fn load_all_slot_metadata(&self) -> [Option<SlotMetadata>; 5] {
         self.load_all_slot_metadata()

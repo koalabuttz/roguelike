@@ -567,23 +567,31 @@ pub fn run_game_loop<W: Write, D: DevHooks>(
                         break 'app;
                     }
                     Some(MenuAction::SaveGame) => {
-                        // Saving is standard-tier only.
-                        if let Some(ref game) = game_state
-                            && let Some(gs) = standard_state(game.as_ref())
-                        {
+                        if let Some(ref game) = game_state {
                             let slots = saves.load_all_slot_metadata();
                             let mut slot_menu = menu::save_slot_menu(&slots);
                             match run_menu(&mut slot_menu, renderer, input)? {
                                 Some(MenuAction::SelectSlot(slot)) => {
-                                    let msg = saves.save_to_slot(gs, slot, &settings.player_name);
+                                    let msg = match game.save_to_json() {
+                                        Ok(json) => {
+                                            let mut meta = game.extract_save_metadata();
+                                            if !settings.player_name.is_empty() {
+                                                meta.player_name =
+                                                    Some(settings.player_name.clone());
+                                            }
+                                            match saves.write_slot(&json, &meta, slot) {
+                                                Ok(()) => "Game saved.".to_string(),
+                                                Err(e) => e,
+                                            }
+                                        }
+                                        Err(e) => e,
+                                    };
                                     let mut new_pause =
                                         menu::pause_menu(settings.casual_mode, platform);
                                     new_pause.selected = 1;
                                     app_state = AppState::Paused(new_pause);
-                                    if let Some(ref mut game) = game_state
-                                        && let Some(gs) = standard_state_mut(game.as_mut())
-                                    {
-                                        gs.log.add(&msg);
+                                    if let Some(ref mut game) = game_state {
+                                        game.inject_message(&msg);
                                     }
                                 }
                                 _ => {
@@ -1137,12 +1145,15 @@ fn handle_load_game<W: Write>(
         let mut load_menu = menu::load_slot_menu(has_auto, &auto_meta, &slots);
         match run_menu(&mut load_menu, renderer, input)? {
             Some(MenuAction::LoadGame) => {
-                // Load autosave (always standard tier).
+                // Load autosave.
                 menu::draw_loading(renderer);
-                match saves.load_autosave() {
+                match saves
+                    .load_autosave_json()
+                    .and_then(|json| game_step::load_game_from_json(&json))
+                {
                     Ok(mut loaded) => {
-                        loaded.log.add("Game loaded.");
-                        *game_state = Some(Box::new(loaded));
+                        loaded.inject_message("Game loaded.");
+                        *game_state = Some(loaded);
                         *autosave_buf = None;
                         *app_state = AppState::Playing;
                     }
@@ -1161,10 +1172,13 @@ fn handle_load_game<W: Write>(
             }
             Some(MenuAction::SelectSlot(slot)) => {
                 menu::draw_loading(renderer);
-                match saves.load_from_slot(slot) {
+                match saves
+                    .load_slot_json(slot)
+                    .and_then(|json| game_step::load_game_from_json(&json))
+                {
                     Ok(mut loaded) => {
-                        loaded.log.add("Game loaded.");
-                        *game_state = Some(Box::new(loaded));
+                        loaded.inject_message("Game loaded.");
+                        *game_state = Some(loaded);
                         *autosave_buf = None;
                         *app_state = AppState::Playing;
                     }
@@ -1189,10 +1203,13 @@ fn handle_load_game<W: Write>(
     } else {
         // Classic mode — load autosave directly.
         menu::draw_loading(renderer);
-        match saves.load_autosave() {
+        match saves
+            .load_autosave_json()
+            .and_then(|json| game_step::load_game_from_json(&json))
+        {
             Ok(mut loaded) => {
-                loaded.log.add("Game loaded.");
-                *game_state = Some(Box::new(loaded));
+                loaded.inject_message("Game loaded.");
+                *game_state = Some(loaded);
                 *autosave_buf = None;
                 *app_state = AppState::Playing;
             }
@@ -1224,10 +1241,8 @@ fn load_failed(
 ) {
     if let Some(selected) = pause_selected {
         // From pause menu — log error and return.
-        if let Some(game) = game_state
-            && let Some(gs) = standard_state_mut(game.as_mut())
-        {
-            gs.log.add(msg);
+        if let Some(game) = game_state {
+            game.inject_message(msg);
         }
         let mut new_pause = menu::pause_menu(settings.casual_mode, platform);
         new_pause.selected = selected;

@@ -1,4 +1,3 @@
-use roguelike_core::game::GameState;
 use roguelike_core::saves::SlotMetadata;
 use roguelike_core::settings::Settings;
 
@@ -31,9 +30,8 @@ impl SaveBackend for LocalSaveBackend {
         std::path::Path::new(SAVE_FILE).exists()
     }
 
-    fn load_autosave(&self) -> Result<GameState, String> {
-        let json = std::fs::read_to_string(SAVE_FILE).map_err(|e| format!("Load failed: {e}"))?;
-        GameState::load_from_json(&json).map_err(|e| format!("Load failed: {e}"))
+    fn load_autosave_json(&self) -> Result<String, String> {
+        std::fs::read_to_string(SAVE_FILE).map_err(|e| format!("Load failed: {e}"))
     }
 
     fn write_autosave(&self, json: &str, meta: &SlotMetadata) {
@@ -52,27 +50,14 @@ impl SaveBackend for LocalSaveBackend {
             .and_then(|json| serde_json::from_str(&json).ok())
     }
 
-    fn save_to_slot(&self, state: &GameState, slot: u8, player_name: &str) -> String {
-        match state.save_to_json() {
-            Ok(json) => match std::fs::write(slot_save_path(slot), json) {
-                Ok(()) => {
-                    let mut meta = state.extract_metadata();
-                    if !player_name.is_empty() {
-                        meta.player_name = Some(player_name.to_string());
-                    }
-                    write_metadata(&slot_meta_path(slot), &meta);
-                    "Game saved.".to_string()
-                }
-                Err(e) => format!("Save failed: {e}"),
-            },
-            Err(e) => format!("Save failed: {e}"),
-        }
+    fn write_slot(&self, json: &str, meta: &SlotMetadata, slot: u8) -> Result<(), String> {
+        std::fs::write(slot_save_path(slot), json).map_err(|e| format!("Save failed: {e}"))?;
+        write_metadata(&slot_meta_path(slot), meta);
+        Ok(())
     }
 
-    fn load_from_slot(&self, slot: u8) -> Result<GameState, String> {
-        let json = std::fs::read_to_string(slot_save_path(slot))
-            .map_err(|e| format!("Load failed: {e}"))?;
-        GameState::load_from_json(&json).map_err(|e| format!("Load failed: {e}"))
+    fn load_slot_json(&self, slot: u8) -> Result<String, String> {
+        std::fs::read_to_string(slot_save_path(slot)).map_err(|e| format!("Load failed: {e}"))
     }
 
     fn load_all_slot_metadata(&self) -> [Option<SlotMetadata>; 5] {

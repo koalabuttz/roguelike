@@ -30,6 +30,7 @@ use crate::tier_micro::game::MicroGameState;
 use crate::tier_micro::item_store::ItemStore;
 use crate::tier_micro::map::{TILE_FLOOR, TILE_STAIRS_DOWN, TILE_STRUCTURAL, TILE_WALL};
 use crate::tier_micro::types::PLAYER_IDX;
+use crate::saves::SlotMetadata;
 use crate::types::{Coord, Stat};
 
 /// Uniform interface for driving a game of any capability tier.
@@ -63,6 +64,29 @@ pub trait GameStep: crate::rules::game_view::GameView + Send {
 
     /// Shareable seed code string (std-only, for TUI).
     fn seed_code_str(&self) -> String;
+
+    /// Serialize game state to JSON for saving.
+    /// Returns `Err` for tiers that don't support JSON serialization.
+    fn save_to_json(&self) -> Result<String, String> {
+        Err("Save not supported for this game tier".into())
+    }
+
+    /// Extract lightweight metadata for save-slot display.
+    fn extract_save_metadata(&self) -> SlotMetadata {
+        let (hp, max_hp) = self.player_hp();
+        SlotMetadata {
+            turn_count: self.turn_count() as Stat,
+            player_hp: hp as Stat,
+            player_max_hp: max_hp as Stat,
+            explored_pct: self.explored_pct() as Stat,
+            player_name: None,
+            depth: self.depth() as Stat,
+        }
+    }
+
+    /// Inject a system message into the game's message log.
+    /// No-op for tiers that don't support string messages.
+    fn inject_message(&mut self, _msg: &str) {}
 }
 
 // ── Standard tier ────────────────────────────────────────────────────
@@ -98,6 +122,18 @@ impl GameStep for GameState {
 
     fn seed_code_str(&self) -> String {
         self.seed_code()
+    }
+
+    fn save_to_json(&self) -> Result<String, String> {
+        GameState::save_to_json(self).map_err(|e| format!("Save failed: {e}"))
+    }
+
+    fn extract_save_metadata(&self) -> SlotMetadata {
+        self.extract_metadata()
+    }
+
+    fn inject_message(&mut self, msg: &str) {
+        self.log.add(msg);
     }
 }
 
@@ -191,6 +227,17 @@ pub fn create_random_game(
     }
     let mut state = GameState::new_with_data(width, height, game_data);
     state.update_fov();
+    Ok(Box::new(state))
+}
+
+/// Deserialize a game from JSON, returning a trait object.
+///
+/// Currently only standard-tier saves exist as JSON, so this delegates
+/// to `GameState::load_from_json`. When other tiers gain JSON save
+/// support, this function can inspect a tier tag in the JSON to route
+/// to the correct deserializer.
+pub fn load_game_from_json(json: &str) -> Result<Box<dyn GameStep>, String> {
+    let state = GameState::load_from_json(json).map_err(|e| format!("Load failed: {e}"))?;
     Ok(Box::new(state))
 }
 

@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - ANSI CSI parser unbounded buffer (DoS) (#243)
 
 ### Added
+- GBA help screen with controls and gameplay hints (#259)
+- GBA pause menu with reusable menu module (#258)
 - Add GameCommand::Interact for constrained-input platforms (#257)
 - Migrate standard tier MessageLog to store GameEvent values (#242)
 - GBA: Decide save system format — postcard vs custom binary (#204)

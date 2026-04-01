@@ -6,6 +6,7 @@ mod debug;
 mod display;
 mod format;
 mod game_loop;
+mod help_screen;
 mod input;
 mod inventory_ui;
 mod menu;

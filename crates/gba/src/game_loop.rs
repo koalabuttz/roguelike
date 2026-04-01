@@ -237,6 +237,12 @@ fn run_pause_flow() -> PauseAction {
     loop {
         match crate::pause_menu::run_pause() {
             crate::pause_menu::PauseResult::Resume => return PauseAction::Resume,
+            crate::pause_menu::PauseResult::Help => {
+                match crate::help_screen::run_help() {
+                    crate::help_screen::HelpResult::Back => {}
+                    crate::help_screen::HelpResult::Resume => return PauseAction::Resume,
+                }
+            }
             crate::pause_menu::PauseResult::Settings => {
                 match crate::settings_menu::run_settings() {
                     crate::settings_menu::SettingsResult::Back => {} // loop to pause menu

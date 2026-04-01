@@ -8,11 +8,11 @@
 
 use super::balance;
 use super::color::GameColor;
+use super::command::GameCommand;
 use super::items::{self as rules_items, Equipment, Inventory, ItemKind};
 use super::message::GameEvent;
 use super::monster_table::{self, MonsterKind};
 use super::tiles as tile_rules;
-use super::command::GameCommand;
 
 /// Unified step result across tiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,5 +145,177 @@ pub trait GameView {
     fn render_item(&self, i: usize) -> (char, GameColor) {
         let kind = self.item_kind_at(i);
         (rules_items::glyph(kind), rules_items::color(kind))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rules::command::GameCommand;
+
+    /// Minimal mock for testing `GameView` default implementations.
+    /// Only fields used by the defaults need real values.
+    struct MockView {
+        visible: bool,
+        explored: bool,
+        tile: u8,
+        game_over: bool,
+        game_won: bool,
+        entity_alive: bool,
+        entity_kind: Option<MonsterKind>,
+        item_kind: ItemKind,
+        equipment: Equipment,
+        inventory: Inventory,
+    }
+
+    impl Default for MockView {
+        fn default() -> Self {
+            Self {
+                visible: false,
+                explored: false,
+                tile: 0,
+                game_over: false,
+                game_won: false,
+                entity_alive: true,
+                entity_kind: Some(MonsterKind::Goblin),
+                item_kind: ItemKind::HealthPotion,
+                equipment: Equipment::default(),
+                inventory: Inventory::default(),
+            }
+        }
+    }
+
+    impl GameView for MockView {
+        fn map_dims(&self) -> (i32, i32) { (10, 10) }
+        fn map_in_bounds(&self, _x: i32, _y: i32) -> bool { true }
+        fn tile_at(&self, _x: i32, _y: i32) -> u8 { self.tile }
+        fn is_visible(&self, _x: i32, _y: i32) -> bool { self.visible }
+        fn is_explored(&self, _x: i32, _y: i32) -> bool { self.explored }
+        fn player_xy(&self) -> (i32, i32) { (5, 5) }
+        fn player_hp(&self) -> (u8, u8) { (10, 10) }
+        fn effective_attack(&self) -> u8 { 3 }
+        fn effective_defense(&self) -> u8 { 1 }
+        fn entity_count(&self) -> usize { 2 }
+        fn entity_xy(&self, _i: usize) -> (i32, i32) { (1, 1) }
+        fn entity_alive(&self, _i: usize) -> bool { self.entity_alive }
+        fn entity_kind(&self, _i: usize) -> Option<MonsterKind> { self.entity_kind }
+        fn entity_hp(&self, _i: usize) -> (u8, u8) { (5, 5) }
+        fn entity_at(&self, _x: i32, _y: i32) -> Option<u8> { None }
+        fn item_count(&self) -> usize { 1 }
+        fn item_xy(&self, _i: usize) -> (i32, i32) { (3, 3) }
+        fn item_alive(&self, _i: usize) -> bool { true }
+        fn item_kind_at(&self, _i: usize) -> ItemKind { self.item_kind }
+        fn item_at(&self, _x: i32, _y: i32) -> Option<u8> { None }
+        fn equipment(&self) -> &Equipment { &self.equipment }
+        fn inventory(&self) -> &Inventory { &self.inventory }
+        fn depth(&self) -> u8 { 1 }
+        fn kills(&self) -> u8 { 0 }
+        fn turn_count(&self) -> u16 { 0 }
+        fn game_over(&self) -> bool { self.game_over }
+        fn game_won(&self) -> bool { self.game_won }
+        fn seed_u32(&self) -> u32 { 42 }
+        fn explored_pct(&self) -> u8 { 50 }
+        fn target_depth(&self) -> u8 { 5 }
+        fn recent_message(&self, _n: u8) -> Option<GameEvent> { None }
+        fn step_view(&mut self, _cmd: GameCommand) -> GameViewStep {
+            GameViewStep { action_taken: false, game_over: false, game_won: false }
+        }
+    }
+
+    #[test]
+    fn is_terminal_both_false() {
+        let v = MockView::default();
+        assert!(!v.is_terminal());
+    }
+
+    #[test]
+    fn is_terminal_game_over() {
+        let v = MockView { game_over: true, ..Default::default() };
+        assert!(v.is_terminal());
+    }
+
+    #[test]
+    fn is_terminal_game_won() {
+        let v = MockView { game_won: true, ..Default::default() };
+        assert!(v.is_terminal());
+    }
+
+    #[test]
+    fn tile_visibility_visible_wins() {
+        let v = MockView { visible: true, explored: true, ..Default::default() };
+        assert_eq!(v.tile_visibility(0, 0), TileVisibility::Visible);
+    }
+
+    #[test]
+    fn tile_visibility_explored() {
+        let v = MockView { visible: false, explored: true, ..Default::default() };
+        assert_eq!(v.tile_visibility(0, 0), TileVisibility::Explored);
+    }
+
+    #[test]
+    fn tile_visibility_unexplored() {
+        let v = MockView::default();
+        assert_eq!(v.tile_visibility(0, 0), TileVisibility::Unexplored);
+    }
+
+    #[test]
+    fn tile_is_structural_true() {
+        let v = MockView { tile: 1, ..Default::default() };
+        assert!(v.tile_is_structural(0, 0));
+    }
+
+    #[test]
+    fn tile_is_structural_false() {
+        let v = MockView { tile: 0, ..Default::default() };
+        assert!(!v.tile_is_structural(0, 0));
+    }
+
+    #[test]
+    fn render_tile_floor() {
+        // tile_at=2 is TileKind::Floor
+        let v = MockView { tile: 2, ..Default::default() };
+        let (glyph, color) = v.render_tile(0, 0);
+        assert_eq!(glyph, tile_rules::glyph(tile_rules::TileKind::Floor));
+        assert_eq!(color, tile_rules::color(tile_rules::TileKind::Floor));
+    }
+
+    #[test]
+    fn render_tile_unknown() {
+        let v = MockView { tile: 255, ..Default::default() };
+        let (glyph, color) = v.render_tile(0, 0);
+        assert_eq!(glyph, ' ');
+        assert_eq!(color, GameColor::Black);
+    }
+
+    #[test]
+    fn render_entity_player() {
+        let v = MockView::default();
+        let (glyph, color) = v.render_entity(0);
+        assert_eq!(glyph, balance::PLAYER_GLYPH);
+        assert_eq!(color, GameColor::Green);
+    }
+
+    #[test]
+    fn render_entity_corpse() {
+        let v = MockView { entity_alive: false, ..Default::default() };
+        let (glyph, color) = v.render_entity(1);
+        assert_eq!(glyph, '%');
+        assert_eq!(color, GameColor::DarkRed);
+    }
+
+    #[test]
+    fn render_entity_monster() {
+        let v = MockView { entity_kind: Some(MonsterKind::Goblin), ..Default::default() };
+        let (glyph, color) = v.render_entity(1);
+        assert_eq!(glyph, monster_table::glyph(MonsterKind::Goblin));
+        assert_eq!(color, monster_table::color(MonsterKind::Goblin));
+    }
+
+    #[test]
+    fn render_item_delegates() {
+        let v = MockView { item_kind: ItemKind::HealthPotion, ..Default::default() };
+        let (glyph, color) = v.render_item(0);
+        assert_eq!(glyph, rules_items::glyph(ItemKind::HealthPotion));
+        assert_eq!(color, rules_items::color(ItemKind::HealthPotion));
     }
 }

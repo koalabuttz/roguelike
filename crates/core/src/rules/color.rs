@@ -41,3 +41,45 @@ pub enum GameColor {
 
 #[cfg(not(feature = "std"))]
 const _: () = assert!(core::mem::size_of::<GameColor>() == 1);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Read the `#[repr(u8)]` discriminant byte from a GameColor value.
+    /// Safe because repr(u8) guarantees the first byte is the discriminant.
+    fn discriminant_u8(c: &GameColor) -> u8 {
+        // SAFETY: #[repr(u8)] guarantees discriminant is the first byte.
+        unsafe { *(c as *const GameColor as *const u8) }
+    }
+
+    /// Discriminant values are serialized cross-platform (saves, seed codes).
+    /// Changing them breaks compatibility with C64/GBA save files.
+    #[test]
+    fn discriminants_are_stable() {
+        assert_eq!(discriminant_u8(&GameColor::Black), 0);
+        assert_eq!(discriminant_u8(&GameColor::White), 1);
+        assert_eq!(discriminant_u8(&GameColor::Grey), 2);
+        assert_eq!(discriminant_u8(&GameColor::DarkGrey), 3);
+        assert_eq!(discriminant_u8(&GameColor::Red), 4);
+        assert_eq!(discriminant_u8(&GameColor::DarkRed), 5);
+        assert_eq!(discriminant_u8(&GameColor::Green), 6);
+        assert_eq!(discriminant_u8(&GameColor::DarkGreen), 7);
+        assert_eq!(discriminant_u8(&GameColor::Yellow), 8);
+        assert_eq!(discriminant_u8(&GameColor::DarkBlue), 9);
+        assert_eq!(discriminant_u8(&GameColor::Cyan), 10);
+    }
+
+    #[test]
+    fn size_of_with_rgb() {
+        // std builds include Rgb(u8,u8,u8) which widens the enum to 4 bytes.
+        assert_eq!(core::mem::size_of::<GameColor>(), 4);
+    }
+
+    #[test]
+    fn copy_clone() {
+        let a = GameColor::Red;
+        let b = a;
+        assert_eq!(a, b);
+    }
+}

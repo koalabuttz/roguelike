@@ -4,6 +4,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
+use std::time::Duration;
 
 use async_trait::async_trait;
 use russh::server::{Auth, Msg, Session};
@@ -25,7 +26,6 @@ pub struct ServerState {
     pub accounts: AccountStore,
     pub active_sessions: AtomicUsize,
     pub max_connections: usize,
-    #[allow(dead_code)] // Wired from CLI args; used when #144 (idle timeout) lands
     pub idle_timeout_secs: u64,
 }
 
@@ -117,6 +117,7 @@ impl russh::server::Handler for SshHandler {
             }
 
             let (width, height) = *size_rx.borrow();
+            let idle_timeout = Duration::from_secs(server.idle_timeout_secs);
 
             // Lobby ↔ session loop: LogOut returns to the lobby.
             loop {
@@ -131,6 +132,7 @@ impl russh::server::Handler for SshHandler {
                     width as i32,
                     height as i32,
                     active_sessions,
+                    idle_timeout,
                 ) {
                     Ok(LobbyResult::LoggedIn(user)) => user,
                     Ok(LobbyResult::Quit) => {
@@ -154,6 +156,7 @@ impl russh::server::Handler for SshHandler {
                     &mut parser,
                     &saves,
                     &username,
+                    idle_timeout,
                 ) {
                     Ok(session::SessionResult::LogOut) => {
                         tracing::info!(username = %username, "User logged out");

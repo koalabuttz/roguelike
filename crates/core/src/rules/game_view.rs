@@ -12,7 +12,7 @@ use super::items::{self as rules_items, Equipment, Inventory, ItemKind};
 use super::message::GameEvent;
 use super::monster_table::{self, MonsterKind};
 use super::tiles as tile_rules;
-use crate::command::GameCommand;
+use super::command::GameCommand;
 
 /// Unified step result across tiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -40,6 +40,7 @@ pub fn run_session<W: Write>(
     parser: &mut AnsiParser,
     saves: &SaveManager,
     username: &str,
+    idle_timeout: Duration,
 ) -> std::io::Result<SessionResult> {
     loop {
         let (cols, rows) = {
@@ -47,9 +48,9 @@ pub fn run_session<W: Write>(
             (w as i32, h as i32)
         };
 
-        match run_server_menu(writer, rx, parser, username, cols, rows)? {
+        match run_server_menu(writer, rx, parser, username, cols, rows, idle_timeout)? {
             ServerMenuChoice::Play => {
-                match run_game(writer, rx, size_rx, parser, saves, username)? {
+                match run_game(writer, rx, size_rx, parser, saves, username, idle_timeout)? {
                     GameLoopResult::Lobby => continue, // Back to server menu
                     GameLoopResult::Quit => return Ok(SessionResult::Quit),
                 }
@@ -88,13 +89,14 @@ fn run_server_menu<W: Write>(
     username: &str,
     width: i32,
     height: i32,
+    idle_timeout: Duration,
 ) -> std::io::Result<ServerMenuChoice> {
     let mut selected: usize = 0;
 
     loop {
         draw_server_menu(w, width, height, selected, username)?;
 
-        let key = match wait_for_key(rx, parser)? {
+        let key = match wait_for_key(rx, parser, idle_timeout)? {
             Some(k) => k,
             None => return Ok(ServerMenuChoice::Disconnected),
         };
@@ -209,6 +211,7 @@ fn run_game<W: Write>(
     parser: &mut AnsiParser,
     saves: &SaveManager,
     username: &str,
+    idle_timeout: Duration,
 ) -> std::io::Result<GameLoopResult> {
     let (mut cols, mut rows) = {
         let (w, h) = *size_rx.borrow();
@@ -244,6 +247,7 @@ fn run_game<W: Write>(
         rx,
         parser,
         size_rx,
+        idle_timeout,
     };
 
     let mut dev = NoDevHooks;

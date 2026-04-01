@@ -36,6 +36,7 @@ const LOBBY_ITEMS: &[LobbyItem] = &[
 ];
 
 /// Run the dgamelaunch-style lobby. Blocks until the user logs in or quits.
+#[allow(clippy::too_many_arguments)]
 pub fn run_lobby<W: Write>(
     w: &mut W,
     rx: &Receiver<Vec<u8>>,
@@ -44,13 +45,14 @@ pub fn run_lobby<W: Write>(
     width: i32,
     height: i32,
     active_sessions: usize,
+    idle_timeout: Duration,
 ) -> std::io::Result<LobbyResult> {
     let mut selected: usize = 0;
 
     loop {
         draw_lobby(w, width, height, selected, active_sessions)?;
 
-        let key = match wait_for_key(rx, parser)? {
+        let key = match wait_for_key(rx, parser, idle_timeout)? {
             Some(k) => k,
             None => return Ok(LobbyResult::Quit),
         };
@@ -70,13 +72,15 @@ pub fn run_lobby<W: Write>(
             KeyCode::Enter | KeyCode::Char(' ') => {
                 match LOBBY_ITEMS[selected] {
                     LobbyItem::Login => {
-                        if let Some(username) = run_login(w, rx, parser, accounts, width, height)? {
+                        if let Some(username) =
+                            run_login(w, rx, parser, accounts, width, height, idle_timeout)?
+                        {
                             return Ok(LobbyResult::LoggedIn(username));
                         }
                     }
                     LobbyItem::Register => {
                         if let Some(username) =
-                            run_register(w, rx, parser, accounts, width, height)?
+                            run_register(w, rx, parser, accounts, width, height, idle_timeout)?
                         {
                             return Ok(LobbyResult::LoggedIn(username));
                         }
@@ -84,7 +88,7 @@ pub fn run_lobby<W: Write>(
                     LobbyItem::Watch => {
                         // Coming soon — show a message and return to lobby
                         show_message(w, width, height, "Spectating coming soon!", Color::Yellow)?;
-                        let _ = wait_for_key(rx, parser)?;
+                        let _ = wait_for_key(rx, parser, idle_timeout)?;
                     }
                     LobbyItem::Quit => return Ok(LobbyResult::Quit),
                 }
@@ -192,6 +196,7 @@ fn draw_lobby<W: Write>(
 }
 
 /// Text input dialog. Returns None on Esc.
+#[allow(clippy::too_many_arguments)]
 fn text_input<W: Write>(
     w: &mut W,
     rx: &Receiver<Vec<u8>>,
@@ -200,6 +205,7 @@ fn text_input<W: Write>(
     width: i32,
     height: i32,
     hidden: bool,
+    idle_timeout: Duration,
 ) -> std::io::Result<Option<String>> {
     let mut input = String::new();
     loop {
@@ -251,7 +257,7 @@ fn text_input<W: Write>(
 
         w.flush()?;
 
-        let key = match wait_for_key(rx, parser)? {
+        let key = match wait_for_key(rx, parser, idle_timeout)? {
             Some(k) => k,
             None => return Ok(None),
         };
@@ -281,13 +287,23 @@ fn run_login<W: Write>(
     accounts: &AccountStore,
     width: i32,
     height: i32,
+    idle_timeout: Duration,
 ) -> std::io::Result<Option<String>> {
-    let username = match text_input(w, rx, parser, "Username", width, height, false)? {
+    let username = match text_input(
+        w,
+        rx,
+        parser,
+        "Username",
+        width,
+        height,
+        false,
+        idle_timeout,
+    )? {
         Some(u) if !u.is_empty() => u,
         _ => return Ok(None),
     };
 
-    let password = match text_input(w, rx, parser, "Password", width, height, true)? {
+    let password = match text_input(w, rx, parser, "Password", width, height, true, idle_timeout)? {
         Some(p) => p,
         None => return Ok(None),
     };
@@ -296,7 +312,7 @@ fn run_login<W: Write>(
         Ok(()) => Ok(Some(username)),
         Err(msg) => {
             show_message(w, width, height, &msg, Color::Red)?;
-            let _ = wait_for_key(rx, parser)?;
+            let _ = wait_for_key(rx, parser, idle_timeout)?;
             Ok(None)
         }
     }
@@ -309,25 +325,53 @@ fn run_register<W: Write>(
     accounts: &AccountStore,
     width: i32,
     height: i32,
+    idle_timeout: Duration,
 ) -> std::io::Result<Option<String>> {
-    let username = match text_input(w, rx, parser, "Choose a Username", width, height, false)? {
+    let username = match text_input(
+        w,
+        rx,
+        parser,
+        "Choose a Username",
+        width,
+        height,
+        false,
+        idle_timeout,
+    )? {
         Some(u) if !u.is_empty() => u,
         _ => return Ok(None),
     };
 
-    let password = match text_input(w, rx, parser, "Choose a Password", width, height, true)? {
+    let password = match text_input(
+        w,
+        rx,
+        parser,
+        "Choose a Password",
+        width,
+        height,
+        true,
+        idle_timeout,
+    )? {
         Some(p) if !p.is_empty() => p,
         _ => return Ok(None),
     };
 
-    let confirm = match text_input(w, rx, parser, "Confirm Password", width, height, true)? {
+    let confirm = match text_input(
+        w,
+        rx,
+        parser,
+        "Confirm Password",
+        width,
+        height,
+        true,
+        idle_timeout,
+    )? {
         Some(c) => c,
         None => return Ok(None),
     };
 
     if password != confirm {
         show_message(w, width, height, "Passwords do not match.", Color::Red)?;
-        let _ = wait_for_key(rx, parser)?;
+        let _ = wait_for_key(rx, parser, idle_timeout)?;
         return Ok(None);
     }
 
@@ -340,12 +384,12 @@ fn run_register<W: Write>(
                 &format!("Account '{}' created! Logging in...", username),
                 Color::Green,
             )?;
-            let _ = wait_for_key(rx, parser)?;
+            let _ = wait_for_key(rx, parser, idle_timeout)?;
             Ok(Some(username))
         }
         Err(msg) => {
             show_message(w, width, height, &msg, Color::Red)?;
-            let _ = wait_for_key(rx, parser)?;
+            let _ = wait_for_key(rx, parser, idle_timeout)?;
             Ok(None)
         }
     }
@@ -389,17 +433,19 @@ fn show_message<W: Write>(
     Ok(())
 }
 
-/// Wait for a key event from the SSH channel. Returns None on channel close.
+/// Wait for a key event from the SSH channel. Returns None on channel close
+/// or when the idle timeout expires with no input.
 pub fn wait_for_key(
     rx: &Receiver<Vec<u8>>,
     parser: &mut AnsiParser,
+    idle_timeout: Duration,
 ) -> std::io::Result<Option<crossterm::event::KeyEvent>> {
     loop {
         // If parser has a pending escape, poll with a short timeout
         let timeout = if parser.pending() {
             Duration::from_millis(50)
         } else {
-            Duration::from_secs(300) // 5 min idle timeout for lobby
+            idle_timeout
         };
 
         match rx.recv_timeout(timeout) {
@@ -416,7 +462,7 @@ pub fn wait_for_key(
                     return Ok(Some(ev));
                 }
                 if !parser.pending() {
-                    // Real timeout — disconnect
+                    tracing::info!("Idle timeout ({:?}) — disconnecting", idle_timeout);
                     return Ok(None);
                 }
             }
@@ -424,5 +470,18 @@ pub fn wait_for_key(
                 return Ok(None);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wait_for_key_idle_timeout() {
+        let (_tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let mut parser = AnsiParser::new();
+        let result = wait_for_key(&rx, &mut parser, Duration::from_millis(10)).unwrap();
+        assert!(result.is_none(), "Should return None on idle timeout");
     }
 }

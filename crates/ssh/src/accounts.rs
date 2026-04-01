@@ -5,6 +5,9 @@ use argon2::{
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// Minimum allowed password length for new accounts.
+const MIN_PASSWORD_LENGTH: usize = 8;
+
 /// Stored account data (one JSON file per user).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
@@ -38,8 +41,11 @@ impl AccountStore {
     /// or the password cannot be hashed.
     pub fn register(&self, username: &str, password: &str) -> Result<(), String> {
         validate_username(username)?;
-        if password.is_empty() {
-            return Err("Password cannot be empty.".to_string());
+        if password.len() < MIN_PASSWORD_LENGTH {
+            return Err(format!(
+                "Password must be at least {} characters.",
+                MIN_PASSWORD_LENGTH
+            ));
         }
         if self.exists(username) {
             return Err("Username already taken.".to_string());
@@ -63,7 +69,10 @@ impl AccountStore {
     /// user-facing message on failure.
     pub fn login(&self, username: &str, password: &str) -> Result<(), String> {
         let path = self.account_path(username);
-        let json = std::fs::read_to_string(&path).map_err(|_| "Unknown username.".to_string())?;
+        let json = std::fs::read_to_string(&path).map_err(|e| {
+            tracing::debug!("Login failed for '{}': {}", username, e);
+            "Invalid username or password.".to_string()
+        })?;
         let mut account: Account =
             serde_json::from_str(&json).map_err(|_| "Corrupted account file.".to_string())?;
 
@@ -124,7 +133,7 @@ fn verify_password(password: &str, hash_str: &str) -> Result<(), String> {
     let parsed = PasswordHash::new(hash_str).map_err(|_| "Corrupted password hash.".to_string())?;
     Argon2::default()
         .verify_password(password.as_bytes(), &parsed)
-        .map_err(|_| "Invalid password.".to_string())
+        .map_err(|_| "Invalid username or password.".to_string())
 }
 
 /// Simple ISO 8601 timestamp without pulling in chrono.
@@ -238,21 +247,35 @@ mod tests {
     #[test]
     fn login_wrong_password() {
         let (store, _dir) = temp_store();
-        store.register("bob", "correct").unwrap();
-        assert!(store.login("bob", "wrong").is_err());
+        store.register("bob", "correct1").unwrap();
+        let err = store.login("bob", "wrong111").unwrap_err();
+        assert_eq!(err, "Invalid username or password.");
     }
 
     #[test]
     fn login_nonexistent_user() {
         let (store, _dir) = temp_store();
-        assert!(store.login("nobody", "pass").is_err());
+        let err = store.login("nobody", "password").unwrap_err();
+        assert_eq!(err, "Invalid username or password.");
+    }
+
+    #[test]
+    fn login_errors_are_identical() {
+        let (store, _dir) = temp_store();
+        store.register("alice", "password123").unwrap();
+        let wrong_user = store.login("nobody", "password123").unwrap_err();
+        let wrong_pass = store.login("alice", "wrongpass").unwrap_err();
+        assert_eq!(
+            wrong_user, wrong_pass,
+            "Error messages must be identical to prevent enumeration"
+        );
     }
 
     #[test]
     fn register_duplicate() {
         let (store, _dir) = temp_store();
-        store.register("alice", "pass1").unwrap();
-        assert!(store.register("alice", "pass2").is_err());
+        store.register("alice", "password1").unwrap();
+        assert!(store.register("alice", "password2").is_err());
     }
 
     #[test]
@@ -262,12 +285,20 @@ mod tests {
     }
 
     #[test]
+    fn register_short_password() {
+        let (store, _dir) = temp_store();
+        assert!(store.register("alice", "short").is_err());
+        assert!(store.register("alice", "1234567").is_err()); // 7 chars
+        assert!(store.register("alice", "12345678").is_ok()); // 8 chars
+    }
+
+    #[test]
     fn count_accounts() {
         let (store, _dir) = temp_store();
         assert_eq!(store.count(), 0);
-        store.register("alice", "pass").unwrap();
+        store.register("alice", "password").unwrap();
         assert_eq!(store.count(), 1);
-        store.register("bob", "pass").unwrap();
+        store.register("bob", "password").unwrap();
         assert_eq!(store.count(), 2);
     }
 

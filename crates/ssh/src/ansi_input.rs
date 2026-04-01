@@ -4,6 +4,11 @@ use std::time::{Duration, Instant};
 /// Timeout for distinguishing a bare Esc from the start of an escape sequence.
 const ESC_TIMEOUT: Duration = Duration::from_millis(50);
 
+/// Maximum bytes of CSI parameter data before discarding the sequence.
+/// Real terminal sequences rarely exceed 5 bytes (e.g. "1;5"). This limit
+/// prevents memory exhaustion from malicious clients sending unbounded digits.
+const MAX_CSI_PARAMS: usize = 32;
+
 /// Parser state machine for ANSI escape sequences.
 ///
 /// Converts raw bytes from an SSH channel into crossterm `KeyEvent` structs
@@ -120,7 +125,12 @@ impl AnsiParser {
     fn handle_csi(&mut self, byte: u8, events: &mut Vec<KeyEvent>) {
         match byte {
             b'0'..=b'9' | b';' => {
-                self.params.push(byte);
+                if self.params.len() < MAX_CSI_PARAMS {
+                    self.params.push(byte);
+                } else {
+                    self.params.clear();
+                    self.state = State::Normal;
+                }
             }
             b'~' => {
                 // Extended key: CSI <number> ~
@@ -489,5 +499,22 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].code, KeyCode::Esc);
         assert_eq!(events[1].code, KeyCode::Char('a'));
+    }
+
+    #[test]
+    fn csi_overflow_discards_sequence() {
+        let mut p = AnsiParser::new();
+        // Start a CSI sequence
+        let events = feed_bytes(&mut p, b"\x1b[");
+        assert!(events.is_empty());
+        // Feed MAX_CSI_PARAMS + 1 digit bytes to trigger overflow
+        let overflow = vec![b'1'; MAX_CSI_PARAMS + 1];
+        let events = feed_bytes(&mut p, &overflow);
+        assert!(events.is_empty());
+        // Parser should be back in Normal state
+        assert!(!p.pending());
+        // Normal input works again
+        let events = feed_bytes(&mut p, b"a");
+        assert_key(&events, KeyCode::Char('a'), KeyModifiers::NONE);
     }
 }

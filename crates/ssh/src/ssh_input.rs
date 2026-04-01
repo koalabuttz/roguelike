@@ -19,18 +19,19 @@ pub struct SshInput<'a> {
     pub rx: &'a Receiver<Vec<u8>>,
     pub parser: &'a mut AnsiParser,
     pub size_rx: &'a mut tokio::sync::watch::Receiver<(u32, u32)>,
+    pub idle_timeout: Duration,
 }
 
 impl<'a> InputProvider for SshInput<'a> {
     fn wait_for_key(&mut self) -> io::Result<InputResult<crossterm::event::KeyEvent>> {
-        match wait_for_key(self.rx, self.parser)? {
+        match wait_for_key(self.rx, self.parser, self.idle_timeout)? {
             Some(key) => Ok(InputResult::Command(key)),
             None => Ok(InputResult::Disconnected),
         }
     }
 
     fn wait_for_game_input(&mut self, settings: &Settings) -> io::Result<GameInput> {
-        match wait_for_key(self.rx, self.parser)? {
+        match wait_for_key(self.rx, self.parser, self.idle_timeout)? {
             Some(key) => {
                 let command = input::translate_key(key, settings);
                 Ok(GameInput::Key { key, command })
@@ -40,7 +41,7 @@ impl<'a> InputProvider for SshInput<'a> {
     }
 
     fn wait_for_menu_command(&mut self) -> io::Result<InputResult<MenuCommand>> {
-        match wait_for_key(self.rx, self.parser)? {
+        match wait_for_key(self.rx, self.parser, self.idle_timeout)? {
             Some(key) => match input::translate_menu_key(key) {
                 Some(cmd) => Ok(InputResult::Command(cmd)),
                 None => Ok(InputResult::NoCommand),
@@ -53,7 +54,7 @@ impl<'a> InputProvider for SshInput<'a> {
         &mut self,
         settings: &Settings,
     ) -> io::Result<InputResult<LookCommand>> {
-        match wait_for_key(self.rx, self.parser)? {
+        match wait_for_key(self.rx, self.parser, self.idle_timeout)? {
             Some(key) => match input::translate_look_key(key, settings) {
                 Some(cmd) => Ok(InputResult::Command(cmd)),
                 None => Ok(InputResult::NoCommand),
@@ -63,7 +64,7 @@ impl<'a> InputProvider for SshInput<'a> {
     }
 
     fn wait_for_history_input(&mut self) -> io::Result<InputResult<HistoryInput>> {
-        match wait_for_key(self.rx, self.parser)? {
+        match wait_for_key(self.rx, self.parser, self.idle_timeout)? {
             Some(key) => {
                 match key.code {
                     KeyCode::PageUp => return Ok(InputResult::Command(HistoryInput::PageUp)),
@@ -127,6 +128,7 @@ mod tests {
             rx,
             parser,
             size_rx,
+            idle_timeout: Duration::from_secs(300),
         }
     }
 

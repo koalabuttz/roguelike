@@ -6,6 +6,7 @@
 
 pub mod balance;
 pub mod color;
+pub mod command;
 pub mod combat;
 pub mod damage;
 pub mod direction;

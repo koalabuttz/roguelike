@@ -13,6 +13,7 @@ mod palette;
 mod pause_menu;
 mod render;
 mod saves;
+mod settings_menu;
 mod title_screen;
 #[cfg(feature = "dev")]
 mod stack_check;

@@ -254,8 +254,8 @@ fn run_play_loop(state: &mut impl GameView) {
                                 render::render_game(state);
                                 continue;
                             }
-                            crate::pause_menu::PauseResult::Inventory => {
-                                crate::inventory_ui::run_inventory(state);
+                            crate::pause_menu::PauseResult::Settings => {
+                                crate::settings_menu::run_settings();
                                 render::render_game(state);
                                 continue;
                             }

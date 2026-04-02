@@ -86,6 +86,11 @@ fn read_pressed() -> u16 {
     !KEYINPUT.read().to_u16() & 0x03FF // mask to 10 button bits
 }
 
+/// Returns true if any button is currently held. Used to interrupt autorun/auto-explore.
+pub fn any_pressed() -> bool {
+    read_pressed() != 0
+}
+
 /// Consume any pending edges by snapshotting the current pressed state.
 /// Call at the start of a new screen/modal to prevent input bleed-through.
 pub fn flush() {

@@ -9,15 +9,21 @@ use gba::prelude::*;
 
 use roguelike_core::command::GameCommand;
 use roguelike_core::rules::balance;
+use roguelike_core::rules::direction::Direction;
 use roguelike_core::rules::game_view::GameView;
 use roguelike_core::rules::health::{self, HealthTier};
 use roguelike_core::rules::items as rules_items;
 use roguelike_core::rules::message::GameEvent;
 use roguelike_core::rules::monster_table;
 use roguelike_core::rules::seed_code;
+use roguelike_core::tier_compact::autorun::{CompactAutorunStepper, CompactBfsStepper, CompactStepOutcome};
 use roguelike_core::tier_compact::game::CompactGameState;
+use roguelike_core::tier_compact::map::TILE_STAIRS_DOWN;
+use roguelike_core::tier_compact::pathfinding::{self as compact_path, BfsBuffers as CompactBfsBuffers};
 use roguelike_core::tier_compact::types::{MAP_HEIGHT, MAP_WIDTH};
+use roguelike_core::tier_micro::autorun::{MicroAutorunStepper, MicroBfsStepper, MicroStepOutcome};
 use roguelike_core::tier_micro::game::MicroGameState;
+use roguelike_core::tier_micro::pathfinding::{self as micro_path, BfsBuffers as MicroBfsBuffers};
 use roguelike_core::tier_micro::types::{
     DEFAULT_MAP_HEIGHT as MICRO_MAP_HEIGHT, DEFAULT_MAP_WIDTH as MICRO_MAP_WIDTH,
 };
@@ -294,6 +300,30 @@ fn run_play_loop(state: &mut impl GameView) {
                         render::render_game(state);
                         continue;
                     }
+                    GameCommand::Autorun(dir) => {
+                        if is_micro() {
+                            run_autorun_micro(dir);
+                        } else {
+                            run_autorun_compact(dir);
+                        }
+                        render::render_game(state);
+                        if state.game_over() || state.game_won() {
+                            app_state = AppState::GameOver;
+                        }
+                        continue;
+                    }
+                    GameCommand::AutoExplore => {
+                        if is_micro() {
+                            run_auto_explore_micro();
+                        } else {
+                            run_auto_explore_compact();
+                        }
+                        render::render_game(state);
+                        if state.game_over() || state.game_won() {
+                            app_state = AppState::GameOver;
+                        }
+                        continue;
+                    }
                     _ => {}
                 }
 
@@ -472,6 +502,120 @@ fn render_look_description(state: &impl GameView, cx: i32, cy: i32) {
             s.trim_end(),
             crate::palette::PALBANK_MSG,
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Autorun — directional run with stop conditions
+// ---------------------------------------------------------------------------
+
+fn stairs_in_fov_micro(state: &MicroGameState) -> bool {
+    for y in 0..state.map.height {
+        for x in 0..state.map.width {
+            if state.fov.is_visible(x, y) && state.map.tile_at(x, y) == TILE_STAIRS_DOWN {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn stairs_in_fov_compact(state: &CompactGameState) -> bool {
+    for y in 0..state.map.height {
+        for x in 0..state.map.width {
+            if state.fov.is_visible(x, y) && state.map.tile_at(x, y) == TILE_STAIRS_DOWN {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn run_autorun_micro(dir: Direction) {
+    let state = game_micro();
+    let mut stepper = MicroAutorunStepper::new(dir, stairs_in_fov_micro(state));
+    loop {
+        match stepper.next_step(state) {
+            MicroStepOutcome::Continue => {
+                render::render_game(state);
+                display::vblank_wait();
+                if input::any_pressed() {
+                    break;
+                }
+            }
+            MicroStepOutcome::Done(_) => break,
+        }
+    }
+}
+
+fn run_autorun_compact(dir: Direction) {
+    let state = game_compact();
+    let mut stepper = CompactAutorunStepper::new(dir, stairs_in_fov_compact(state));
+    loop {
+        match stepper.next_step(state) {
+            CompactStepOutcome::Continue => {
+                render::render_game(state);
+                display::vblank_wait();
+                if input::any_pressed() {
+                    break;
+                }
+            }
+            CompactStepOutcome::Done(_) => break,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Auto-explore — BFS pathfind to nearest frontier
+// ---------------------------------------------------------------------------
+
+fn run_auto_explore_micro() {
+    let state = game_micro();
+    let (px, py) = (state.entities.x[0], state.entities.y[0]);
+    let mut buf = MicroBfsBuffers::new();
+
+    let (tx, ty) = match micro_path::find_nearest_frontier(px, py, &state.map, &state.fov, &mut buf) {
+        Some(pos) => pos,
+        None => return, // fully explored
+    };
+
+    let mut stepper = MicroBfsStepper::new(tx, ty, stairs_in_fov_micro(state));
+    loop {
+        match stepper.next_step(state, &mut buf) {
+            MicroStepOutcome::Continue => {
+                render::render_game(state);
+                display::vblank_wait();
+                if input::any_pressed() {
+                    break;
+                }
+            }
+            MicroStepOutcome::Done(_) => break,
+        }
+    }
+}
+
+fn run_auto_explore_compact() {
+    let state = game_compact();
+    let (px, py) = (state.entities.x[0], state.entities.y[0]);
+    let mut buf = CompactBfsBuffers::new();
+
+    let (tx, ty) = match compact_path::find_nearest_frontier(px, py, &state.map, &state.fov, &mut buf) {
+        Some(pos) => pos,
+        None => return, // fully explored
+    };
+
+    let mut stepper = CompactBfsStepper::new(tx, ty, stairs_in_fov_compact(state));
+    loop {
+        match stepper.next_step(state, &mut buf) {
+            CompactStepOutcome::Continue => {
+                render::render_game(state);
+                display::vblank_wait();
+                if input::any_pressed() {
+                    break;
+                }
+            }
+            CompactStepOutcome::Done(_) => break,
+        }
     }
 }
 

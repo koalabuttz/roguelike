@@ -200,6 +200,10 @@ pub fn read_game_input() -> Option<GameCommand> {
     if edges & BIT_SELECT != 0 {
         return Some(GameCommand::OpenInventory);
     }
+    // L+R combo = Message History (check before individual L/R)
+    if pressed & BIT_L != 0 && pressed & BIT_R != 0 && edges & (BIT_L | BIT_R) != 0 {
+        return Some(GameCommand::MessageHistory);
+    }
     if edges & BIT_R != 0 {
         return Some(GameCommand::AutoExplore);
     }

@@ -155,15 +155,8 @@ pub fn write_hud_centered(y: usize, s: &str, palbank: u16) -> usize {
     x
 }
 
-/// Write a string centered on the map layer at row y.
-/// Returns the X position used.
-pub fn write_map_centered(y: usize, s: &str, palbank: u16) -> usize {
-    let x = SCREEN_COLS.saturating_sub(s.len()) / 2;
-    write_map_string(x, y, s, palbank);
-    x
-}
-
 /// Write a string right-aligned on the HUD layer at row y.
+#[allow(dead_code)]
 /// The string ends at column `SCREEN_COLS - 1 - margin`.
 pub fn write_hud_right_aligned(y: usize, s: &str, palbank: u16, margin: usize) {
     let x = SCREEN_COLS.saturating_sub(s.len() + margin);
@@ -178,6 +171,7 @@ pub fn write_hud_separator(y: usize, x_start: usize, x_end: usize, palbank: u16)
 }
 
 /// Fill a rectangular region on the HUD layer with a glyph.
+#[allow(dead_code)]
 pub fn fill_hud_rect(x: usize, y: usize, w: usize, h: usize, glyph: u8, palbank: u16) {
     for ry in y..y + h {
         for rx in x..x + w {

@@ -11,6 +11,7 @@ mod help_screen;
 mod input;
 mod inventory_ui;
 mod menu;
+mod message_history;
 mod palette;
 mod pause_menu;
 mod render;

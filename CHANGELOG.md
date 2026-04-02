@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - ANSI CSI parser unbounded buffer (DoS) (#243)
 
 ### Added
+- Add GBA message history viewer with L+R combo and fix message order (#262)
 - GBA autorun and auto-explore implementation (#261)
 - GBA help screen with controls and gameplay hints (#259)
 - GBA pause menu with reusable menu module (#258)
@@ -135,6 +136,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Inventory UX polish: equip bonus display, equipped indicators, item coloring (#89, #92, #93)
 
 ### Fixed
+- Fix GBA message verb conjugation for player (You looks → You look) (#264)
 - Fix GBA A button to also descend stairs when no items to pick up (#239)
 - Check is_material_dead for non-consumable source items in combine_items (#186)
 - Fix combine undo not reverting non-consumable source mutation (#167)

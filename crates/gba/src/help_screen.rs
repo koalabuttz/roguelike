@@ -75,7 +75,7 @@ fn render_help() {
     display::write_hud_separator(SEP_ROW, KEY_COL, KEY_COL + 22, PALBANK_DIM);
 
     // Controls
-    let controls: [(&str, &str); 8] = [
+    let controls: [(&str, &str); 9] = [
         ("D-pad", "Move/Attack"),
         ("D-pad+L", "Autorun"),
         ("A", "Interact"),
@@ -84,6 +84,7 @@ fn render_help() {
         ("SELECT", "Inventory"),
         ("R", "Auto-explore"),
         ("L", "Wait"),
+        ("L+R", "Messages"),
     ];
 
     for (i, (key, desc)) in controls.iter().enumerate() {

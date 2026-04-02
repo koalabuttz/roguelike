@@ -10,6 +10,7 @@ use roguelike_core::rules::game_view::GameView;
 use crate::display;
 use crate::format;
 use crate::input::{self, MenuCommand};
+use crate::menu;
 
 /// Palbank for death title text.
 const PALBANK_DEATH: u16 = 4; // Red
@@ -53,11 +54,8 @@ pub fn run_game_over(state: &impl GameView) -> GameOverAction {
     let won = state.game_won();
 
     input::flush();
+    menu::enable_dim_pct(87);
     display::clear_hud();
-
-    // Fill a dark panel on BG0 — no hardware blend, just palette-based dimming
-    // inside the panel. Map outside stays at full brightness.
-    render_panel();
 
     // Render static content
     if won {
@@ -119,6 +117,7 @@ pub fn run_game_over(state: &impl GameView) -> GameOverAction {
     // Cleanup
     crate::cursor::hide();
     crate::cursor::disable_obj_layer();
+    menu::disable_dim();
     display::clear_hud();
 
     match selected {
@@ -130,16 +129,6 @@ pub fn run_game_over(state: &impl GameView) -> GameOverAction {
 // ---------------------------------------------------------------------------
 // Render helpers
 // ---------------------------------------------------------------------------
-
-/// Fill a black rectangle on BG0 using solid block tiles with palbank 0 (black).
-/// Covers rows 3–14, columns 2–27.
-fn render_panel() {
-    for y in 3..15 {
-        for x in 2..28 {
-            display::write_map_tile(x, y, 0xDB, 0);
-        }
-    }
-}
 
 fn render_death(state: &impl GameView) {
     display::write_hud_centered(5, "You have been slain...", PALBANK_DEATH);

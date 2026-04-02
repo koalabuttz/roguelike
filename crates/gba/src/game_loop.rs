@@ -300,6 +300,11 @@ fn run_play_loop(state: &mut impl GameView) {
                         render::render_game(state);
                         continue;
                     }
+                    GameCommand::MessageHistory => {
+                        crate::message_history::run_message_history(state);
+                        render::render_game(state);
+                        continue;
+                    }
                     GameCommand::Autorun(dir) => {
                         if is_micro() {
                             run_autorun_micro(dir);

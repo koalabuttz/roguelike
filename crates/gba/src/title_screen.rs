@@ -351,16 +351,11 @@ fn setup_neon_palettes() {
 fn animate_palettes(frame: u16) {
     // Neon title: interpolate between hot pink (31,0,20) and cyan (0,25,31).
     let idx = ((frame as u32 * 64 / NEON_PERIOD as u32) % 64) as usize;
-    let t = SINE_LUT[idx]; // 0..31
+    let t = SINE_LUT[idx] as u32;
 
-    // Lerp: color = pink * (31-t)/31 + cyan * t/31
-    // Do all math in u32 (ARM7-native), cast to u16 only for the MMIO write.
-    let t32 = t as u32;
-    let r = (31 * (31 - t32)) / 31;
-    let g = (25 * t32) / 31;
-    let b = (20 * (31 - t32) + 31 * t32) / 31;
-
-    let neon_color = Color::from_rgb(r.min(31) as u16, g.min(31) as u16, b.min(31) as u16);
+    let hot_pink = Color::from_rgb(31, 0, 20);
+    let cyan = Color::from_rgb(0, 25, 31);
+    let neon_color = crate::palette::lerp_color(hot_pink, cyan, t);
     bg_palbank(PALBANK_NEON as usize)
         .index(1)
         .write(neon_color);

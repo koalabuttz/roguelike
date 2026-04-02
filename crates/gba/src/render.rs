@@ -165,15 +165,16 @@ fn render_status_bar(state: &impl GameView) {
     display::write_hud_string(0, STATUS_ROW, core::str::from_utf8(&buf).unwrap_or(""), PALBANK_STATUS);
 }
 
-/// Render last 2 messages on BG1 rows 18-19.
+/// Render last 2 messages on BG1 rows 18-19 (older on top, newest on bottom).
 fn render_messages(state: &impl GameView) {
-    for row in 0..2usize {
+    for row in 0..display::MSG_LINES {
         // Clear row
         for x in 0..SCREEN_COLS {
             display::write_hud_tile(x, MSG_ROW + row, b' ', PALBANK_MSG);
         }
 
-        if let Some(event) = state.recent_message(row as u8) {
+        // recent_message(0) = newest. Show older on top row, newest on bottom.
+        if let Some(event) = state.recent_message((display::MSG_LINES - 1 - row) as u8) {
             let mut buf = [b' '; 30];
             format::format_event(event, &mut buf);
             display::write_hud_string(

@@ -6,59 +6,6 @@
 use roguelike_core::rules::health::HealthTier;
 use roguelike_core::rules::message::{Combatant, GameEvent};
 
-// ---------------------------------------------------------------------------
-// LineBuf — ergonomic buffer for the write_str/write_u16/display pattern
-// ---------------------------------------------------------------------------
-
-/// A 30-byte line buffer for building formatted text without allocation.
-///
-/// ```ignore
-/// let mut line = LineBuf::new();
-/// line.str("ATK+");
-/// line.u16(5);
-/// display::write_hud_right_aligned(row, line.as_str(), pal, 1);
-/// ```
-pub struct LineBuf {
-    buf: [u8; 30],
-    pos: usize,
-}
-
-impl LineBuf {
-    pub fn new() -> Self {
-        Self {
-            buf: [b' '; 30],
-            pos: 0,
-        }
-    }
-
-    /// Append a string.
-    pub fn str(&mut self, s: &str) {
-        self.pos = write_str(&mut self.buf, self.pos, s);
-    }
-
-    /// Append a u16 as decimal digits.
-    pub fn u16(&mut self, val: u16) {
-        self.pos = write_u16(&mut self.buf, self.pos, val);
-    }
-
-    /// Append a single byte.
-    pub fn byte(&mut self, b: u8) {
-        if self.pos < self.buf.len() {
-            self.buf[self.pos] = b;
-            self.pos += 1;
-        }
-    }
-
-    /// Get the written content as a &str (trimmed).
-    pub fn as_str(&self) -> &str {
-        core::str::from_utf8(&self.buf[..self.pos]).unwrap_or("")
-    }
-
-    /// Number of bytes written.
-    pub fn len(&self) -> usize {
-        self.pos
-    }
-}
 
 /// Write a u32 as 8-digit uppercase hexadecimal into `buf` starting at `pos`.
 /// Returns the new position after the 8 hex digits.
@@ -144,7 +91,8 @@ fn format_event_inner(event: GameEvent, buf: &mut [u8; 30]) -> usize {
             damage,
         } => {
             let mut p = write_combatant(buf, 0, attacker);
-            p = write_str(buf, p, " hit ");
+            let verb = if matches!(attacker, Combatant::Player) { " hit " } else { " hits " };
+            p = write_str(buf, p, verb);
             p = write_combatant(buf, p, defender);
             p = write_str(buf, p, " for ");
             p = write_u16(buf, p, damage as u16);
@@ -156,14 +104,16 @@ fn format_event_inner(event: GameEvent, buf: &mut [u8; 30]) -> usize {
             defender,
         } => {
             let mut p = write_combatant(buf, 0, attacker);
-            p = write_str(buf, p, " miss ");
+            let verb = if matches!(attacker, Combatant::Player) { " miss " } else { " misses " };
+            p = write_str(buf, p, verb);
             p = write_combatant(buf, p, defender);
             p
         }
 
         GameEvent::Kill { attacker, victim } => {
             let mut p = write_combatant(buf, 0, attacker);
-            p = write_str(buf, p, " killed ");
+            let verb = if matches!(attacker, Combatant::Player) { " killed " } else { " kills " };
+            p = write_str(buf, p, verb);
             p = write_combatant(buf, p, victim);
             p
         }
@@ -227,7 +177,9 @@ fn format_event_inner(event: GameEvent, buf: &mut [u8; 30]) -> usize {
         }
 
         GameEvent::EntityNotice { who } => {
-            let mut p = write_combatant(buf, 0, who);
+            // EntityNotice is only emitted for monsters, but be safe.
+            let mut p = write_str(buf, 0, "The ");
+            p = write_str(buf, p, who.name());
             p = write_str(buf, p, " notices you!");
             p
         }
@@ -238,14 +190,26 @@ fn format_event_inner(event: GameEvent, buf: &mut [u8; 30]) -> usize {
         GameEvent::SoundCue { .. } => write_str(buf, 0, "You hear something..."),
 
         GameEvent::HealthStatus { who, tier } => {
-            let mut p = write_combatant(buf, 0, who);
-            p = write_str(buf, p, match tier {
-                HealthTier::Healthy => " looks healthy",
-                HealthTier::Moderate => " looks damaged",
-                HealthTier::Severe => " looks wounded",
-                HealthTier::AlmostDead => " is dying",
-            });
-            p
+            match who {
+                Combatant::Player => {
+                    write_str(buf, 0, match tier {
+                        HealthTier::Healthy => "You look healthy",
+                        HealthTier::Moderate => "You look damaged",
+                        HealthTier::Severe => "You look wounded",
+                        HealthTier::AlmostDead => "You are dying",
+                    })
+                }
+                _ => {
+                    let mut p = write_combatant(buf, 0, who);
+                    p = write_str(buf, p, match tier {
+                        HealthTier::Healthy => " looks healthy",
+                        HealthTier::Moderate => " looks damaged",
+                        HealthTier::Severe => " looks wounded",
+                        HealthTier::AlmostDead => " is dying",
+                    });
+                    p
+                }
+            }
         }
 
         GameEvent::UnequipWeapon { kind } => {

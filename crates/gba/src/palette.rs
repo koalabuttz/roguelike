@@ -4,7 +4,6 @@
 //! mapping from `GameColor as u8`. Banks 11-14 are UI-specific states.
 
 use gba::prelude::*;
-use roguelike_core::rules::color::GameColor;
 
 /// Palbank for explored-but-not-visible tiles (dimmed).
 pub const PALBANK_DIM: u16 = 11;
@@ -81,14 +80,3 @@ pub fn lerp_color(a: Color, b: Color, t: u32) -> Color {
     Color::from_rgb(r as u16, g as u16, b_ch as u16)
 }
 
-/// Convert a `GameColor` + visibility state to a palbank index.
-///
-/// For visible tiles, the palbank is the `GameColor` discriminant directly.
-/// For explored-but-not-visible tiles, returns `PALBANK_DIM`.
-pub fn game_color_to_palbank(color: GameColor, visible: bool) -> u16 {
-    if visible {
-        color as u16
-    } else {
-        PALBANK_DIM
-    }
-}

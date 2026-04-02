@@ -539,12 +539,13 @@ fn stairs_in_fov_compact(state: &CompactGameState) -> bool {
 fn run_autorun_micro(dir: Direction) {
     let state = game_micro();
     let mut stepper = MicroAutorunStepper::new(dir, stairs_in_fov_micro(state));
+    input::flush();
     loop {
         match stepper.next_step(state) {
             MicroStepOutcome::Continue => {
                 render::render_game(state);
                 display::vblank_wait();
-                if input::any_pressed() {
+                if input::any_new_press() {
                     break;
                 }
             }
@@ -556,12 +557,13 @@ fn run_autorun_micro(dir: Direction) {
 fn run_autorun_compact(dir: Direction) {
     let state = game_compact();
     let mut stepper = CompactAutorunStepper::new(dir, stairs_in_fov_compact(state));
+    input::flush();
     loop {
         match stepper.next_step(state) {
             CompactStepOutcome::Continue => {
                 render::render_game(state);
                 display::vblank_wait();
-                if input::any_pressed() {
+                if input::any_new_press() {
                     break;
                 }
             }
@@ -585,12 +587,13 @@ fn run_auto_explore_micro() {
     };
 
     let mut stepper = MicroBfsStepper::new(tx, ty, stairs_in_fov_micro(state));
+    input::flush();
     loop {
         match stepper.next_step(state, &mut buf) {
             MicroStepOutcome::Continue => {
                 render::render_game(state);
                 display::vblank_wait();
-                if input::any_pressed() {
+                if input::any_new_press() {
                     break;
                 }
             }
@@ -610,12 +613,13 @@ fn run_auto_explore_compact() {
     };
 
     let mut stepper = CompactBfsStepper::new(tx, ty, stairs_in_fov_compact(state));
+    input::flush();
     loop {
         match stepper.next_step(state, &mut buf) {
             CompactStepOutcome::Continue => {
                 render::render_game(state);
                 display::vblank_wait();
-                if input::any_pressed() {
+                if input::any_new_press() {
                     break;
                 }
             }

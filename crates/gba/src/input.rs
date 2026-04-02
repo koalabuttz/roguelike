@@ -86,9 +86,15 @@ fn read_pressed() -> u16 {
     !KEYINPUT.read().to_u16() & 0x03FF // mask to 10 button bits
 }
 
-/// Returns true if any button is currently held. Used to interrupt autorun/auto-explore.
-pub fn any_pressed() -> bool {
-    read_pressed() != 0
+/// Returns true if any new button was pressed since the last call.
+/// Uses edge detection so held buttons from the trigger don't immediately interrupt.
+/// Call once per frame during autorun/auto-explore loops.
+pub fn any_new_press() -> bool {
+    let pressed = read_pressed();
+    let s = state();
+    let edges = pressed & !s.prev_pressed;
+    s.prev_pressed = pressed;
+    edges != 0
 }
 
 /// Consume any pending edges by snapshotting the current pressed state.

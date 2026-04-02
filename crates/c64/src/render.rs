@@ -697,6 +697,14 @@ fn copy_num(buf: &mut [u8; 40], pos: usize, val: u8) -> usize {
     p
 }
 
+/// Map a combatant to a display name: "you" for the player, monster name otherwise.
+fn combatant_name(who: Combatant) -> &'static [u8] {
+    match who {
+        Combatant::Player => b"you",
+        _ => who.name().as_bytes(),
+    }
+}
+
 /// Format a GameEvent into a 40-byte PETSCII buffer (space-padded).
 /// Messages match PC-tier text quality within the 40-column limit.
 #[inline(never)]
@@ -704,20 +712,37 @@ fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
     *buf = [b' '; 40];
     let _ = match event {
         GameEvent::Attack { attacker, defender, .. } => {
-            let p = copy_bytes(buf, 0, attacker.name().as_bytes());
-            let p = copy_bytes(buf, p, b" hits ");
-            let p = copy_bytes(buf, p, defender.name().as_bytes());
+            let (name, verb) = match attacker {
+                Combatant::Player => (&b"You"[..], &b" hit "[..]),
+                _ => (attacker.name().as_bytes(), &b" hits "[..]),
+            };
+            let def_name = combatant_name(defender);
+            let p = copy_bytes(buf, 0, name);
+            let p = copy_bytes(buf, p, verb);
+            let p = copy_bytes(buf, p, def_name);
             copy_bytes(buf, p, b".")
         }
         GameEvent::NoDamage { attacker, defender } => {
-            let p = copy_bytes(buf, 0, attacker.name().as_bytes());
-            let p = copy_bytes(buf, p, b" attacks ");
-            let p = copy_bytes(buf, p, defender.name().as_bytes());
+            let (name, verb) = match attacker {
+                Combatant::Player => (&b"You"[..], &b" attack "[..]),
+                _ => (attacker.name().as_bytes(), &b" attacks "[..]),
+            };
+            let def_name = combatant_name(defender);
+            let p = copy_bytes(buf, 0, name);
+            let p = copy_bytes(buf, p, verb);
+            let p = copy_bytes(buf, p, def_name);
             copy_bytes(buf, p, b". No damage.")
         }
-        GameEvent::Kill { victim, .. } => {
-            let p = copy_bytes(buf, 0, victim.name().as_bytes());
-            copy_bytes(buf, p, b" is dead!")
+        GameEvent::Kill { attacker, victim } => {
+            let (name, verb) = match attacker {
+                Combatant::Player => (&b"You"[..], &b" killed "[..]),
+                _ => (attacker.name().as_bytes(), &b" kills "[..]),
+            };
+            let vic_name = combatant_name(victim);
+            let p = copy_bytes(buf, 0, name);
+            let p = copy_bytes(buf, p, verb);
+            let p = copy_bytes(buf, p, vic_name);
+            copy_bytes(buf, p, b"!")
         }
         GameEvent::HealthStatus { who, tier } => {
             let desc: &[u8] = match tier {

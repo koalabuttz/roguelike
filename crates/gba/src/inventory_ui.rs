@@ -97,6 +97,40 @@ fn clamp_cursor(state: &impl GameView, cursor: &mut u8) {
     }
 }
 
+/// Number of screen rows consumed by equipped items (including blank separator).
+fn equip_rows(state: &impl GameView) -> usize {
+    let ec = equip_count(state) as usize;
+    if ec > 0 { ec + 1 } else { 0 }
+}
+
+/// Compute the first inventory item index to display, given cursor position.
+/// Equipped items are always visible; only inventory items scroll.
+fn inv_scroll(state: &impl GameView, cursor: u8) -> usize {
+    let ec = equip_count(state);
+    if cursor < ec {
+        return 0;
+    }
+    let inv_visible = (DETAIL_SEP_ROW - LIST_ROW_START).saturating_sub(equip_rows(state));
+    if inv_visible == 0 {
+        return 0;
+    }
+    let inv_cursor = (cursor - ec) as usize;
+    inv_cursor.saturating_sub(inv_visible - 1)
+}
+
+/// Convert a logical cursor position to the screen row it occupies.
+fn cursor_screen_row(state: &impl GameView, cursor: u8) -> usize {
+    let ec = equip_count(state);
+    if cursor < ec {
+        LIST_ROW_START + cursor as usize
+    } else {
+        let er = equip_rows(state);
+        let scroll = inv_scroll(state, cursor);
+        let inv_cursor = (cursor - ec) as usize;
+        LIST_ROW_START + er + (inv_cursor - scroll)
+    }
+}
+
 /// Get the item kind and whether it's equipped, for a given visual cursor position.
 fn item_at_cursor(state: &impl GameView, cursor: u8) -> Option<CursorItem> {
     let ec = equip_count(state);
@@ -246,15 +280,18 @@ fn render_screen(state: &impl GameView, inv: &InvState) {
         row += 1; // blank separator after equipped
     }
 
-    // Inventory items
-    let max_visible = DETAIL_SEP_ROW.saturating_sub(row);
-    for vis_idx in 0..max_visible {
-        if let Some((_slot_idx, slot)) = state.inventory().nth_occupied(vis_idx) {
-            let visual = ec as usize + vis_idx;
-            let selected = inv.cursor as usize == visual;
+    // Inventory items (scrollable)
+    let inv_visible = DETAIL_SEP_ROW.saturating_sub(row);
+    let scroll = inv_scroll(state, inv.cursor);
+    let inv_len = state.inventory().len();
+    for vis_idx in 0..inv_visible {
+        let item_idx = scroll + vis_idx;
+        if let Some((_slot_idx, slot)) = state.inventory().nth_occupied(item_idx) {
+            let logical = ec as usize + item_idx;
+            let selected = inv.cursor as usize == logical;
             let pal = if selected { PALBANK_SEL } else { color(slot.kind) as u16 };
 
-            let letter = b'a' + vis_idx as u8;
+            let letter = b'a' + item_idx as u8;
             display::write_hud_tile(1, row, letter, pal);
             display::write_hud_tile(2, row, b')', pal);
             write_item_name(3, row, slot.kind, pal);
@@ -272,6 +309,14 @@ fn render_screen(state: &impl GameView, inv: &InvState) {
         } else {
             break;
         }
+    }
+
+    // Scroll indicators
+    if scroll > 0 {
+        display::write_hud_tile(0, LIST_ROW_START + equip_rows(state), 0x1E, PALBANK_DIM);
+    }
+    if scroll + inv_visible < inv_len {
+        display::write_hud_tile(0, DETAIL_SEP_ROW - 1, 0x1F, PALBANK_DIM);
     }
 
     if total_items(state) == 0 {
@@ -416,8 +461,8 @@ fn render_submenu(state: &impl GameView, cursor: u8, sel: u8) {
     let ec = equip_count(state);
     let is_equipped = cursor < ec;
 
-    // Position submenu near the cursor row
-    let sy = (LIST_ROW_START + cursor as usize).min(display::SCREEN_ROWS - 4);
+    // Position submenu near the cursor's screen row
+    let sy = cursor_screen_row(state, cursor).min(display::SCREEN_ROWS - 4);
 
     if is_equipped {
         let pal = if sel == 0 { PALBANK_SEL } else { PALBANK_MSG };
@@ -459,7 +504,7 @@ pub fn run_inventory(state: &mut impl GameView) {
                 let remaining = SLIDE_FRAMES - *frame;
                 let offset = remaining as u16 * SLIDE_PX_PER_FRAME;
                 BG1HOFS.write(offset);
-                crate::cursor::update(0, LIST_ROW_START + inv.cursor as usize, inv.frame_counter, offset);
+                crate::cursor::update(0, cursor_screen_row(state, inv.cursor), inv.frame_counter, offset);
                 *frame += 1;
                 if *frame >= SLIDE_FRAMES {
                     BG1HOFS.write(0);
@@ -470,7 +515,7 @@ pub fn run_inventory(state: &mut impl GameView) {
             InvMode::SlideOut { ref mut frame } => {
                 let offset = (*frame as u16 + 1) * SLIDE_PX_PER_FRAME;
                 BG1HOFS.write(offset);
-                crate::cursor::update(0, LIST_ROW_START + inv.cursor as usize, inv.frame_counter, offset);
+                crate::cursor::update(0, cursor_screen_row(state, inv.cursor), inv.frame_counter, offset);
                 *frame += 1;
                 if *frame >= SLIDE_FRAMES {
                     break;

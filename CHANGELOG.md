@@ -137,6 +137,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Inventory UX polish: equip bonus display, equipped indicators, item coloring (#89, #92, #93)
 
 ### Fixed
+- Fix GBA inventory not scrolling — items beyond row 13 invisible and unreachable (#267)
 - Fix C64 message verb conjugation for player (Player hits → You hit) (#265)
 - Fix GBA message verb conjugation for player (You looks → You look) (#264)
 - Fix GBA A button to also descend stairs when no items to pick up (#239)

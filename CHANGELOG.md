@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - ANSI CSI parser unbounded buffer (DoS) (#243)
 
 ### Added
+- Expand message history to 128 (compact) / 16 (micro) with save persistence and scrollable GBA viewer (#266)
 - Add GBA message history viewer with L+R combo and fix message order (#262)
 - GBA autorun and auto-explore implementation (#261)
 - GBA help screen with controls and gameplay hints (#259)

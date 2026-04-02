@@ -14,7 +14,9 @@ use roguelike_core::tier_micro::save as micro_save;
 const SRAM_BASE: usize = 0x0E00_0000;
 
 /// Maximum bytes for one save slot.
-const SLOT_SIZE: usize = 6144;
+/// v3 log adds 515 bytes (128 events × 4B + 3B header). Worst case
+/// (80×40 map, 128 entities, 128 items): ~7910 bytes.
+const SLOT_SIZE: usize = 8000;
 
 /// Header at SRAM offset 0: 4-byte magic + validity marker.
 const HEADER_MAGIC: [u8; 4] = *b"RGSV";

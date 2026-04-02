@@ -6,7 +6,8 @@
 use crate::rules::message::GameEvent;
 
 /// Circular buffer capacity — number of recent events stored.
-pub const MSG_COUNT: usize = 8;
+/// Must be a power of 2 (used for bitwise masking).
+pub const MSG_COUNT: usize = 16;
 
 pub struct MicroMessageLog {
     events: [Option<GameEvent>; MSG_COUNT],
@@ -52,6 +53,27 @@ impl MicroMessageLog {
 
     pub fn total(&self) -> u16 {
         self.total
+    }
+
+    // -- Save/load accessors --
+
+    /// Direct array access for serialization.
+    pub fn event_at(&self, idx: usize) -> Option<GameEvent> {
+        self.events[idx]
+    }
+
+    /// Current write head position.
+    pub fn head(&self) -> u8 {
+        self.head
+    }
+
+    /// Restore from saved state.
+    pub fn from_saved(events: [Option<GameEvent>; MSG_COUNT], head: u8, total: u16) -> Self {
+        Self {
+            events,
+            head,
+            total,
+        }
     }
 }
 

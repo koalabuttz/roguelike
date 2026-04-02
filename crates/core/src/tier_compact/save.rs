@@ -11,7 +11,7 @@
 //! - u32 seed and RNG state (4 bytes LE each)
 //! - Fixed map dimensions (MAP_WIDTH × MAP_HEIGHT) — not stored per-save
 //!
-//! # Format (v1)
+//! # Format (v3)
 //!
 //! ```text
 //! Envelope (4B): magic "RG" | version(1) | tier(1)
@@ -24,6 +24,7 @@
 //! Items:         count | parallel arrays (i32 coords = 4B LE each)
 //! Equipment:     weapon(1) | weapon_props(8) | armor(1) | armor_props(8)
 //! Inventory:     26 × {kind(1) | count(1) | props(8)}
+//! Log (v3):      head(1) | total(LE u16) | MSG_COUNT × 4-byte encoded events
 //! CRC-16 (2B):   CCITT over all preceding bytes
 //! ```
 
@@ -47,7 +48,8 @@ pub use crate::rules::save_common::{SAVE_MAGIC, SaveError, crc16, crc16_update};
 /// Format version for compact tier saves.
 /// v1: fixed 80×40 dimensions (no width/height in header)
 /// v2: variable dimensions (width + height stored as LE i32 after seed)
-pub const SAVE_VERSION: u8 = 2;
+/// v3: message log persisted (head + total + MSG_COUNT × 4-byte events)
+pub const SAVE_VERSION: u8 = 3;
 
 // ---------------------------------------------------------------------------
 // Serialize
@@ -268,6 +270,20 @@ pub fn serialize<F: FnMut(u8)>(state: &CompactGameState, emit: &mut F) -> usize 
                     pi += 1;
                 }
             }
+        }
+        i += 1;
+    }
+
+    // --- Message log (v3: head + total + MSG_COUNT × 4-byte events) ---
+    wb!(state.log.head());
+    wb_u16!(state.log.total());
+    i = 0;
+    while i < super::msglog::MSG_COUNT {
+        let encoded = encode_game_event(state.log.event_at(i));
+        let mut ei = 0;
+        while ei < ENCODED_EVENT_SIZE {
+            wb!(encoded[ei]);
+            ei += 1;
         }
         i += 1;
     }
@@ -547,7 +563,20 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
     state.wandering_spawned = wandering_spawned;
     state.wandering_counter = wandering_counter;
     state.rng = LfsrRng32::from_raw_state(rng_state);
-    state.log = CompactMessageLog::new();
+
+    // --- Message log (v3) ---
+    {
+        let log_head = rb!();
+        let log_total = rb_u16!();
+        let mut events = [None; super::msglog::MSG_COUNT];
+        i = 0;
+        while i < super::msglog::MSG_COUNT {
+            let bytes = [rb!(), rb!(), rb!(), rb!()];
+            events[i] = decode_game_event(bytes);
+            i += 1;
+        }
+        state.log = CompactMessageLog::from_saved(events, log_head, log_total);
+    }
 
     // --- CRC verification ---
     let stored_lo = read().ok_or(SaveError::UnexpectedEof)?;
@@ -759,9 +788,9 @@ mod tests {
     fn save_size_reasonable() {
         let state = new_game(42);
         let bytes = serialize_to_vec(&state);
-        // 80×40 map: ~4000-6000 bytes typical
+        // 80×40 map: ~4500-6500 bytes typical (v3 log adds ~515 bytes)
         assert!(
-            bytes.len() > 3000 && bytes.len() < 8000,
+            bytes.len() > 3500 && bytes.len() < 8500,
             "save size {} outside expected range",
             bytes.len()
         );
@@ -810,5 +839,32 @@ mod tests {
         assert_eq!(bytes[1], b'G');
         assert_eq!(bytes[2], SAVE_VERSION);
         assert_eq!(bytes[3], Tier::Compact as u8);
+    }
+
+    #[test]
+    fn message_log_preserved() {
+        use crate::rules::message::{Combatant, GameEvent};
+        use crate::rules::monster_table::MonsterKind;
+
+        let mut state = new_game(42);
+        state.log.add(GameEvent::Welcome);
+        state.log.add(GameEvent::Attack {
+            attacker: Combatant::Player,
+            defender: Combatant::Monster(MonsterKind::Orc),
+            damage: 7,
+        });
+        state.log.add(GameEvent::Descend {
+            depth: 3,
+            target: 5,
+        });
+
+        let bytes = serialize_to_vec(&state);
+        let mut loaded = new_game(0);
+        deserialize_from_slice(&mut loaded, &bytes).unwrap();
+
+        assert_eq!(loaded.log.total(), state.log.total());
+        assert_eq!(loaded.log.recent(0), state.log.recent(0));
+        assert_eq!(loaded.log.recent(1), state.log.recent(1));
+        assert_eq!(loaded.log.recent(2), state.log.recent(2));
     }
 }

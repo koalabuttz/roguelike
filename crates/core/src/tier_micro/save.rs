@@ -7,7 +7,7 @@
 //! Serialization uses streaming callbacks (`FnMut`) so the C64 can
 //! write directly to disk via KERNAL CHROUT without a RAM buffer.
 //!
-//! # Format (v1)
+//! # Format (v3)
 //!
 //! ```text
 //! Header (8B): magic "RG" | version | width | height | seed (LE u16) | depth
@@ -18,6 +18,7 @@
 //! Items: count | 4 parallel arrays × count
 //! Equipment: weapon | armor (0xFF = None)
 //! Inventory: 26 × {kind, count, props[8]} (0xFF = empty slot, 10 bytes each)
+//! Log (v3): head(1) | total(LE u16) | MSG_COUNT × 4-byte encoded events
 //! CRC-16 (2B): CCITT over all preceding bytes
 //! ```
 
@@ -37,7 +38,7 @@ use crate::rules::save_common::*;
 
 pub use crate::rules::save_common::{SAVE_MAGIC, SaveError, crc16, crc16_update};
 
-pub const SAVE_VERSION: u8 = 2;
+pub const SAVE_VERSION: u8 = 3;
 
 // ---------------------------------------------------------------------------
 // Size helpers
@@ -250,6 +251,20 @@ pub fn serialize<F: FnMut(u8)>(state: &MicroGameState, emit: &mut F) -> usize {
                     pi += 1;
                 }
             }
+        }
+        i += 1;
+    }
+
+    // --- Message log (v3: head + total + MSG_COUNT × 4-byte events) ---
+    wb!(state.log.head());
+    wb_u16!(state.log.total());
+    i = 0;
+    while i < super::msglog::MSG_COUNT {
+        let encoded = encode_game_event(state.log.event_at(i));
+        let mut ei = 0;
+        while ei < ENCODED_EVENT_SIZE {
+            wb!(encoded[ei]);
+            ei += 1;
         }
         i += 1;
     }
@@ -508,7 +523,20 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
     state.wandering_counter = wandering_counter;
     state.ambient_sound_counter = ambient_sound_counter;
     state.rng = LfsrRng16::from_raw_state(rng_state);
-    state.log = MicroMessageLog::new();
+
+    // --- Message log (v3) ---
+    {
+        let log_head = rb!();
+        let log_total = rb_u16!();
+        let mut events = [None; super::msglog::MSG_COUNT];
+        i = 0;
+        while i < super::msglog::MSG_COUNT {
+            let bytes = [rb!(), rb!(), rb!(), rb!()];
+            events[i] = decode_game_event(bytes);
+            i += 1;
+        }
+        state.log = MicroMessageLog::from_saved(events, log_head, log_total);
+    }
 
     // --- CRC verification ---
     let stored_lo = read().ok_or(SaveError::UnexpectedEof)?;
@@ -709,9 +737,9 @@ mod tests {
     fn save_size_reasonable() {
         let state = MicroGameState::new_default(42);
         let bytes = serialize_to_vec(&state);
-        // 64×48 map: ~2000-2500 bytes typical
+        // 64×48 map: ~2100-2600 bytes typical (v3 log adds ~67 bytes)
         assert!(
-            bytes.len() > 1500 && bytes.len() < 4000,
+            bytes.len() > 1500 && bytes.len() < 4500,
             "save size {} outside expected range",
             bytes.len()
         );
@@ -781,5 +809,32 @@ mod tests {
         assert_eq!(loaded.regen_counter, original.regen_counter);
         assert_eq!(loaded.wandering_counter, original.wandering_counter);
         assert_eq!(loaded.ambient_sound_counter, original.ambient_sound_counter);
+    }
+
+    #[test]
+    fn message_log_preserved() {
+        use crate::rules::message::{Combatant, GameEvent};
+        use crate::rules::monster_table::MonsterKind;
+
+        let mut original = MicroGameState::new_default(42);
+        original.log.add(GameEvent::Welcome);
+        original.log.add(GameEvent::Attack {
+            attacker: Combatant::Player,
+            defender: Combatant::Monster(MonsterKind::Goblin),
+            damage: 5,
+        });
+        original.log.add(GameEvent::Descend {
+            depth: 2,
+            target: 5,
+        });
+
+        let bytes = serialize_to_vec(&original);
+        let mut loaded = MicroGameState::new_default(0);
+        deserialize_from_slice(&mut loaded, &bytes).unwrap();
+
+        assert_eq!(loaded.log.total(), original.log.total());
+        assert_eq!(loaded.log.recent(0), original.log.recent(0));
+        assert_eq!(loaded.log.recent(1), original.log.recent(1));
+        assert_eq!(loaded.log.recent(2), original.log.recent(2));
     }
 }

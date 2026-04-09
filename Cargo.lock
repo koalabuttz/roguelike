@@ -1978,6 +1978,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "roguelike-renderer3d"
+version = "0.5.0"
+
+[[package]]
 name = "roguelike-saves"
 version = "0.5.0"
 dependencies = [

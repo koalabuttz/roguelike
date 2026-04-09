@@ -96,6 +96,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Add fixed-point 3D math library for PS1-era software renderer (#288)
 - Dev hooks: 8 unwraps on overlay cursors (#250)
 - frontier_tiles() 8 levels of nesting (#253)
 - SSH SaveBackend returns concrete GameState (#249)

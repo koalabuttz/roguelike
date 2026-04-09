@@ -56,11 +56,7 @@ impl Fixed16 {
 
     #[inline]
     pub const fn abs(self) -> Self {
-        if self.0 < 0 {
-            Self(-self.0)
-        } else {
-            self
-        }
+        if self.0 < 0 { Self(-self.0) } else { self }
     }
 
     /// Fixed-point square root via Newton's method (4 iterations).

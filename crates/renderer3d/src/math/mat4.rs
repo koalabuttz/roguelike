@@ -26,12 +26,7 @@ impl Mat4 {
         let z = Fixed16::ZERO;
         let o = Fixed16::ONE;
         Self {
-            m: [
-                [o, z, z, z],
-                [z, o, z, z],
-                [z, z, o, z],
-                [z, z, z, o],
-            ],
+            m: [[o, z, z, z], [z, o, z, z], [z, z, o, z], [z, z, z, o]],
         }
     }
 
@@ -82,12 +77,7 @@ impl Mat4 {
         let z = Fixed16::ZERO;
         let o = Fixed16::ONE;
         Self {
-            m: [
-                [o, z, z, v.x],
-                [z, o, z, v.y],
-                [z, z, o, v.z],
-                [z, z, z, o],
-            ],
+            m: [[o, z, z, v.x], [z, o, z, v.y], [z, z, o, v.z], [z, z, z, o]],
         }
     }
 
@@ -95,12 +85,7 @@ impl Mat4 {
         let z = Fixed16::ZERO;
         let o = Fixed16::ONE;
         Self {
-            m: [
-                [v.x, z, z, z],
-                [z, v.y, z, z],
-                [z, z, v.z, z],
-                [z, z, z, o],
-            ],
+            m: [[v.x, z, z, z], [z, v.y, z, z], [z, z, v.z, z], [z, z, z, o]],
         }
     }
 
@@ -110,12 +95,7 @@ impl Mat4 {
         let z = Fixed16::ZERO;
         let o = Fixed16::ONE;
         Self {
-            m: [
-                [o, z, z, z],
-                [z, c, -s, z],
-                [z, s, c, z],
-                [z, z, z, o],
-            ],
+            m: [[o, z, z, z], [z, c, -s, z], [z, s, c, z], [z, z, z, o]],
         }
     }
 
@@ -125,12 +105,7 @@ impl Mat4 {
         let z = Fixed16::ZERO;
         let o = Fixed16::ONE;
         Self {
-            m: [
-                [c, z, s, z],
-                [z, o, z, z],
-                [-s, z, c, z],
-                [z, z, z, o],
-            ],
+            m: [[c, z, s, z], [z, o, z, z], [-s, z, c, z], [z, z, z, o]],
         }
     }
 
@@ -140,12 +115,7 @@ impl Mat4 {
         let z = Fixed16::ZERO;
         let o = Fixed16::ONE;
         Self {
-            m: [
-                [c, -s, z, z],
-                [s, c, z, z],
-                [z, z, o, z],
-                [z, z, z, o],
-            ],
+            m: [[c, -s, z, z], [s, c, z, z], [z, z, o, z], [z, z, z, o]],
         }
     }
 
@@ -184,7 +154,11 @@ impl Mat4 {
         let s = trig::sin(half_fov);
         let c = trig::cos(half_fov);
         // Guard against zero sin (fov=0 is degenerate)
-        let f = if s.to_raw() != 0 { c / s } else { Fixed16::ZERO };
+        let f = if s.to_raw() != 0 {
+            c / s
+        } else {
+            Fixed16::ZERO
+        };
 
         let z = Fixed16::ZERO;
         let range = near - far;
@@ -193,7 +167,12 @@ impl Mat4 {
             m: [
                 [f / aspect, z, z, z],
                 [z, f, z, z],
-                [z, z, (far + near) / range, (Fixed16::from_int(2) * far * near) / range],
+                [
+                    z,
+                    z,
+                    (far + near) / range,
+                    (Fixed16::from_int(2) * far * near) / range,
+                ],
                 [z, z, Fixed16::NEG_ONE, z],
             ],
         }
@@ -412,12 +391,7 @@ mod tests {
     fn perspective_center_stays_center() {
         // FOV = 1/8 turn (45 degrees), aspect = 1, near = 1, far = 100
         let eighth = Fixed16::from_raw(65536 / 8);
-        let proj = Mat4::perspective(
-            eighth,
-            Fixed16::ONE,
-            Fixed16::ONE,
-            Fixed16::from_int(100),
-        );
+        let proj = Mat4::perspective(eighth, Fixed16::ONE, Fixed16::ONE, Fixed16::from_int(100));
         // Point on the center axis at z = -10 (in front of camera)
         let p = Vec4::new(
             Fixed16::ZERO,

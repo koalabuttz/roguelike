@@ -1,6 +1,20 @@
 use crate::framebuffer::Framebuffer;
 use crate::pipeline::ScreenVertex;
 
+/// Blend an RGB555 color toward black by a fog factor (0 = clear, 256 = full black).
+/// Each 5-bit channel is multiplied by (256 - fog) and shifted right by 8.
+#[inline]
+fn apply_fog(color: u16, fog: i16) -> u16 {
+    if fog <= 0 {
+        return color;
+    }
+    let inv = (256 - fog.min(256)) as u16;
+    let r = (((color >> 10) & 0x1F) * inv) >> 8;
+    let g = (((color >> 5) & 0x1F) * inv) >> 8;
+    let b = ((color & 0x1F) * inv) >> 8;
+    (r << 10) | (g << 5) | b
+}
+
 /// Is this edge a "top" or "left" edge for the top-left fill rule?
 /// Top: horizontal, going right (a == 0, b > 0).
 /// Left: going up in screen space (a > 0).
@@ -94,7 +108,19 @@ pub fn rasterize_triangle(
                 let z =
                     ((u0 as i64 * v0.z as i64 + u1 as i64 * v1.z as i64 + u2 as i64 * v2.z as i64)
                         / twice_area) as i16;
-                fb.set_pixel(x as u32, y as u32, color, z);
+
+                // Fog interpolation + color blend
+                let pixel_color = if v0.fog | v1.fog | v2.fog != 0 {
+                    let fog = ((u0 as i64 * v0.fog as i64
+                        + u1 as i64 * v1.fog as i64
+                        + u2 as i64 * v2.fog as i64)
+                        / twice_area) as i16;
+                    apply_fog(color, fog)
+                } else {
+                    color
+                };
+
+                fb.set_pixel(x as u32, y as u32, pixel_color, z);
             }
             w0 += a0;
             w1 += a1;

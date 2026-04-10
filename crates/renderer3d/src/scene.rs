@@ -30,6 +30,15 @@ const FAR: Fixed16 = Fixed16::from_int(60);
 /// Set to 1 to disable. 2 gives a subtle shimmer, 4+ is very noticeable.
 const SNAP_GRID: i32 = 2;
 
+// --- Distance fog ---
+
+/// Distance² (in tiles) where fog begins.
+const FOG_START_SQ: i32 = 36; // 6 tiles
+/// Distance² (in tiles) where fog reaches full black.
+const FOG_END_SQ: i32 = 196; // 14 tiles
+/// Range for the linear ramp (precomputed to avoid division in the hot path).
+const FOG_RANGE_SQ: i32 = FOG_END_SQ - FOG_START_SQ;
+
 /// Rasterizing triangle sink: transforms world-space triangles through
 /// the MVP matrix and rasterizes them into the framebuffer.
 struct RasterSink<'a> {
@@ -37,10 +46,13 @@ struct RasterSink<'a> {
     mvp: Mat4,
     width: i32,
     height: i32,
+    /// Player position in world-space tile coordinates for distance fog.
+    player_x: i32,
+    player_z: i32,
 }
 
 impl<'a> RasterSink<'a> {
-    fn new(fb: &'a mut Framebuffer, mvp: Mat4) -> Self {
+    fn new(fb: &'a mut Framebuffer, mvp: Mat4, player_x: i32, player_z: i32) -> Self {
         let width = fb.width() as i32;
         let height = fb.height() as i32;
         Self {
@@ -48,6 +60,23 @@ impl<'a> RasterSink<'a> {
             mvp,
             width,
             height,
+            player_x,
+            player_z,
+        }
+    }
+
+    /// Compute fog factor (0-256) for a world-space vertex based on XZ distance to player.
+    #[inline]
+    fn vertex_fog(&self, world: Vec3) -> i16 {
+        let dx = world.x.to_int() - self.player_x;
+        let dz = world.z.to_int() - self.player_z;
+        let dist_sq = dx * dx + dz * dz;
+        if dist_sq <= FOG_START_SQ {
+            0
+        } else if dist_sq >= FOG_END_SQ {
+            256
+        } else {
+            ((dist_sq - FOG_START_SQ) * 256 / FOG_RANGE_SQ) as i16
         }
     }
 }
@@ -66,37 +95,47 @@ fn clip_lerp(a: Vec4, b: Vec4, t: Fixed16) -> Vec4 {
 /// Snap a screen-space vertex to the PS1-style grid.
 /// Uses Euclidean division for consistent behavior with negative coordinates.
 #[inline]
-fn snap_vertex(sv: ScreenVertex) -> ScreenVertex {
-    if SNAP_GRID <= 1 {
-        return sv;
+fn snap_vertex(mut sv: ScreenVertex) -> ScreenVertex {
+    if SNAP_GRID > 1 {
+        sv.x = sv.x.div_euclid(SNAP_GRID) * SNAP_GRID;
+        sv.y = sv.y.div_euclid(SNAP_GRID) * SNAP_GRID;
     }
-    ScreenVertex::new(
-        sv.x.div_euclid(SNAP_GRID) * SNAP_GRID,
-        sv.y.div_euclid(SNAP_GRID) * SNAP_GRID,
-        sv.z,
-    )
+    sv
+}
+
+/// Lerp a fog value at parameter t (matching clip_lerp for positions).
+#[inline]
+fn fog_lerp(a: i16, b: i16, t: Fixed16) -> i16 {
+    (a as i32 + ((((b as i32 - a as i32) as i64) * t.to_raw() as i64) >> 16) as i32) as i16
 }
 
 impl RasterSink<'_> {
-    /// Project, snap, and rasterize a clip-space triangle.
+    /// Project a clip-space vertex to screen space with fog, then snap.
     #[inline]
-    fn project_and_rasterize(&mut self, c0: Vec4, c1: Vec4, c2: Vec4, color: u16) {
-        let s0 = snap_vertex(project_vertex(c0, self.width, self.height));
-        let s1 = snap_vertex(project_vertex(c1, self.width, self.height));
-        let s2 = snap_vertex(project_vertex(c2, self.width, self.height));
+    fn project_with_fog(&self, clip: Vec4, fog: i16) -> ScreenVertex {
+        let mut sv = project_vertex(clip, self.width, self.height);
+        sv.fog = fog;
+        snap_vertex(sv)
+    }
+
+    /// Project, snap, and rasterize a clip-space triangle with per-vertex fog.
+    #[inline]
+    fn project_and_rasterize(&mut self, c0: Vec4, c1: Vec4, c2: Vec4, f: [i16; 3], color: u16) {
+        let s0 = self.project_with_fog(c0, f[0]);
+        let s1 = self.project_with_fog(c1, f[1]);
+        let s2 = self.project_with_fog(c2, f[2]);
         rasterize_triangle(self.fb, s0, s1, s2, color);
     }
 
     /// Clip a triangle against the near plane (w + z = 0) and rasterize the result.
-    ///
-    /// `v`: clip-space vertices, `d`: signed distance to near plane (w + z),
-    /// `inside`: which vertices are in front, `count`: number inside (1 or 2).
+    /// Fog factors are interpolated at clip points alongside positions.
     fn clip_and_rasterize(
         &mut self,
         v: [Vec4; 3],
         d: [Fixed16; 3],
         inside: [bool; 3],
         count: u8,
+        f: [i16; 3],
         color: u16,
     ) {
         if count == 2 {
@@ -111,16 +150,16 @@ impl RasterSink<'_> {
             let next = (out + 1) % 3;
             let prev = (out + 2) % 3;
 
-            // Interpolation parameter along each edge from inside→outside
             let t_next = d[next] / (d[next] - d[out]);
             let t_prev = d[prev] / (d[prev] - d[out]);
 
             let p_next = clip_lerp(v[next], v[out], t_next);
             let p_prev = clip_lerp(v[prev], v[out], t_prev);
+            let f_next = fog_lerp(f[next], f[out], t_next);
+            let f_prev = fog_lerp(f[prev], f[out], t_prev);
 
-            // Quad (v[next], v[prev], p_prev, p_next) preserves winding
-            self.project_and_rasterize(v[next], v[prev], p_prev, color);
-            self.project_and_rasterize(v[next], p_prev, p_next, color);
+            self.project_and_rasterize(v[next], v[prev], p_prev, [f[next], f[prev], f_prev], color);
+            self.project_and_rasterize(v[next], p_prev, p_next, [f[next], f_prev, f_next], color);
         } else {
             // 2 vertices outside — clip produces 1 smaller triangle
             let in_idx = if inside[0] {
@@ -138,21 +177,33 @@ impl RasterSink<'_> {
 
             let p_next = clip_lerp(v[in_idx], v[next], t_next);
             let p_prev = clip_lerp(v[in_idx], v[prev], t_prev);
+            let f_next = fog_lerp(f[in_idx], f[next], t_next);
+            let f_prev = fog_lerp(f[in_idx], f[prev], t_prev);
 
-            self.project_and_rasterize(v[in_idx], p_next, p_prev, color);
+            self.project_and_rasterize(
+                v[in_idx],
+                p_next,
+                p_prev,
+                [f[in_idx], f_next, f_prev],
+                color,
+            );
         }
     }
 }
 
 impl TriangleSink for RasterSink<'_> {
     fn emit(&mut self, v0: Vec3, v1: Vec3, v2: Vec3, color: u16) {
+        // Compute per-vertex fog from world-space XZ distance to player
+        let f0 = self.vertex_fog(v0);
+        let f1 = self.vertex_fog(v1);
+        let f2 = self.vertex_fog(v2);
+
         // Transform world-space → clip-space via MVP
         let c0 = self.mvp * v0.to_point();
         let c1 = self.mvp * v1.to_point();
         let c2 = self.mvp * v2.to_point();
 
         // Classify vertices against near plane (w + z = 0).
-        // Vertices with d >= 0 are in front of (or on) the near plane.
         let d0 = c0.w + c0.z;
         let d1 = c1.w + c1.z;
         let d2 = c2.w + c2.z;
@@ -162,18 +213,26 @@ impl TriangleSink for RasterSink<'_> {
         let in2 = d2.to_raw() >= 0;
 
         let count = in0 as u8 + in1 as u8 + in2 as u8;
+        let f = [f0, f1, f2];
 
         match count {
             3 => {
                 // Fast path: all inside, no clipping needed
-                self.project_and_rasterize(c0, c1, c2, color);
+                self.project_and_rasterize(c0, c1, c2, f, color);
             }
             0 => {
                 // All behind near plane — cull
             }
             _ => {
                 // 1 or 2 vertices inside — clip against near plane
-                self.clip_and_rasterize([c0, c1, c2], [d0, d1, d2], [in0, in1, in2], count, color);
+                self.clip_and_rasterize(
+                    [c0, c1, c2],
+                    [d0, d1, d2],
+                    [in0, in1, in2],
+                    count,
+                    f,
+                    color,
+                );
             }
         }
     }
@@ -205,7 +264,7 @@ pub fn render_scene(view: &dyn GameView, fb: &mut Framebuffer) {
 
     let mvp = proj_mat.mul_mat(&view_mat);
 
-    let mut sink = RasterSink::new(fb, mvp);
+    let mut sink = RasterSink::new(fb, mvp, px, py);
     geometry::generate_map_geometry(view, &mut sink);
 }
 
@@ -230,9 +289,9 @@ mod tests {
     }
 
     /// Create a RasterSink with identity MVP (clip space = world space).
-    /// Useful for testing clipping in isolation.
+    /// Player at origin, no fog for nearby test vertices.
     fn make_test_sink(fb: &mut Framebuffer) -> RasterSink<'_> {
-        RasterSink::new(fb, Mat4::identity())
+        RasterSink::new(fb, Mat4::identity(), 0, 0)
     }
 
     // --- Clipping unit tests ---

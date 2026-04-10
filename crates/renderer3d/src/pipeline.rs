@@ -7,12 +7,20 @@ pub struct ScreenVertex {
     pub x: i32,
     pub y: i32,
     pub z: i16,
+    /// Per-vertex fog factor: 0 = clear, 256 = full fog (black).
+    /// Interpolated per-pixel in the rasterizer for smooth distance fog.
+    pub fog: i16,
 }
 
 impl ScreenVertex {
     #[inline]
     pub const fn new(x: i32, y: i32, z: i16) -> Self {
-        Self { x, y, z }
+        Self { x, y, z, fog: 0 }
+    }
+
+    #[inline]
+    pub const fn with_fog(x: i32, y: i32, z: i16, fog: i16) -> Self {
+        Self { x, y, z, fog }
     }
 }
 
@@ -41,6 +49,7 @@ pub fn project_vertex(clip: Vec4, width: i32, height: i32) -> ScreenVertex {
         x: pixel_x,
         y: pixel_y,
         z: z_screen,
+        fog: 0,
     }
 }
 

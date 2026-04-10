@@ -1,17 +1,32 @@
 use crate::framebuffer::Framebuffer;
 use crate::pipeline::ScreenVertex;
 
-/// Blend an RGB555 color toward black by a fog factor (0 = clear, 256 = full black).
-/// Each 5-bit channel is multiplied by (256 - fog) and shifted right by 8.
+/// 4×4 Bayer ordered dither matrix, pre-scaled to 0..240 (matching the 8-bit
+/// fractional precision of our fog blending). This breaks fog banding into a
+/// fine stipple pattern that the eye reads as a smooth gradient.
+#[rustfmt::skip]
+const BAYER_4X4: [u16; 16] = [
+      0, 128,  32, 160,
+    192,  64, 224,  96,
+     48, 176,  16, 144,
+    240, 112, 208,  80,
+];
+
+/// Blend an RGB555 color toward black by a fog factor, with ordered dithering.
+///
+/// `fog`: 0 = clear, 256 = full black. `dither`: Bayer matrix value (0..240).
+/// Each 5-bit channel is computed at 13-bit precision (channel × inv), the
+/// dither offset is added, then truncated to 5 bits. This breaks quantization
+/// banding into a stipple pattern.
 #[inline]
-fn apply_fog(color: u16, fog: i16) -> u16 {
+fn apply_fog(color: u16, fog: i16, dither: u16) -> u16 {
     if fog <= 0 {
         return color;
     }
     let inv = (256 - fog.min(256)) as u16;
-    let r = (((color >> 10) & 0x1F) * inv) >> 8;
-    let g = (((color >> 5) & 0x1F) * inv) >> 8;
-    let b = ((color & 0x1F) * inv) >> 8;
+    let r = ((((color >> 10) & 0x1F) * inv + dither) >> 8).min(31);
+    let g = ((((color >> 5) & 0x1F) * inv + dither) >> 8).min(31);
+    let b = (((color & 0x1F) * inv + dither) >> 8).min(31);
     (r << 10) | (g << 5) | b
 }
 
@@ -109,13 +124,14 @@ pub fn rasterize_triangle(
                     ((u0 as i64 * v0.z as i64 + u1 as i64 * v1.z as i64 + u2 as i64 * v2.z as i64)
                         / twice_area) as i16;
 
-                // Fog interpolation + color blend
+                // Fog interpolation + dithered color blend
                 let pixel_color = if v0.fog | v1.fog | v2.fog != 0 {
                     let fog = ((u0 as i64 * v0.fog as i64
                         + u1 as i64 * v1.fog as i64
                         + u2 as i64 * v2.fog as i64)
                         / twice_area) as i16;
-                    apply_fog(color, fog)
+                    let dither = BAYER_4X4[((y & 3) * 4 + (x & 3)) as usize];
+                    apply_fog(color, fog, dither)
                 } else {
                     color
                 };

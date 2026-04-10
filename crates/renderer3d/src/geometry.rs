@@ -8,10 +8,6 @@ use crate::math::{Fixed16, Vec3};
 /// Height of wall blocks in world units.
 pub const WALL_HEIGHT: Fixed16 = Fixed16::ONE;
 
-/// Size of entity/item marker quads as a fraction of a tile.
-const MARKER_PAD: Fixed16 = Fixed16::from_raw(0x4CCC); // ~0.3
-const MARKER_SIZE: Fixed16 = Fixed16::from_raw(0x6666); // ~0.4
-
 /// Consumer of triangles produced by geometry generation.
 ///
 /// The streaming pattern: geometry is generated, emitted into the sink,
@@ -109,19 +105,6 @@ fn emit_wall_west(sink: &mut dyn TriangleSink, gx: i32, gz: i32, color: u16) {
     emit_quad(sink, v0, v1, v2, v3, color);
 }
 
-/// Emit a small colored quad on the floor for an entity or item marker.
-fn emit_marker(sink: &mut dyn TriangleSink, gx: i32, gz: i32, color: u16) {
-    let base_x = Fixed16::from_int(gx) + MARKER_PAD;
-    let base_z = Fixed16::from_int(gz) + MARKER_PAD;
-    let y = Fixed16::from_raw(0x0100); // slightly above floor to avoid z-fighting
-
-    let v0 = Vec3::new(base_x, y, base_z);
-    let v1 = Vec3::new(base_x, y, base_z + MARKER_SIZE);
-    let v2 = Vec3::new(base_x + MARKER_SIZE, y, base_z + MARKER_SIZE);
-    let v3 = Vec3::new(base_x + MARKER_SIZE, y, base_z);
-    emit_quad(sink, v0, v1, v2, v3, color);
-}
-
 /// Check if a tile at (x, z) is a Structural wall.
 fn is_structural(view: &dyn GameView, x: i32, z: i32) -> bool {
     let (w, h) = view.map_dims();
@@ -136,8 +119,8 @@ fn is_structural(view: &dyn GameView, x: i32, z: i32) -> bool {
 /// Walks the tile grid via `GameView`, emitting geometry into the sink:
 /// - Floor/StairsDown → flat quad at y=0
 /// - Structural → extruded block (top + adjacency-culled side faces)
-/// - Entities/items at visible positions → small colored floor markers
 ///
+/// Entities and items are rendered as billboards by the scene module.
 /// Unexplored tiles and Wall (void) tiles produce no geometry.
 pub fn generate_map_geometry(view: &dyn GameView, sink: &mut dyn TriangleSink) {
     let (w, h) = view.map_dims();
@@ -185,34 +168,6 @@ pub fn generate_map_geometry(view: &dyn GameView, sink: &mut dyn TriangleSink) {
                 }
             }
         }
-    }
-
-    // Entity markers (visible only)
-    for i in 0..view.entity_count() {
-        if !view.entity_alive(i) {
-            continue;
-        }
-        let (ex, ey) = view.entity_xy(i);
-        if view.tile_visibility(ex, ey) != TileVisibility::Visible {
-            continue;
-        }
-        let (_, gc) = view.render_entity(i);
-        let color = crate::color_map::game_color_to_rgb555(gc);
-        emit_marker(sink, ex, ey, color);
-    }
-
-    // Item markers (visible only)
-    for i in 0..view.item_count() {
-        if !view.item_alive(i) {
-            continue;
-        }
-        let (ix, iy) = view.item_xy(i);
-        if view.tile_visibility(ix, iy) != TileVisibility::Visible {
-            continue;
-        }
-        let (_, gc) = view.render_item(i);
-        let color = crate::color_map::game_color_to_rgb555(gc);
-        emit_marker(sink, ix, iy, color);
     }
 }
 
@@ -387,21 +342,5 @@ mod tests {
         }
         assert!(has_floor, "wall face should touch y=0");
         assert!(has_top, "wall face should reach WALL_HEIGHT");
-    }
-
-    #[test]
-    fn marker_slightly_above_floor() {
-        let mut sink = VecSink::new();
-        emit_marker(&mut sink, 5, 5, rgb555(0, 31, 0));
-
-        assert_eq!(sink.tris.len(), 2);
-        // All vertices should be slightly above zero
-        for (v0, v1, v2, _) in &sink.tris {
-            assert!(v0.y > Fixed16::ZERO);
-            assert!(v1.y > Fixed16::ZERO);
-            assert!(v2.y > Fixed16::ZERO);
-            // But well below wall height
-            assert!(v0.y < WALL_HEIGHT);
-        }
     }
 }

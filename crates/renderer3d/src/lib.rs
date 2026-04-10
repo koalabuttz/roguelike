@@ -1,6 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod color_map;
+pub mod font;
 pub mod framebuffer;
 pub mod geometry;
 pub mod math;

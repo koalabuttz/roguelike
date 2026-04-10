@@ -155,6 +155,130 @@ pub fn rasterize_triangle(
     }
 }
 
+/// Rasterize a glyph-textured triangle with 1-bit texel lookup.
+///
+/// Same edge function rasterization as `rasterize_triangle`, but additionally
+/// interpolates UV coordinates (0..255 range mapping to 0..7 in glyph space)
+/// and skips transparent texels.
+#[allow(clippy::too_many_arguments)]
+///
+/// `uv0..uv2`: per-vertex UV coordinates as (u, v) in 0..255 fixed-point.
+/// `glyph`: 8-byte bitmap — one byte per row, MSB = leftmost pixel.
+pub fn rasterize_glyph_triangle(
+    fb: &mut Framebuffer,
+    v0: ScreenVertex,
+    v1: ScreenVertex,
+    v2: ScreenVertex,
+    color: u16,
+    uv0: (i16, i16),
+    uv1: (i16, i16),
+    uv2: (i16, i16),
+    glyph: &[u8; 8],
+) {
+    let twice_area =
+        (v1.x - v0.x) as i64 * (v2.y - v0.y) as i64 - (v2.x - v0.x) as i64 * (v1.y - v0.y) as i64;
+    if twice_area <= 0 {
+        return;
+    }
+
+    let a0 = v1.y - v2.y;
+    let b0 = v2.x - v1.x;
+    let c0 = v1.x * v2.y - v2.x * v1.y;
+    let a1 = v2.y - v0.y;
+    let b1 = v0.x - v2.x;
+    let c1 = v2.x * v0.y - v0.x * v2.y;
+    let a2 = v0.y - v1.y;
+    let b2 = v1.x - v0.x;
+    let c2 = v0.x * v1.y - v1.x * v0.y;
+
+    let bias0 = if is_top_left(a0, b0) { 0 } else { -1 };
+    let bias1 = if is_top_left(a1, b1) { 0 } else { -1 };
+    let bias2 = if is_top_left(a2, b2) { 0 } else { -1 };
+
+    let fb_w = fb.width() as i32;
+    let fb_h = fb.height() as i32;
+    let min_x = v0.x.min(v1.x).min(v2.x).max(0);
+    let min_y = v0.y.min(v1.y).min(v2.y).max(0);
+    let max_x = v0.x.max(v1.x).max(v2.x).min(fb_w - 1);
+    let max_y = v0.y.max(v1.y).max(v2.y).min(fb_h - 1);
+
+    if min_x > max_x || min_y > max_y {
+        return;
+    }
+
+    let base0 = a0 * min_x + b0 * min_y + c0;
+    let base1 = a1 * min_x + b1 * min_y + c1;
+    let base2 = a2 * min_x + b2 * min_y + c2;
+
+    let mut w0_row = base0 + bias0;
+    let mut w1_row = base1 + bias1;
+    let mut w2_row = base2 + bias2;
+    let mut u0_row = base0;
+    let mut u1_row = base1;
+    let mut u2_row = base2;
+
+    for y in min_y..=max_y {
+        let mut w0 = w0_row;
+        let mut w1 = w1_row;
+        let mut w2 = w2_row;
+        let mut ub0 = u0_row;
+        let mut ub1 = u1_row;
+        let mut ub2 = u2_row;
+
+        for x in min_x..=max_x {
+            if w0 >= 0 && w1 >= 0 && w2 >= 0 {
+                // Interpolate UV coordinates (0..255 range)
+                let tex_u = ((ub0 as i64 * uv0.0 as i64
+                    + ub1 as i64 * uv1.0 as i64
+                    + ub2 as i64 * uv2.0 as i64)
+                    / twice_area) as i32;
+                let tex_v = ((ub0 as i64 * uv0.1 as i64
+                    + ub1 as i64 * uv1.1 as i64
+                    + ub2 as i64 * uv2.1 as i64)
+                    / twice_area) as i32;
+
+                // Map UV (0..255) to glyph pixel (0..7)
+                let gx = ((tex_u * 8) >> 8).clamp(0, 7) as usize;
+                let gy = ((tex_v * 8) >> 8).clamp(0, 7) as usize;
+
+                // Texel lookup: skip transparent pixels
+                if glyph[gy] & (0x80 >> gx) != 0 {
+                    let z = ((ub0 as i64 * v0.z as i64
+                        + ub1 as i64 * v1.z as i64
+                        + ub2 as i64 * v2.z as i64)
+                        / twice_area) as i16;
+
+                    let pixel_color = if v0.fog | v1.fog | v2.fog != 0 {
+                        let fog = ((ub0 as i64 * v0.fog as i64
+                            + ub1 as i64 * v1.fog as i64
+                            + ub2 as i64 * v2.fog as i64)
+                            / twice_area) as i16;
+                        let dither = BAYER_4X4[((y & 3) * 4 + (x & 3)) as usize];
+                        apply_fog(color, fog, dither)
+                    } else {
+                        color
+                    };
+
+                    fb.set_pixel(x as u32, y as u32, pixel_color, z);
+                }
+            }
+            w0 += a0;
+            w1 += a1;
+            w2 += a2;
+            ub0 += a0;
+            ub1 += a1;
+            ub2 += a2;
+        }
+
+        w0_row += b0;
+        w1_row += b1;
+        w2_row += b2;
+        u0_row += b0;
+        u1_row += b1;
+        u2_row += b2;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,17 +1,20 @@
-use roguelike_core::rules::game_view::GameView;
+use roguelike_core::rules::game_view::{GameView, TileVisibility};
 
+use crate::color_map::game_color_to_rgb555;
+use crate::font;
 use crate::framebuffer::Framebuffer;
 use crate::geometry::{self, TriangleSink};
 use crate::math::{Fixed16, Mat4, Vec3, Vec4};
 use crate::pipeline::{ScreenVertex, project_vertex};
-use crate::rasterizer::rasterize_triangle;
+use crate::rasterizer::{rasterize_glyph_triangle, rasterize_triangle};
 
 /// Camera height above the floor plane (in world units).
-const CAMERA_HEIGHT: Fixed16 = Fixed16::from_int(12);
+const CAMERA_HEIGHT: Fixed16 = Fixed16::from_int(10);
 
 /// Forward offset from the eye toward the target — controls tilt angle.
-/// At height=12, offset=3 gives ~75° from horizontal (arctan(12/3) ≈ 76°).
-const CAMERA_TILT_OFFSET: Fixed16 = Fixed16::from_int(3);
+/// At height=10, offset=5 gives ~63° from horizontal (arctan(10/5) ≈ 63°).
+/// Lower than the original 76° to make entity billboards more readable.
+const CAMERA_TILT_OFFSET: Fixed16 = Fixed16::from_int(5);
 
 /// Vertical FOV as a fraction of full circle. ~60° ≈ 1/6 turn.
 /// Fixed16::ONE = 360°, so 60° = ONE/6 ≈ 0x2AAA.
@@ -39,6 +42,13 @@ const FOG_END_SQ: i32 = 196; // 14 tiles
 /// Range for the linear ramp (precomputed to avoid division in the hot path).
 const FOG_RANGE_SQ: i32 = FOG_END_SQ - FOG_START_SQ;
 
+// --- Billboard constants ---
+
+/// Billboard width in world units (fraction of a tile).
+const BILLBOARD_WIDTH: Fixed16 = Fixed16::from_raw(0xB333); // ~0.7
+/// Billboard height in world units.
+const BILLBOARD_HEIGHT: Fixed16 = Fixed16::from_raw(0xE666); // ~0.9
+
 /// Rasterizing triangle sink: transforms world-space triangles through
 /// the MVP matrix and rasterizes them into the framebuffer.
 struct RasterSink<'a> {
@@ -49,10 +59,18 @@ struct RasterSink<'a> {
     /// Player position in world-space tile coordinates for distance fog.
     player_x: i32,
     player_z: i32,
+    /// Camera right vector for billboard orientation.
+    cam_right: Vec3,
 }
 
 impl<'a> RasterSink<'a> {
-    fn new(fb: &'a mut Framebuffer, mvp: Mat4, player_x: i32, player_z: i32) -> Self {
+    fn new(
+        fb: &'a mut Framebuffer,
+        mvp: Mat4,
+        player_x: i32,
+        player_z: i32,
+        cam_right: Vec3,
+    ) -> Self {
         let width = fb.width() as i32;
         let height = fb.height() as i32;
         Self {
@@ -62,6 +80,7 @@ impl<'a> RasterSink<'a> {
             height,
             player_x,
             player_z,
+            cam_right,
         }
     }
 
@@ -189,6 +208,107 @@ impl RasterSink<'_> {
             );
         }
     }
+
+    /// Render a glyph billboard at a world-space tile position.
+    ///
+    /// Constructs a camera-facing vertical quad, transforms it through
+    /// the MVP pipeline, and rasterizes with 1-bit glyph texel lookup.
+    fn render_billboard(&mut self, tile_x: i32, tile_z: i32, glyph: &font::Glyph, color: u16) {
+        let center_x = Fixed16::from_int(tile_x) + Fixed16::HALF;
+        let center_z = Fixed16::from_int(tile_z) + Fixed16::HALF;
+
+        let half_w = Fixed16::from_raw(BILLBOARD_WIDTH.to_raw() >> 1);
+
+        let right = self.cam_right;
+
+        // Billboard quad corners (CW from front for y-flip compensation)
+        // Bottom-left, top-left, top-right, bottom-right
+        let bl = Vec3::new(
+            center_x - right.x * half_w,
+            Fixed16::ZERO,
+            center_z - right.z * half_w,
+        );
+        let tl = Vec3::new(
+            center_x - right.x * half_w,
+            BILLBOARD_HEIGHT,
+            center_z - right.z * half_w,
+        );
+        let tr = Vec3::new(
+            center_x + right.x * half_w,
+            BILLBOARD_HEIGHT,
+            center_z + right.z * half_w,
+        );
+        let br = Vec3::new(
+            center_x + right.x * half_w,
+            Fixed16::ZERO,
+            center_z + right.z * half_w,
+        );
+
+        // UV coords: 0..255 maps to glyph 0..7
+        // CW winding (y-flip): bl, tl, tr and bl, tr, br
+        let uv_bl = (0i16, 255); // bottom-left of glyph
+        let uv_tl = (0, 0); // top-left
+        let uv_tr = (255, 0); // top-right
+        let uv_br = (255, 255); // bottom-right
+
+        // Compute fog for the center position
+        let fog = self.vertex_fog(Vec3::new(center_x, Fixed16::ZERO, center_z));
+
+        // Transform and rasterize each triangle of the quad
+        // Using CW winding to match emit_quad convention (y-flip compensation)
+        self.rasterize_billboard_tri(bl, tl, tr, color, fog, uv_bl, uv_tl, uv_tr, glyph);
+        self.rasterize_billboard_tri(bl, tr, br, color, fog, uv_bl, uv_tr, uv_br, glyph);
+    }
+
+    /// Transform, clip, project, and rasterize a single billboard triangle.
+    #[allow(clippy::too_many_arguments)]
+    fn rasterize_billboard_tri(
+        &mut self,
+        v0: Vec3,
+        v1: Vec3,
+        v2: Vec3,
+        color: u16,
+        fog: i16,
+        uv0: (i16, i16),
+        uv1: (i16, i16),
+        uv2: (i16, i16),
+        glyph: &font::Glyph,
+    ) {
+        let c0 = self.mvp * v0.to_point();
+        let c1 = self.mvp * v1.to_point();
+        let c2 = self.mvp * v2.to_point();
+
+        // Near-plane classification
+        let d0 = c0.w + c0.z;
+        let d1 = c1.w + c1.z;
+        let d2 = c2.w + c2.z;
+
+        let in0 = d0.to_raw() >= 0;
+        let in1 = d1.to_raw() >= 0;
+        let in2 = d2.to_raw() >= 0;
+
+        let count = in0 as u8 + in1 as u8 + in2 as u8;
+
+        if count == 0 {
+            return;
+        }
+
+        // For simplicity, only render billboard triangles that are fully inside.
+        // Billboards are small — clipping is rarely needed.
+        if count < 3 {
+            return;
+        }
+
+        let mut s0 = snap_vertex(project_vertex(c0, self.width, self.height));
+        let mut s1 = snap_vertex(project_vertex(c1, self.width, self.height));
+        let mut s2 = snap_vertex(project_vertex(c2, self.width, self.height));
+
+        s0.fog = fog;
+        s1.fog = fog;
+        s2.fog = fog;
+
+        rasterize_glyph_triangle(self.fb, s0, s1, s2, color, uv0, uv1, uv2, glyph);
+    }
 }
 
 impl TriangleSink for RasterSink<'_> {
@@ -257,6 +377,10 @@ pub fn render_scene(view: &dyn GameView, fb: &mut Framebuffer) {
     let eye = Vec3::new(target.x, CAMERA_HEIGHT, target.z - CAMERA_TILT_OFFSET);
     let up = Vec3::new(Fixed16::ZERO, Fixed16::ONE, Fixed16::ZERO);
 
+    // Camera basis vectors for billboard orientation
+    let forward = (target - eye).normalize();
+    let cam_right = forward.cross(up).normalize();
+
     let view_mat = Mat4::look_at(eye, target, up);
 
     let aspect = Fixed16::from_raw((((fb.width() as i64) << 16) / fb.height() as i64) as i32);
@@ -264,8 +388,39 @@ pub fn render_scene(view: &dyn GameView, fb: &mut Framebuffer) {
 
     let mvp = proj_mat.mul_mat(&view_mat);
 
-    let mut sink = RasterSink::new(fb, mvp, px, py);
+    // Render map geometry (floors, walls)
+    let mut sink = RasterSink::new(fb, mvp, px, py, cam_right);
     geometry::generate_map_geometry(view, &mut sink);
+
+    // Render entity billboards
+    for i in 0..view.entity_count() {
+        if !view.entity_alive(i) {
+            continue;
+        }
+        let (ex, ey) = view.entity_xy(i);
+        if view.tile_visibility(ex, ey) != TileVisibility::Visible {
+            continue;
+        }
+        let (ch, gc) = view.render_entity(i);
+        let color = game_color_to_rgb555(gc);
+        let glyph = font::glyph(ch);
+        sink.render_billboard(ex, ey, &glyph, color);
+    }
+
+    // Render item billboards
+    for i in 0..view.item_count() {
+        if !view.item_alive(i) {
+            continue;
+        }
+        let (ix, iy) = view.item_xy(i);
+        if view.tile_visibility(ix, iy) != TileVisibility::Visible {
+            continue;
+        }
+        let (ch, gc) = view.render_item(i);
+        let color = game_color_to_rgb555(gc);
+        let glyph = font::glyph(ch);
+        sink.render_billboard(ix, iy, &glyph, color);
+    }
 }
 
 #[cfg(test)]
@@ -291,7 +446,13 @@ mod tests {
     /// Create a RasterSink with identity MVP (clip space = world space).
     /// Player at origin, no fog for nearby test vertices.
     fn make_test_sink(fb: &mut Framebuffer) -> RasterSink<'_> {
-        RasterSink::new(fb, Mat4::identity(), 0, 0)
+        RasterSink::new(
+            fb,
+            Mat4::identity(),
+            0,
+            0,
+            Vec3::new(Fixed16::ONE, Fixed16::ZERO, Fixed16::ZERO),
+        )
     }
 
     // --- Clipping unit tests ---

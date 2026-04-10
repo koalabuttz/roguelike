@@ -6,7 +6,13 @@ license.workspace = true
 
 [dependencies]
 roguelike-core = { path = "../core", default-features = false }
+minifb = { version = "0.28", optional = true }
 
 [features]
 default = ["std"]
 std = ["roguelike-core/std"]
+window = ["std", "dep:minifb"]
+
+[[example]]
+name = "render_window"
+required-features = ["window"]

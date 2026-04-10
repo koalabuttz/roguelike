@@ -2,7 +2,7 @@ use roguelike_core::rules::game_view::GameView;
 
 use crate::framebuffer::Framebuffer;
 use crate::geometry::{self, TriangleSink};
-use crate::math::{Fixed16, Mat4, Vec3};
+use crate::math::{Fixed16, Mat4, Vec3, Vec4};
 use crate::pipeline::project_vertex;
 use crate::rasterizer::rasterize_triangle;
 
@@ -45,6 +45,84 @@ impl<'a> RasterSink<'a> {
     }
 }
 
+/// Lerp between two clip-space vertices at parameter t.
+#[inline]
+fn clip_lerp(a: Vec4, b: Vec4, t: Fixed16) -> Vec4 {
+    Vec4::new(
+        a.x + (b.x - a.x) * t,
+        a.y + (b.y - a.y) * t,
+        a.z + (b.z - a.z) * t,
+        a.w + (b.w - a.w) * t,
+    )
+}
+
+impl RasterSink<'_> {
+    /// Project a clip-space triangle to screen space and rasterize it.
+    #[inline]
+    fn project_and_rasterize(&mut self, c0: Vec4, c1: Vec4, c2: Vec4, color: u16) {
+        let s0 = project_vertex(c0, self.width, self.height);
+        let s1 = project_vertex(c1, self.width, self.height);
+        let s2 = project_vertex(c2, self.width, self.height);
+        rasterize_triangle(self.fb, s0, s1, s2, color);
+    }
+
+    /// Clip a triangle against the near plane (w + z = 0) and rasterize the result.
+    ///
+    /// `v`: clip-space vertices, `d`: signed distance to near plane (w + z),
+    /// `inside`: which vertices are in front, `count`: number inside (1 or 2).
+    fn clip_and_rasterize(
+        &mut self,
+        v: [Vec4; 3],
+        d: [Fixed16; 3],
+        inside: [bool; 3],
+        count: u8,
+        color: u16,
+    ) {
+        if count == 2 {
+            // 1 vertex outside — clip produces a quad (2 triangles)
+            let out = if !inside[0] {
+                0
+            } else if !inside[1] {
+                1
+            } else {
+                2
+            };
+            let next = (out + 1) % 3;
+            let prev = (out + 2) % 3;
+
+            // Interpolation parameter along each edge from inside→outside
+            let t_next = d[next] / (d[next] - d[out]);
+            let t_prev = d[prev] / (d[prev] - d[out]);
+
+            let p_next = clip_lerp(v[next], v[out], t_next);
+            let p_prev = clip_lerp(v[prev], v[out], t_prev);
+
+            // Quad (v[next], v[prev], p_prev, p_next) preserves winding
+            self.project_and_rasterize(v[next], v[prev], p_prev, color);
+            self.project_and_rasterize(v[next], p_prev, p_next, color);
+        } else {
+            // 2 vertices outside — clip produces 1 smaller triangle
+            let in_idx = if inside[0] {
+                0
+            } else if inside[1] {
+                1
+            } else {
+                2
+            };
+            let next = (in_idx + 1) % 3;
+            let prev = (in_idx + 2) % 3;
+
+            let t_next = d[in_idx] / (d[in_idx] - d[next]);
+            let t_prev = d[in_idx] / (d[in_idx] - d[prev]);
+
+            let p_next = clip_lerp(v[in_idx], v[next], t_next);
+            let p_prev = clip_lerp(v[in_idx], v[prev], t_prev);
+
+            self.project_and_rasterize(v[in_idx], p_next, p_prev, color);
+        }
+    }
+}
+
 impl TriangleSink for RasterSink<'_> {
     fn emit(&mut self, v0: Vec3, v1: Vec3, v2: Vec3, color: u16) {
         // Transform world-space → clip-space via MVP
@@ -52,18 +130,31 @@ impl TriangleSink for RasterSink<'_> {
         let c1 = self.mvp * v1.to_point();
         let c2 = self.mvp * v2.to_point();
 
-        // Cull triangles with any vertex behind the near plane (w <= 0).
-        // Without proper clipping, perspective divide on negative w produces garbage.
-        if c0.w.to_raw() <= 0 || c1.w.to_raw() <= 0 || c2.w.to_raw() <= 0 {
-            return;
+        // Classify vertices against near plane (w + z = 0).
+        // Vertices with d >= 0 are in front of (or on) the near plane.
+        let d0 = c0.w + c0.z;
+        let d1 = c1.w + c1.z;
+        let d2 = c2.w + c2.z;
+
+        let in0 = d0.to_raw() >= 0;
+        let in1 = d1.to_raw() >= 0;
+        let in2 = d2.to_raw() >= 0;
+
+        let count = in0 as u8 + in1 as u8 + in2 as u8;
+
+        match count {
+            3 => {
+                // Fast path: all inside, no clipping needed
+                self.project_and_rasterize(c0, c1, c2, color);
+            }
+            0 => {
+                // All behind near plane — cull
+            }
+            _ => {
+                // 1 or 2 vertices inside — clip against near plane
+                self.clip_and_rasterize([c0, c1, c2], [d0, d1, d2], [in0, in1, in2], count, color);
+            }
         }
-
-        // Project to screen space
-        let s0 = project_vertex(c0, self.width, self.height);
-        let s1 = project_vertex(c1, self.width, self.height);
-        let s2 = project_vertex(c2, self.width, self.height);
-
-        rasterize_triangle(self.fb, s0, s1, s2, color);
     }
 }
 
@@ -100,7 +191,136 @@ pub fn render_scene(view: &dyn GameView, fb: &mut Framebuffer) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::framebuffer::rgb555;
+    use crate::math::Vec4;
     use roguelike_core::tier_micro::game::MicroGameState;
+
+    /// Helper: count non-black pixels in a framebuffer.
+    fn count_colored(fb: &Framebuffer) -> u32 {
+        let mut n = 0u32;
+        for y in 0..fb.height() {
+            for x in 0..fb.width() {
+                if fb.get_pixel(x, y) != 0 {
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+
+    /// Create a RasterSink with identity MVP (clip space = world space).
+    /// Useful for testing clipping in isolation.
+    fn make_test_sink(fb: &mut Framebuffer) -> RasterSink<'_> {
+        RasterSink::new(fb, Mat4::identity())
+    }
+
+    // --- Clipping unit tests ---
+
+    #[test]
+    fn clip_lerp_midpoint() {
+        let a = Vec4::new(Fixed16::ZERO, Fixed16::ZERO, Fixed16::ZERO, Fixed16::ONE);
+        let b = Vec4::new(Fixed16::ONE, Fixed16::ONE, Fixed16::ONE, Fixed16::ONE);
+        let mid = clip_lerp(a, b, Fixed16::HALF);
+        assert_eq!(mid.x, Fixed16::HALF);
+        assert_eq!(mid.y, Fixed16::HALF);
+        assert_eq!(mid.z, Fixed16::HALF);
+        assert_eq!(mid.w, Fixed16::ONE);
+    }
+
+    #[test]
+    fn clip_lerp_endpoints() {
+        let a = Vec4::new(Fixed16::ZERO, Fixed16::ZERO, Fixed16::ZERO, Fixed16::ONE);
+        let b = Vec4::new(
+            Fixed16::ONE,
+            Fixed16::ONE,
+            Fixed16::ONE,
+            Fixed16::from_int(2),
+        );
+        assert_eq!(clip_lerp(a, b, Fixed16::ZERO), a);
+        assert_eq!(clip_lerp(a, b, Fixed16::ONE), b);
+    }
+
+    #[test]
+    fn all_inside_renders() {
+        let mut fb = Framebuffer::new(100, 100);
+        let mut sink = make_test_sink(&mut fb);
+        let color = rgb555(31, 0, 0);
+
+        // CW winding in world xy-plane → CCW in screen after viewport y-flip.
+        // With identity MVP, w=1, z=0, so w+z=1 > 0 (all inside).
+        sink.emit(
+            Vec3::from_ints(0, 0, 0),
+            Vec3::new(Fixed16::ZERO, Fixed16::HALF, Fixed16::ZERO),
+            Vec3::new(Fixed16::HALF, Fixed16::ZERO, Fixed16::ZERO),
+            color,
+        );
+
+        assert!(count_colored(&fb) > 0, "all-inside triangle should render");
+    }
+
+    #[test]
+    fn all_outside_culled() {
+        let mut fb = Framebuffer::new(100, 100);
+        let mut sink = make_test_sink(&mut fb);
+        let color = rgb555(31, 0, 0);
+
+        // All at z=-2: w+z = 1+(-2) = -1 < 0 → all outside.
+        sink.emit(
+            Vec3::new(Fixed16::ZERO, Fixed16::ZERO, Fixed16::from_int(-2)),
+            Vec3::new(Fixed16::ZERO, Fixed16::HALF, Fixed16::from_int(-2)),
+            Vec3::new(Fixed16::HALF, Fixed16::ZERO, Fixed16::from_int(-2)),
+            color,
+        );
+
+        assert_eq!(
+            count_colored(&fb),
+            0,
+            "all-outside triangle should be culled"
+        );
+    }
+
+    #[test]
+    fn one_vertex_behind_clips() {
+        let mut fb = Framebuffer::new(100, 100);
+        let mut sink = make_test_sink(&mut fb);
+        let color = rgb555(31, 0, 0);
+
+        // CW winding: v0 and v1 in front (z=0, d=1), v2 behind (z=-2, d=-1).
+        // Without clipping this would be culled entirely.
+        sink.emit(
+            Vec3::new(Fixed16::ZERO, Fixed16::ZERO, Fixed16::ZERO),
+            Vec3::new(Fixed16::ZERO, Fixed16::HALF, Fixed16::ZERO),
+            Vec3::new(Fixed16::HALF, Fixed16::ZERO, Fixed16::from_int(-2)),
+            color,
+        );
+
+        assert!(
+            count_colored(&fb) > 0,
+            "triangle with 1 vertex behind should be clipped, not culled"
+        );
+    }
+
+    #[test]
+    fn two_vertices_behind_clips() {
+        let mut fb = Framebuffer::new(100, 100);
+        let mut sink = make_test_sink(&mut fb);
+        let color = rgb555(31, 0, 0);
+
+        // CW winding: v0 in front (z=0, d=1), v1 and v2 behind (z=-2, d=-1).
+        sink.emit(
+            Vec3::new(Fixed16::ZERO, Fixed16::ZERO, Fixed16::ZERO),
+            Vec3::new(Fixed16::ZERO, Fixed16::HALF, Fixed16::from_int(-2)),
+            Vec3::new(Fixed16::HALF, Fixed16::ZERO, Fixed16::from_int(-2)),
+            color,
+        );
+
+        assert!(
+            count_colored(&fb) > 0,
+            "triangle with 2 vertices behind should be clipped, not culled"
+        );
+    }
+
+    // --- Integration tests ---
 
     #[test]
     fn render_produces_pixels() {

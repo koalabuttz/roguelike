@@ -4,7 +4,7 @@ use roguelike_core::rules::command::GameCommand;
 use roguelike_core::rules::direction::Direction;
 use roguelike_core::rules::game_view::GameView;
 use roguelike_core::tier_micro::game::MicroGameState;
-use roguelike_renderer3d::framebuffer::{unpack_rgb555, Framebuffer};
+use roguelike_renderer3d::framebuffer::{Framebuffer, unpack_rgb555};
 use roguelike_renderer3d::scene::render_scene;
 
 const WIDTH: usize = 640;

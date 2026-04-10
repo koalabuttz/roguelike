@@ -33,13 +33,17 @@ const FAR: Fixed16 = Fixed16::from_int(60);
 /// Set to 1 to disable. 2 gives a subtle shimmer, 4+ is very noticeable.
 const SNAP_GRID: i32 = 2;
 
-// --- Distance fog ---
+// --- Light map system ---
+// A per-tile fog map combines FOV visibility with distance-based falloff.
+// Visible tiles: fog = distance_ramp (0 near player, 256 at FOV_RADIUS).
+// Non-visible tiles: fog = 256 (full dark, rendered as black geometry).
+// This eliminates hard edges: non-visible tiles ARE rendered but fully dark.
 
 /// Distance² (in tiles) where fog begins.
-const FOG_START_SQ: i32 = 36; // 6 tiles
-/// Distance² (in tiles) where fog reaches full black.
-const FOG_END_SQ: i32 = 196; // 14 tiles
-/// Range for the linear ramp (precomputed to avoid division in the hot path).
+const FOG_START_SQ: i32 = 4; // 2 tiles
+/// Distance² (in tiles) where fog reaches full black (= FOV_RADIUS²).
+const FOG_END_SQ: i32 = 64; // 8 tiles
+/// Range for the linear ramp.
 const FOG_RANGE_SQ: i32 = FOG_END_SQ - FOG_START_SQ;
 
 // --- Billboard constants ---
@@ -49,6 +53,19 @@ const BILLBOARD_WIDTH: Fixed16 = Fixed16::from_raw(0xB333); // ~0.7
 /// Billboard height in world units.
 const BILLBOARD_HEIGHT: Fixed16 = Fixed16::from_raw(0xE666); // ~0.9
 
+/// Minimum ambient light factor (0..256). Prevents surfaces from going
+/// completely black just from the Lambert term — simulates indirect light.
+const AMBIENT: i32 = 50;
+
+/// Height of the player's light source above the floor.
+/// Higher = wider floor light pool (light hits floor at less oblique angle).
+/// At h=2.5: the floor at 2 tiles away still gets ~80% of directly-below brightness.
+const LIGHT_HEIGHT: Fixed16 = Fixed16::from_raw(0x28000); // 2.5
+
+/// Attenuation scale: controls light reach. Formula: `256 / (1 + d²/ATTEN_SCALE)`.
+/// Higher = light reaches further. At 12: brightness halves at ~3.5 tiles.
+const ATTEN_SCALE: i64 = 16;
+
 /// Rasterizing triangle sink: transforms world-space triangles through
 /// the MVP matrix and rasterizes them into the framebuffer.
 struct RasterSink<'a> {
@@ -56,20 +73,26 @@ struct RasterSink<'a> {
     mvp: Mat4,
     width: i32,
     height: i32,
-    /// Player position in world-space tile coordinates for distance fog.
-    player_x: i32,
-    player_z: i32,
-    /// Camera right vector for billboard orientation.
     cam_right: Vec3,
+    /// Per-tile fog map: fog value (0=bright, 256=black) for each tile.
+    /// Combines FOV visibility with distance-based light falloff.
+    fog_map: Vec<i16>,
+    map_width: i32,
+    map_height: i32,
+    /// Light source position in world space.
+    light_pos: Vec3,
 }
 
 impl<'a> RasterSink<'a> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         fb: &'a mut Framebuffer,
         mvp: Mat4,
-        player_x: i32,
-        player_z: i32,
         cam_right: Vec3,
+        fog_map: Vec<i16>,
+        map_width: i32,
+        map_height: i32,
+        light_pos: Vec3,
     ) -> Self {
         let width = fb.width() as i32;
         let height = fb.height() as i32;
@@ -78,25 +101,64 @@ impl<'a> RasterSink<'a> {
             mvp,
             width,
             height,
-            player_x,
-            player_z,
             cam_right,
+            fog_map,
+            map_width,
+            map_height,
+            light_pos,
         }
     }
 
-    /// Compute fog factor (0-256) for a world-space vertex based on XZ distance to player.
+    /// Compute per-vertex lighting: `brightness = visibility × lambert × attenuation`.
+    ///
+    /// - **Visibility**: fog map (smooth FOV envelope: 1 near player, 0 at boundary)
+    /// - **Lambert**: `dot(N, normalize(L))` — angular shading
+    /// - **Attenuation**: `1 / (1 + k·d²)` — physical inverse-square light falloff
+    ///
+    /// Distance is part of the light equation, not a separate fog system.
+    /// This ensures a nearby floor is always brighter than a distant wall.
     #[inline]
-    fn vertex_fog(&self, world: Vec3) -> i16 {
-        let dx = world.x.to_int() - self.player_x;
-        let dz = world.z.to_int() - self.player_z;
-        let dist_sq = dx * dx + dz * dz;
-        if dist_sq <= FOG_START_SQ {
-            0
-        } else if dist_sq >= FOG_END_SQ {
-            256
-        } else {
-            ((dist_sq - FOG_START_SQ) * 256 / FOG_RANGE_SQ) as i16
+    fn vertex_light(&self, vertex: Vec3, normal: Vec3) -> i16 {
+        // FOV visibility envelope from fog map (0 = fully visible, 256 = dark)
+        let tx = vertex.x.to_int().clamp(0, self.map_width - 1);
+        let tz = vertex.z.to_int().clamp(0, self.map_height - 1);
+        let fog_vis = self.fog_map[(tz * self.map_width + tx) as usize] as i64;
+        if fog_vis >= 256 {
+            return 256;
         }
+        let visibility = 256 - fog_vis; // 0..256
+
+        // Direction + distance to light
+        let to_light = self.light_pos - vertex;
+        let dist = to_light.length();
+
+        if dist.to_raw() == 0 {
+            return (256 - visibility) as i16; // at light — full brightness modulated by visibility
+        }
+
+        // Lambert: dot(N, normalize(to_light))
+        let inv_dist = Fixed16::ONE / dist;
+        let light_dir = Vec3::new(
+            to_light.x * inv_dist,
+            to_light.y * inv_dist,
+            to_light.z * inv_dist,
+        );
+        let ndotl = normal.dot(light_dir);
+
+        let lambert = if ndotl.to_raw() <= 0 {
+            AMBIENT as i64
+        } else {
+            (ndotl.to_raw() >> 8).clamp(0, 256).max(AMBIENT) as i64
+        };
+
+        // Inverse-square attenuation: 256 / (1 + k·d²)
+        // d² in tiles (integer): to_light.length_squared().to_int()
+        let dist_sq_tiles = to_light.length_squared().to_int().max(1) as i64;
+        let atten = (256 * ATTEN_SCALE) / (ATTEN_SCALE + dist_sq_tiles); // 0..256
+
+        // Combine: brightness = visibility × lambert × attenuation / 256²
+        let brightness = visibility * lambert * atten / (256 * 256);
+        (256 - brightness.clamp(0, 256)) as i16
     }
 }
 
@@ -251,8 +313,11 @@ impl RasterSink<'_> {
         let uv_tr = (255, 0); // top-right
         let uv_br = (255, 255); // bottom-right
 
-        // Compute fog for the center position
-        let fog = self.vertex_fog(Vec3::new(center_x, Fixed16::ZERO, center_z));
+        // Billboard normal: face toward camera (perpendicular to right vector, in XZ plane)
+        // For lighting, billboards always face the light → use a normal that gives good results
+        let bb_normal = Vec3::new(Fixed16::ZERO, Fixed16::ONE, Fixed16::ZERO); // up-facing for uniform lighting
+        let center = Vec3::new(center_x, Fixed16::HALF, center_z);
+        let fog = self.vertex_light(center, bb_normal);
 
         // Transform and rasterize each triangle of the quad
         // Using CW winding to match emit_quad convention (y-flip compensation)
@@ -312,11 +377,11 @@ impl RasterSink<'_> {
 }
 
 impl TriangleSink for RasterSink<'_> {
-    fn emit(&mut self, v0: Vec3, v1: Vec3, v2: Vec3, color: u16) {
-        // Compute per-vertex fog from world-space XZ distance to player
-        let f0 = self.vertex_fog(v0);
-        let f1 = self.vertex_fog(v1);
-        let f2 = self.vertex_fog(v2);
+    fn emit(&mut self, v0: Vec3, v1: Vec3, v2: Vec3, normal: Vec3, color: u16) {
+        // Per-vertex lighting: fog map (distance + visibility) × Lambert (face angle)
+        let f0 = self.vertex_light(v0, normal);
+        let f1 = self.vertex_light(v1, normal);
+        let f2 = self.vertex_light(v2, normal);
 
         // Transform world-space → clip-space via MVP
         let c0 = self.mvp * v0.to_point();
@@ -366,6 +431,30 @@ pub fn render_scene(view: &dyn GameView, fb: &mut Framebuffer) {
     fb.clear(0, i16::MAX);
 
     let (px, py) = view.player_xy();
+    let (mw, mh) = view.map_dims();
+
+    // Build per-tile fog map: combines FOV visibility with distance falloff.
+    // Visible tiles get distance-based fog. All other tiles get max fog (black).
+    let mut fog_map = vec![256i16; (mw * mh) as usize];
+    for gz in 0..mh {
+        for gx in 0..mw {
+            if view.is_visible(gx, gz) {
+                let dx = gx - px;
+                let dz = gz - py;
+                let dist_sq = dx * dx + dz * dz;
+                fog_map[(gz * mw + gx) as usize] = if dist_sq <= FOG_START_SQ {
+                    0
+                } else if dist_sq >= FOG_END_SQ {
+                    256
+                } else {
+                    // Quadratic curve: bright near player, steep dropoff at edges.
+                    // Feels like torchlight rather than a uniform gradient.
+                    let linear = (dist_sq - FOG_START_SQ) * 256 / FOG_RANGE_SQ;
+                    (linear * linear / 256) as i16
+                };
+            }
+        }
+    }
 
     // Camera looks at the player's floor position.
     // Eye is above and slightly behind (negative z = north in grid space).
@@ -388,8 +477,15 @@ pub fn render_scene(view: &dyn GameView, fb: &mut Framebuffer) {
 
     let mvp = proj_mat.mul_mat(&view_mat);
 
+    // Light position: player's tile center, at waist height
+    let light_pos = Vec3::new(
+        Fixed16::from_int(px) + Fixed16::HALF,
+        LIGHT_HEIGHT,
+        Fixed16::from_int(py) + Fixed16::HALF,
+    );
+
     // Render map geometry (floors, walls)
-    let mut sink = RasterSink::new(fb, mvp, px, py, cam_right);
+    let mut sink = RasterSink::new(fb, mvp, cam_right, fog_map, mw, mh, light_pos);
     geometry::generate_map_geometry(view, &mut sink);
 
     // Render entity billboards
@@ -446,12 +542,15 @@ mod tests {
     /// Create a RasterSink with identity MVP (clip space = world space).
     /// Player at origin, no fog for nearby test vertices.
     fn make_test_sink(fb: &mut Framebuffer) -> RasterSink<'_> {
+        let fog_map = vec![0i16; 100 * 100]; // no fog for tests
         RasterSink::new(
             fb,
             Mat4::identity(),
-            0,
-            0,
             Vec3::new(Fixed16::ONE, Fixed16::ZERO, Fixed16::ZERO),
+            fog_map,
+            100,
+            100,
+            Vec3::zero(), // light at origin
         )
     }
 
@@ -487,12 +586,14 @@ mod tests {
         let mut sink = make_test_sink(&mut fb);
         let color = rgb555(31, 0, 0);
 
+        let n = Vec3::new(Fixed16::ZERO, Fixed16::ONE, Fixed16::ZERO); // up
         // CW winding in world xy-plane → CCW in screen after viewport y-flip.
         // With identity MVP, w=1, z=0, so w+z=1 > 0 (all inside).
         sink.emit(
             Vec3::from_ints(0, 0, 0),
             Vec3::new(Fixed16::ZERO, Fixed16::HALF, Fixed16::ZERO),
             Vec3::new(Fixed16::HALF, Fixed16::ZERO, Fixed16::ZERO),
+            n,
             color,
         );
 
@@ -504,12 +605,14 @@ mod tests {
         let mut fb = Framebuffer::new(100, 100);
         let mut sink = make_test_sink(&mut fb);
         let color = rgb555(31, 0, 0);
+        let n = Vec3::new(Fixed16::ZERO, Fixed16::ONE, Fixed16::ZERO);
 
         // All at z=-2: w+z = 1+(-2) = -1 < 0 → all outside.
         sink.emit(
             Vec3::new(Fixed16::ZERO, Fixed16::ZERO, Fixed16::from_int(-2)),
             Vec3::new(Fixed16::ZERO, Fixed16::HALF, Fixed16::from_int(-2)),
             Vec3::new(Fixed16::HALF, Fixed16::ZERO, Fixed16::from_int(-2)),
+            n,
             color,
         );
 
@@ -525,6 +628,7 @@ mod tests {
         let mut fb = Framebuffer::new(100, 100);
         let mut sink = make_test_sink(&mut fb);
         let color = rgb555(31, 0, 0);
+        let n = Vec3::new(Fixed16::ZERO, Fixed16::ONE, Fixed16::ZERO);
 
         // CW winding: v0 and v1 in front (z=0, d=1), v2 behind (z=-2, d=-1).
         // Without clipping this would be culled entirely.
@@ -532,6 +636,7 @@ mod tests {
             Vec3::new(Fixed16::ZERO, Fixed16::ZERO, Fixed16::ZERO),
             Vec3::new(Fixed16::ZERO, Fixed16::HALF, Fixed16::ZERO),
             Vec3::new(Fixed16::HALF, Fixed16::ZERO, Fixed16::from_int(-2)),
+            n,
             color,
         );
 
@@ -546,12 +651,14 @@ mod tests {
         let mut fb = Framebuffer::new(100, 100);
         let mut sink = make_test_sink(&mut fb);
         let color = rgb555(31, 0, 0);
+        let n = Vec3::new(Fixed16::ZERO, Fixed16::ONE, Fixed16::ZERO);
 
         // CW winding: v0 in front (z=0, d=1), v1 and v2 behind (z=-2, d=-1).
         sink.emit(
             Vec3::new(Fixed16::ZERO, Fixed16::ZERO, Fixed16::ZERO),
             Vec3::new(Fixed16::ZERO, Fixed16::HALF, Fixed16::from_int(-2)),
             Vec3::new(Fixed16::HALF, Fixed16::ZERO, Fixed16::from_int(-2)),
+            n,
             color,
         );
 

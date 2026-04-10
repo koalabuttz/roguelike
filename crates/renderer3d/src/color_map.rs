@@ -1,14 +1,18 @@
 use roguelike_core::rules::color::GameColor;
-use roguelike_core::rules::game_view::TileVisibility;
 
 use crate::framebuffer::rgb555;
 
-/// Which face of a wall block this triangle belongs to.
+/// Which face of a surface this triangle belongs to.
+/// Shading models a point light at the player's position (ground level):
+/// vertical wall sides facing the player are brightest, floors moderate,
+/// wall tops dimmest (lit from below at a steep angle).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Face {
-    /// Top face (roof of wall) or floor — full brightness.
-    Top,
-    /// Side face (vertical wall) — darkened one step.
+    /// Floor surface (y=0) — moderate brightness.
+    Floor,
+    /// Wall top surface (y=WALL_HEIGHT) — dimmest (lit indirectly from below).
+    WallTop,
+    /// Vertical wall side facing the camera — full brightness (light hits head-on).
     Side,
 }
 
@@ -44,21 +48,17 @@ pub const fn darken_rgb555(color: u16, shift: u8) -> u16 {
 
 /// Compute the final RGB555 color for a tile triangle.
 ///
-/// Pipeline: GameColor → RGB555 base → face shade → visibility dim.
-/// Side faces get 1 shift darker. Explored (not visible) tiles get 1 shift darker.
-/// These stack: an explored side face is 2 shifts darker.
-pub fn tile_color(color: GameColor, face: Face, vis: TileVisibility) -> u16 {
+/// Pipeline: GameColor → RGB555 base → face shade.
+/// Wall sides (facing player) are brightest. Floors are 1 shift dimmer.
+/// Wall tops are 2 shifts dimmer (lit from below at a steep angle).
+pub fn tile_color(color: GameColor, face: Face) -> u16 {
     let base = game_color_to_rgb555(color);
     let face_shift = match face {
-        Face::Top => 0,
-        Face::Side => 1,
+        Face::Side => 0,    // full brightness — light hits head-on
+        Face::Floor => 1,   // moderate — horizontal surface, glancing light
+        Face::WallTop => 2, // dim — top of wall, lit indirectly from below
     };
-    let vis_shift = match vis {
-        TileVisibility::Visible => 0,
-        TileVisibility::Explored => 1,
-        TileVisibility::Unexplored => 0, // caller should skip unexplored tiles
-    };
-    darken_rgb555(base, face_shift + vis_shift)
+    darken_rgb555(base, face_shift)
 }
 
 #[cfg(test)]
@@ -104,25 +104,13 @@ mod tests {
 
     #[test]
     fn tile_color_face_shading() {
-        let white_top = tile_color(GameColor::White, Face::Top, TileVisibility::Visible);
-        let white_side = tile_color(GameColor::White, Face::Side, TileVisibility::Visible);
-        assert_eq!(white_top, rgb555(31, 31, 31));
-        assert_eq!(white_side, rgb555(15, 15, 15));
-    }
-
-    #[test]
-    fn tile_color_visibility_dimming() {
-        let visible = tile_color(GameColor::White, Face::Top, TileVisibility::Visible);
-        let explored = tile_color(GameColor::White, Face::Top, TileVisibility::Explored);
-        assert_eq!(visible, rgb555(31, 31, 31));
-        assert_eq!(explored, rgb555(15, 15, 15));
-    }
-
-    #[test]
-    fn tile_color_explored_side_double_darken() {
-        // Explored + Side = 2 shifts
-        let color = tile_color(GameColor::White, Face::Side, TileVisibility::Explored);
-        assert_eq!(color, rgb555(7, 7, 7));
+        // Side: brightest (0 shifts), Floor: 1 shift, WallTop: 2 shifts
+        let side = tile_color(GameColor::White, Face::Side);
+        let floor = tile_color(GameColor::White, Face::Floor);
+        let wall_top = tile_color(GameColor::White, Face::WallTop);
+        assert_eq!(side, rgb555(31, 31, 31));
+        assert_eq!(floor, rgb555(15, 15, 15));
+        assert_eq!(wall_top, rgb555(7, 7, 7));
     }
 
     #[test]

@@ -91,6 +91,21 @@ impl Framebuffer {
         self.height
     }
 
+    /// Write the framebuffer as a PPM (P6) image.
+    ///
+    /// PPM is the simplest image format — no external deps needed.
+    /// RGB555 pixels are expanded to 8-bit via `unpack_rgb555`.
+    pub fn write_ppm(&self, w: &mut dyn std::io::Write) -> std::io::Result<()> {
+        std::write!(w, "P6\n{} {}\n255\n", self.width, self.height)?;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let (r, g, b) = unpack_rgb555(self.get_pixel(x, y));
+                w.write_all(&[r, g, b])?;
+            }
+        }
+        Ok(())
+    }
+
     #[inline]
     fn index(&self, x: u32, y: u32) -> usize {
         (y * self.width + x) as usize

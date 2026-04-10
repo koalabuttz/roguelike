@@ -21,13 +21,16 @@ pub trait TriangleSink {
     fn emit(&mut self, v0: Vec3, v1: Vec3, v2: Vec3, color: u16);
 }
 
-/// Emit a quad as two CCW triangles: (v0,v1,v2) and (v0,v2,v3).
+/// Emit a quad as two triangles with reversed winding.
 ///
-/// Vertices should be in CCW order when viewed from the front.
+/// Callers specify vertices in CCW order when viewed from the front face
+/// (the natural convention). This function emits them in CW order to
+/// compensate for the viewport y-flip in project_vertex, which negates
+/// the screen-space cross product. CW-in-world → CCW-in-screen → front-facing.
 #[inline]
 fn emit_quad(sink: &mut dyn TriangleSink, v0: Vec3, v1: Vec3, v2: Vec3, v3: Vec3, color: u16) {
-    sink.emit(v0, v1, v2, color);
-    sink.emit(v0, v2, v3, color);
+    sink.emit(v0, v2, v1, color);
+    sink.emit(v0, v3, v2, color);
 }
 
 /// Helper to create a Vec3 from grid coordinates at a given height.
@@ -239,16 +242,16 @@ mod tests {
         Fixed16::from_int(n)
     }
 
-    /// Check that a triangle has CCW winding when viewed from above (+y direction).
-    /// The y-component of cross(v1-v0, v2-v0) should be positive.
-    /// For vectors in the xz-plane: y = e1z*e2x - e1x*e2z.
-    fn cross_y_positive(v0: Vec3, v1: Vec3, v2: Vec3) -> bool {
+    /// Check that a triangle has CW winding when viewed from above (+y direction).
+    /// We emit CW-from-above so that the viewport y-flip produces CCW-in-screen.
+    /// The y-component of cross(v1-v0, v2-v0) should be negative.
+    fn cross_y_negative(v0: Vec3, v1: Vec3, v2: Vec3) -> bool {
         let e1x = v1.x - v0.x;
         let e1z = v1.z - v0.z;
         let e2x = v2.x - v0.x;
         let e2z = v2.z - v0.z;
         let y_component = e1z * e2x - e1x * e2z;
-        y_component > Fixed16::ZERO
+        y_component < Fixed16::ZERO
     }
 
     #[test]
@@ -269,15 +272,15 @@ mod tests {
     }
 
     #[test]
-    fn floor_ccw_winding() {
+    fn floor_winding_for_yflip() {
         let mut sink = VecSink::new();
         emit_floor(&mut sink, 0, 0, 0);
 
-        // Both triangles should be CCW when viewed from above (+y)
+        // Triangles are CW-from-above → CCW-in-screen after viewport y-flip
         for (v0, v1, v2, _) in &sink.tris {
             assert!(
-                cross_y_positive(*v0, *v1, *v2),
-                "floor triangle should be CCW from above"
+                cross_y_negative(*v0, *v1, *v2),
+                "floor triangle should be CW from above (CCW after y-flip)"
             );
         }
     }
@@ -296,14 +299,14 @@ mod tests {
     }
 
     #[test]
-    fn wall_top_ccw_winding() {
+    fn wall_top_winding_for_yflip() {
         let mut sink = VecSink::new();
         emit_wall_top(&mut sink, 0, 0, 0);
 
         for (v0, v1, v2, _) in &sink.tris {
             assert!(
-                cross_y_positive(*v0, *v1, *v2),
-                "wall top should be CCW from above"
+                cross_y_negative(*v0, *v1, *v2),
+                "wall top should be CW from above (CCW after y-flip)"
             );
         }
     }

@@ -63,16 +63,21 @@ fn main() {
     // ~60 FPS update rate (keeps window responsive without burning CPU)
     window.set_target_fps(60);
 
+    let mut frame: u32 = 0;
+
     // Initial render
-    render_scene(&game, &mut fb);
+    render_scene(&game, &mut fb, frame);
     fb_to_u32(&fb, &mut buf);
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
         if let Some(cmd) = get_command(&window) {
             game.step_view(cmd);
-            render_scene(&game, &mut fb);
-            fb_to_u32(&fb, &mut buf);
         }
+
+        // Re-render every frame for torch flicker animation
+        render_scene(&game, &mut fb, frame);
+        fb_to_u32(&fb, &mut buf);
+        frame = frame.wrapping_add(1);
 
         window.update_with_buffer(&buf, WIDTH, HEIGHT).unwrap();
     }

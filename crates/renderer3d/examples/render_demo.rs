@@ -21,7 +21,7 @@ fn main() {
     let game = MicroGameState::new_default(seed);
     let mut fb = Framebuffer::new(width, height);
 
-    render_scene(&game, &mut fb);
+    render_scene(&game, &mut fb, 0);
 
     let path = format!("render_seed{seed}_{width}x{height}.ppm");
     let mut file = std::fs::File::create(&path).expect("failed to create output file");

@@ -12,21 +12,28 @@ const BAYER_4X4: [u16; 16] = [
     240, 112, 208,  80,
 ];
 
-/// Blend an RGB555 color toward black by a fog factor, with ordered dithering.
+/// Blend an RGB555 color toward black by a fog factor, with ordered dithering
+/// and per-channel light color tinting.
 ///
 /// `fog`: 0 = clear, 256 = full black. `dither`: Bayer matrix value (0..240).
-/// Each 5-bit channel is computed at 13-bit precision (channel × inv), the
-/// dither offset is added, then truncated to 5 bits. This breaks quantization
-/// banding into a stipple pattern.
+/// `light_color`: per-channel brightness multiplier `[r, g, b]` in 0..256
+/// (256 = full white, lower = tinted). A warm torch might be `[256, 200, 100]`.
+///
+/// Each 5-bit channel is computed as: `surface × (256-fog) × light / 256²`,
+/// with a dither offset added before the final truncation to 5 bits.
 #[inline]
-fn apply_fog(color: u16, fog: i16, dither: u16) -> u16 {
-    if fog <= 0 {
+fn apply_fog(color: u16, fog: i16, dither: u16, light_color: [u16; 3]) -> u16 {
+    if fog <= 0 && light_color[0] >= 256 && light_color[1] >= 256 && light_color[2] >= 256 {
         return color;
     }
     let inv = (256 - fog.min(256)) as u16;
-    let r = ((((color >> 10) & 0x1F) * inv + dither) >> 8).min(31);
-    let g = ((((color >> 5) & 0x1F) * inv + dither) >> 8).min(31);
-    let b = (((color & 0x1F) * inv + dither) >> 8).min(31);
+    // Per-channel: brightness = inv × light_channel / 256
+    let r_bright = (inv as u32 * light_color[0] as u32) >> 8;
+    let g_bright = (inv as u32 * light_color[1] as u32) >> 8;
+    let b_bright = (inv as u32 * light_color[2] as u32) >> 8;
+    let r = (((((color >> 10) & 0x1F) as u32) * r_bright + dither as u32) >> 8).min(31) as u16;
+    let g = (((((color >> 5) & 0x1F) as u32) * g_bright + dither as u32) >> 8).min(31) as u16;
+    let b = ((((color & 0x1F) as u32) * b_bright + dither as u32) >> 8).min(31) as u16;
     (r << 10) | (g << 5) | b
 }
 
@@ -52,6 +59,7 @@ pub fn rasterize_triangle(
     v1: ScreenVertex,
     v2: ScreenVertex,
     color: u16,
+    light_color: [u16; 3],
 ) {
     // Back-face cull: twice-area via cross product. Positive = CCW = front-facing.
     let twice_area =
@@ -124,14 +132,18 @@ pub fn rasterize_triangle(
                     ((u0 as i64 * v0.z as i64 + u1 as i64 * v1.z as i64 + u2 as i64 * v2.z as i64)
                         / twice_area) as i16;
 
-                // Fog interpolation + dithered color blend
-                let pixel_color = if v0.fog | v1.fog | v2.fog != 0 {
+                // Fog interpolation + light color tinting + dithered blend
+                let pixel_color = if v0.fog | v1.fog | v2.fog != 0
+                    || light_color[0] < 256
+                    || light_color[1] < 256
+                    || light_color[2] < 256
+                {
                     let fog = ((u0 as i64 * v0.fog as i64
                         + u1 as i64 * v1.fog as i64
                         + u2 as i64 * v2.fog as i64)
                         / twice_area) as i16;
                     let dither = BAYER_4X4[((y & 3) * 4 + (x & 3)) as usize];
-                    apply_fog(color, fog, dither)
+                    apply_fog(color, fog, dither, light_color)
                 } else {
                     color
                 };
@@ -170,6 +182,7 @@ pub fn rasterize_glyph_triangle(
     v1: ScreenVertex,
     v2: ScreenVertex,
     color: u16,
+    light_color: [u16; 3],
     uv0: (i16, i16),
     uv1: (i16, i16),
     uv2: (i16, i16),
@@ -248,13 +261,17 @@ pub fn rasterize_glyph_triangle(
                         + ub2 as i64 * v2.z as i64)
                         / twice_area) as i16;
 
-                    let pixel_color = if v0.fog | v1.fog | v2.fog != 0 {
+                    let pixel_color = if v0.fog | v1.fog | v2.fog != 0
+                        || light_color[0] < 256
+                        || light_color[1] < 256
+                        || light_color[2] < 256
+                    {
                         let fog = ((ub0 as i64 * v0.fog as i64
                             + ub1 as i64 * v1.fog as i64
                             + ub2 as i64 * v2.fog as i64)
                             / twice_area) as i16;
                         let dither = BAYER_4X4[((y & 3) * 4 + (x & 3)) as usize];
-                        apply_fog(color, fog, dither)
+                        apply_fog(color, fog, dither, light_color)
                     } else {
                         color
                     };
@@ -284,6 +301,9 @@ mod tests {
     use super::*;
     use crate::framebuffer::rgb555;
 
+    /// White (neutral) light for tests that don't care about color tinting.
+    const WHITE: [u16; 3] = [256, 256, 256];
+
     fn count_colored_pixels(fb: &Framebuffer, color: u16) -> u32 {
         let mut count = 0;
         for y in 0..fb.height() {
@@ -306,7 +326,7 @@ mod tests {
         let v1 = ScreenVertex::new(6, 1, 0);
         let v2 = ScreenVertex::new(4, 5, 0);
 
-        rasterize_triangle(&mut fb, v0, v1, v2, red);
+        rasterize_triangle(&mut fb, v0, v1, v2, red, WHITE);
 
         // Center pixel should be filled
         assert_eq!(fb.get_pixel(4, 3), red, "center pixel should be red");
@@ -328,7 +348,7 @@ mod tests {
         let v1 = ScreenVertex::new(0, 5, 0);
         let v2 = ScreenVertex::new(5, 0, 0);
 
-        rasterize_triangle(&mut fb, v0, v1, v2, red);
+        rasterize_triangle(&mut fb, v0, v1, v2, red, WHITE);
         assert_eq!(
             count_colored_pixels(&fb, red),
             0,
@@ -346,7 +366,7 @@ mod tests {
         let v1 = ScreenVertex::new(5, 0, 0);
         let v2 = ScreenVertex::new(0, 5, 0);
 
-        rasterize_triangle(&mut fb, v0, v1, v2, red);
+        rasterize_triangle(&mut fb, v0, v1, v2, red, WHITE);
         assert!(
             count_colored_pixels(&fb, red) > 0,
             "CCW triangle should render"
@@ -363,7 +383,7 @@ mod tests {
         let v1 = ScreenVertex::new(5, 5, 0);
         let v2 = ScreenVertex::new(9, 9, 0);
 
-        rasterize_triangle(&mut fb, v0, v1, v2, red);
+        rasterize_triangle(&mut fb, v0, v1, v2, red, WHITE);
         assert_eq!(
             count_colored_pixels(&fb, red),
             0,
@@ -381,7 +401,7 @@ mod tests {
         let v1 = ScreenVertex::new(5, -10, 0);
         let v2 = ScreenVertex::new(20, 20, 0);
 
-        rasterize_triangle(&mut fb, v0, v1, v2, red);
+        rasterize_triangle(&mut fb, v0, v1, v2, red, WHITE);
 
         // Should have rendered some pixels inside the buffer
         let count = count_colored_pixels(&fb, red);
@@ -406,6 +426,7 @@ mod tests {
             ScreenVertex::new(8, 1, far),
             ScreenVertex::new(4, 8, far),
             red,
+            WHITE,
         );
 
         // Near triangle overlapping (depth -1000)
@@ -416,6 +437,7 @@ mod tests {
             ScreenVertex::new(8, 1, near),
             ScreenVertex::new(4, 8, near),
             green,
+            WHITE,
         );
 
         // Overlapping pixels should be green (near wins)
@@ -439,6 +461,7 @@ mod tests {
             ScreenVertex::new(8, 1, -1000),
             ScreenVertex::new(4, 8, -1000),
             red,
+            WHITE,
         );
 
         // Far triangle drawn second (depth 1000) — should NOT overwrite
@@ -448,6 +471,7 @@ mod tests {
             ScreenVertex::new(8, 1, 1000),
             ScreenVertex::new(4, 8, 1000),
             green,
+            WHITE,
         );
 
         // Should still show red (near triangle preserved by z-buffer)
@@ -470,6 +494,7 @@ mod tests {
             ScreenVertex::new(8, 1, depth),
             ScreenVertex::new(4, 8, depth),
             red,
+            WHITE,
         );
 
         // All rasterized pixels should have the same depth
@@ -499,6 +524,7 @@ mod tests {
             ScreenVertex::new(20, -10, 0),
             ScreenVertex::new(5, 20, 0),
             red,
+            WHITE,
         );
 
         assert_eq!(
@@ -506,5 +532,26 @@ mod tests {
             16,
             "should fill all 16 pixels"
         );
+    }
+
+    #[test]
+    fn warm_light_tints_output() {
+        let mut fb = Framebuffer::new(10, 10);
+        let white = rgb555(31, 31, 31);
+        // Warm light: full red, half green, no blue
+        let warm = [256, 128, 0];
+
+        let v0 = ScreenVertex::new(0, 0, 0);
+        let v1 = ScreenVertex::new(9, 0, 0);
+        let v2 = ScreenVertex::new(5, 9, 0);
+
+        rasterize_triangle(&mut fb, v0, v1, v2, white, warm);
+
+        let pixel = fb.get_pixel(5, 3);
+        let r = (pixel >> 10) & 0x1F;
+        let g = (pixel >> 5) & 0x1F;
+        let b = pixel & 0x1F;
+        assert!(r > g, "warm light: red ({r}) should exceed green ({g})");
+        assert_eq!(b, 0, "warm light: blue should be zero");
     }
 }

@@ -66,6 +66,55 @@ const LIGHT_HEIGHT: Fixed16 = Fixed16::from_raw(0x28000); // 2.5
 /// Higher = light reaches further. At 12: brightness halves at ~3.5 tiles.
 const ATTEN_SCALE: i64 = 16;
 
+// --- Torch light color (warm amber, ~1800K blackbody) ---
+
+/// Base torch color: per-channel brightness 0..256.
+/// Full red, warm green, low blue → amber/orange glow.
+const TORCH_R: u16 = 256;
+const TORCH_G: u16 = 210;
+const TORCH_B: u16 = 110;
+
+// --- Flicker animation ---
+
+/// Quake-inspired flame flicker table. Each entry is a brightness multiplier
+/// (0..256). The flame mostly stays near full brightness with occasional dips
+/// and the rare sharp drop — matching real candle/torch behavior.
+///
+/// 32 entries at ~15 fps effective rate (sampled every 4 frames at 60 fps)
+/// gives a ~2 second loop, long enough to avoid visible repetition.
+#[rustfmt::skip]
+const FLICKER_TABLE: [u16; 32] = [
+    240, 245, 235, 250, 230, 248, 225, 252, // gentle undulation
+    245, 220, 250, 240, 255, 235, 210, 245, // slight dip at 210
+    250, 248, 230, 255, 240, 195, 250, 245, // deeper dip at 195
+    235, 252, 248, 230, 245, 240, 255, 250, // back to normal
+];
+
+/// Compute the per-frame light color from the flicker table.
+///
+/// The flicker modulates overall brightness while preserving the warm tint.
+/// A secondary effect: at lower brightness, the color shifts slightly *warmer*
+/// (more red-dominant) — matching real flames where a dimmer flame burns cooler.
+fn torch_light_color(frame: u32) -> [u16; 3] {
+    // Sample the table at 1/4 frame rate for naturalistic low-frequency wobble
+    let idx = ((frame / 4) % FLICKER_TABLE.len() as u32) as usize;
+    let brightness = FLICKER_TABLE[idx] as u32;
+
+    // Interpolate between current and next entry for smoother transitions
+    let next_idx = (idx + 1) % FLICKER_TABLE.len();
+    let next_brightness = FLICKER_TABLE[next_idx] as u32;
+    let sub_frame = frame % 4;
+    let smooth = (brightness * (4 - sub_frame) + next_brightness * sub_frame) / 4;
+
+    // Apply brightness to each channel. The warm tint comes from the base
+    // color ratio (R > G > B); flicker modulates all channels linearly.
+    let r = (TORCH_R as u32 * smooth / 256).min(256) as u16;
+    let g = (TORCH_G as u32 * smooth / 256).min(256) as u16;
+    let b = (TORCH_B as u32 * smooth / 256).min(256) as u16;
+
+    [r, g, b]
+}
+
 /// Rasterizing triangle sink: transforms world-space triangles through
 /// the MVP matrix and rasterizes them into the framebuffer.
 struct RasterSink<'a> {
@@ -81,6 +130,8 @@ struct RasterSink<'a> {
     map_height: i32,
     /// Light source position in world space.
     light_pos: Vec3,
+    /// Per-frame light color (warm tint + flicker modulation).
+    light_color: [u16; 3],
 }
 
 impl<'a> RasterSink<'a> {
@@ -93,6 +144,7 @@ impl<'a> RasterSink<'a> {
         map_width: i32,
         map_height: i32,
         light_pos: Vec3,
+        light_color: [u16; 3],
     ) -> Self {
         let width = fb.width() as i32;
         let height = fb.height() as i32;
@@ -106,6 +158,7 @@ impl<'a> RasterSink<'a> {
             map_width,
             map_height,
             light_pos,
+            light_color,
         }
     }
 
@@ -205,7 +258,7 @@ impl RasterSink<'_> {
         let s0 = self.project_with_fog(c0, f[0]);
         let s1 = self.project_with_fog(c1, f[1]);
         let s2 = self.project_with_fog(c2, f[2]);
-        rasterize_triangle(self.fb, s0, s1, s2, color);
+        rasterize_triangle(self.fb, s0, s1, s2, color, self.light_color);
     }
 
     /// Clip a triangle against the near plane (w + z = 0) and rasterize the result.
@@ -372,7 +425,7 @@ impl RasterSink<'_> {
         s1.fog = fog;
         s2.fog = fog;
 
-        rasterize_glyph_triangle(self.fb, s0, s1, s2, color, uv0, uv1, uv2, glyph);
+        rasterize_glyph_triangle(self.fb, s0, s1, s2, color, self.light_color, uv0, uv1, uv2, glyph);
     }
 }
 
@@ -427,7 +480,11 @@ impl TriangleSink for RasterSink<'_> {
 ///
 /// Sets up a nearly top-down camera centered on the player, builds the
 /// MVP matrix, and streams all visible geometry through the rasterizer.
-pub fn render_scene(view: &dyn GameView, fb: &mut Framebuffer) {
+///
+/// `frame`: monotonically increasing frame counter. Drives the torch flicker
+/// animation — each frame produces a slightly different light color/intensity.
+/// Pass 0 for a static snapshot (e.g., PPM output).
+pub fn render_scene(view: &dyn GameView, fb: &mut Framebuffer, frame: u32) {
     fb.clear(0, i16::MAX);
 
     let (px, py) = view.player_xy();
@@ -484,8 +541,11 @@ pub fn render_scene(view: &dyn GameView, fb: &mut Framebuffer) {
         Fixed16::from_int(py) + Fixed16::HALF,
     );
 
+    // Compute per-frame torch light color (warm tint + flicker)
+    let light_color = torch_light_color(frame);
+
     // Render map geometry (floors, walls)
-    let mut sink = RasterSink::new(fb, mvp, cam_right, fog_map, mw, mh, light_pos);
+    let mut sink = RasterSink::new(fb, mvp, cam_right, fog_map, mw, mh, light_pos, light_color);
     geometry::generate_map_geometry(view, &mut sink);
 
     // Render entity billboards
@@ -540,7 +600,7 @@ mod tests {
     }
 
     /// Create a RasterSink with identity MVP (clip space = world space).
-    /// Player at origin, no fog for nearby test vertices.
+    /// Player at origin, no fog for nearby test vertices, white light.
     fn make_test_sink(fb: &mut Framebuffer) -> RasterSink<'_> {
         let fog_map = vec![0i16; 100 * 100]; // no fog for tests
         RasterSink::new(
@@ -551,6 +611,7 @@ mod tests {
             100,
             100,
             Vec3::zero(), // light at origin
+            [256, 256, 256], // white light for tests
         )
     }
 
@@ -675,7 +736,7 @@ mod tests {
         let game = MicroGameState::new_default(42);
         let mut fb = Framebuffer::new(160, 120);
 
-        render_scene(&game, &mut fb);
+        render_scene(&game, &mut fb, 0);
 
         // Should have rendered at least some non-black pixels
         let mut colored = 0u32;
@@ -700,8 +761,8 @@ mod tests {
         let mut fb_a = Framebuffer::new(80, 60);
         let mut fb_b = Framebuffer::new(80, 60);
 
-        render_scene(&game_a, &mut fb_a);
-        render_scene(&game_b, &mut fb_b);
+        render_scene(&game_a, &mut fb_a, 0);
+        render_scene(&game_b, &mut fb_b, 0);
 
         // At least one pixel should differ between different seeds
         let mut differs = false;
@@ -721,7 +782,7 @@ mod tests {
         let game = MicroGameState::new_default(42);
         let mut fb = Framebuffer::new(160, 120);
 
-        render_scene(&game, &mut fb);
+        render_scene(&game, &mut fb, 0);
 
         // The central 50% of the image should have some content.
         // With a top-down camera centered on the player, the player's
@@ -742,5 +803,57 @@ mod tests {
             center_colored > 0,
             "central region should have rendered pixels"
         );
+    }
+
+    // --- Torch flicker tests ---
+
+    #[test]
+    fn torch_color_is_warm() {
+        let color = torch_light_color(0);
+        // Red should be brightest, blue dimmest
+        assert!(color[0] > color[1], "red ({}) > green ({})", color[0], color[1]);
+        assert!(color[1] > color[2], "green ({}) > blue ({})", color[1], color[2]);
+    }
+
+    #[test]
+    fn torch_flicker_varies_over_time() {
+        // Sample at different frames — brightness should vary
+        let colors: Vec<_> = (0..32).map(|f| torch_light_color(f * 4)).collect();
+        let min_r = colors.iter().map(|c| c[0]).min().unwrap();
+        let max_r = colors.iter().map(|c| c[0]).max().unwrap();
+        assert!(
+            max_r > min_r,
+            "flicker should produce varying brightness: min={min_r}, max={max_r}"
+        );
+    }
+
+    #[test]
+    fn torch_flicker_never_goes_dark() {
+        // Flicker should never drop below ~60% brightness
+        for frame in 0..256 {
+            let color = torch_light_color(frame);
+            assert!(color[0] >= 150, "red too dim at frame {frame}: {}", color[0]);
+        }
+    }
+
+    #[test]
+    fn different_frames_produce_different_pixels() {
+        let game = MicroGameState::new_default(42);
+        let mut fb_a = Framebuffer::new(80, 60);
+        let mut fb_b = Framebuffer::new(80, 60);
+
+        render_scene(&game, &mut fb_a, 0);
+        render_scene(&game, &mut fb_b, 16); // different flicker phase
+
+        let mut differs = false;
+        'outer: for y in 0..fb_a.height() {
+            for x in 0..fb_a.width() {
+                if fb_a.get_pixel(x, y) != fb_b.get_pixel(x, y) {
+                    differs = true;
+                    break 'outer;
+                }
+            }
+        }
+        assert!(differs, "different frames should produce different images (flicker)");
     }
 }

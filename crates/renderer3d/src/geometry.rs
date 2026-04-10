@@ -159,7 +159,10 @@ pub fn generate_map_geometry(view: &dyn GameView, sink: &mut dyn TriangleSink) {
                     // Void tile — no geometry
                 }
                 TileKind::Floor | TileKind::StairsDown => {
-                    let color = game_color_to_rgb555(tiles::color(tile));
+                    // Use a brighter albedo than the 2D terminal color (DarkGrey).
+                    // In 3D, the lighting system handles brightness — the surface
+                    // color is the material reflectivity, not the final appearance.
+                    let color = game_color_to_rgb555(GameColor::Grey);
                     emit_floor(sink, gx, gz, color);
                 }
                 TileKind::Structural => {

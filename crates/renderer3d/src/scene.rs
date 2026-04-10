@@ -41,10 +41,11 @@ const SNAP_GRID: i32 = 2;
 
 /// Distance² (in tiles) where fog begins.
 const FOG_START_SQ: i32 = 4; // 2 tiles
-/// Distance² (in tiles) where fog reaches full black (= FOV_RADIUS²).
-const FOG_END_SQ: i32 = 64; // 8 tiles
-/// Range for the linear ramp.
-const FOG_RANGE_SQ: i32 = FOG_END_SQ - FOG_START_SQ;
+/// Distance² (in tiles) where fog reaches full black.
+/// Set inside the FOV radius (8 tiles = 64) so the per-vertex distance fog
+/// fades to black before the FOV boundary. This hides the FOV shadowcasting
+/// staircase — tiles at the FOV edge are already dark from distance.
+const FOG_END_SQ: i32 = 36; // 6 tiles (FOV_RADIUS is 8)
 
 // --- Billboard constants ---
 
@@ -123,11 +124,6 @@ struct RasterSink<'a> {
     width: i32,
     height: i32,
     cam_right: Vec3,
-    /// Per-tile fog map: fog value (0=bright, 256=black) for each tile.
-    /// Combines FOV visibility with distance-based light falloff.
-    fog_map: Vec<i16>,
-    map_width: i32,
-    map_height: i32,
     /// Light source position in world space.
     light_pos: Vec3,
     /// Per-frame light color (warm tint + flicker modulation).
@@ -135,14 +131,10 @@ struct RasterSink<'a> {
 }
 
 impl<'a> RasterSink<'a> {
-    #[allow(clippy::too_many_arguments)]
     fn new(
         fb: &'a mut Framebuffer,
         mvp: Mat4,
         cam_right: Vec3,
-        fog_map: Vec<i16>,
-        map_width: i32,
-        map_height: i32,
         light_pos: Vec3,
         light_color: [u16; 3],
     ) -> Self {
@@ -154,39 +146,50 @@ impl<'a> RasterSink<'a> {
             width,
             height,
             cam_right,
-            fog_map,
-            map_width,
-            map_height,
             light_pos,
             light_color,
         }
     }
 
-    /// Compute per-vertex lighting: `brightness = visibility × lambert × attenuation`.
+    /// Compute per-vertex lighting: `brightness = visibility × distance_fog × lambert × attenuation`.
     ///
-    /// - **Visibility**: fog map (smooth FOV envelope: 1 near player, 0 at boundary)
+    /// - **Visibility**: fog map — binary FOV check (tile visible or not)
+    /// - **Distance fog**: smooth per-vertex quadratic falloff from world position
     /// - **Lambert**: `dot(N, normalize(L))` — angular shading
     /// - **Attenuation**: `1 / (1 + k·d²)` — physical inverse-square light falloff
     ///
-    /// Distance is part of the light equation, not a separate fog system.
-    /// This ensures a nearby floor is always brighter than a distant wall.
+    /// Distance fog is computed from the vertex's actual world position, not per-tile,
+    /// so gradients are smooth across tile boundaries.
     #[inline]
     fn vertex_light(&self, vertex: Vec3, normal: Vec3) -> i16 {
-        // FOV visibility envelope from fog map (0 = fully visible, 256 = dark)
-        let tx = vertex.x.to_int().clamp(0, self.map_width - 1);
-        let tz = vertex.z.to_int().clamp(0, self.map_height - 1);
-        let fog_vis = self.fog_map[(tz * self.map_width + tx) as usize] as i64;
-        if fog_vis >= 256 {
+        // Smooth distance fog from vertex world position — full Fixed16 precision.
+        // Using raw Fixed16 values (1 unit = 65536) avoids integer quantization
+        // that creates visible circular brightness bands.
+        let dx = vertex.x - self.light_pos.x;
+        let dz = vertex.z - self.light_pos.z;
+        let dist_sq_raw = (dx * dx + dz * dz).to_raw().max(0) as i64;
+        let fog_start_raw = (FOG_START_SQ as i64) << 16;
+        let fog_end_raw = (FOG_END_SQ as i64) << 16;
+        let fog_range_raw = fog_end_raw - fog_start_raw;
+
+        let visibility = if dist_sq_raw <= fog_start_raw {
+            256i64
+        } else if dist_sq_raw >= fog_end_raw {
+            0
+        } else {
+            256 * (fog_end_raw - dist_sq_raw) / fog_range_raw
+        };
+
+        if visibility <= 0 {
             return 256;
         }
-        let visibility = 256 - fog_vis; // 0..256
 
-        // Direction + distance to light
+        // Direction + distance to light (3D, includes height)
         let to_light = self.light_pos - vertex;
         let dist = to_light.length();
 
         if dist.to_raw() == 0 {
-            return (256 - visibility) as i16; // at light — full brightness modulated by visibility
+            return (256 - visibility) as i16;
         }
 
         // Lambert: dot(N, normalize(to_light))
@@ -204,10 +207,10 @@ impl<'a> RasterSink<'a> {
             (ndotl.to_raw() >> 8).clamp(0, 256).max(AMBIENT) as i64
         };
 
-        // Inverse-square attenuation: 256 / (1 + k·d²)
-        // d² in tiles (integer): to_light.length_squared().to_int()
-        let dist_sq_tiles = to_light.length_squared().to_int().max(1) as i64;
-        let atten = (256 * ATTEN_SCALE) / (ATTEN_SCALE + dist_sq_tiles); // 0..256
+        // Inverse-square attenuation: 256·k / (k + d²), using Fixed16 precision.
+        let dist_sq_3d_raw = to_light.length_squared().to_raw().max(1) as i64;
+        let atten_k = ATTEN_SCALE << 16; // scale constant to Fixed16
+        let atten = (256 * atten_k) / (atten_k + dist_sq_3d_raw);
 
         // Combine: brightness = visibility × lambert × attenuation / 256²
         let brightness = visibility * lambert * atten / (256 * 256);
@@ -425,13 +428,23 @@ impl RasterSink<'_> {
         s1.fog = fog;
         s2.fog = fog;
 
-        rasterize_glyph_triangle(self.fb, s0, s1, s2, color, self.light_color, uv0, uv1, uv2, glyph);
+        rasterize_glyph_triangle(
+            self.fb,
+            s0,
+            s1,
+            s2,
+            color,
+            self.light_color,
+            uv0,
+            uv1,
+            uv2,
+            glyph,
+        );
     }
 }
 
 impl TriangleSink for RasterSink<'_> {
     fn emit(&mut self, v0: Vec3, v1: Vec3, v2: Vec3, normal: Vec3, color: u16) {
-        // Per-vertex lighting: fog map (distance + visibility) × Lambert (face angle)
         let f0 = self.vertex_light(v0, normal);
         let f1 = self.vertex_light(v1, normal);
         let f2 = self.vertex_light(v2, normal);
@@ -488,30 +501,6 @@ pub fn render_scene(view: &dyn GameView, fb: &mut Framebuffer, frame: u32) {
     fb.clear(0, i16::MAX);
 
     let (px, py) = view.player_xy();
-    let (mw, mh) = view.map_dims();
-
-    // Build per-tile fog map: combines FOV visibility with distance falloff.
-    // Visible tiles get distance-based fog. All other tiles get max fog (black).
-    let mut fog_map = vec![256i16; (mw * mh) as usize];
-    for gz in 0..mh {
-        for gx in 0..mw {
-            if view.is_visible(gx, gz) {
-                let dx = gx - px;
-                let dz = gz - py;
-                let dist_sq = dx * dx + dz * dz;
-                fog_map[(gz * mw + gx) as usize] = if dist_sq <= FOG_START_SQ {
-                    0
-                } else if dist_sq >= FOG_END_SQ {
-                    256
-                } else {
-                    // Quadratic curve: bright near player, steep dropoff at edges.
-                    // Feels like torchlight rather than a uniform gradient.
-                    let linear = (dist_sq - FOG_START_SQ) * 256 / FOG_RANGE_SQ;
-                    (linear * linear / 256) as i16
-                };
-            }
-        }
-    }
 
     // Camera looks at the player's floor position.
     // Eye is above and slightly behind (negative z = north in grid space).
@@ -545,7 +534,7 @@ pub fn render_scene(view: &dyn GameView, fb: &mut Framebuffer, frame: u32) {
     let light_color = torch_light_color(frame);
 
     // Render map geometry (floors, walls)
-    let mut sink = RasterSink::new(fb, mvp, cam_right, fog_map, mw, mh, light_pos, light_color);
+    let mut sink = RasterSink::new(fb, mvp, cam_right, light_pos, light_color);
     geometry::generate_map_geometry(view, &mut sink);
 
     // Render entity billboards
@@ -600,17 +589,13 @@ mod tests {
     }
 
     /// Create a RasterSink with identity MVP (clip space = world space).
-    /// Player at origin, no fog for nearby test vertices, white light.
+    /// Player at origin, white light.
     fn make_test_sink(fb: &mut Framebuffer) -> RasterSink<'_> {
-        let fog_map = vec![0i16; 100 * 100]; // no fog for tests
         RasterSink::new(
             fb,
             Mat4::identity(),
             Vec3::new(Fixed16::ONE, Fixed16::ZERO, Fixed16::ZERO),
-            fog_map,
-            100,
-            100,
-            Vec3::zero(), // light at origin
+            Vec3::zero(),    // light at origin
             [256, 256, 256], // white light for tests
         )
     }
@@ -811,8 +796,18 @@ mod tests {
     fn torch_color_is_warm() {
         let color = torch_light_color(0);
         // Red should be brightest, blue dimmest
-        assert!(color[0] > color[1], "red ({}) > green ({})", color[0], color[1]);
-        assert!(color[1] > color[2], "green ({}) > blue ({})", color[1], color[2]);
+        assert!(
+            color[0] > color[1],
+            "red ({}) > green ({})",
+            color[0],
+            color[1]
+        );
+        assert!(
+            color[1] > color[2],
+            "green ({}) > blue ({})",
+            color[1],
+            color[2]
+        );
     }
 
     #[test]
@@ -832,7 +827,11 @@ mod tests {
         // Flicker should never drop below ~60% brightness
         for frame in 0..256 {
             let color = torch_light_color(frame);
-            assert!(color[0] >= 150, "red too dim at frame {frame}: {}", color[0]);
+            assert!(
+                color[0] >= 150,
+                "red too dim at frame {frame}: {}",
+                color[0]
+            );
         }
     }
 
@@ -854,6 +853,9 @@ mod tests {
                 }
             }
         }
-        assert!(differs, "different frames should produce different images (flicker)");
+        assert!(
+            differs,
+            "different frames should produce different images (flicker)"
+        );
     }
 }

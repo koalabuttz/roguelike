@@ -25,6 +25,12 @@ pub trait TriangleSink {
     fn emit(&mut self, v0: Vec3, v1: Vec3, v2: Vec3, normal: Vec3, color: u16);
 }
 
+/// Subdivision level per axis. Each tile face becomes SUBDIV×SUBDIV quads.
+/// 1 = no subdivision (original), 2 = 4 quads/face, 4 = 16 quads/face.
+/// Higher values reduce Gouraud faceting by sampling the non-linear lighting
+/// (Lambert × inverse-square) at more vertices.
+const SUBDIV: i32 = 1;
+
 /// Emit a quad as two triangles with reversed winding.
 ///
 /// Callers specify vertices in CCW order when viewed from the front face
@@ -45,70 +51,132 @@ fn emit_quad(
     sink.emit(v0, v3, v2, normal, color);
 }
 
+/// Linearly interpolate between two Vec3 at parameter t (0..SUBDIV maps to 0..1).
+#[inline]
+fn lerp(a: Vec3, b: Vec3, num: i32, den: i32) -> Vec3 {
+    // a + (b - a) * num / den, using Fixed16 arithmetic
+    let t_num = Fixed16::from_int(num);
+    let t_den = Fixed16::from_int(den);
+    let t = t_num / t_den;
+    Vec3::new(
+        a.x + (b.x - a.x) * t,
+        a.y + (b.y - a.y) * t,
+        a.z + (b.z - a.z) * t,
+    )
+}
+
+/// Emit a subdivided quad as SUBDIV×SUBDIV sub-quads.
+///
+/// Corners v0..v3 are in CCW order when viewed from the front face:
+/// ```text
+///   v0 ------- v3
+///   |           |
+///   |           |
+///   v1 ------- v2
+/// ```
+/// The quad is subdivided by bilinear interpolation: each sub-quad's corners
+/// are lerped from the original 4 corners, giving Gouraud shading more
+/// sample points for smoother lighting gradients.
+fn emit_subdivided_quad(
+    sink: &mut dyn TriangleSink,
+    v0: Vec3,
+    v1: Vec3,
+    v2: Vec3,
+    v3: Vec3,
+    normal: Vec3,
+    color: u16,
+) {
+    if SUBDIV <= 1 {
+        emit_quad(sink, v0, v1, v2, v3, normal, color);
+        return;
+    }
+
+    let n = SUBDIV;
+    for row in 0..n {
+        for col in 0..n {
+            // Bilinear interpolation of the 4 corners for sub-quad (row, col).
+            // Top edge: lerp(v0, v3) at col/n and (col+1)/n
+            // Bottom edge: lerp(v1, v2) at col/n and (col+1)/n
+            // Then lerp vertically between top and bottom edges.
+            let top_l = lerp(v0, v3, col, n);
+            let top_r = lerp(v0, v3, col + 1, n);
+            let bot_l = lerp(v1, v2, col, n);
+            let bot_r = lerp(v1, v2, col + 1, n);
+
+            let sv0 = lerp(top_l, bot_l, row, n);
+            let sv1 = lerp(top_l, bot_l, row + 1, n);
+            let sv2 = lerp(top_r, bot_r, row + 1, n);
+            let sv3 = lerp(top_r, bot_r, row, n);
+
+            emit_quad(sink, sv0, sv1, sv2, sv3, normal, color);
+        }
+    }
+}
+
 /// Helper to create a Vec3 from grid coordinates at a given height.
 #[inline]
 fn gv(x: i32, y_height: Fixed16, z: i32) -> Vec3 {
     Vec3::new(Fixed16::from_int(x), y_height, Fixed16::from_int(z))
 }
 
-/// Emit a floor quad at y=0 for grid position (gx, gz).
+/// Emit a subdivided floor quad at y=0 for grid position (gx, gz).
 fn emit_floor(sink: &mut dyn TriangleSink, gx: i32, gz: i32, color: u16) {
     let y = Fixed16::ZERO;
     let v0 = gv(gx, y, gz);
     let v1 = gv(gx, y, gz + 1);
     let v2 = gv(gx + 1, y, gz + 1);
     let v3 = gv(gx + 1, y, gz);
-    emit_quad(sink, v0, v1, v2, v3, NORMAL_UP, color);
+    emit_subdivided_quad(sink, v0, v1, v2, v3, NORMAL_UP, color);
 }
 
-/// Emit a wall top quad at y=WALL_HEIGHT for grid position (gx, gz).
+/// Emit a subdivided wall top quad at y=WALL_HEIGHT for grid position (gx, gz).
 fn emit_wall_top(sink: &mut dyn TriangleSink, gx: i32, gz: i32, color: u16) {
     let y = WALL_HEIGHT;
     let v0 = gv(gx, y, gz);
     let v1 = gv(gx, y, gz + 1);
     let v2 = gv(gx + 1, y, gz + 1);
     let v3 = gv(gx + 1, y, gz);
-    emit_quad(sink, v0, v1, v2, v3, NORMAL_UP, color);
+    emit_subdivided_quad(sink, v0, v1, v2, v3, NORMAL_UP, color);
 }
 
-/// Emit south-facing wall (at z=gz+1, facing +z direction).
+/// Emit subdivided south-facing wall (at z=gz+1, facing +z direction).
 fn emit_wall_south(sink: &mut dyn TriangleSink, gx: i32, gz: i32, color: u16) {
     let z = gz + 1;
-    let v0 = gv(gx, Fixed16::ZERO, z);
-    let v1 = gv(gx + 1, Fixed16::ZERO, z);
-    let v2 = gv(gx + 1, WALL_HEIGHT, z);
-    let v3 = gv(gx, WALL_HEIGHT, z);
-    emit_quad(sink, v0, v1, v2, v3, NORMAL_SOUTH, color);
+    let v0 = gv(gx, WALL_HEIGHT, z);
+    let v1 = gv(gx, Fixed16::ZERO, z);
+    let v2 = gv(gx + 1, Fixed16::ZERO, z);
+    let v3 = gv(gx + 1, WALL_HEIGHT, z);
+    emit_subdivided_quad(sink, v0, v1, v2, v3, NORMAL_SOUTH, color);
 }
 
-/// Emit north-facing wall (at z=gz, facing -z direction).
+/// Emit subdivided north-facing wall (at z=gz, facing -z direction).
 fn emit_wall_north(sink: &mut dyn TriangleSink, gx: i32, gz: i32, color: u16) {
     let z = gz;
-    let v0 = gv(gx + 1, Fixed16::ZERO, z);
-    let v1 = gv(gx, Fixed16::ZERO, z);
-    let v2 = gv(gx, WALL_HEIGHT, z);
-    let v3 = gv(gx + 1, WALL_HEIGHT, z);
-    emit_quad(sink, v0, v1, v2, v3, NORMAL_NORTH, color);
+    let v0 = gv(gx + 1, WALL_HEIGHT, z);
+    let v1 = gv(gx + 1, Fixed16::ZERO, z);
+    let v2 = gv(gx, Fixed16::ZERO, z);
+    let v3 = gv(gx, WALL_HEIGHT, z);
+    emit_subdivided_quad(sink, v0, v1, v2, v3, NORMAL_NORTH, color);
 }
 
-/// Emit east-facing wall (at x=gx+1, facing +x direction).
+/// Emit subdivided east-facing wall (at x=gx+1, facing +x direction).
 fn emit_wall_east(sink: &mut dyn TriangleSink, gx: i32, gz: i32, color: u16) {
     let x = gx + 1;
-    let v0 = gv(x, Fixed16::ZERO, gz + 1);
-    let v1 = gv(x, Fixed16::ZERO, gz);
-    let v2 = gv(x, WALL_HEIGHT, gz);
-    let v3 = gv(x, WALL_HEIGHT, gz + 1);
-    emit_quad(sink, v0, v1, v2, v3, NORMAL_EAST, color);
+    let v0 = gv(x, WALL_HEIGHT, gz + 1);
+    let v1 = gv(x, Fixed16::ZERO, gz + 1);
+    let v2 = gv(x, Fixed16::ZERO, gz);
+    let v3 = gv(x, WALL_HEIGHT, gz);
+    emit_subdivided_quad(sink, v0, v1, v2, v3, NORMAL_EAST, color);
 }
 
-/// Emit west-facing wall (at x=gx, facing -x direction).
+/// Emit subdivided west-facing wall (at x=gx, facing -x direction).
 fn emit_wall_west(sink: &mut dyn TriangleSink, gx: i32, gz: i32, color: u16) {
     let x = gx;
-    let v0 = gv(x, Fixed16::ZERO, gz);
-    let v1 = gv(x, Fixed16::ZERO, gz + 1);
-    let v2 = gv(x, WALL_HEIGHT, gz + 1);
-    let v3 = gv(x, WALL_HEIGHT, gz);
-    emit_quad(sink, v0, v1, v2, v3, NORMAL_WEST, color);
+    let v0 = gv(x, WALL_HEIGHT, gz);
+    let v1 = gv(x, Fixed16::ZERO, gz);
+    let v2 = gv(x, Fixed16::ZERO, gz + 1);
+    let v3 = gv(x, WALL_HEIGHT, gz + 1);
+    emit_subdivided_quad(sink, v0, v1, v2, v3, NORMAL_WEST, color);
 }
 
 /// Check if a tile at (x, z) is a Structural wall.
@@ -225,13 +293,20 @@ mod tests {
         y_component < Fixed16::ZERO
     }
 
+    /// Expected triangle count per face: SUBDIV² sub-quads × 2 tris each.
+    const EXPECTED_TRIS: usize = (SUBDIV * SUBDIV * 2) as usize;
+
     #[test]
-    fn floor_emits_two_triangles() {
+    fn floor_emits_subdivided_triangles() {
         let mut sink = VecSink::new();
         let color = rgb555(10, 10, 10);
         emit_floor(&mut sink, 3, 5, color);
 
-        assert_eq!(sink.tris.len(), 2, "floor quad should emit 2 triangles");
+        assert_eq!(
+            sink.tris.len(),
+            EXPECTED_TRIS,
+            "floor should emit {EXPECTED_TRIS} triangles"
+        );
 
         // All vertices at y=0
         for (v0, v1, v2, _, c) in &sink.tris {
@@ -261,7 +336,7 @@ mod tests {
         let mut sink = VecSink::new();
         emit_wall_top(&mut sink, 2, 3, 0);
 
-        assert_eq!(sink.tris.len(), 2);
+        assert_eq!(sink.tris.len(), EXPECTED_TRIS);
         for (v0, v1, v2, _, _) in &sink.tris {
             assert_eq!(v0.y, WALL_HEIGHT);
             assert_eq!(v1.y, WALL_HEIGHT);
@@ -287,7 +362,7 @@ mod tests {
         let mut sink = VecSink::new();
         emit_wall_south(&mut sink, 1, 2, 0);
 
-        assert_eq!(sink.tris.len(), 2);
+        assert_eq!(sink.tris.len(), EXPECTED_TRIS);
         // All vertices should be at z = gz+1 = 3
         for (v0, v1, v2, _, _) in &sink.tris {
             assert_eq!(v0.z, f(3));
@@ -301,7 +376,7 @@ mod tests {
         let mut sink = VecSink::new();
         emit_wall_north(&mut sink, 1, 2, 0);
 
-        assert_eq!(sink.tris.len(), 2);
+        assert_eq!(sink.tris.len(), EXPECTED_TRIS);
         // All vertices should be at z = gz = 2
         for (v0, v1, v2, _, _) in &sink.tris {
             assert_eq!(v0.z, f(2));
@@ -315,7 +390,7 @@ mod tests {
         let mut sink = VecSink::new();
         emit_wall_east(&mut sink, 1, 2, 0);
 
-        assert_eq!(sink.tris.len(), 2);
+        assert_eq!(sink.tris.len(), EXPECTED_TRIS);
         // All vertices at x = gx+1 = 2
         for (v0, v1, v2, _, _) in &sink.tris {
             assert_eq!(v0.x, f(2));
@@ -329,7 +404,7 @@ mod tests {
         let mut sink = VecSink::new();
         emit_wall_west(&mut sink, 1, 2, 0);
 
-        assert_eq!(sink.tris.len(), 2);
+        assert_eq!(sink.tris.len(), EXPECTED_TRIS);
         // All vertices at x = gx = 1
         for (v0, v1, v2, _, _) in &sink.tris {
             assert_eq!(v0.x, f(1));
@@ -358,5 +433,30 @@ mod tests {
         }
         assert!(has_floor, "wall face should touch y=0");
         assert!(has_top, "wall face should reach WALL_HEIGHT");
+    }
+
+    #[test]
+    fn subdivision_creates_midpoint_vertices() {
+        let mut sink = VecSink::new();
+        emit_floor(&mut sink, 0, 0, 0);
+
+        // With SUBDIV=2, should have vertices at 0.0, 0.5, and 1.0
+        let half = Fixed16::HALF;
+        let mut has_half_x = false;
+        let mut has_half_z = false;
+        for (v0, v1, v2, _, _) in &sink.tris {
+            for v in [v0, v1, v2] {
+                if v.x == half {
+                    has_half_x = true;
+                }
+                if v.z == half {
+                    has_half_z = true;
+                }
+            }
+        }
+        if SUBDIV >= 2 {
+            assert!(has_half_x, "subdivision should create x=0.5 midpoints");
+            assert!(has_half_z, "subdivision should create z=0.5 midpoints");
+        }
     }
 }

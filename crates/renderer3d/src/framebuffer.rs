@@ -106,6 +106,69 @@ impl Framebuffer {
         Ok(())
     }
 
+    /// Render the framebuffer to a terminal using half-block characters.
+    ///
+    /// Each terminal cell displays two vertical pixels via `▀` (upper half block):
+    /// foreground color = top pixel, background color = bottom pixel.
+    /// Uses 24-bit ANSI color escapes (`\x1b[38;2;R;G;Bm`).
+    ///
+    /// Optimized: skips redundant color escapes when adjacent pixels share colors.
+    pub fn write_half_blocks(&self, w: &mut dyn std::io::Write) -> std::io::Result<()> {
+        let mut prev_fg: u16 = u16::MAX; // impossible RGB555 value → forces first write
+        let mut prev_bg: u16 = u16::MAX;
+
+        let rows = self.height / 2;
+        for row in 0..rows {
+            let y_top = row * 2;
+            let y_bot = y_top + 1;
+
+            for x in 0..self.width {
+                let top = self.get_pixel(x, y_top);
+                let bot = self.get_pixel(x, y_bot);
+
+                // Only emit color escapes when the color actually changes
+                if top != prev_fg {
+                    let (r, g, b) = unpack_rgb555(top);
+                    std::write!(w, "\x1b[38;2;{r};{g};{b}m")?;
+                    prev_fg = top;
+                }
+                if bot != prev_bg {
+                    let (r, g, b) = unpack_rgb555(bot);
+                    std::write!(w, "\x1b[48;2;{r};{g};{b}m")?;
+                    prev_bg = bot;
+                }
+
+                w.write_all("▀".as_bytes())?;
+            }
+
+            // Reset at end of row and newline
+            w.write_all(b"\x1b[0m\n")?;
+            prev_fg = u16::MAX;
+            prev_bg = u16::MAX;
+        }
+
+        // Odd height: last row, top pixel only, black background
+        if self.height % 2 == 1 {
+            let y = self.height - 1;
+            for x in 0..self.width {
+                let top = self.get_pixel(x, y);
+                if top != prev_fg {
+                    let (r, g, b) = unpack_rgb555(top);
+                    std::write!(w, "\x1b[38;2;{r};{g};{b}m")?;
+                    prev_fg = top;
+                }
+                if prev_bg != 0 {
+                    w.write_all(b"\x1b[48;2;0;0;0m")?;
+                    prev_bg = 0;
+                }
+                w.write_all("▀".as_bytes())?;
+            }
+            w.write_all(b"\x1b[0m\n")?;
+        }
+
+        Ok(())
+    }
+
     #[inline]
     fn index(&self, x: u32, y: u32) -> usize {
         (y * self.width + x) as usize

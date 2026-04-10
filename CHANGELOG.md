@@ -96,6 +96,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Add world geometry module with TriangleSink, color mapping, and scene rendering (#290)
+- Add near-plane triangle clipping to 3D renderer (#291)
+- Add PS1 vertex snap and depth fog effects (#292)
+- Add per-pixel world-space distance fog to rasterizer (#293)
+- Add ordered Bayer dithering for fog gradient smoothing (#294)
+- Add glyph-textured entity billboards to 3D renderer (#295)
+- Implement per-vertex Lambert lighting with surface normals (#296)
+- Add terminal half-block rendering for 3D framebuffer output (#297)
 - Add framebuffer and triangle rasterizer for PS1-era software renderer (#289)
 - Add fixed-point 3D math library for PS1-era software renderer (#288)
 - Dev hooks: 8 unwraps on overlay cursors (#250)

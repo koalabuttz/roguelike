@@ -2109,6 +2109,7 @@ dependencies = [
 name = "roguelike-renderer3d"
 version = "0.5.0"
 dependencies = [
+ "crossterm",
  "minifb",
  "roguelike-core",
 ]

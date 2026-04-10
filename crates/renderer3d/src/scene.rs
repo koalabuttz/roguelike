@@ -3,7 +3,7 @@ use roguelike_core::rules::game_view::GameView;
 use crate::framebuffer::Framebuffer;
 use crate::geometry::{self, TriangleSink};
 use crate::math::{Fixed16, Mat4, Vec3, Vec4};
-use crate::pipeline::project_vertex;
+use crate::pipeline::{ScreenVertex, project_vertex};
 use crate::rasterizer::rasterize_triangle;
 
 /// Camera height above the floor plane (in world units).
@@ -22,6 +22,13 @@ const NEAR: Fixed16 = Fixed16::ONE;
 
 /// Far clipping plane distance — enough to see ~40 tiles.
 const FAR: Fixed16 = Fixed16::from_int(60);
+
+// --- PS1 aesthetic effects ---
+
+/// Vertex snap grid size in pixels. Vertices are snapped to multiples of this
+/// value after projection, causing the signature PS1 polygon wobble/jitter.
+/// Set to 1 to disable. 2 gives a subtle shimmer, 4+ is very noticeable.
+const SNAP_GRID: i32 = 2;
 
 /// Rasterizing triangle sink: transforms world-space triangles through
 /// the MVP matrix and rasterizes them into the framebuffer.
@@ -56,13 +63,27 @@ fn clip_lerp(a: Vec4, b: Vec4, t: Fixed16) -> Vec4 {
     )
 }
 
+/// Snap a screen-space vertex to the PS1-style grid.
+/// Uses Euclidean division for consistent behavior with negative coordinates.
+#[inline]
+fn snap_vertex(sv: ScreenVertex) -> ScreenVertex {
+    if SNAP_GRID <= 1 {
+        return sv;
+    }
+    ScreenVertex::new(
+        sv.x.div_euclid(SNAP_GRID) * SNAP_GRID,
+        sv.y.div_euclid(SNAP_GRID) * SNAP_GRID,
+        sv.z,
+    )
+}
+
 impl RasterSink<'_> {
-    /// Project a clip-space triangle to screen space and rasterize it.
+    /// Project, snap, and rasterize a clip-space triangle.
     #[inline]
     fn project_and_rasterize(&mut self, c0: Vec4, c1: Vec4, c2: Vec4, color: u16) {
-        let s0 = project_vertex(c0, self.width, self.height);
-        let s1 = project_vertex(c1, self.width, self.height);
-        let s2 = project_vertex(c2, self.width, self.height);
+        let s0 = snap_vertex(project_vertex(c0, self.width, self.height));
+        let s1 = snap_vertex(project_vertex(c1, self.width, self.height));
+        let s2 = snap_vertex(project_vertex(c2, self.width, self.height));
         rasterize_triangle(self.fb, s0, s1, s2, color);
     }
 

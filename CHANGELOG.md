@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - ANSI CSI parser unbounded buffer (DoS) (#243)
 
 ### Added
+- NDS: Document that hardware fog requires the matrix stack; register scaffolding preserved for Phase 2 (#305)
 - Renderer3d: Precompute reciprocal and skip dark triangles for rasterizer optimization (#301)
 - Expand message history to 128 (compact) / 16 (micro) with save persistence and scrollable GBA viewer (#266)
 - Add GBA message history viewer with L+R combo and fix message order (#262)

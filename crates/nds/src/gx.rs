@@ -64,6 +64,18 @@ pub const CLEAR_COLOR: *mut u32 = 0x0400_0350 as *mut u32;
 /// Z-buffer clear depth (0..0x7FFF)
 pub const CLEAR_DEPTH: *mut u16 = 0x0400_0354 as *mut u16;
 
+// --- Fog registers (GBATEK §4000358h-4000360h) ---
+/// Fog color + alpha, u32 layout: bits 0-14 RGB555 (B<<10|G<<5|R DS order),
+/// bit 15 unused, bits 16-20 alpha 0..31, bits 21-31 unused.
+pub const FOG_COLOR: *mut u32 = 0x0400_0358 as *mut u32;
+/// Fog depth offset: unsigned 0..0x7FFF in the top 15 bits of the 24-bit
+/// depth range. The first density boundary is at FOG_OFFSET + FOG_STEP.
+pub const FOG_OFFSET: *mut u16 = 0x0400_035C as *mut u16;
+/// Fog density table base: 32 bytes, written one u8 at a time (see
+/// [`setup_fog`]). Each byte's bits 0-6 are density 0..0x7F
+/// (0 = no fog, 0x7F = full fog); bit 7 is ignored.
+pub const FOG_TABLE_BASE: *mut u8 = 0x0400_0360 as *mut u8;
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -86,11 +98,26 @@ pub const PRIM_TRIANGLES: u32 = 0;
 //   Bit 6:      Render back-face
 //   Bit 7:      Render front-face
 //   Bit 11:     Depth test mode (0 = less)
+//   Bit 15:     Per-polygon fog enable
 //   Bits 16-20: Alpha (0..31, 0 = wireframe, 31 = opaque)
 //   Bits 24-29: Polygon ID (0..63)
 const POLY_ATTR_RENDER_BACK: u32 = 1 << 6;
 const POLY_ATTR_RENDER_FRONT: u32 = 1 << 7;
+/// Phase 2b scaffolding — hardware fog per-polygon enable bit, unused
+/// until the hardware matrix stack pipeline lands.
+#[allow(dead_code)]
+const POLY_ATTR_FOG_ENABLE: u32 = 1 << 15;
 const POLY_ATTR_ALPHA_SHIFT: u32 = 16;
+
+// DISP3DCNT fog-related bits (GBATEK §DISP3DCNT)
+//   Bit 6     : fog color/alpha mode (0 = RGB and alpha, 1 = alpha only)
+//   Bit 7     : fog master enable
+//   Bits 8-11 : fog depth shift (FOG_STEP = 0x400 >> FOG_SHIFT, 0..10 usable)
+/// Phase 2b scaffolding — DISP3DCNT fog master enable bit, unused until
+/// the hardware matrix stack pipeline lands.
+#[allow(dead_code)]
+const DISP3DCNT_FOG_MASTER: u16 = 1 << 7;
+
 
 // ---------------------------------------------------------------------------
 // Initialization
@@ -110,7 +137,10 @@ const POLY_ATTR_ALPHA_SHIFT: u32 = 16;
 pub fn init() {
     unsafe {
         // Disable fog, edge marking, anti-aliasing, toon shading.
-        // Phase 2 will reconfigure this with fog enable + table.
+        // Hardware fog turned out to be coupled to the hardware matrix
+        // stack pipeline and is deferred to Phase 2 proper. See the
+        // `setup_fog` helper for the scaffolding that will be used
+        // once the matrix stack work lands.
         ptr::write_volatile(DISP3DCNT, 0);
 
         // Viewport is packed into a single 32-bit word:
@@ -149,6 +179,41 @@ pub fn init() {
         mtx_identity();
         mtx_mode(MTX_MODE_TEXTURE);
         mtx_identity();
+    }
+}
+
+/// Program the hardware fog registers.
+///
+/// `color` is a 32-bit FOG_COLOR value in DS native packing: bits 0-14
+/// are RGB555 (B<<10|G<<5|R), bit 15 unused, bits 16-20 are alpha 0..31.
+///
+/// `offset` is the 15-bit starting depth (0..0x7FFF) below which all
+/// pixels use `table[0]`.
+///
+/// `table` is a 32-byte density ramp; each byte's low 7 bits are the
+/// density 0..0x7F (0 = no fog, 0x7F = full fog). Bit 7 of each byte is
+/// unused by the hardware.
+///
+/// This function does NOT enable fog in DISP3DCNT or POLYGON_ATTR;
+/// call [`init`] first, then caller is responsible for flipping those
+/// master-enable bits once the hardware matrix stack pipeline is in
+/// place (Phase 2b). Programming fog while emitting pre-divided
+/// vertices via VTX_16 produces constant fog depth across all
+/// fragments, so hardware fog is only useful once the hardware owns
+/// the projection matrix and per-vertex perspective divide.
+#[allow(dead_code)] // Phase 2b scaffolding
+pub fn setup_fog(color: u32, offset: u16, table: &[u8; 32]) {
+    unsafe {
+        ptr::write_volatile(FOG_COLOR, color);
+        ptr::write_volatile(FOG_OFFSET, offset);
+
+        // FOG_TABLE_BASE is a *mut u8; each write lands at the
+        // corresponding FogDensity entry in 0x0400_0360..0x0400_037F.
+        let mut i = 0;
+        while i < 32 {
+            ptr::write_volatile(FOG_TABLE_BASE.add(i), table[i]);
+            i += 1;
+        }
     }
 }
 

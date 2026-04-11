@@ -97,6 +97,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- NDS Phase 1.5: Debug HUD + ARM9 offload sprint (#303)
+- NDS Phase 1: Hardware 3D bootstrap + GpuSink (#302)
 - DS: Software 3D renderer experiment — test render_scene on ARM9 @ 67MHz (#300)
 - Add world geometry module with TriangleSink, color mapping, and scene rendering (#290)
 - Add near-plane triangle clipping to 3D renderer (#291)

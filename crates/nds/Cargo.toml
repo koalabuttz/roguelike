@@ -5,6 +5,13 @@ edition = "2021"
 
 [workspace]
 
+[features]
+# Hardware 3D is the default path. Enable `software3d` to build the
+# software rasterizer path instead — used for A/B frame-time comparison
+# during development of the hardware path.
+default = []
+software3d = []
+
 [dependencies]
 roguelike-core = { path = "../core", default-features = false }
 roguelike-renderer3d = { path = "../renderer3d", default-features = false, features = ["alloc"] }

@@ -46,7 +46,7 @@ fn apply_recip(numerator: i64, recip: i64) -> i64 {
 /// Each 5-bit channel is computed as: `surface × (256-fog) × light / 256²`,
 /// with a dither offset added before the final truncation to 5 bits.
 #[inline]
-fn apply_fog(color: u16, fog: i16, dither: u16, light_color: [u16; 3]) -> u16 {
+pub fn apply_fog(color: u16, fog: i16, dither: u16, light_color: [u16; 3]) -> u16 {
     if fog <= 0 && light_color[0] >= 256 && light_color[1] >= 256 && light_color[2] >= 256 {
         return color;
     }

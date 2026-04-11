@@ -116,6 +116,86 @@ fn torch_light_color(frame: u32) -> [u16; 3] {
     [r, g, b]
 }
 
+/// Compute per-vertex lighting as a fog factor (0..256).
+///
+/// Returns an opacity-style fog factor where 0 = fully lit and 256 =
+/// fully dark. The rasterizer (or a hardware equivalent) applies the
+/// fog factor to tint the base surface color.
+///
+/// The composite formula is
+/// `brightness = visibility × lambert × attenuation / 256²`, with the
+/// return value being `256 - brightness`. Components:
+///
+/// - **Visibility (distance ramp)**: linear 256..0 as distance² crosses
+///   [FOG_START_SQ, FOG_END_SQ] (in Fixed16-raw units), matching the
+///   per-tile fog map used by the FOV system.
+/// - **Lambert**: `dot(normal, normalize(light_pos - vertex))`, clamped
+///   to `[AMBIENT, 256]` so back-facing surfaces still receive a minimum
+///   indirect-light floor.
+/// - **Attenuation**: `256·k / (k + d²)` inverse-square falloff using
+///   the full 3D distance (including camera and light height), with
+///   `k = ATTEN_SCALE << 16`.
+///
+/// Extracted from `RasterSink::vertex_light` so that both the software
+/// rasterizer and the DS hardware-3D sink (`crates/nds/src/gpu_sink.rs`)
+/// can share the same lighting math without duplication.
+pub fn vertex_light(vertex: Vec3, normal: Vec3, light_pos: Vec3) -> i16 {
+    // Smooth distance fog from vertex world position — full Fixed16
+    // precision. Using raw Fixed16 values (1 unit = 65536) avoids
+    // integer quantization that would create visible circular
+    // brightness bands.
+    let dx = vertex.x - light_pos.x;
+    let dz = vertex.z - light_pos.z;
+    let dist_sq_raw = (dx * dx + dz * dz).to_raw().max(0) as i64;
+    let fog_start_raw = (FOG_START_SQ as i64) << 16;
+    let fog_end_raw = (FOG_END_SQ as i64) << 16;
+    let fog_range_raw = fog_end_raw - fog_start_raw;
+
+    let visibility = if dist_sq_raw <= fog_start_raw {
+        256i64
+    } else if dist_sq_raw >= fog_end_raw {
+        0
+    } else {
+        256 * (fog_end_raw - dist_sq_raw) / fog_range_raw
+    };
+
+    if visibility <= 0 {
+        return 256;
+    }
+
+    // Direction + distance to light (3D, includes height)
+    let to_light = light_pos - vertex;
+    let dist = to_light.length();
+
+    if dist.to_raw() == 0 {
+        return (256 - visibility) as i16;
+    }
+
+    // Lambert: dot(N, normalize(to_light))
+    let inv_dist = Fixed16::ONE / dist;
+    let light_dir = Vec3::new(
+        to_light.x * inv_dist,
+        to_light.y * inv_dist,
+        to_light.z * inv_dist,
+    );
+    let ndotl = normal.dot(light_dir);
+
+    let lambert = if ndotl.to_raw() <= 0 {
+        AMBIENT as i64
+    } else {
+        (ndotl.to_raw() >> 8).clamp(0, 256).max(AMBIENT) as i64
+    };
+
+    // Inverse-square attenuation: 256·k / (k + d²), using Fixed16 precision.
+    let dist_sq_3d_raw = to_light.length_squared().to_raw().max(1) as i64;
+    let atten_k = ATTEN_SCALE << 16; // scale constant to Fixed16
+    let atten = (256 * atten_k) / (atten_k + dist_sq_3d_raw);
+
+    // Combine: brightness = visibility × lambert × attenuation / 256²
+    let brightness = visibility * lambert * atten / (256 * 256);
+    (256 - brightness.clamp(0, 256)) as i16
+}
+
 /// Rasterizing triangle sink: transforms world-space triangles through
 /// the MVP matrix and rasterizes them into the framebuffer.
 struct RasterSink<'a> {
@@ -151,70 +231,12 @@ impl<'a> RasterSink<'a> {
         }
     }
 
-    /// Compute per-vertex lighting: `brightness = visibility × distance_fog × lambert × attenuation`.
-    ///
-    /// - **Visibility**: fog map — binary FOV check (tile visible or not)
-    /// - **Distance fog**: smooth per-vertex quadratic falloff from world position
-    /// - **Lambert**: `dot(N, normalize(L))` — angular shading
-    /// - **Attenuation**: `1 / (1 + k·d²)` — physical inverse-square light falloff
-    ///
-    /// Distance fog is computed from the vertex's actual world position, not per-tile,
-    /// so gradients are smooth across tile boundaries.
+    /// Thin wrapper forwarding to the standalone `vertex_light()` at
+    /// module level. Kept so `self.vertex_light(v, n)` still reads well
+    /// inside RasterSink's methods.
     #[inline]
     fn vertex_light(&self, vertex: Vec3, normal: Vec3) -> i16 {
-        // Smooth distance fog from vertex world position — full Fixed16 precision.
-        // Using raw Fixed16 values (1 unit = 65536) avoids integer quantization
-        // that creates visible circular brightness bands.
-        let dx = vertex.x - self.light_pos.x;
-        let dz = vertex.z - self.light_pos.z;
-        let dist_sq_raw = (dx * dx + dz * dz).to_raw().max(0) as i64;
-        let fog_start_raw = (FOG_START_SQ as i64) << 16;
-        let fog_end_raw = (FOG_END_SQ as i64) << 16;
-        let fog_range_raw = fog_end_raw - fog_start_raw;
-
-        let visibility = if dist_sq_raw <= fog_start_raw {
-            256i64
-        } else if dist_sq_raw >= fog_end_raw {
-            0
-        } else {
-            256 * (fog_end_raw - dist_sq_raw) / fog_range_raw
-        };
-
-        if visibility <= 0 {
-            return 256;
-        }
-
-        // Direction + distance to light (3D, includes height)
-        let to_light = self.light_pos - vertex;
-        let dist = to_light.length();
-
-        if dist.to_raw() == 0 {
-            return (256 - visibility) as i16;
-        }
-
-        // Lambert: dot(N, normalize(to_light))
-        let inv_dist = Fixed16::ONE / dist;
-        let light_dir = Vec3::new(
-            to_light.x * inv_dist,
-            to_light.y * inv_dist,
-            to_light.z * inv_dist,
-        );
-        let ndotl = normal.dot(light_dir);
-
-        let lambert = if ndotl.to_raw() <= 0 {
-            AMBIENT as i64
-        } else {
-            (ndotl.to_raw() >> 8).clamp(0, 256).max(AMBIENT) as i64
-        };
-
-        // Inverse-square attenuation: 256·k / (k + d²), using Fixed16 precision.
-        let dist_sq_3d_raw = to_light.length_squared().to_raw().max(1) as i64;
-        let atten_k = ATTEN_SCALE << 16; // scale constant to Fixed16
-        let atten = (256 * atten_k) / (atten_k + dist_sq_3d_raw);
-
-        // Combine: brightness = visibility × lambert × attenuation / 256²
-        let brightness = visibility * lambert * atten / (256 * 256);
-        (256 - brightness.clamp(0, 256)) as i16
+        vertex_light(vertex, normal, self.light_pos)
     }
 }
 

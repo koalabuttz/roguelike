@@ -1,3 +1,6 @@
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
+use alloc::{vec, vec::Vec};
+
 /// Pack 5-bit RGB channels into u16 RGB555 format.
 /// Input channels are masked to 0..31.
 #[inline]
@@ -23,7 +26,7 @@ pub const fn unpack_rgb555(c: u16) -> (u8, u8, u8) {
 ///
 /// 4 bytes per pixel total (2 color + 2 depth). At 1080p that's ~8 MB;
 /// at 256x192 (DS) it's ~192 KB.
-#[cfg(feature = "std")]
+#[cfg(any(feature = "std", feature = "alloc"))]
 pub struct Framebuffer {
     width: u32,
     height: u32,
@@ -31,7 +34,7 @@ pub struct Framebuffer {
     depth: Vec<i16>,
 }
 
-#[cfg(feature = "std")]
+#[cfg(any(feature = "std", feature = "alloc"))]
 impl Framebuffer {
     pub fn new(width: u32, height: u32) -> Self {
         let size = (width * height) as usize;
@@ -91,10 +94,19 @@ impl Framebuffer {
         self.height
     }
 
+    /// Raw slice of the RGB555 color buffer (width×height pixels, row-major).
+    ///
+    /// Used for blitting to hardware framebuffers (e.g., DS VRAM Display Mode).
+    #[inline]
+    pub fn color_slice(&self) -> &[u16] {
+        &self.color
+    }
+
     /// Write the framebuffer as a PPM (P6) image.
     ///
     /// PPM is the simplest image format — no external deps needed.
     /// RGB555 pixels are expanded to 8-bit via `unpack_rgb555`.
+    #[cfg(feature = "std")]
     pub fn write_ppm(&self, w: &mut dyn std::io::Write) -> std::io::Result<()> {
         std::write!(w, "P6\n{} {}\n255\n", self.width, self.height)?;
         for y in 0..self.height {
@@ -113,6 +125,7 @@ impl Framebuffer {
     /// Uses 24-bit ANSI color escapes (`\x1b[38;2;R;G;Bm`).
     ///
     /// Optimized: skips redundant color escapes when adjacent pixels share colors.
+    #[cfg(feature = "std")]
     pub fn write_half_blocks(&self, w: &mut dyn std::io::Write) -> std::io::Result<()> {
         let mut prev_fg: u16 = u16::MAX; // impossible RGB555 value → forces first write
         let mut prev_bg: u16 = u16::MAX;

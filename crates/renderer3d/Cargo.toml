@@ -11,7 +11,8 @@ crossterm = { version = "0.28", optional = true }
 
 [features]
 default = ["std"]
-std = ["roguelike-core/std"]
+std = ["roguelike-core/std", "alloc"]
+alloc = []
 window = ["std", "dep:minifb"]
 terminal = ["std", "dep:crossterm"]
 

@@ -449,6 +449,12 @@ impl TriangleSink for RasterSink<'_> {
         let f1 = self.vertex_light(v1, normal);
         let f2 = self.vertex_light(v2, normal);
 
+        // Skip fully dark triangles — all vertices at max fog render as pure black,
+        // contributing nothing visible. Saves the MVP transform + rasterization.
+        if f0 >= 256 && f1 >= 256 && f2 >= 256 {
+            return;
+        }
+
         // Transform world-space → clip-space via MVP
         let c0 = self.mvp * v0.to_point();
         let c1 = self.mvp * v1.to_point();

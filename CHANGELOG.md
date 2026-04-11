@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - ANSI CSI parser unbounded buffer (DoS) (#243)
 
 ### Added
+- Renderer3d: Precompute reciprocal and skip dark triangles for rasterizer optimization (#301)
 - Expand message history to 128 (compact) / 16 (micro) with save persistence and scrollable GBA viewer (#266)
 - Add GBA message history viewer with L+R combo and fix message order (#262)
 - GBA autorun and auto-explore implementation (#261)
@@ -96,6 +97,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- DS: Software 3D renderer experiment — test render_scene on ARM9 @ 67MHz (#300)
 - Add world geometry module with TriangleSink, color mapping, and scene rendering (#290)
 - Add near-plane triangle clipping to 3D renderer (#291)
 - Add PS1 vertex snap and depth fog effects (#292)

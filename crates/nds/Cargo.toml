@@ -1,0 +1,16 @@
+[package]
+name = "roguelike-nds"
+version = "0.5.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+roguelike-core = { path = "../core", default-features = false }
+roguelike-renderer3d = { path = "../renderer3d", default-features = false, features = ["alloc"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+debug = true # DWARF in ELF — zero ROM cost, enables addr2line debugging

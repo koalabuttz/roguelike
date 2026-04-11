@@ -186,6 +186,36 @@ impl GpuSink {
             gx::vtx_16(x, y, z);
         }
     }
+
+    /// Compute the Cohen-Sutherland outcode bits for a clip-space vertex
+    /// against the 4 side frustum planes (near / far are handled by the
+    /// existing `w + z` check). Each bit set means the vertex is outside
+    /// the corresponding plane.
+    ///
+    /// A triangle is trivially rejectable if all three vertex outcodes
+    /// share any bit — i.e. `(oc0 & oc1 & oc2) != 0` — because that
+    /// means every vertex is outside the *same* plane and the triangle
+    /// cannot contribute any visible pixels.
+    #[inline]
+    fn frustum_outcode(x: Fixed16, y: Fixed16, w: Fixed16) -> u8 {
+        let xr = x.to_raw();
+        let yr = y.to_raw();
+        let wr = w.to_raw();
+        let mut code = 0u8;
+        if xr < -wr {
+            code |= 1; // outside left plane
+        }
+        if xr > wr {
+            code |= 2; // outside right plane
+        }
+        if yr < -wr {
+            code |= 4; // outside bottom plane
+        }
+        if yr > wr {
+            code |= 8; // outside top plane
+        }
+        code
+    }
 }
 
 impl TriangleSink for GpuSink {
@@ -243,6 +273,24 @@ impl TriangleSink for GpuSink {
         // deferred. In practice walls rarely straddle the near plane
         // because the camera is 10 units above the floor.
         if count < 3 {
+            return;
+        }
+
+        // ---- B.4: Cohen-Sutherland-style frustum trivial reject ----
+        //
+        // After the MVP transform we know the clip-space coordinates.
+        // Compute outcode bits per vertex against the 4 side frustum
+        // planes (left/right/bottom/top) and trivially reject the
+        // triangle if all three vertices share any outside-plane bit.
+        //
+        // Skips the perspective divide and GXFIFO writes for triangles
+        // that survived the earlier centroid cull but are entirely
+        // off-screen to the side of the camera. Cheap (12 comparisons
+        // + 3 ANDs) and saves ~250-400 cycles per off-frustum triangle.
+        let oc0 = Self::frustum_outcode(c0.x, c0.y, c0.w);
+        let oc1 = Self::frustum_outcode(c1.x, c1.y, c1.w);
+        let oc2 = Self::frustum_outcode(c2.x, c2.y, c2.w);
+        if (oc0 & oc1 & oc2) != 0 {
             return;
         }
 

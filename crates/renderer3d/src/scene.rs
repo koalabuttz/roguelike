@@ -196,6 +196,54 @@ pub fn vertex_light(vertex: Vec3, normal: Vec3, light_pos: Vec3) -> i16 {
     (256 - brightness.clamp(0, 256)) as i16
 }
 
+/// Variant of [`vertex_light`] that omits the distance-visibility term.
+///
+/// Returns `brightness = lambert × attenuation / 256`, then
+/// `256 - brightness` as a fog factor. Used by the DS hardware sink
+/// (`crates/nds/src/gpu_sink.rs`) where the DS 3D engine's hardware
+/// fog unit provides the per-fragment distance darkening — running
+/// the software visibility term there too would double-darken the
+/// frame.
+///
+/// The contract is: `vertex_light_no_visibility(v, n, l)` equals
+/// `vertex_light(v, n, l)` whenever the full-visibility case (`dist²
+/// ≤ FOG_START_SQ`) is in effect, i.e. close enough to the light
+/// source that `visibility = 256`.
+pub fn vertex_light_no_visibility(vertex: Vec3, normal: Vec3, light_pos: Vec3) -> i16 {
+    // Direction + distance to light (3D, includes height)
+    let to_light = light_pos - vertex;
+    let dist = to_light.length();
+
+    if dist.to_raw() == 0 {
+        // At the light source: fully lit.
+        return 0;
+    }
+
+    // Lambert: dot(N, normalize(to_light))
+    let inv_dist = Fixed16::ONE / dist;
+    let light_dir = Vec3::new(
+        to_light.x * inv_dist,
+        to_light.y * inv_dist,
+        to_light.z * inv_dist,
+    );
+    let ndotl = normal.dot(light_dir);
+
+    let lambert = if ndotl.to_raw() <= 0 {
+        AMBIENT as i64
+    } else {
+        (ndotl.to_raw() >> 8).clamp(0, 256).max(AMBIENT) as i64
+    };
+
+    // Inverse-square attenuation: 256·k / (k + d²), using Fixed16 precision.
+    let dist_sq_3d_raw = to_light.length_squared().to_raw().max(1) as i64;
+    let atten_k = ATTEN_SCALE << 16; // scale constant to Fixed16
+    let atten = (256 * atten_k) / (atten_k + dist_sq_3d_raw);
+
+    // brightness = lambert × attenuation / 256 (visibility = 256 folds out)
+    let brightness = lambert * atten / 256;
+    (256 - brightness.clamp(0, 256)) as i16
+}
+
 /// Rasterizing triangle sink: transforms world-space triangles through
 /// the MVP matrix and rasterizes them into the framebuffer.
 struct RasterSink<'a> {
@@ -885,5 +933,76 @@ mod tests {
             differs,
             "different frames should produce different images (flicker)"
         );
+    }
+
+    // --- vertex_light_no_visibility parity ---
+
+    #[test]
+    fn no_visibility_matches_full_visibility_case() {
+        // When the vertex is close enough to the light that the visibility
+        // term in vertex_light() saturates at 256 (i.e. dist² ≤ FOG_START_SQ),
+        // vertex_light_no_visibility() should return exactly the same value.
+        // This is the contract: hardware fog in the DS pipeline replaces
+        // the software visibility term, so the two functions must agree in
+        // the "fully visible" case.
+        let light_pos = Vec3::new(
+            Fixed16::from_int(5),
+            Fixed16::from_raw(0x28000), // LIGHT_HEIGHT = 2.5
+            Fixed16::from_int(5),
+        );
+        // Vertex at ~1 tile horizontal, on the floor — dist² ≈ 1²+2.5² ≈ 7.25,
+        // which is > FOG_START_SQ=4. Move closer to make visibility saturate.
+        // Vertex at 0.5 tile horizontal, y=0: dist² = 0.25 + 6.25 = 6.5. Still > 4.
+        // Try vertex directly below the light at y=0: dist² = 0 + 6.25 = 6.25. Still > 4.
+        //
+        // The visibility term is based on horizontal distance squared
+        // (dx² + dz², not dy²), per the source: it only uses x/z components.
+        // So a vertex at horizontal distance 0 gives visibility=256.
+        let vertex = Vec3::new(Fixed16::from_int(5), Fixed16::ZERO, Fixed16::from_int(5));
+        let normal = Vec3::new(Fixed16::ZERO, Fixed16::ONE, Fixed16::ZERO); // floor up
+
+        let with_vis = vertex_light(vertex, normal, light_pos);
+        let without_vis = vertex_light_no_visibility(vertex, normal, light_pos);
+        assert_eq!(
+            with_vis, without_vis,
+            "parity violated: vertex_light={with_vis}, no_visibility={without_vis}"
+        );
+    }
+
+    #[test]
+    fn no_visibility_is_brighter_than_full_at_distance() {
+        // At a distance where the visibility term darkens the output
+        // (dist² well above FOG_END_SQ=36), the no-visibility variant
+        // should return a strictly smaller (= brighter) fog factor.
+        let light_pos = Vec3::new(
+            Fixed16::from_int(0),
+            Fixed16::from_raw(0x28000),
+            Fixed16::from_int(0),
+        );
+        // 8 tiles away horizontally: dist² = 64, well past FOG_END_SQ=36.
+        let vertex = Vec3::new(Fixed16::from_int(8), Fixed16::ZERO, Fixed16::ZERO);
+        let normal = Vec3::new(Fixed16::ZERO, Fixed16::ONE, Fixed16::ZERO);
+
+        let with_vis = vertex_light(vertex, normal, light_pos);
+        let without_vis = vertex_light_no_visibility(vertex, normal, light_pos);
+        assert!(
+            without_vis < with_vis,
+            "no-visibility fog should be smaller (brighter) at distance: \
+             with_vis={with_vis}, without_vis={without_vis}"
+        );
+    }
+
+    #[test]
+    fn no_visibility_at_light_source_is_fully_lit() {
+        // Vertex exactly at the light position — dist = 0, so we return
+        // the fully-lit value (0).
+        let light_pos = Vec3::new(
+            Fixed16::from_int(3),
+            Fixed16::from_int(1),
+            Fixed16::from_int(3),
+        );
+        let normal = Vec3::new(Fixed16::ZERO, Fixed16::ONE, Fixed16::ZERO);
+        let fog = vertex_light_no_visibility(light_pos, normal, light_pos);
+        assert_eq!(fog, 0);
     }
 }

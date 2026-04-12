@@ -1,35 +1,57 @@
 //! DS hardware-3D sink: writes GXFIFO commands instead of rasterizing.
 //!
-//! Phase 1 replacement for `roguelike_renderer3d::scene::RasterSink`.
-//! Implements [`TriangleSink`] and, for each triangle emitted by
-//! `geometry::generate_map_geometry`, performs:
+//! Phase 2 restructuring (#306): the DS hardware matrix stack now owns
+//! projection + perspective divide. `render_scene_ds` uploads view and
+//! projection matrices via [`gx::mtx_load_4x4`] each frame, and
+//! `GpuSink::emit` emits **player-relative, half-scaled world-space**
+//! vertices via `VTX_16` — letting the hardware transform them.
 //!
-//! 1. Per-vertex fog via `renderer3d::scene::vertex_light` (shared with
-//!    the software path — same formula, identical fog output)
-//! 2. Dark-triangle skip (all three vertices at full fog)
-//! 3. Software MVP transform to clip space
-//! 4. Near-plane rejection (Phase 1 culls any triangle crossing the near
-//!    plane rather than clipping — acceptable because walls near the
-//!    camera are rare and Phase 2 can add proper clipping if needed)
-//! 5. Software perspective divide to NDC via `Vec4::perspective_divide`
-//! 6. Per-vertex color tinting via `renderer3d::rasterizer::apply_fog`
-//!    (no dither — hardware Gouraud interpolates across the triangle)
-//! 7. RGB555 swizzle from renderer3d (R<<10|G<<5|B) to DS hardware
-//!    convention (B<<10|G<<5|R)
-//! 8. Emission via GXFIFO (`BEGIN`, `COLOR`+`VTX_16` ×3, `END`)
+//! Per-triangle pipeline:
 //!
-//! Billboards are not emitted in Phase 1 — `render_scene_ds` skips the
-//! entity and item walks. They return in Phase 3 with A3I5 textures.
+//! 1. CPU-side centroid cull (rejects ~60% of geometry past fog-end)
+//! 2. Per-vertex lighting via [`vertex_light_no_visibility`] (Lambert
+//!    + attenuation only — hardware fog provides distance darkening)
+//! 3. Dark-triangle skip
+//! 4. Color tint via [`apply_fog`] with the computed lighting factor
+//! 5. RGB555 swizzle from renderer3d to DS hardware convention
+//! 6. Vertex emission via `VTX_16` after player-relative translation
+//!    and a 1/2 scale so coords fit in s.3.12's [-8, +8) range
+//!
+//! The hardware then runs MVP × vertex, perspective divide, frustum
+//! clip, viewport transform, and per-fragment fog lookup.
+//!
+//! ## Why player-relative + 1/2 scale?
+//!
+//! The DS `VTX_16` command takes signed 16-bit coordinates in s.3.12
+//! format — range `[-8, +8)` world units. Our map is 80×40 tiles so
+//! world coordinates can reach ±80, and render-radius geometry
+//! extends ±11 tiles from the player. Pre-translating vertices by
+//! the player position gives `≤ ±11` magnitude; dividing by 2 gives
+//! `≤ ±5.5`, safely inside the format range.
+//!
+//! The matching POSITION matrix is `look_at(eye_rel, target_rel, up) ×
+//! scale(2)` — the scale(2) factor cancels the /2 on the vertex side,
+//! and the player-relative camera produces the same rotation as the
+//! world-space camera (look_at's basis is translation-invariant).
+//!
+//! Phase 1's software MVP, near-plane reject, Cohen-Sutherland outcode,
+//! and reciprocal perspective divide are all deleted — the hardware
+//! pipeline handles them. Centroid cull and dark-triangle skip remain
+//! as CPU-side savings (they reject triangles before we pay GXFIFO
+//! bandwidth for them).
+//!
+//! Billboards are not emitted in Phase 1/2 — `render_scene_ds` skips
+//! the entity and item walks. They return in Phase 3 with A3I5 textures.
 //!
 //! ## Why pre-tinted vertex colors?
 //!
 //! The software path interpolates the *fog factor* per-pixel, then
 //! tints the base color via `apply_fog` at pixel time. DS hardware
 //! Gouraud-interpolates *vertex colors* instead — it has no concept of
-//! per-vertex fog factor interpolation. So we apply the fog tint at
-//! vertex time on all three vertices, and hardware interpolation of
-//! those tinted colors closely approximates the software per-pixel
-//! tint. Not bit-identical but visually very close.
+//! per-vertex fog factor interpolation. So we apply the Lambert /
+//! attenuation tint at vertex time on all three vertices; hardware
+//! then interpolates and layers its own per-fragment distance fog
+//! on top.
 
 use core::cell::UnsafeCell;
 
@@ -37,7 +59,7 @@ use roguelike_core::rules::game_view::GameView;
 use roguelike_renderer3d::geometry::{self, TriangleSink};
 use roguelike_renderer3d::math::{Fixed16, Mat4, Vec3};
 use roguelike_renderer3d::rasterizer::apply_fog;
-use roguelike_renderer3d::scene::vertex_light;
+use roguelike_renderer3d::scene::vertex_light_no_visibility;
 
 use crate::{gx, read_timer32};
 
@@ -58,6 +80,33 @@ static LAST_GEN_TICKS: GenTicks = GenTicks(UnsafeCell::new(0));
 /// `render_scene_ds` spent inside `generate_map_geometry`.
 pub fn last_gen_ticks() -> u32 {
     unsafe { *LAST_GEN_TICKS.0.get() }
+}
+
+// ---------------------------------------------------------------------------
+// Runtime-tunable fog parameters
+// ---------------------------------------------------------------------------
+//
+// Exposed via d-pad HUD controls (Select+Up/Down = offset, Select+Left/Right
+// = shift) so the fog curve can be tuned on real hardware without rebuilding.
+// `render_scene_ds` reads these each frame and re-programs the fog registers.
+
+static FOG_OFFSET: GenTicks = GenTicks(UnsafeCell::new(0x3000));
+static FOG_SHIFT: GenTicks = GenTicks(UnsafeCell::new(0));
+
+pub fn fog_offset() -> u32 {
+    unsafe { *FOG_OFFSET.0.get() }
+}
+
+pub fn fog_shift() -> u32 {
+    unsafe { *FOG_SHIFT.0.get() }
+}
+
+pub fn set_fog_offset(val: u32) {
+    unsafe { *FOG_OFFSET.0.get() = val }
+}
+
+pub fn set_fog_shift(val: u32) {
+    unsafe { *FOG_SHIFT.0.get() = val }
 }
 
 // ---------------------------------------------------------------------------
@@ -124,40 +173,61 @@ const CENTROID_CULL_TILES_SQ: i64 = 64;
 const CENTROID_CULL_THRESHOLD_RAW: i64 = 9 * CENTROID_CULL_TILES_SQ * 65536;
 
 /// Triangle sink that emits DS GX commands instead of rasterizing.
+///
+/// Holds the CPU-side state needed by per-triangle emission — the
+/// world-space light position (for `vertex_light_no_visibility` and
+/// the centroid cull), pre-scaled light coords, light color, and
+/// the player's world X/Z used to translate vertices into the
+/// player-relative frame consumed by the hardware matrix stack.
 pub struct GpuSink {
-    mvp: Mat4,
+    /// Light source position in world space (used by lighting math).
     light_pos: Vec3,
     /// Pre-scaled `light_pos.x * 3` and `light_pos.z * 3`, used by the
     /// centroid cull so we don't multiply `light_pos` by 3 per triangle.
     light_x_3: Fixed16,
     light_z_3: Fixed16,
+    /// Per-frame torch color (with flicker modulation).
     light_color: [u16; 3],
+    /// Player world X — subtracted from vertex X before VTX_16 emit.
+    player_x: Fixed16,
+    /// Player world Z — subtracted from vertex Z before VTX_16 emit.
+    player_z: Fixed16,
 }
 
 impl GpuSink {
-    pub fn new(mvp: Mat4, light_pos: Vec3, light_color: [u16; 3]) -> Self {
+    pub fn new(
+        light_pos: Vec3,
+        light_color: [u16; 3],
+        player_x: Fixed16,
+        player_z: Fixed16,
+    ) -> Self {
         let three = Fixed16::from_int(3);
         Self {
-            mvp,
             light_pos,
             light_x_3: light_pos.x * three,
             light_z_3: light_pos.z * three,
             light_color,
+            player_x,
+            player_z,
         }
     }
 
-    /// Convert a Fixed16 value expected to be in NDC range `[-1, +1]`
-    /// into DS VTX_16 s.3.12 fixed-point format.
+    /// Convert a world-space Fixed16 coordinate into DS `VTX_16` s.3.12
+    /// format, after subtracting the player reference and scaling by 1/2.
     ///
-    /// Fixed16 has 16 fractional bits, s.3.12 has 12 — the conversion
-    /// is a right shift by 4. Values outside the s.3.12 representable
-    /// range ([-8, +8)) are clamped; the hardware will then clip them
-    /// against the frustum during its own pipeline. Clamping here is
-    /// necessary to avoid silent integer truncation when NDC values
-    /// exceed ±8 for vertices that are well outside the view frustum.
+    /// The player reference makes geometry camera-relative (vertices
+    /// near the player land near zero). The /2 scale packs a ≤11-tile
+    /// render radius into the s.3.12 `[-8, +8)` range with margin. The
+    /// matching POSITION matrix compensates via `scale(2)`.
+    ///
+    /// Shift breakdown: `Fixed16` is s.15.16 (16 frac bits), s.3.12 has
+    /// 12 frac bits, and `/2` drops one more bit — total `>> 5` on the
+    /// raw i32. Still preserves 11 fractional bits of subpixel precision,
+    /// plenty for tile-aligned geometry.
     #[inline]
-    fn ndc_to_s3_12(value: Fixed16) -> i16 {
-        let raw = value.to_raw() >> 4;
+    fn world_to_s3_12_rel(value: Fixed16, player_ref: Fixed16) -> i16 {
+        let rel_raw = (value - player_ref).to_raw();
+        let raw = rel_raw >> 5;
         raw.clamp(i16::MIN as i32, i16::MAX as i32) as i16
     }
 
@@ -177,58 +247,35 @@ impl GpuSink {
         }
     }
 
-    /// Emit one vertex at NDC coordinates (x, y, z).
+    /// Emit one vertex at world-space coordinates. Subtracts the player
+    /// reference position and scales by 1/2 so the submitted value fits
+    /// in `VTX_16`'s s.3.12 range.
     #[inline]
-    fn emit_vertex(&self, ndc: Vec3) {
-        let x = Self::ndc_to_s3_12(ndc.x);
-        let y = Self::ndc_to_s3_12(ndc.y);
-        let z = Self::ndc_to_s3_12(ndc.z);
+    fn emit_vertex(&self, world: Vec3) {
+        let x = Self::world_to_s3_12_rel(world.x, self.player_x);
+        // Y is height above the floor (0..~10 units), always positive
+        // and well below the range limit even without scaling. We still
+        // apply the 1/2 scale so the POSITION matrix's scale(2) factor
+        // applies uniformly and world geometry stays in proportion.
+        let y = Self::world_to_s3_12_rel(world.y, Fixed16::ZERO);
+        let z = Self::world_to_s3_12_rel(world.z, self.player_z);
         unsafe {
             gx::vtx_16(x, y, z);
         }
-    }
-
-    /// Compute the Cohen-Sutherland outcode bits for a clip-space vertex
-    /// against the 4 side frustum planes (near / far are handled by the
-    /// existing `w + z` check). Each bit set means the vertex is outside
-    /// the corresponding plane.
-    ///
-    /// A triangle is trivially rejectable if all three vertex outcodes
-    /// share any bit — i.e. `(oc0 & oc1 & oc2) != 0` — because that
-    /// means every vertex is outside the *same* plane and the triangle
-    /// cannot contribute any visible pixels.
-    #[inline]
-    fn frustum_outcode(x: Fixed16, y: Fixed16, w: Fixed16) -> u8 {
-        let xr = x.to_raw();
-        let yr = y.to_raw();
-        let wr = w.to_raw();
-        let mut code = 0u8;
-        if xr < -wr {
-            code |= 1; // outside left plane
-        }
-        if xr > wr {
-            code |= 2; // outside right plane
-        }
-        if yr < -wr {
-            code |= 4; // outside bottom plane
-        }
-        if yr > wr {
-            code |= 8; // outside top plane
-        }
-        code
     }
 }
 
 impl TriangleSink for GpuSink {
     fn emit(&mut self, v0: Vec3, v1: Vec3, v2: Vec3, normal: Vec3, color: u16) {
-        // ---- B.2: Cheap centroid cull ----
+        // ---- Cheap centroid cull ----
         //
         // Before doing any expensive per-vertex work, check whether the
         // triangle's centroid is even close enough to the light source to
-        // be visible. Rejects the ~60 % of map-radius triangles that are
+        // be visible. Rejects the ~60% of map-radius triangles that are
         // past the fog-end distance and would only produce fully-dark
-        // pixels. Skips 3 × vertex_light (including sqrt + divides) plus
-        // the MVP transform for those triangles.
+        // pixels. Avoids 3× vertex_light calls plus the GXFIFO writes
+        // for those triangles — pure CPU-side win even after the
+        // software MVP moved to hardware.
         //
         // We compare `9 · dist²` to the pre-scaled threshold to avoid a
         // division by 3 — `dx = 3·(centroid − light)` because we use
@@ -242,83 +289,41 @@ impl TriangleSink for GpuSink {
             return;
         }
 
-        // ---- Per-vertex lighting (expensive: sqrt + divides) ----
-        let f0 = vertex_light(v0, normal, self.light_pos);
-        let f1 = vertex_light(v1, normal, self.light_pos);
-        let f2 = vertex_light(v2, normal, self.light_pos);
+        // ---- Per-vertex lighting (Lambert + attenuation, no visibility) ----
+        //
+        // Hardware fog (DISP3DCNT bit 7 + POLYGON_ATTR bit 15) provides
+        // the per-fragment distance darkening that the software path's
+        // visibility term did. Running that term here too would
+        // double-darken. `vertex_light_no_visibility` drops it, leaving
+        // only the Lambert normal term and inverse-square attenuation
+        // that create the close-range torch pool.
+        let f0 = vertex_light_no_visibility(v0, normal, self.light_pos);
+        let f1 = vertex_light_no_visibility(v1, normal, self.light_pos);
+        let f2 = vertex_light_no_visibility(v2, normal, self.light_pos);
 
-        // Dark-triangle skip — matches RasterSink's optimization.
+        // Dark-triangle skip: if Lambert+attenuation alone produces a
+        // fully dark result at every vertex, the hardware interpolation
+        // would just draw a black triangle. Skip it.
         if f0 >= 256 && f1 >= 256 && f2 >= 256 {
             return;
         }
 
-        // ---- Software MVP transform into clip space ----
-        let c0 = self.mvp * v0.to_point();
-        let c1 = self.mvp * v1.to_point();
-        let c2 = self.mvp * v2.to_point();
-
-        // Near-plane classification. `w + z < 0` means behind the near
-        // plane (standard reverse-Z-ish convention used by the renderer3d
-        // perspective matrix).
-        let d0 = c0.w + c0.z;
-        let d1 = c1.w + c1.z;
-        let d2 = c2.w + c2.z;
-        let in0 = d0.to_raw() >= 0;
-        let in1 = d1.to_raw() >= 0;
-        let in2 = d2.to_raw() >= 0;
-        let count = in0 as u8 + in1 as u8 + in2 as u8;
-
-        // Phase 1: any triangle that crosses the near plane is culled
-        // entirely rather than clipped. RasterSink has proper clipping
-        // logic; porting that to emit interpolated sub-triangles is
-        // deferred. In practice walls rarely straddle the near plane
-        // because the camera is 10 units above the floor.
-        if count < 3 {
-            return;
-        }
-
-        // ---- B.4: Cohen-Sutherland-style frustum trivial reject ----
+        // ---- Emit triangle ----
         //
-        // After the MVP transform we know the clip-space coordinates.
-        // Compute outcode bits per vertex against the 4 side frustum
-        // planes (left/right/bottom/top) and trivially reject the
-        // triangle if all three vertices share any outside-plane bit.
-        //
-        // Skips the perspective divide and GXFIFO writes for triangles
-        // that survived the earlier centroid cull but are entirely
-        // off-screen to the side of the camera. Cheap (12 comparisons
-        // + 3 ANDs) and saves ~250-400 cycles per off-frustum triangle.
-        let oc0 = Self::frustum_outcode(c0.x, c0.y, c0.w);
-        let oc1 = Self::frustum_outcode(c1.x, c1.y, c1.w);
-        let oc2 = Self::frustum_outcode(c2.x, c2.y, c2.w);
-        if (oc0 & oc1 & oc2) != 0 {
-            return;
-        }
-
-        // ---- B.1: Reciprocal-multiply perspective divide ----
-        //
-        // Each `Vec4::perspective_divide` would do 3 Fixed16 divides.
-        // Precomputing `1/w` once and multiplying by it drops the cost
-        // to 1 divide + 3 multiplies per vertex — a ~500-cycle saving
-        // per triangle on ARM9 (which has no hardware i64 divide).
-        let inv_w0 = Fixed16::ONE / c0.w;
-        let inv_w1 = Fixed16::ONE / c1.w;
-        let inv_w2 = Fixed16::ONE / c2.w;
-        let ndc0 = Vec3::new(c0.x * inv_w0, c0.y * inv_w0, c0.z * inv_w0);
-        let ndc1 = Vec3::new(c1.x * inv_w1, c1.y * inv_w1, c1.z * inv_w1);
-        let ndc2 = Vec3::new(c2.x * inv_w2, c2.y * inv_w2, c2.z * inv_w2);
-
-        // Emit the triangle: COLOR + VTX_16 per vertex, bracketed by
-        // BEGIN_VTXS / END_VTXS.
+        // No software MVP, near-plane reject, frustum outcode, or
+        // perspective divide — the hardware matrix stack and rasterizer
+        // handle all of that on the GPU side. Our job is to submit
+        // player-relative, 1/2-scaled world-space vertices via VTX_16
+        // and let the hardware do the rest.
         unsafe {
             gx::begin(gx::PRIM_TRIANGLES);
         }
         self.emit_color(color, f0);
-        self.emit_vertex(ndc0);
+        self.emit_vertex(v0);
         self.emit_color(color, f1);
-        self.emit_vertex(ndc1);
+        self.emit_vertex(v1);
         self.emit_color(color, f2);
-        self.emit_vertex(ndc2);
+        self.emit_vertex(v2);
         unsafe {
             gx::end();
         }
@@ -332,9 +337,34 @@ impl TriangleSink for GpuSink {
 /// DS hardware 3D entry point — mirrors `renderer3d::scene::render_scene`.
 ///
 /// Sets up the same camera / light / torch flicker as the software path,
+/// uploads view and projection matrices to the DS hardware matrix stack,
 /// constructs a [`GpuSink`], and walks the visible map geometry through
-/// `generate_map_geometry`. Phase 1 does not emit entity or item
-/// billboards.
+/// `generate_map_geometry`. Phase 1/2 does not emit entity or item
+/// billboards (deferred to Phase 3 with A3I5 textures).
+///
+/// ## Matrix stack setup (Phase 2)
+///
+/// The hardware matrix stack owns projection + perspective divide. We
+/// upload two matrices per frame:
+///
+/// - `MTX_MODE_PROJECTION` ← `perspective(FOV, aspect, NEAR, FAR)`
+/// - `MTX_MODE_POSITION`   ← `look_at(eye_rel, target_rel, up) × scale(2)`
+///
+/// The view matrix is built in **player-relative space** (both eye and
+/// target have the player position subtracted) so that its rotation
+/// portion matches the world-space equivalent while its translation
+/// term collapses. `GpuSink::emit_vertex` then subtracts the player
+/// position from each emitted vertex and scales by 1/2 — together
+/// those match the `scale(2)` in POSITION, giving
+/// `POSITION × (v_world - player)/2 = view × v_world`.
+///
+/// ## Why not build the view matrix in world space?
+///
+/// Because DS `VTX_16` submits coordinates in s.3.12 (range `[-8, +8)`).
+/// A world-space vertex at `(60, 0, 30)` wraps silently into i16. The
+/// player-relative emission keeps `|value - player_ref|` bounded by
+/// the render radius (~11 tiles), and the /2 scale packs that into
+/// `±5.5`, well inside the format range.
 ///
 /// The DS 3D engine hardware clears and depth-tests internally; no
 /// framebuffer clear is necessary. The caller is responsible for
@@ -343,30 +373,64 @@ impl TriangleSink for GpuSink {
 pub fn render_scene_ds(view: &dyn GameView, frame: u32) {
     let (px, py) = view.player_xy();
 
-    // Camera looks down at the player from above and slightly behind.
-    let target = Vec3::new(
-        Fixed16::from_int(px) + Fixed16::HALF,
-        Fixed16::ZERO,
-        Fixed16::from_int(py) + Fixed16::HALF,
+    // Player world position (tile center) — reference point for the
+    // view matrix translation collapse and for the vertex emission
+    // subtraction in GpuSink::emit_vertex.
+    let player_x = Fixed16::from_int(px) + Fixed16::HALF;
+    let player_z = Fixed16::from_int(py) + Fixed16::HALF;
+
+    // Build the camera in player-relative space. Both target and eye
+    // are expressed relative to the player — the rotation portion of
+    // the view matrix comes out identical to the world-space version
+    // (look_at's basis is translation-invariant), and the translation
+    // portion collapses to near-zero.
+    let target_rel = Vec3::new(Fixed16::ZERO, Fixed16::ZERO, Fixed16::ZERO);
+    let eye_rel = Vec3::new(
+        Fixed16::ZERO,         // same x as target
+        CAMERA_HEIGHT,         // 10 units up
+        -CAMERA_TILT_OFFSET,   // 5 units behind target (toward negative z)
     );
-    let eye = Vec3::new(target.x, CAMERA_HEIGHT, target.z - CAMERA_TILT_OFFSET);
     let up = Vec3::new(Fixed16::ZERO, Fixed16::ONE, Fixed16::ZERO);
-    let view_mat = Mat4::look_at(eye, target, up);
+    let view_rel = Mat4::look_at(eye_rel, target_rel, up);
+
+    // Pre-multiply by scale(2) so the hardware matrix undoes the /2
+    // applied per vertex in emit_vertex. Recomputed per frame (~64
+    // Fixed16 multiplies) because the camera rotation is constant but
+    // the code path is simpler this way than caching.
+    let two = Fixed16::from_int(2);
+    let scale2 = Mat4::scale(Vec3::new(two, two, two));
+    let position_mat = view_rel * scale2;
 
     // DS top screen is 256×192, aspect 4:3 in Fixed16.
     let aspect = Fixed16::from_raw((((256i64) << 16) / 192) as i32);
-    let proj_mat = Mat4::perspective(FOV, aspect, NEAR, FAR);
-    let mvp = proj_mat * view_mat;
+    let projection_mat = Mat4::perspective(FOV, aspect, NEAR, FAR);
 
-    // Torch light at the player's waist.
-    let light_pos = Vec3::new(
-        Fixed16::from_int(px) + Fixed16::HALF,
-        LIGHT_HEIGHT,
-        Fixed16::from_int(py) + Fixed16::HALF,
-    );
+    // Convert to DS 1.19.12 column-major submission order and upload.
+    let ds_projection = projection_mat.to_ds_matrix();
+    let ds_position = position_mat.to_ds_matrix();
+    unsafe {
+        // MTX_MODE_POSITION (1), not POSITION_AND_VECTOR (2): Phase 2
+        // keeps software Lambert + attenuation lighting. When hardware
+        // lighting lands, switch to mode 2 so the vector stack tracks
+        // the position stack for normal transformation.
+        gx::mtx_mode(gx::MTX_MODE_PROJECTION);
+        gx::mtx_load_4x4(&ds_projection);
+        gx::mtx_mode(gx::MTX_MODE_POSITION);
+        gx::mtx_load_4x4(&ds_position);
+
+        // Re-program fog offset and depth shift from the runtime-tunable
+        // cells. Only touches two registers (FOG_OFFSET + DISP3DCNT) —
+        // the density table is static and was programmed once in init().
+        gx::update_fog_params(fog_offset() as u16, fog_shift() as u16);
+    }
+
+    // Torch light at the player's waist. World-space — the lighting
+    // math in `vertex_light_no_visibility` consumes world coords, as
+    // does the centroid cull.
+    let light_pos = Vec3::new(player_x, LIGHT_HEIGHT, player_z);
     let light_color = torch_light_color(frame);
 
-    let mut sink = GpuSink::new(mvp, light_pos, light_color);
+    let mut sink = GpuSink::new(light_pos, light_color, player_x, player_z);
 
     // Profiling: measure time spent walking map geometry + emitting
     // through GpuSink. Exposed via `last_gen_ticks()` for the debug HUD.
@@ -377,7 +441,7 @@ pub fn render_scene_ds(view: &dyn GameView, frame: u32) {
         *LAST_GEN_TICKS.0.get() = gen_t1.wrapping_sub(gen_t0);
     }
 
-    // Phase 1 does not render entity / item billboards. Phase 3 adds
+    // Phase 1/2 does not render entity / item billboards. Phase 3 adds
     // A3I5 textured billboards via TEXIMAGE_PARAM + TEXCOORD + a glyph
     // font uploaded to a VRAM texture slot.
 }

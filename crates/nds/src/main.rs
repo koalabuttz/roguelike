@@ -234,6 +234,8 @@ const POWCNT1_ENABLE: u16 = 0x020F; // LCD + 2D-A + 3D + 3D-geo + 2D-B, top
 
 // Key masks (active-low register, we invert on read)
 const KEY_A: u16 = 1 << 0;
+#[cfg(not(feature = "software3d"))]
+const KEY_SELECT: u16 = 1 << 2; // used for fog tuning (hardware 3D only)
 const KEY_RIGHT: u16 = 1 << 4;
 const KEY_LEFT: u16 = 1 << 5;
 const KEY_UP: u16 = 1 << 6;
@@ -418,6 +420,14 @@ fn update_hud_fps(frame_ticks: u32) {
         let p = debug_hud::write_str(&mut row1, 0, b"GEN ");
         let _ = debug_hud::write_u32_dec(&mut row1, p, gen_ms);
         debug_hud::write_text(0, 1, &row1);
+
+        // Row 2: fog tuning parameters (Select + d-pad to adjust).
+        let mut row2 = [b' '; 16];
+        let mut p = debug_hud::write_str(&mut row2, 0, b"FOG ");
+        p = debug_hud::write_u16_hex(&mut row2, p, gpu_sink::fog_offset() as u16);
+        p = debug_hud::write_str(&mut row2, p, b" SH ");
+        let _ = debug_hud::write_u32_dec(&mut row2, p, gpu_sink::fog_shift());
+        debug_hud::write_text(0, 2, &row2);
     }
 }
 
@@ -476,9 +486,37 @@ extern "C" fn main() -> ! {
 
     loop {
         let keys = read_keys();
+
+        // Select + d-pad: fog parameter tuning (hardware path only).
+        // Holding SELECT hijacks the d-pad for fog controls instead of
+        // player movement. This avoids a rebuild/flash cycle per tuning
+        // iteration on real DS hardware.
+        #[cfg(not(feature = "software3d"))]
+        if keys & KEY_SELECT != 0 {
+            let pressed = keys & !prev_keys;
+            if pressed & KEY_UP != 0 {
+                let v = gpu_sink::fog_offset().saturating_add(0x100).min(0x7F00);
+                gpu_sink::set_fog_offset(v);
+            } else if pressed & KEY_DOWN != 0 {
+                let v = gpu_sink::fog_offset().saturating_sub(0x100);
+                gpu_sink::set_fog_offset(v);
+            } else if pressed & KEY_RIGHT != 0 {
+                let v = gpu_sink::fog_shift().saturating_add(1).min(10);
+                gpu_sink::set_fog_shift(v);
+            } else if pressed & KEY_LEFT != 0 {
+                let v = gpu_sink::fog_shift().saturating_sub(1);
+                gpu_sink::set_fog_shift(v);
+            }
+        } else if let Some(cmd) = keys_to_command(keys, prev_keys) {
+            game().step_view(cmd);
+        }
+
+        // Software path: always dispatch normally (no fog tuning).
+        #[cfg(feature = "software3d")]
         if let Some(cmd) = keys_to_command(keys, prev_keys) {
             game().step_view(cmd);
         }
+
         prev_keys = keys;
 
         let t0 = read_timer32();

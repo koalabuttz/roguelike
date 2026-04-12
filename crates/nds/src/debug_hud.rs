@@ -16,7 +16,7 @@
 //!
 //! ## Font
 //!
-//! A minimal 1bpp 8×8 font covering: space, digits 0-9, F, P, S, M, ':', '.'
+//! A minimal 1bpp 8×8 font covering: space, digits 0-9, A-F, P, S, M, ':', '.'
 //! Each glyph is 8 bytes (1 byte per row, MSB = leftmost pixel). At init
 //! time the font is converted to DS 4bpp tile format (32 bytes per tile:
 //! 8 rows × 4 bytes per row, low nibble = left pixel, high nibble = right).
@@ -203,6 +203,66 @@ const G_9: Glyph = [
 ];
 
 #[rustfmt::skip]
+const G_A: Glyph = [
+    0b_0111_0000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1111_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_B: Glyph = [
+    0b_1111_0000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1111_0000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_C: Glyph = [
+    0b_0111_0000,
+    0b_1000_1000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1000_1000,
+    0b_0111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_D: Glyph = [
+    0b_1111_0000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_E: Glyph = [
+    0b_1111_1000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1111_0000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1111_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
 const G_F: Glyph = [
     0b_1111_1000,
     0b_1000_0000,
@@ -275,7 +335,7 @@ const G_DOT: Glyph = [
 ];
 
 /// Font ordered so tile index matches [`ascii_to_tile`].
-const FONT: [Glyph; 17] = [
+const FONT: [Glyph; 22] = [
     G_SPACE, // 0
     G_0,     // 1
     G_1,     // 2
@@ -287,12 +347,17 @@ const FONT: [Glyph; 17] = [
     G_7,     // 8
     G_8,     // 9
     G_9,     // 10
-    G_F,     // 11
-    G_P,     // 12
-    G_S,     // 13
-    G_M,     // 14
-    G_COLON, // 15
-    G_DOT,   // 16
+    G_A,     // 11
+    G_B,     // 12
+    G_C,     // 13
+    G_D,     // 14
+    G_E,     // 15
+    G_F,     // 16
+    G_P,     // 17
+    G_S,     // 18
+    G_M,     // 19
+    G_COLON, // 20
+    G_DOT,   // 21
 ];
 
 /// Map an ASCII byte to the tile index in [`FONT`].
@@ -302,12 +367,17 @@ fn ascii_to_tile(c: u8) -> u16 {
     match c {
         b' ' => 0,
         b'0'..=b'9' => 1 + (c - b'0') as u16,
-        b'F' => 11,
-        b'P' => 12,
-        b'S' => 13,
-        b'M' => 14,
-        b':' => 15,
-        b'.' => 16,
+        b'A' => 11,
+        b'B' => 12,
+        b'C' => 13,
+        b'D' => 14,
+        b'E' => 15,
+        b'F' => 16,
+        b'P' => 17,
+        b'S' => 18,
+        b'M' => 19,
+        b':' => 20,
+        b'.' => 21,
         _ => 0,
     }
 }
@@ -445,6 +515,21 @@ pub fn write_u32_dec(buf: &mut [u8], pos: usize, val: u32) -> usize {
     for i in (0..count).rev() {
         if p < buf.len() {
             buf[p] = digits[i];
+        }
+        p += 1;
+    }
+    p
+}
+
+/// Write a u16 as 4-digit uppercase hex into `buf` starting at `pos`.
+/// Returns the new position (pos + 4).
+#[allow(dead_code)] // used only in hardware-3D path (fog HUD)
+pub fn write_u16_hex(buf: &mut [u8], pos: usize, val: u16) -> usize {
+    const HEX: [u8; 16] = *b"0123456789ABCDEF";
+    let mut p = pos;
+    for shift in [12, 8, 4, 0] {
+        if p < buf.len() {
+            buf[p] = HEX[((val >> shift) & 0xF) as usize];
         }
         p += 1;
     }

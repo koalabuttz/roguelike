@@ -177,6 +177,38 @@ impl Mat4 {
             ],
         }
     }
+
+    /// Convert to the Nintendo DS 3D engine's `MTX_LOAD_4x4` submission
+    /// format: 16 `u32` words in the order the hardware expects them.
+    ///
+    /// Two conversions happen in the same pass:
+    ///
+    /// 1. **Transpose**. Our `Mat4` is row-major with column-vector
+    ///    convention (`M * v`) — translation lives at `m[0..2][3]`. The
+    ///    DS expects row-vector convention (`v * M`) with translation
+    ///    in the **bottom row** (`out[12..14]`), per GBATEK §MTX_TRANS.
+    ///    Sequentially, that layout is bit-identical to OpenGL
+    ///    column-major storage relative to our column-vector `Mat4`.
+    ///    The transpose is performed by iterating `col` outer / `row`
+    ///    inner over our row-major storage.
+    ///
+    /// 2. **Fixed-point format**. `Fixed16` is s.15.16 (16 fractional
+    ///    bits); DS matrices are 1.19.12 (12 fractional bits). The
+    ///    conversion is an arithmetic right shift by 4, which preserves
+    ///    sign. The subsequent cast to `u32` preserves the
+    ///    two's-complement bit pattern that DS hardware interprets as
+    ///    a signed 1.19.12 value.
+    pub fn to_ds_matrix(&self) -> [u32; 16] {
+        let mut out = [0u32; 16];
+        let mut i = 0;
+        for col in 0..4 {
+            for row in 0..4 {
+                out[i] = (self.m[row][col].to_raw() >> 4) as u32;
+                i += 1;
+            }
+        }
+        out
+    }
 }
 
 // --- Operator overloads ---
@@ -448,5 +480,83 @@ mod tests {
     #[test]
     fn sqrt_of_zero() {
         assert_eq!(Fixed16::ZERO.sqrt(), Fixed16::ZERO);
+    }
+
+    // --- to_ds_matrix ---
+
+    // DS 1.19.12 representation of value 1.0 is `1 << 12 = 0x1000`.
+    const DS_ONE: u32 = 0x1000;
+
+    #[test]
+    fn to_ds_matrix_identity() {
+        let ds = Mat4::identity().to_ds_matrix();
+        // Diagonal is 1.0 in 1.19.12, off-diagonal is 0.
+        let expected = [
+            DS_ONE, 0, 0, 0, // column 0
+            0, DS_ONE, 0, 0, // column 1
+            0, 0, DS_ONE, 0, // column 2
+            0, 0, 0, DS_ONE, // column 3
+        ];
+        assert_eq!(ds, expected);
+    }
+
+    #[test]
+    fn to_ds_matrix_translation_lands_in_bottom_row() {
+        // GBATEK shows MTX_TRANS putting x,y,z in the bottom row
+        // (indices 12, 13, 14 of the sequential layout). Our Mat4
+        // stores translation at m[0][3], m[1][3], m[2][3] — after
+        // the to_ds_matrix transpose, those must land at out[12..15].
+        let t = Mat4::translate(Vec3::from_ints(5, 7, -3));
+        let ds = t.to_ds_matrix();
+        assert_eq!(ds[12], (5 << 12) as u32, "translation X in bottom row");
+        assert_eq!(ds[13], (7 << 12) as u32, "translation Y in bottom row");
+        assert_eq!(
+            ds[14],
+            (-3i32 << 12) as u32,
+            "translation Z (negative) in bottom row"
+        );
+        assert_eq!(ds[15], DS_ONE, "bottom-right is 1.0");
+    }
+
+    #[test]
+    fn to_ds_matrix_negative_values_roundtrip() {
+        // Regression guard: arithmetic shift + `as u32` cast must
+        // produce the correct two's-complement 1.19.12 bit pattern
+        // for negative translations. A naive implementation using
+        // unsigned shift or sign-dropping would silently corrupt.
+        let t = Mat4::translate(Vec3::from_ints(-3, -5, -7));
+        let ds = t.to_ds_matrix();
+        assert_eq!(ds[12], (-3i32 << 12) as u32);
+        assert_eq!(ds[13], (-5i32 << 12) as u32);
+        assert_eq!(ds[14], (-7i32 << 12) as u32);
+    }
+
+    #[test]
+    fn to_ds_matrix_scale_diagonal() {
+        // Scale(2, 3, 4) places s values on the diagonal; after transpose
+        // they must land at out[0] (col 0, row 0), out[5] (col 1, row 1),
+        // out[10] (col 2, row 2).
+        let s = Mat4::scale(Vec3::from_ints(2, 3, 4));
+        let ds = s.to_ds_matrix();
+        assert_eq!(ds[0], (2 << 12) as u32);
+        assert_eq!(ds[5], (3 << 12) as u32);
+        assert_eq!(ds[10], (4 << 12) as u32);
+        assert_eq!(ds[15], DS_ONE);
+        // Off-diagonal should all be zero
+        for (i, &v) in ds.iter().enumerate() {
+            if i != 0 && i != 5 && i != 10 && i != 15 {
+                assert_eq!(v, 0, "off-diagonal at {i} should be zero");
+            }
+        }
+    }
+
+    #[test]
+    fn to_ds_matrix_fractional_value() {
+        // Fixed16::HALF is 0.5 (raw 0x8000). In 1.19.12 that's 0x800.
+        let m = Mat4::scale(Vec3::new(Fixed16::HALF, Fixed16::HALF, Fixed16::HALF));
+        let ds = m.to_ds_matrix();
+        assert_eq!(ds[0], 0x800);
+        assert_eq!(ds[5], 0x800);
+        assert_eq!(ds[10], 0x800);
     }
 }

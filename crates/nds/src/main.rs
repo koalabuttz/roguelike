@@ -469,7 +469,10 @@ extern "C" fn main() -> ! {
     // after init_display() which powers on the 3D engine bits in
     // POWCNT1.
     #[cfg(not(feature = "software3d"))]
-    gx::init();
+    {
+        gx::init();
+        gx::init_textures(&gpu_sink::GLYPH_ATLAS, &gpu_sink::GLYPH_PALETTE);
+    }
 
     // Placement-construct game state into static (avoids 6KB stack allocation)
     unsafe {

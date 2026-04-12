@@ -98,6 +98,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- NDS Phase 3: glyph billboard rendering via A3I5 textures (#307)
 - NDS Phase 2: hardware matrix stack + hardware fog (#306)
 - NDS Phase 1.5 polish: frustum centroid culling (#304)
 - NDS Phase 1.5: Debug HUD + ARM9 offload sprint (#303)

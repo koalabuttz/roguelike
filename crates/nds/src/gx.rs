@@ -47,8 +47,11 @@ pub const GX_MTX_LOAD_4X4: *mut u32 = 0x0400_0458 as *mut u32;
 
 // Vertex and draw commands
 pub const GX_COLOR: *mut u32 = 0x0400_0480 as *mut u32;
+pub const GX_TEXCOORD: *mut u32 = 0x0400_0488 as *mut u32;
 pub const GX_VTX_16: *mut u32 = 0x0400_048C as *mut u32;
 pub const GX_POLYGON_ATTR: *mut u32 = 0x0400_04A4 as *mut u32;
+pub const GX_TEXIMAGE_PARAM: *mut u32 = 0x0400_04A8 as *mut u32;
+pub const GX_PLTT_BASE: *mut u32 = 0x0400_04AC as *mut u32;
 pub const GX_BEGIN_VTXS: *mut u32 = 0x0400_0500 as *mut u32;
 pub const GX_END_VTXS: *mut u32 = 0x0400_0504 as *mut u32;
 pub const GX_SWAP_BUFFERS: *mut u32 = 0x0400_0540 as *mut u32;
@@ -60,6 +63,9 @@ pub const GX_VIEWPORT: *mut u32 = 0x0400_0580 as *mut u32;
 
 /// 3D display control — fog, edge, anti-alias, toon/highlight enables
 pub const DISP3DCNT: *mut u16 = 0x0400_0060 as *mut u16;
+/// Alpha-test comparison value (bits 0-4: 0..31). Pixels with alpha
+/// GREATER than this value are rendered; others are rejected.
+pub const ALPHA_TEST_REF: *mut u16 = 0x0400_0340 as *mut u16;
 /// Polygon clear color (includes alpha, polygon ID, fog enable)
 pub const CLEAR_COLOR: *mut u32 = 0x0400_0350 as *mut u32;
 /// Z-buffer clear depth (0..0x7FFF)
@@ -116,6 +122,23 @@ const POLY_ATTR_ALPHA_SHIFT: u32 = 16;
 /// Master fog enable bit in `DISP3DCNT`. Required alongside
 /// `POLY_ATTR_FOG_ENABLE` for fog to actually apply.
 const DISP3DCNT_FOG_MASTER: u16 = 1 << 7;
+
+/// Texture mapping master enable in `DISP3DCNT`. Without this bit,
+/// the 3D engine ignores all TEXIMAGE_PARAM settings and renders
+/// untextured (vertex color only). Required for A3I5 glyph billboards.
+const DISP3DCNT_TEXTURE_MAP: u16 = 1 << 0;
+
+/// Alpha-test enable bit in `DISP3DCNT`. When set, texels with alpha
+/// ≤ `ALPHA_TEST_REF` are rejected. Used by the billboard pass to
+/// discard transparent A3I5 texels (alpha=0 background pixels).
+const DISP3DCNT_ALPHA_TEST: u16 = 1 << 2;
+
+/// Packed `DISP3DCNT` bits that must always be set: texture mapping +
+/// alpha test + fog master. `update_fog_params` combines these with the
+/// runtime fog shift each frame. Keeps all three features from
+/// clobbering each other.
+const DISP3DCNT_ALWAYS: u16 =
+    DISP3DCNT_TEXTURE_MAP | DISP3DCNT_ALPHA_TEST | DISP3DCNT_FOG_MASTER;
 
 /// `CLEAR_COLOR` bit 15: fog enable for the rear-plane pixels that
 /// haven't been covered by any polygon. Without this bit set, the
@@ -178,15 +201,20 @@ const DEFAULT_FOG_TABLE: [u8; 32] = {
 ///   projection and position matrices per frame)
 pub fn init() {
     unsafe {
-        // Enable hardware fog. The fog master bit (7) is required for
-        // the per-polygon fog enable in POLYGON_ATTR to have effect.
-        // Bits 8-11 are the fog depth shift, which controls FOG_STEP =
-        // 0x400 >> FOG_SHIFT. Together with FOG_OFFSET they define the
-        // depth range where the 32-entry density table is sampled.
+        // Enable hardware fog + alpha test. The fog master bit (7) is
+        // required for the per-polygon fog enable in POLYGON_ATTR to
+        // have effect. Alpha test (bit 2) rejects A3I5 texels with
+        // alpha=0, used by the billboard pass for glyph transparency.
+        // Bits 8-11 are the fog depth shift.
         ptr::write_volatile(
             DISP3DCNT,
-            DISP3DCNT_FOG_MASTER | (DEFAULT_FOG_SHIFT << 8),
+            DISP3DCNT_ALWAYS | (DEFAULT_FOG_SHIFT << 8),
         );
+
+        // Alpha test threshold = 0: reject texels with alpha == 0 only.
+        // A3I5 foreground texels have alpha=7 (> 0, rendered), background
+        // texels have alpha=0 (== 0, not > 0, rejected).
+        ptr::write_volatile(ALPHA_TEST_REF, 0);
 
         // Viewport is packed into a single 32-bit word:
         //   byte 0 = x1 (= 0), byte 1 = y1 (= 0),
@@ -237,6 +265,70 @@ pub fn init() {
         // (avoids a rebuild/flash cycle per tuning iteration on real
         // hardware).
         setup_fog(DEFAULT_FOG_COLOR, DEFAULT_FOG_OFFSET, &DEFAULT_FOG_TABLE);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Texture VRAM setup
+// ---------------------------------------------------------------------------
+
+/// VRAM bank control registers.
+const VRAMCNT_B: *mut u8 = 0x0400_0241 as *mut u8;
+const VRAMCNT_F: *mut u8 = 0x0400_0245 as *mut u8;
+
+/// Bank B LCDC-mode address for CPU writes.
+const VRAM_B_LCDC: *mut u8 = 0x0682_0000 as *mut u8;
+
+/// Bank F LCDC-mode address for CPU writes. When mapped as texture
+/// palette (MST=4), the 3D engine sees this data at slot 0.
+const VRAM_F_LCDC: *mut u16 = 0x0689_0000 as *mut u16;
+
+/// Upload the glyph texture atlas and palette to VRAM.
+///
+/// Call once at boot, after [`init`]. Maps VRAM Bank B as Texture Slot 0
+/// (for the 32×32 A3I5 atlas) and Bank F as Texture Palette Slot 0 (for
+/// the 2-entry white palette). Both banks are temporarily put in LCDC
+/// mode for the CPU write, then remapped for 3D engine access.
+///
+/// # Safety
+/// Must be called before any `render_billboards` call. Bank B must not
+/// already be mapped for another purpose (it should be unmapped at boot).
+pub fn init_textures(atlas: &[u8; 1024], palette: &[u16; 2]) {
+    unsafe {
+        // --- Bank B → Texture Slot 0 (atlas data) ---
+        //
+        // Step 1: LCDC mode (MST=0) — CPU can write to 0x06820000.
+        ptr::write_volatile(VRAMCNT_B, 0x80); // enable + MST=0
+        // Step 2: Copy atlas. Bank B is 128K but we only use 1024 bytes.
+        // Must use u16 writes (u8 writes to non-LCDC VRAM are dropped,
+        // and we're in LCDC mode here so u8 is fine, but u16 is safer
+        // and matches the Phase 1.5 gotcha pattern).
+        let dst = VRAM_B_LCDC as *mut u16;
+        let mut i = 0;
+        while i < 1024 {
+            let word = (atlas[i] as u16) | ((atlas[i + 1] as u16) << 8);
+            ptr::write_volatile(dst.add(i / 2), word);
+            i += 2;
+        }
+        // Step 3: Remap as Texture Slot 0 (MST=3, OFS=0). The 3D engine
+        // reads texture data from slot 0 at an internal address; the CPU
+        // can no longer write to this bank.
+        ptr::write_volatile(VRAMCNT_B, 0x83); // enable + MST=3 + OFS=0
+
+        // --- Bank F → Texture Palette Slot 0 ---
+        //
+        // Step 1: LCDC mode.
+        ptr::write_volatile(VRAMCNT_F, 0x80); // enable + MST=0
+        // Step 2: Write the 2-entry palette (4 bytes = 2 u16 words).
+        let pal_dst = VRAM_F_LCDC;
+        ptr::write_volatile(pal_dst, palette[0]);
+        ptr::write_volatile(pal_dst.add(1), palette[1]);
+        // Step 3: Remap as Texture Palette Slot 0 (MST=3, OFS=0).
+        // VRAMCNT_F bits: 7=enable, 0-2=MST, 3-4=OFS.
+        // MST=3 → bits 0-2 = 0b011 = Texture Palette. OFS=0 → Slot 0.
+        // (MST=4 would be Engine A BG ext palette — wrong destination!)
+        // GBATEK: "F,G 16K MST=3 OFS=0..3 → Texture Palette Slot"
+        ptr::write_volatile(VRAMCNT_F, 0x83);
     }
 }
 
@@ -371,8 +463,28 @@ pub unsafe fn vtx_16(x: i16, y: i16, z: i16) {
 #[inline]
 pub unsafe fn update_fog_params(offset: u16, shift: u16) {
     ptr::write_volatile(FOG_OFFSET, offset);
-    ptr::write_volatile(DISP3DCNT, DISP3DCNT_FOG_MASTER | (shift << 8));
+    ptr::write_volatile(DISP3DCNT, DISP3DCNT_ALWAYS | (shift << 8));
 }
+
+/// Set texture coordinates for the next vertex.
+///
+/// Per GBATEK §TEXCOORD: s.11.4 fixed-point format in each half-word.
+/// One texel = 16 raw units. Must be called BEFORE the `VTX_16` command
+/// for each vertex of a textured polygon.
+#[inline]
+pub unsafe fn texcoord(s: i16, t: i16) {
+    let packed = (s as u16 as u32) | ((t as u16 as u32) << 16);
+    ptr::write_volatile(GX_TEXCOORD, packed);
+}
+
+/// Pre-packed `TEXIMAGE_PARAM` value for the 32×32 A3I5 glyph atlas
+/// at Texture Slot 0 offset 0. Per GBATEK §TEXIMAGE_PARAM:
+///   bits 0-15:  VRAM offset / 8 = 0
+///   bits 20-22: S-Size W=2 (Width = 8 << 2 = 32)
+///   bits 23-25: T-Size H=2 (Height = 8 << 2 = 32)
+///   bits 26-28: Format = 1 (A3I5: 3-bit alpha + 5-bit palette index)
+///   bit 29:     Color 0 transparency = 0 (alpha handles it)
+pub const TEXIMAGE_GLYPH_ATLAS: u32 = (2 << 20) | (2 << 23) | (1 << 26);
 
 /// Commit the current frame and swap render buffers.
 ///

@@ -55,13 +55,101 @@
 
 use core::cell::UnsafeCell;
 
-use roguelike_core::rules::game_view::GameView;
+use roguelike_core::rules::color::GameColor;
+use roguelike_core::rules::game_view::{GameView, TileVisibility};
+use roguelike_renderer3d::color_map::game_color_to_rgb555;
+use roguelike_renderer3d::font;
 use roguelike_renderer3d::geometry::{self, TriangleSink};
 use roguelike_renderer3d::math::{Fixed16, Mat4, Vec3};
 use roguelike_renderer3d::rasterizer::apply_fog;
 use roguelike_renderer3d::scene::vertex_light_no_visibility;
 
 use crate::{gx, read_timer32};
+
+// ---------------------------------------------------------------------------
+// Compile-time A3I5 glyph atlas
+// ---------------------------------------------------------------------------
+
+/// A3I5 texel: alpha=7 (opaque, bits 5-7) + palette index 1 (white, bits 0-4).
+const A3I5_FOREGROUND: u8 = (7 << 5) | 1;
+/// A3I5 texel: alpha=0 (transparent).
+const A3I5_BACKGROUND: u8 = 0;
+
+/// Glyph characters in atlas order. The atlas is a 4×4 grid of 8×8 cells
+/// (32×32 texture). Index = row * 4 + col.
+const ATLAS_CHARS: [char; 12] = ['@', 'g', 'o', 'T', '!', '/', '[', '>', '%', '.', '\0', '\0'];
+
+/// Map a character to its (col, row) position in the atlas. Unknown
+/// characters map to the filled-square fallback at slot (2, 2).
+const fn char_to_atlas(ch: char) -> (u8, u8) {
+    // Linear search over the 12-entry table. The filled-square fallback
+    // for unknown chars lives at slot 10 (col=2, row=2), which we also
+    // use for all unknown characters — matching font.rs's behavior of
+    // returning a filled square for unrecognized chars.
+    let mut i = 0;
+    while i < 10 {
+        // Can't match on char in const fn, so compare as u32.
+        if ATLAS_CHARS[i] as u32 == ch as u32 {
+            return ((i % 4) as u8, (i / 4) as u8);
+        }
+        i += 1;
+    }
+    // Fallback: filled square at slot 10 (col=2, row=2)
+    (2, 2)
+}
+
+/// Build the 32×32 A3I5 texture atlas at compile time from the renderer3d
+/// 1bpp font glyphs. Each 8×8 glyph occupies one cell in the 4×4 grid.
+/// Foreground pixels → A3I5_FOREGROUND (opaque white), background → 0x00
+/// (transparent).
+const fn build_atlas() -> [u8; 1024] {
+    let mut atlas = [0u8; 1024]; // 32 × 32
+
+    let chars: [char; 11] = ['@', 'g', 'o', 'T', '!', '/', '[', '>', '%', '.', '\x00'];
+    let mut slot = 0;
+    while slot < 11 {
+        let col = slot % 4;
+        let row = slot / 4;
+
+        // Get the 1bpp glyph. Slot 10 ('\x00') gets the fallback filled square.
+        let glyph = if slot < 10 {
+            font::glyph(chars[slot])
+        } else {
+            // Filled square fallback (unknown char)
+            font::glyph('\x01') // triggers the _ => filled square branch
+        };
+
+        // Convert each texel
+        let mut ty = 0;
+        while ty < 8 {
+            let mut tx = 0;
+            while tx < 8 {
+                let atlas_x = col * 8 + tx;
+                let atlas_y = row * 8 + ty;
+                let idx = atlas_y * 32 + atlas_x;
+
+                atlas[idx] = if font::texel(&glyph, tx as u8, ty as u8) {
+                    A3I5_FOREGROUND
+                } else {
+                    A3I5_BACKGROUND
+                };
+                tx += 1;
+            }
+            ty += 1;
+        }
+        slot += 1;
+    }
+    atlas
+}
+
+/// The 32×32 A3I5 texture atlas, computed at compile time and stored in
+/// `.rodata`. Uploaded to VRAM Bank B once at init.
+pub const GLYPH_ATLAS: [u8; 1024] = build_atlas();
+
+/// 2-entry texture palette for glyph rendering. Entry 0 = black (masked
+/// by alpha=0, never visible). Entry 1 = white (modulated by vertex
+/// color to produce the entity's GameColor).
+pub const GLYPH_PALETTE: [u16; 2] = [0x0000, 0x7FFF];
 
 // ---------------------------------------------------------------------------
 // Timing instrumentation
@@ -441,7 +529,168 @@ pub fn render_scene_ds(view: &dyn GameView, frame: u32) {
         *LAST_GEN_TICKS.0.get() = gen_t1.wrapping_sub(gen_t0);
     }
 
-    // Phase 1/2 does not render entity / item billboards. Phase 3 adds
-    // A3I5 textured billboards via TEXIMAGE_PARAM + TEXCOORD + a glyph
-    // font uploaded to a VRAM texture slot.
+    // Billboard pass: render entities and items as textured quads.
+    render_billboards(view, light_pos, light_color, player_x, player_z);
+}
+
+// ---------------------------------------------------------------------------
+// Billboard rendering
+// ---------------------------------------------------------------------------
+
+/// Billboard width in world units (~0.7 tile), matching the software
+/// path's `BILLBOARD_WIDTH` in renderer3d::scene.
+const BILLBOARD_HALF_W: Fixed16 = Fixed16::from_raw(0xB333 / 2); // ~0.35
+
+/// Billboard height in world units (~0.9 tile), matching the software
+/// path's `BILLBOARD_HEIGHT`.
+const BILLBOARD_HEIGHT: Fixed16 = Fixed16::from_raw(0xE666); // ~0.9
+
+/// Render visible entities and items as A3I5-textured billboard quads.
+///
+/// Each entity/item becomes a camera-facing quad (2 triangles) textured
+/// with the corresponding glyph from the compile-time atlas. The vertex
+/// COLOR carries the entity's `GameColor` tinted by Lambert + attenuation
+/// (via `vertex_light_no_visibility`); the white texture modulates it
+/// to produce the final color. A3I5 alpha=0 texels are rejected by the
+/// hardware alpha test, giving clean glyph transparency.
+///
+/// The camera right vector is a compile-time constant `(-1, 0, 0)`
+/// because the camera parameters (eye_rel, target_rel) are fixed. The
+/// quad construction matches `renderer3d::scene::render_billboard`
+/// exactly: `center ± cam_right × half_width`, with height along +Y.
+fn render_billboards(
+    view: &dyn GameView,
+    light_pos: Vec3,
+    light_color: [u16; 3],
+    player_x: Fixed16,
+    player_z: Fixed16,
+) {
+    // Enable the glyph atlas texture for the billboard pass.
+    unsafe {
+        core::ptr::write_volatile(gx::GX_TEXIMAGE_PARAM, gx::TEXIMAGE_GLYPH_ATLAS);
+        core::ptr::write_volatile(gx::GX_PLTT_BASE, 0); // palette slot 0
+    }
+
+    let up_normal = Vec3::new(Fixed16::ZERO, Fixed16::ONE, Fixed16::ZERO);
+    let half_h = Fixed16::from_raw(BILLBOARD_HEIGHT.to_raw() / 2);
+
+    // Entities
+    let entity_count = view.entity_count();
+    let mut i = 0;
+    while i < entity_count {
+        if view.entity_alive(i) {
+            let (ex, ey) = view.entity_xy(i);
+            if view.tile_visibility(ex, ey) == TileVisibility::Visible {
+                let (ch, gc) = view.render_entity(i);
+                emit_billboard(
+                    ex, ey, ch, gc, &up_normal, light_pos, light_color,
+                    player_x, player_z, half_h,
+                );
+            }
+        }
+        i += 1;
+    }
+
+    // Items
+    let item_count = view.item_count();
+    let mut i = 0;
+    while i < item_count {
+        if view.item_alive(i) {
+            let (ix, iy) = view.item_xy(i);
+            if view.tile_visibility(ix, iy) == TileVisibility::Visible {
+                let (ch, gc) = view.render_item(i);
+                emit_billboard(
+                    ix, iy, ch, gc, &up_normal, light_pos, light_color,
+                    player_x, player_z, half_h,
+                );
+            }
+        }
+        i += 1;
+    }
+
+    // Disable texturing for any subsequent geometry (defensive reset).
+    unsafe {
+        core::ptr::write_volatile(gx::GX_TEXIMAGE_PARAM, 0);
+    }
+}
+
+/// Emit one textured billboard quad (2 triangles) for an entity or item.
+#[inline(never)] // keep out of the hot loop to reduce register pressure
+#[allow(clippy::too_many_arguments)] // per-call values, no natural struct
+fn emit_billboard(
+    tile_x: i32,
+    tile_z: i32,
+    ch: char,
+    gc: GameColor,
+    up_normal: &Vec3,
+    light_pos: Vec3,
+    light_color: [u16; 3],
+    player_x: Fixed16,
+    player_z: Fixed16,
+    half_h: Fixed16,
+) {
+    let (atlas_col, atlas_row) = char_to_atlas(ch);
+
+    // TEXCOORD values in s.11.4 format (1 texel = 16 raw units).
+    // Each glyph is 8×8 texels in the 32×32 atlas.
+    let s_min = atlas_col as i16 * 128; // col * 8 texels * 16
+    let s_max = s_min + 128;
+    let t_min = atlas_row as i16 * 128;
+    let t_max = t_min + 128;
+
+    // World-space quad center at the tile center, y=0 (floor).
+    let cx = Fixed16::from_int(tile_x) + Fixed16::HALF;
+    let cz = Fixed16::from_int(tile_z) + Fixed16::HALF;
+
+    // Camera right vector = (-1, 0, 0). The quad extends along ±X:
+    //   left  = center + half_w  (positive X — screen left)
+    //   right = center - half_w  (negative X — screen right)
+    // This matches the software path's `center - cam_right * half_w`
+    // for the left side, where cam_right = (-1, 0, 0).
+    let lx = cx + BILLBOARD_HALF_W;
+    let rx = cx - BILLBOARD_HALF_W;
+
+    // 4 vertices: bl (bottom-left), tl (top-left), tr (top-right), br (bottom-right)
+    // Y axis: 0 = floor, BILLBOARD_HEIGHT = top of glyph.
+    let y_bot = Fixed16::ZERO;
+    let y_top = BILLBOARD_HEIGHT;
+
+    // Per-quad lighting: compute once at the quad center (midpoint height).
+    let center_mid = Vec3::new(cx, half_h, cz);
+    let fog = vertex_light_no_visibility(center_mid, *up_normal, light_pos);
+
+    // Tint entity color by lighting, swizzle to DS format.
+    let base_rgb = game_color_to_rgb555(gc);
+    let tinted = apply_fog(base_rgb, fog, 0, light_color);
+    let ds_color = gx::swizzle_gl_to_ds(tinted);
+
+    // Player-relative half-scaled vertex conversion (reuse Phase 2 helper).
+    let xl = GpuSink::world_to_s3_12_rel(lx, player_x);
+    let xr = GpuSink::world_to_s3_12_rel(rx, player_x);
+    let yb = GpuSink::world_to_s3_12_rel(y_bot, Fixed16::ZERO);
+    let yt = GpuSink::world_to_s3_12_rel(y_top, Fixed16::ZERO);
+    let z = GpuSink::world_to_s3_12_rel(cz, player_z);
+
+    unsafe {
+        gx::color(ds_color);
+        gx::begin(gx::PRIM_TRIANGLES);
+
+        // Triangle 1: bl - tl - tr
+        gx::texcoord(s_min, t_max);
+        gx::vtx_16(xl, yb, z);
+        gx::texcoord(s_min, t_min);
+        gx::vtx_16(xl, yt, z);
+        gx::texcoord(s_max, t_min);
+        gx::vtx_16(xr, yt, z);
+
+        // Triangle 2: bl - tr - br
+        gx::texcoord(s_min, t_max);
+        gx::vtx_16(xl, yb, z);
+        gx::texcoord(s_max, t_min);
+        gx::vtx_16(xr, yt, z);
+        gx::texcoord(s_max, t_max);
+        gx::vtx_16(xr, yb, z);
+
+        gx::end();
+    }
 }

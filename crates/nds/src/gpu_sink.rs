@@ -476,7 +476,7 @@ pub fn render_scene_ds(view: &dyn GameView, frame: u32) {
     let eye_rel = Vec3::new(
         Fixed16::ZERO,         // same x as target
         CAMERA_HEIGHT,         // 10 units up
-        -CAMERA_TILT_OFFSET,   // 5 units behind target (toward negative z)
+        CAMERA_TILT_OFFSET,    // 5 units south of target (camera looks north, -Z)
     );
     let up = Vec3::new(Fixed16::ZERO, Fixed16::ONE, Fixed16::ZERO);
     let view_rel = Mat4::look_at(eye_rel, target_rel, up);
@@ -554,7 +554,7 @@ const BILLBOARD_HEIGHT: Fixed16 = Fixed16::from_raw(0xE666); // ~0.9
 /// to produce the final color. A3I5 alpha=0 texels are rejected by the
 /// hardware alpha test, giving clean glyph transparency.
 ///
-/// The camera right vector is a compile-time constant `(-1, 0, 0)`
+/// The camera right vector is a compile-time constant `(+1, 0, 0)`
 /// because the camera parameters (eye_rel, target_rel) are fixed. The
 /// quad construction matches `renderer3d::scene::render_billboard`
 /// exactly: `center ± cam_right × half_width`, with height along +Y.
@@ -642,13 +642,11 @@ fn emit_billboard(
     let cx = Fixed16::from_int(tile_x) + Fixed16::HALF;
     let cz = Fixed16::from_int(tile_z) + Fixed16::HALF;
 
-    // Camera right vector = (-1, 0, 0). The quad extends along ±X:
-    //   left  = center + half_w  (positive X — screen left)
-    //   right = center - half_w  (negative X — screen right)
-    // This matches the software path's `center - cam_right * half_w`
-    // for the left side, where cam_right = (-1, 0, 0).
-    let lx = cx + BILLBOARD_HALF_W;
-    let rx = cx - BILLBOARD_HALF_W;
+    // Camera right vector = (+1, 0, 0). The quad extends along ±X:
+    //   left  = center - half_w  (negative X — screen left)
+    //   right = center + half_w  (positive X — screen right)
+    let lx = cx - BILLBOARD_HALF_W;
+    let rx = cx + BILLBOARD_HALF_W;
 
     // 4 vertices: bl (bottom-left), tl (top-left), tr (top-right), br (bottom-right)
     // Y axis: 0 = floor, BILLBOARD_HEIGHT = top of glyph.

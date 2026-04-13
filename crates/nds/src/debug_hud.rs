@@ -613,65 +613,475 @@ const G_RPAREN: Glyph = [
     0b_0000_0000,
 ];
 
+// --- Additional symbol glyphs for automap ---
+
+#[rustfmt::skip]
+const G_HASH: Glyph = [
+    0b_0101_0000,
+    0b_0101_0000,
+    0b_1111_1000,
+    0b_0101_0000,
+    0b_1111_1000,
+    0b_0101_0000,
+    0b_0101_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_GT: Glyph = [
+    0b_0100_0000,
+    0b_0010_0000,
+    0b_0001_0000,
+    0b_0000_1000,
+    0b_0001_0000,
+    0b_0010_0000,
+    0b_0100_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_AT: Glyph = [
+    0b_0111_0000,
+    0b_1000_1000,
+    0b_1010_1000,
+    0b_1011_1000,
+    0b_1010_0000,
+    0b_1000_1000,
+    0b_0111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LBRACKET: Glyph = [
+    0b_0111_0000,
+    0b_0100_0000,
+    0b_0100_0000,
+    0b_0100_0000,
+    0b_0100_0000,
+    0b_0100_0000,
+    0b_0111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_PERCENT: Glyph = [
+    0b_1100_0000,
+    0b_1100_1000,
+    0b_0001_0000,
+    0b_0010_0000,
+    0b_0100_0000,
+    0b_1001_1000,
+    0b_0001_1000,
+    0b_0000_0000,
+];
+
+// --- Lowercase glyphs: full-height, visually distinct from uppercase ---
+// Design strategy: structural differences where possible (a vs A),
+// narrower forms for inherently similar shapes (o vs O).
+
+#[rustfmt::skip]
+const G_LA: Glyph = [  // round bowl (A = pointed peak)
+    0b_0111_0000,
+    0b_1000_1000,
+    0b_0000_1000,
+    0b_0111_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0111_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LB: Glyph = [  // left stem + right bowl (B = double bowls)
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1111_0000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LC: Glyph = [  // narrower C (3px vs 5px wide)
+    0b_0011_0000,
+    0b_0100_0000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_0100_0000,
+    0b_0011_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LD: Glyph = [  // mirror of b (right stem + left bowl)
+    0b_0000_1000,
+    0b_0000_1000,
+    0b_0111_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0111_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LE: Glyph = [  // round + crossbar (E = three parallel bars)
+    0b_0111_0000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1111_1000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_0111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LF: Glyph = [  // hooked top + low crossbar (F = straight + high bar)
+    0b_0011_0000,
+    0b_0100_0000,
+    0b_0100_0000,
+    0b_1111_0000,
+    0b_0100_0000,
+    0b_0100_0000,
+    0b_0100_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LG: Glyph = [  // bowl + descender (G = horizontal spur)
+    0b_0111_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0111_1000,
+    0b_0000_1000,
+    0b_1000_1000,
+    0b_0111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LH: Glyph = [  // left stem + arch (H = two stems + crossbar)
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1111_0000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LI: Glyph = [  // dot + thin column (I = serif column)
+    0b_0010_0000,
+    0b_0000_0000,
+    0b_0110_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LJ: Glyph = [  // dot + hook (J = full hook column)
+    0b_0001_0000,
+    0b_0000_0000,
+    0b_0011_0000,
+    0b_0001_0000,
+    0b_0001_0000,
+    0b_1001_0000,
+    0b_0110_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LK: Glyph = [  // left stem + kicks (K = centered diagonals)
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1001_0000,
+    0b_1010_0000,
+    0b_1100_0000,
+    0b_1010_0000,
+    0b_1001_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LL: Glyph = [  // thin column + base (L = right angle)
+    0b_0110_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LM: Glyph = [  // triple arch (M = pointed peaks)
+    0b_1101_0000,
+    0b_1010_1000,
+    0b_1010_1000,
+    0b_1010_1000,
+    0b_1010_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LN: Glyph = [  // arch (N = diagonal stroke)
+    0b_1011_0000,
+    0b_1100_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LO: Glyph = [  // narrower oval (O = 5px wide, o = 4px wide)
+    0b_0110_0000,
+    0b_1001_0000,
+    0b_1001_0000,
+    0b_1001_0000,
+    0b_1001_0000,
+    0b_1001_0000,
+    0b_0110_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LP: Glyph = [  // stem up, bowl down (P = bowl on top)
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1111_0000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LQ: Glyph = [  // mirror of p (Q = circle + diagonal tail)
+    0b_0000_1000,
+    0b_0000_1000,
+    0b_0000_1000,
+    0b_0111_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0111_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LR: Glyph = [  // stub arch (R = full diagonal leg)
+    0b_1011_0000,
+    0b_1100_1000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LS: Glyph = [  // narrower S (4px vs 5px wide)
+    0b_0110_0000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_0110_0000,
+    0b_0001_0000,
+    0b_0001_0000,
+    0b_1110_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LT: Glyph = [  // column + crossbar (T = top-heavy bar)
+    0b_0100_0000,
+    0b_0100_0000,
+    0b_1111_0000,
+    0b_0100_0000,
+    0b_0100_0000,
+    0b_0100_0000,
+    0b_0011_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LU: Glyph = [  // bowl + tail (U = symmetric bowl)
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1001_1000,
+    0b_0110_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LV: Glyph = [  // narrower V (4px wide)
+    0b_1001_0000,
+    0b_1001_0000,
+    0b_1001_0000,
+    0b_1001_0000,
+    0b_1001_0000,
+    0b_0110_0000,
+    0b_0110_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LW: Glyph = [  // converging bottom (W = diverging bottom)
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1010_1000,
+    0b_1010_1000,
+    0b_1010_1000,
+    0b_0101_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LX: Glyph = [  // narrower crossing (4px wide)
+    0b_1001_0000,
+    0b_1001_0000,
+    0b_0110_0000,
+    0b_0110_0000,
+    0b_0110_0000,
+    0b_1001_0000,
+    0b_1001_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LY: Glyph = [  // fork + descender tail (Y = symmetric fork)
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0111_1000,
+    0b_0000_1000,
+    0b_1000_1000,
+    0b_0111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LZ: Glyph = [  // narrower zigzag (4px vs 5px wide)
+    0b_1111_0000,
+    0b_0001_0000,
+    0b_0010_0000,
+    0b_0100_0000,
+    0b_0100_0000,
+    0b_1000_0000,
+    0b_1111_0000,
+    0b_0000_0000,
+];
+
 /// Font ordered so tile index matches [`ascii_to_tile`].
-/// Tiles 0 = space, 1-10 = digits, 11-36 = A-Z, 37-44 = symbols.
-const FONT: [Glyph; 45] = [
-    G_SPACE,  // 0
-    G_0,      // 1
-    G_1,      // 2
-    G_2,      // 3
-    G_3,      // 4
-    G_4,      // 5
-    G_5,      // 6
-    G_6,      // 7
-    G_7,      // 8
-    G_8,      // 9
-    G_9,      // 10
-    G_A,      // 11
-    G_B,      // 12
-    G_C,      // 13
-    G_D,      // 14
-    G_E,      // 15
-    G_F,      // 16
-    G_G,      // 17
-    G_H,      // 18
-    G_I,      // 19
-    G_J,      // 20
-    G_K,      // 21
-    G_L,      // 22
-    G_M,      // 23
-    G_N,      // 24
-    G_O,      // 25
-    G_P,      // 26
-    G_Q,      // 27
-    G_R,      // 28
-    G_S,      // 29
-    G_T,      // 30
-    G_U,      // 31
-    G_V,      // 32
-    G_W,      // 33
-    G_X,      // 34
-    G_Y,      // 35
-    G_Z,      // 36
-    G_COLON,  // 37
-    G_DOT,    // 38
-    G_SLASH,  // 39
-    G_EXCL,   // 40
-    G_PLUS,   // 41
-    G_DASH,   // 42
-    G_LPAREN, // 43
-    G_RPAREN, // 44
+/// Tiles 0 = space, 1-10 = digits, 11-36 = A-Z, 37-44 = symbols,
+/// 45-49 = extra symbols (#>@[%), 50-75 = lowercase a-z.
+const FONT: [Glyph; 76] = [
+    G_SPACE,    // 0
+    G_0,        // 1
+    G_1,        // 2
+    G_2,        // 3
+    G_3,        // 4
+    G_4,        // 5
+    G_5,        // 6
+    G_6,        // 7
+    G_7,        // 8
+    G_8,        // 9
+    G_9,        // 10
+    G_A,        // 11
+    G_B,        // 12
+    G_C,        // 13
+    G_D,        // 14
+    G_E,        // 15
+    G_F,        // 16
+    G_G,        // 17
+    G_H,        // 18
+    G_I,        // 19
+    G_J,        // 20
+    G_K,        // 21
+    G_L,        // 22
+    G_M,        // 23
+    G_N,        // 24
+    G_O,        // 25
+    G_P,        // 26
+    G_Q,        // 27
+    G_R,        // 28
+    G_S,        // 29
+    G_T,        // 30
+    G_U,        // 31
+    G_V,        // 32
+    G_W,        // 33
+    G_X,        // 34
+    G_Y,        // 35
+    G_Z,        // 36
+    G_COLON,    // 37
+    G_DOT,      // 38
+    G_SLASH,    // 39
+    G_EXCL,     // 40
+    G_PLUS,     // 41
+    G_DASH,     // 42
+    G_LPAREN,   // 43
+    G_RPAREN,   // 44
+    G_HASH,     // 45
+    G_GT,       // 46
+    G_AT,       // 47
+    G_LBRACKET, // 48
+    G_PERCENT,  // 49
+    G_LA,       // 50
+    G_LB,       // 51
+    G_LC,       // 52
+    G_LD,       // 53
+    G_LE,       // 54
+    G_LF,       // 55
+    G_LG,       // 56
+    G_LH,       // 57
+    G_LI,       // 58
+    G_LJ,       // 59
+    G_LK,       // 60
+    G_LL,       // 61
+    G_LM,       // 62
+    G_LN,       // 63
+    G_LO,       // 64
+    G_LP,       // 65
+    G_LQ,       // 66
+    G_LR,       // 67
+    G_LS,       // 68
+    G_LT,       // 69
+    G_LU,       // 70
+    G_LV,       // 71
+    G_LW,       // 72
+    G_LX,       // 73
+    G_LY,       // 74
+    G_LZ,       // 75
 ];
 
 /// Map an ASCII byte to the tile index in [`FONT`].
 /// Unknown characters fall back to the space tile.
 #[inline]
-fn ascii_to_tile(c: u8) -> u16 {
+pub(crate) fn ascii_to_tile(c: u8) -> u16 {
     match c {
         b' ' => 0,
         b'0'..=b'9' => 1 + (c - b'0') as u16,
         b'A'..=b'Z' => 11 + (c - b'A') as u16,
-        b'a'..=b'z' => 11 + (c - b'a') as u16,
+        b'a'..=b'z' => 50 + (c - b'a') as u16,
         b':' => 37,
         b'.' => 38,
         b'/' => 39,
@@ -680,6 +1090,11 @@ fn ascii_to_tile(c: u8) -> u16 {
         b'-' => 42,
         b'(' => 43,
         b')' => 44,
+        b'#' => 45,
+        b'>' => 46,
+        b'@' => 47,
+        b'[' => 48,
+        b'%' => 49,
         _ => 0,
     }
 }
@@ -701,15 +1116,18 @@ fn row_1bpp_to_4bpp(src: u8) -> [u8; 4] {
     out
 }
 
-/// Write the full font into VRAM character base as 4bpp tiles.
+/// Write the full font into a VRAM character base as 4bpp tiles.
 ///
 /// Each tile is 32 bytes (8 rows × 4 bytes) = 16 u16 words (8 rows × 2
 /// words). We emit the data as `u16` writes because ARM9 u8 writes are
 /// silently dropped when a VRAM bank is mapped as BG memory.
-fn upload_font() {
+///
+/// `char_base` is the VRAM address to write to — Engine B uses
+/// `CHAR_BASE` (0x06200000), Engine A overlay uses 0x06000000.
+pub(crate) fn upload_font_to(char_base: *mut u16) {
     for (tile_idx, glyph) in FONT.iter().enumerate() {
         // 16 u16 words per tile, sequential.
-        let tile_word_base = unsafe { CHAR_BASE.add(tile_idx * 16) };
+        let tile_word_base = unsafe { char_base.add(tile_idx * 16) };
         for (row_idx, &row_byte) in glyph.iter().enumerate() {
             let row_4bpp = row_1bpp_to_4bpp(row_byte);
             // Pack two bytes per u16, little-endian (ARM9 is LE), so the
@@ -722,6 +1140,10 @@ fn upload_font() {
             }
         }
     }
+}
+
+fn upload_font() {
+    upload_font_to(CHAR_BASE);
 }
 
 // ---------------------------------------------------------------------------
@@ -765,6 +1187,21 @@ pub fn write_text_pal(col: u8, row: u8, text: &[u8], pal: u16) {
     }
 }
 
+/// Write a single tilemap entry with explicit tile index and palette bank.
+///
+/// Used by the automap renderer which computes tile indices and palette
+/// banks from game state rather than from ASCII text.
+pub(crate) fn write_tile_pal(col: u8, row: u8, tile: u16, pal: u16) {
+    if row >= 32 || col >= 32 {
+        return;
+    }
+    let offset = row as usize * 32 + col as usize;
+    let entry = (tile & 0x3FF) | ((pal & 0xF) << 12);
+    unsafe {
+        MAP_BASE.add(offset).write_volatile(entry);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Initialization
 // ---------------------------------------------------------------------------
@@ -794,6 +1231,27 @@ pub fn init() {
         // Bank 2: yellow (messages)
         PALETTE_B.add(32).write_volatile(0x0000);
         PALETTE_B.add(33).write_volatile(0x03FF);
+        // Bank 3: dark grey (floor tiles)
+        PALETTE_B.add(48).write_volatile(0x0000);
+        PALETTE_B.add(49).write_volatile(0x294A);
+        // Bank 4: cyan (stairs, short sword)
+        PALETTE_B.add(64).write_volatile(0x0000);
+        PALETTE_B.add(65).write_volatile(0x7FE0);
+        // Bank 5: red (orc, health potion)
+        PALETTE_B.add(80).write_volatile(0x0000);
+        PALETTE_B.add(81).write_volatile(0x001F);
+        // Bank 6: dark green (troll)
+        PALETTE_B.add(96).write_volatile(0x0000);
+        PALETTE_B.add(97).write_volatile(0x0200);
+        // Bank 7: grey (chain mail)
+        PALETTE_B.add(112).write_volatile(0x0000);
+        PALETTE_B.add(113).write_volatile(0x5294);
+        // Bank 8: dark red (corpse, greater health potion)
+        PALETTE_B.add(128).write_volatile(0x0000);
+        PALETTE_B.add(129).write_volatile(0x0010);
+        // Bank 9: dim explored (dark blue-grey, ~RGB(40,40,50))
+        PALETTE_B.add(144).write_volatile(0x0000);
+        PALETTE_B.add(145).write_volatile(0x18A5);
     }
 
     upload_font();

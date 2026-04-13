@@ -1,16 +1,14 @@
-//! Game HUD rendering on Engine B (top screen).
+//! Game HUD rendering on Engine B (bottom screen).
 //!
 //! Renders player status and message log using the `GameView` trait,
-//! producing the same information as the GBA's status bar and message
-//! area but laid out for the DS's dedicated HUD screen.
+//! below the automap viewport on the bottom screen.
 //!
 //! ## Screen layout (32 columns × 24 rows)
 //!
 //! ```text
-//! Rows  0-2:  Debug stats (FPS/GEN/FOG) — rendered by main.rs
-//! Rows  3-18: Reserved for future minimap
-//! Rows 19-22: Message log (4 lines, oldest top, newest bottom)
-//! Row  23:    Status bar (HP/ATK/DEF/Depth/Turns)
+//! Rows  0-19: Automap viewport — rendered by automap.rs
+//! Row  20:    Status bar (HP/ATK/DEF/Depth/Turns)
+//! Rows 21-23: Message log (3 lines, oldest top, newest bottom)
 //! ```
 
 use roguelike_core::rules::game_view::GameView;
@@ -18,14 +16,14 @@ use roguelike_core::rules::game_view::GameView;
 use crate::debug_hud;
 use crate::format;
 
-/// Status bar row (bottom of top screen, closest to game on bottom screen).
-const STATUS_ROW: u8 = 23;
+/// Status bar row (below the automap viewport).
+const STATUS_ROW: u8 = 20;
 
-/// First message log row.
-const MSG_START_ROW: u8 = 19;
+/// First message log row (below the status bar).
+const MSG_START_ROW: u8 = 21;
 
 /// Number of message lines to display.
-const MSG_LINES: usize = 4;
+const MSG_LINES: usize = 3;
 
 /// Palette bank for status bar (green).
 const PAL_STATUS: u16 = 1;

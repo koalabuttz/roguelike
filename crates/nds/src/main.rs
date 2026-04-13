@@ -4,7 +4,10 @@
 extern crate alloc;
 
 mod allocator;
+mod automap;
 mod debug_hud;
+#[cfg(not(feature = "software3d"))]
+mod debug_overlay;
 mod format;
 #[cfg(not(feature = "software3d"))]
 mod gpu_sink;
@@ -209,10 +212,13 @@ const VRAMCNT_LCDC: u8 = 0x80;
 //   DISPCNT bits 0-2   = BG mode 0 (tile backgrounds only)
 //   DISPCNT bit 3      = BG0 in 3D mode (Engine A only feature)
 //   DISPCNT bit 8      = BG0 display enable
+//   DISPCNT bit 9      = BG1 display enable (debug text overlay)
 //   DISPCNT bits 16-17 = display mode 1 (graphics display)
 // The 3D engine output is composited into BG0 when bit 3 is set.
+// BG1 is a 2D tile layer for the FPS/GEN/FOG debug text overlay,
+// drawn on top of the 3D scene (BG1 priority 0, BG0 priority 1).
 #[cfg(not(feature = "software3d"))]
-const DISPCNT_3D_MODE: u32 = (1 << 16) | (1 << 8) | (1 << 3);
+const DISPCNT_3D_MODE: u32 = (1 << 16) | (1 << 9) | (1 << 8) | (1 << 3);
 
 // VRAMCNT_A: enable (bit 7), MST = 1 (Engine A BG), offset = 0 → bank A
 // is mapped as Engine A BG slot 0 at 0x06000000.
@@ -231,8 +237,10 @@ const REG_BG0CNT: *mut u16 = 0x0400_0008 as *mut u16;
 //   3: 3D geometry engine
 //   9: Engine B (2D)
 //  15: Display swap (0 = Engine A top, 1 = Engine A bottom)
-// Enable everything, Engine A on top (bit 15 = 0)
-const POWCNT1_ENABLE: u16 = 0x020F; // LCD + 2D-A + 3D + 3D-geo + 2D-B, top
+// Enable everything, Engine A on top (bit 15 = 1).
+// Empirically verified: bit 15 = 0 puts Engine A on BOTTOM, opposite
+// of GBATEK wording. Set bit 15 = 1 for Engine A on top screen.
+const POWCNT1_ENABLE: u16 = 0x820F; // LCD + 2D-A + 3D + 3D-geo + 2D-B, A=top
 
 // Key masks (active-low register, we invert on read)
 const KEY_A: u16 = 1 << 0;
@@ -299,7 +307,7 @@ fn init_display() {
             // composited to the top screen.
             REG_VRAMCNT_A.write_volatile(VRAMCNT_ENGINE_A_BG);
             REG_DISPCNT.write_volatile(DISPCNT_3D_MODE);
-            REG_BG0CNT.write_volatile(0); // priority 0 (highest)
+            REG_BG0CNT.write_volatile(1); // priority 1 (behind BG1 debug overlay)
         }
     }
 }
@@ -399,6 +407,11 @@ fn keys_to_command(keys: u16, prev: u16) -> Option<GameCommand> {
 /// The difference between the two is main-loop overhead outside the
 /// rendering hot path. Helps bisect where the frame-time budget is
 /// going.
+/// Format frame/render/fog stats and write to Engine A BG1 overlay.
+///
+/// Hardware-3D only — software3d path uses the pixel-based debug bar
+/// drawn directly into the VRAM framebuffer.
+#[cfg(not(feature = "software3d"))]
 fn update_hud_fps(frame_ticks: u32) {
     let ms = frame_ticks / 33514;
     // checked_div handles the ms=0 case (faster than a millisecond): we
@@ -411,26 +424,22 @@ fn update_hud_fps(frame_ticks: u32) {
     p = debug_hud::write_u32_dec(&mut row0, p, fps);
     p = debug_hud::write_str(&mut row0, p, b" MS ");
     let _ = debug_hud::write_u32_dec(&mut row0, p, ms);
-    debug_hud::write_text(0, 0, &row0);
+    debug_overlay::write_text(0, 0, &row0);
 
     // Row 1: generate_map_geometry time (rendering hot path only).
-    // Only meaningful in the hardware-3D path where gpu_sink tracks it.
-    #[cfg(not(feature = "software3d"))]
-    {
-        let gen_ms = gpu_sink::last_gen_ticks() / 33514;
-        let mut row1 = [b' '; 16];
-        let p = debug_hud::write_str(&mut row1, 0, b"GEN ");
-        let _ = debug_hud::write_u32_dec(&mut row1, p, gen_ms);
-        debug_hud::write_text(0, 1, &row1);
+    let gen_ms = gpu_sink::last_gen_ticks() / 33514;
+    let mut row1 = [b' '; 16];
+    let p = debug_hud::write_str(&mut row1, 0, b"GEN ");
+    let _ = debug_hud::write_u32_dec(&mut row1, p, gen_ms);
+    debug_overlay::write_text(0, 1, &row1);
 
-        // Row 2: fog tuning parameters (Select + d-pad to adjust).
-        let mut row2 = [b' '; 16];
-        let mut p = debug_hud::write_str(&mut row2, 0, b"FOG ");
-        p = debug_hud::write_u16_hex(&mut row2, p, gpu_sink::fog_offset() as u16);
-        p = debug_hud::write_str(&mut row2, p, b" SH ");
-        let _ = debug_hud::write_u32_dec(&mut row2, p, gpu_sink::fog_shift());
-        debug_hud::write_text(0, 2, &row2);
-    }
+    // Row 2: fog tuning parameters (Select + d-pad to adjust).
+    let mut row2 = [b' '; 16];
+    let mut p = debug_hud::write_str(&mut row2, 0, b"FOG ");
+    p = debug_hud::write_u16_hex(&mut row2, p, gpu_sink::fog_offset() as u16);
+    p = debug_hud::write_str(&mut row2, p, b" SH ");
+    let _ = debug_hud::write_u32_dec(&mut row2, p, gpu_sink::fog_shift());
+    debug_overlay::write_text(0, 2, &row2);
 }
 
 // ---------------------------------------------------------------------------
@@ -474,6 +483,7 @@ extern "C" fn main() -> ! {
     {
         gx::init();
         gx::init_textures(&gpu_sink::GLYPH_ATLAS, &gpu_sink::GLYPH_PALETTE);
+        debug_overlay::init();
     }
 
     // Placement-construct game state into static (avoids 6KB stack allocation)
@@ -537,7 +547,9 @@ extern "C" fn main() -> ! {
         // Display "FPS NN MS MMMM" on Engine B (top screen). Works in
         // both hardware and software 3D paths — the HUD lives on Engine
         // B regardless of which engine the game is on.
+        #[cfg(not(feature = "software3d"))]
         update_hud_fps(frame_ticks);
+        automap::render_automap(game());
         hud::render_hud(game());
 
         wait_vblank();

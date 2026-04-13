@@ -5,10 +5,12 @@ extern crate alloc;
 
 mod allocator;
 mod debug_hud;
+mod format;
 #[cfg(not(feature = "software3d"))]
 mod gpu_sink;
 #[cfg(not(feature = "software3d"))]
 mod gx;
+mod hud;
 
 use core::arch::naked_asm;
 use core::cell::UnsafeCell;
@@ -536,6 +538,7 @@ extern "C" fn main() -> ! {
         // both hardware and software 3D paths — the HUD lives on Engine
         // B regardless of which engine the game is on.
         update_hud_fps(frame_ticks);
+        hud::render_hud(game());
 
         wait_vblank();
 

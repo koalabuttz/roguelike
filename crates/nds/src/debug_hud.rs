@@ -16,12 +16,13 @@
 //!
 //! ## Font
 //!
-//! A minimal 1bpp 8×8 font covering: space, digits 0-9, A-F, P, S, M, ':', '.'
+//! A 1bpp 8×8 font covering: space, digits 0-9, A-Z, and common symbols
+//! (`:`, `.`, `/`, `!`, `+`, `-`, `(`, `)`). Lowercase a-z maps to uppercase.
 //! Each glyph is 8 bytes (1 byte per row, MSB = leftmost pixel). At init
 //! time the font is converted to DS 4bpp tile format (32 bytes per tile:
 //! 8 rows × 4 bytes per row, low nibble = left pixel, high nibble = right).
 //!
-//! ## Tile 0 = space, tile 1..=10 = digits, ...
+//! ## Tile 0 = space, tiles 1-10 = digits, tiles 11-36 = A-Z, tiles 37-44 = symbols
 //!
 //! See [`ascii_to_tile`] for the full mapping.
 //!
@@ -334,30 +335,332 @@ const G_DOT: Glyph = [
     0b_0000_0000,
 ];
 
+// --- New glyphs for full A-Z coverage + symbols ---
+
+#[rustfmt::skip]
+const G_G: Glyph = [
+    0b_0111_0000,
+    0b_1000_1000,
+    0b_1000_0000,
+    0b_1011_0000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_H: Glyph = [
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1111_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_I: Glyph = [
+    0b_0111_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_J: Glyph = [
+    0b_0011_1000,
+    0b_0001_0000,
+    0b_0001_0000,
+    0b_0001_0000,
+    0b_0001_0000,
+    0b_1001_0000,
+    0b_0110_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_K: Glyph = [
+    0b_1000_1000,
+    0b_1001_0000,
+    0b_1010_0000,
+    0b_1100_0000,
+    0b_1010_0000,
+    0b_1001_0000,
+    0b_1000_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_L: Glyph = [
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1000_0000,
+    0b_1111_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_N: Glyph = [
+    0b_1000_1000,
+    0b_1100_1000,
+    0b_1010_1000,
+    0b_1001_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_O: Glyph = [
+    0b_0111_0000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_Q: Glyph = [
+    0b_0111_0000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1010_1000,
+    0b_1001_0000,
+    0b_0110_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_R: Glyph = [
+    0b_1111_0000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1111_0000,
+    0b_1010_0000,
+    0b_1001_0000,
+    0b_1000_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_T: Glyph = [
+    0b_1111_1000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_U: Glyph = [
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0111_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_V: Glyph = [
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0101_0000,
+    0b_0101_0000,
+    0b_0010_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_W: Glyph = [
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_1010_1000,
+    0b_1010_1000,
+    0b_1101_1000,
+    0b_1000_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_X: Glyph = [
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0101_0000,
+    0b_0010_0000,
+    0b_0101_0000,
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_Y: Glyph = [
+    0b_1000_1000,
+    0b_1000_1000,
+    0b_0101_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_Z: Glyph = [
+    0b_1111_1000,
+    0b_0000_1000,
+    0b_0001_0000,
+    0b_0010_0000,
+    0b_0100_0000,
+    0b_1000_0000,
+    0b_1111_1000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_SLASH: Glyph = [
+    0b_0000_0000,
+    0b_0000_1000,
+    0b_0001_0000,
+    0b_0010_0000,
+    0b_0100_0000,
+    0b_1000_0000,
+    0b_0000_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_EXCL: Glyph = [
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0000_0000,
+    0b_0010_0000,
+    0b_0000_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_PLUS: Glyph = [
+    0b_0000_0000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_1111_1000,
+    0b_0010_0000,
+    0b_0010_0000,
+    0b_0000_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_DASH: Glyph = [
+    0b_0000_0000,
+    0b_0000_0000,
+    0b_0000_0000,
+    0b_1111_1000,
+    0b_0000_0000,
+    0b_0000_0000,
+    0b_0000_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_LPAREN: Glyph = [
+    0b_0001_0000,
+    0b_0010_0000,
+    0b_0100_0000,
+    0b_0100_0000,
+    0b_0100_0000,
+    0b_0010_0000,
+    0b_0001_0000,
+    0b_0000_0000,
+];
+
+#[rustfmt::skip]
+const G_RPAREN: Glyph = [
+    0b_0100_0000,
+    0b_0010_0000,
+    0b_0001_0000,
+    0b_0001_0000,
+    0b_0001_0000,
+    0b_0010_0000,
+    0b_0100_0000,
+    0b_0000_0000,
+];
+
 /// Font ordered so tile index matches [`ascii_to_tile`].
-const FONT: [Glyph; 22] = [
-    G_SPACE, // 0
-    G_0,     // 1
-    G_1,     // 2
-    G_2,     // 3
-    G_3,     // 4
-    G_4,     // 5
-    G_5,     // 6
-    G_6,     // 7
-    G_7,     // 8
-    G_8,     // 9
-    G_9,     // 10
-    G_A,     // 11
-    G_B,     // 12
-    G_C,     // 13
-    G_D,     // 14
-    G_E,     // 15
-    G_F,     // 16
-    G_P,     // 17
-    G_S,     // 18
-    G_M,     // 19
-    G_COLON, // 20
-    G_DOT,   // 21
+/// Tiles 0 = space, 1-10 = digits, 11-36 = A-Z, 37-44 = symbols.
+const FONT: [Glyph; 45] = [
+    G_SPACE,  // 0
+    G_0,      // 1
+    G_1,      // 2
+    G_2,      // 3
+    G_3,      // 4
+    G_4,      // 5
+    G_5,      // 6
+    G_6,      // 7
+    G_7,      // 8
+    G_8,      // 9
+    G_9,      // 10
+    G_A,      // 11
+    G_B,      // 12
+    G_C,      // 13
+    G_D,      // 14
+    G_E,      // 15
+    G_F,      // 16
+    G_G,      // 17
+    G_H,      // 18
+    G_I,      // 19
+    G_J,      // 20
+    G_K,      // 21
+    G_L,      // 22
+    G_M,      // 23
+    G_N,      // 24
+    G_O,      // 25
+    G_P,      // 26
+    G_Q,      // 27
+    G_R,      // 28
+    G_S,      // 29
+    G_T,      // 30
+    G_U,      // 31
+    G_V,      // 32
+    G_W,      // 33
+    G_X,      // 34
+    G_Y,      // 35
+    G_Z,      // 36
+    G_COLON,  // 37
+    G_DOT,    // 38
+    G_SLASH,  // 39
+    G_EXCL,   // 40
+    G_PLUS,   // 41
+    G_DASH,   // 42
+    G_LPAREN, // 43
+    G_RPAREN, // 44
 ];
 
 /// Map an ASCII byte to the tile index in [`FONT`].
@@ -367,17 +670,16 @@ fn ascii_to_tile(c: u8) -> u16 {
     match c {
         b' ' => 0,
         b'0'..=b'9' => 1 + (c - b'0') as u16,
-        b'A' => 11,
-        b'B' => 12,
-        b'C' => 13,
-        b'D' => 14,
-        b'E' => 15,
-        b'F' => 16,
-        b'P' => 17,
-        b'S' => 18,
-        b'M' => 19,
-        b':' => 20,
-        b'.' => 21,
+        b'A'..=b'Z' => 11 + (c - b'A') as u16,
+        b'a'..=b'z' => 11 + (c - b'a') as u16,
+        b':' => 37,
+        b'.' => 38,
+        b'/' => 39,
+        b'!' => 40,
+        b'+' => 41,
+        b'-' => 42,
+        b'(' => 43,
+        b')' => 44,
         _ => 0,
     }
 }
@@ -438,10 +740,17 @@ fn clear_tilemap() {
 /// Write an ASCII byte string into the tilemap at `(col, row)`.
 /// Text that runs off the right edge of the row is silently clipped.
 pub fn write_text(col: u8, row: u8, text: &[u8]) {
+    write_text_pal(col, row, text, 0);
+}
+
+/// Write an ASCII byte string with a palette bank into the tilemap at `(col, row)`.
+/// `pal` selects the 16-color palette bank (0-15) encoded in tilemap bits 12-15.
+pub fn write_text_pal(col: u8, row: u8, text: &[u8], pal: u16) {
     if row >= 32 {
         return;
     }
     let row_offset = row as usize * 32;
+    let pal_bits = (pal & 0xF) << 12;
     for (i, &byte) in text.iter().enumerate() {
         let col_idx = col as usize + i;
         if col_idx >= 32 {
@@ -451,7 +760,7 @@ pub fn write_text(col: u8, row: u8, text: &[u8]) {
         unsafe {
             MAP_BASE
                 .add(row_offset + col_idx)
-                .write_volatile(tile);
+                .write_volatile(tile | pal_bits);
         }
     }
 }
@@ -473,11 +782,18 @@ pub fn init() {
         DISPCNT_B.write_volatile(DISPCNT_B_VALUE);
         BG0CNT_B.write_volatile(BG0CNT_B_VALUE);
 
-        // Engine B palette bank 0: index 0 transparent/black, index 1 white.
-        // RGB555 is symmetric for pure black and pure white so no swizzle
-        // is needed.
-        PALETTE_B.add(0).write_volatile(0x0000); // black (transparent)
-        PALETTE_B.add(1).write_volatile(0x7FFF); // white
+        // Engine B palette banks. Each bank is 16 colors; we use index 0
+        // (transparent/black) and index 1 (foreground) in our 1bpp font.
+        // DS BGR555: bit15 unused | B[4:0]<<10 | G[4:0]<<5 | R[4:0].
+        // Bank 0: white (debug text)
+        PALETTE_B.add(0).write_volatile(0x0000);
+        PALETTE_B.add(1).write_volatile(0x7FFF);
+        // Bank 1: green (status bar)
+        PALETTE_B.add(16).write_volatile(0x0000);
+        PALETTE_B.add(17).write_volatile(0x03E0);
+        // Bank 2: yellow (messages)
+        PALETTE_B.add(32).write_volatile(0x0000);
+        PALETTE_B.add(33).write_volatile(0x03FF);
     }
 
     upload_font();

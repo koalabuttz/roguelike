@@ -1252,6 +1252,9 @@ pub fn init() {
         // Bank 9: dim explored (dark blue-grey, ~RGB(40,40,50))
         PALETTE_B.add(144).write_volatile(0x0000);
         PALETTE_B.add(145).write_volatile(0x18A5);
+        // Bank 10: bright cyan (touch button bar)
+        PALETTE_B.add(160).write_volatile(0x0000);
+        PALETTE_B.add(161).write_volatile(0x7FE8); // ~RGB(8,31,31)
     }
 
     upload_font();

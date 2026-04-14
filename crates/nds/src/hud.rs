@@ -8,7 +8,8 @@
 //! ```text
 //! Rows  0-19: Automap viewport — rendered by automap.rs
 //! Row  20:    Status bar (HP/ATK/DEF/Depth/Turns)
-//! Rows 21-23: Message log (3 lines, oldest top, newest bottom)
+//! Rows 21-22: Message log (2 lines, oldest top, newest bottom)
+//! Row  23:    Touch button bar (INV LK WT RUN EXP MSG)
 //! ```
 
 use roguelike_core::rules::game_view::GameView;
@@ -22,8 +23,11 @@ const STATUS_ROW: u8 = 20;
 /// First message log row (below the status bar).
 const MSG_START_ROW: u8 = 21;
 
-/// Number of message lines to display.
-const MSG_LINES: usize = 3;
+/// Number of message lines to display (shrunk from 3 to make room for button bar).
+const MSG_LINES: usize = 2;
+
+/// Button bar row (bottom of screen).
+const BUTTON_ROW: u8 = 23;
 
 /// Palette bank for status bar (green).
 const PAL_STATUS: u16 = 1;
@@ -31,10 +35,14 @@ const PAL_STATUS: u16 = 1;
 /// Palette bank for messages (yellow).
 const PAL_MSG: u16 = 2;
 
-/// Render the full game HUD: status bar + message log.
+/// Palette bank for touch button bar (bright cyan).
+const PAL_BUTTON: u16 = 10;
+
+/// Render the full game HUD: status bar + message log + button bar.
 pub fn render_hud(state: &impl GameView) {
     render_status(state);
     render_messages(state);
+    render_button_bar();
 }
 
 /// Render the status bar at the bottom of the top screen.
@@ -66,10 +74,9 @@ fn render_status(state: &impl GameView) {
     debug_hud::write_text_pal(0, STATUS_ROW, &buf, PAL_STATUS);
 }
 
-/// Render the last 4 messages above the status bar.
+/// Render the last 2 messages below the status bar.
 ///
-/// `recent_message(0)` = newest. Oldest message on top (row 19),
-/// newest on bottom (row 22).
+/// `recent_message(0)` = newest. Oldest message on top, newest on bottom.
 fn render_messages(state: &impl GameView) {
     for row in 0..MSG_LINES {
         let screen_row = MSG_START_ROW + row as u8;
@@ -84,4 +91,22 @@ fn render_messages(state: &impl GameView) {
             debug_hud::write_text(0, screen_row, &blank);
         }
     }
+}
+
+/// Render the touch button bar at the bottom of the screen.
+///
+/// ```text
+/// INV  LK  WT  RUN  EXP  MSG
+/// ```
+///
+/// Button column ranges match `touch::screen_to_button()`.
+fn render_button_bar() {
+    let mut buf = [b' '; 32];
+    buf[0] = b'I'; buf[1] = b'N'; buf[2] = b'V';
+    buf[5] = b'L'; buf[6] = b'K';
+    buf[9] = b'W'; buf[10] = b'T';
+    buf[13] = b'R'; buf[14] = b'U'; buf[15] = b'N';
+    buf[18] = b'E'; buf[19] = b'X'; buf[20] = b'P';
+    buf[23] = b'M'; buf[24] = b'S'; buf[25] = b'G';
+    debug_hud::write_text_pal(0, BUTTON_ROW, &buf, PAL_BUTTON);
 }

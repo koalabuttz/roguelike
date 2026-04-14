@@ -7,6 +7,8 @@
 //! ADC values to screen pixels, and maps screen pixels to world tile
 //! coordinates using the automap viewport offset.
 
+use roguelike_core::rules::command::GameCommand;
+
 use crate::automap;
 
 // Shared memory layout (written by ARM7, read by ARM9):
@@ -143,4 +145,41 @@ pub fn screen_to_world(
     let world_x = (view_x + tile_col) as i32;
     let world_y = (view_y + tile_row) as i32;
     Some((world_x, world_y))
+}
+
+/// Button bar row on Engine B (tile row 23 = pixel y 184..191).
+const BUTTON_ROW_PX: u16 = 23 * 8;
+
+/// Check if a screen tap hit a touch button on row 23.
+///
+/// Returns the corresponding `GameCommand` if a button was hit, `None` if
+/// the tap was outside the button bar. Column ranges match the labels
+/// rendered by `hud::render_button_bar()`.
+///
+/// ```text
+/// Col: 0-2   5-6   9-10  13-15  18-20  23-25
+///      INV    LK    WT    RUN    EXP    MSG
+/// ```
+pub fn screen_to_button(screen_x: u16, screen_y: u16) -> Option<GameCommand> {
+    if screen_y < BUTTON_ROW_PX {
+        return None;
+    }
+    let col = screen_x as usize / TILE_PX;
+    match col {
+        0..=3 => Some(GameCommand::OpenInventory),
+        4..=7 => Some(GameCommand::Look),
+        8..=11 => Some(GameCommand::Wait),
+        12..=16 => None, // RUN — handled by caller (needs direction)
+        17..=21 => Some(GameCommand::AutoExplore),
+        22..=26 => Some(GameCommand::MessageHistory),
+        _ => None,
+    }
+}
+
+/// Check if a screen tap hit the RUN button (cols 12-16 on row 23).
+pub fn is_run_button(screen_x: u16, screen_y: u16) -> bool {
+    screen_y >= BUTTON_ROW_PX && {
+        let col = screen_x as usize / TILE_PX;
+        (12..=16).contains(&col)
+    }
 }

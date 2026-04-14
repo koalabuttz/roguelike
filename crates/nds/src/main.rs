@@ -26,7 +26,7 @@ use roguelike_core::rules::direction::Direction;
 use roguelike_core::rules::game_view::GameView;
 use roguelike_core::tier_compact::autorun::{stairs_in_fov, CompactBfsStepper, CompactStepOutcome};
 use roguelike_core::tier_compact::game::CompactGameState;
-use roguelike_core::tier_compact::pathfinding::BfsBuffers;
+use roguelike_core::tier_compact::pathfinding::{self as compact_path, BfsBuffers};
 use roguelike_core::tier_compact::types::{MAP_HEIGHT, MAP_WIDTH};
 #[cfg(feature = "software3d")]
 use roguelike_renderer3d::framebuffer::Framebuffer;
@@ -247,13 +247,16 @@ const POWCNT1_ENABLE: u16 = 0x820F; // LCD + 2D-A + 3D + 3D-geo + 2D-B, A=top
 
 // Key masks (active-low register, we invert on read)
 const KEY_A: u16 = 1 << 0;
+const KEY_B: u16 = 1 << 1;
 #[cfg(not(feature = "software3d"))]
 const KEY_SELECT: u16 = 1 << 2; // used for fog tuning (hardware 3D only)
-const KEY_START: u16 = 1 << 3; // cycles debug overlay mode
+const KEY_START: u16 = 1 << 3;  // cycles debug overlay mode
 const KEY_RIGHT: u16 = 1 << 4;
 const KEY_LEFT: u16 = 1 << 5;
 const KEY_UP: u16 = 1 << 6;
 const KEY_DOWN: u16 = 1 << 7;
+const KEY_R: u16 = 1 << 8;
+const KEY_L: u16 = 1 << 9;
 
 // ---------------------------------------------------------------------------
 // Timer registers for frame timing measurement
@@ -311,9 +314,87 @@ fn set_pathfinding(v: bool) {
     unsafe { *PATHFINDING.0.get() = v; }
 }
 
-/// Process a single touch-tap and either dispatch a GameCommand or start
-/// animated pathfinding.
+/// Last movement direction (for Autorun via the RUN touch button).
+struct PrevDir(UnsafeCell<Option<Direction>>);
+unsafe impl Sync for PrevDir {}
+static PREV_DIR: PrevDir = PrevDir(UnsafeCell::new(None));
+
+fn last_direction() -> Option<Direction> {
+    unsafe { *PREV_DIR.0.get() }
+}
+fn set_last_direction(dir: Direction) {
+    unsafe { *PREV_DIR.0.get() = Some(dir); }
+}
+
+/// Start animated BFS pathfinding to a specific target tile.
+fn start_pathfind(tx: i32, ty: i32) {
+    let g = game();
+    if !g.map.in_bounds(tx, ty) || !g.fov.is_explored(tx, ty) || !g.map.is_walkable(tx, ty) {
+        return;
+    }
+    let stairs_vis = stairs_in_fov(&g.map, &g.fov);
+    unsafe {
+        (*BFS_SLOT.0.get()).write(BfsBuffers::new());
+        (*STEPPER_SLOT.0.get()).write(CompactBfsStepper::new(tx, ty, stairs_vis));
+    }
+    set_pathfinding(true);
+}
+
+/// Start auto-explore: BFS to the nearest unexplored frontier tile.
+fn start_auto_explore() {
+    let g = game();
+    let pi = 0usize;
+    let px = g.entities.x[pi];
+    let py = g.entities.y[pi];
+    let mut buf = unsafe { (*BFS_SLOT.0.get()).assume_init_mut() };
+    *buf = BfsBuffers::new();
+    if let Some((tx, ty)) = compact_path::find_nearest_frontier(px, py, &g.map, &g.fov, &mut buf) {
+        let stairs_vis = stairs_in_fov(&g.map, &g.fov);
+        unsafe {
+            (*STEPPER_SLOT.0.get()).write(CompactBfsStepper::new(tx, ty, stairs_vis));
+        }
+        set_pathfinding(true);
+    }
+}
+
+/// Start autorun: BFS to the farthest walkable tile in a direction.
+fn start_autorun(dir: Direction) {
+    let g = game();
+    let (dx, dy) = dir.to_offset();
+    let (mut x, mut y) = (g.entities.x[0], g.entities.y[0]);
+    loop {
+        let (nx, ny) = (x + dx, y + dy);
+        if !g.map.in_bounds(nx, ny) || !g.map.is_walkable(nx, ny) {
+            break;
+        }
+        x = nx;
+        y = ny;
+    }
+    if x != g.entities.x[0] || y != g.entities.y[0] {
+        start_pathfind(x, y);
+    }
+}
+
+/// Process a single touch-tap: check button bar first, then automap.
 fn handle_touch(screen_x: u16, screen_y: u16) {
+    // 1. Check touch button bar (row 23)
+    if let Some(cmd) = touch::screen_to_button(screen_x, screen_y) {
+        match cmd {
+            GameCommand::AutoExplore => { start_auto_explore(); return; }
+            GameCommand::Wait => { game().step_view(cmd); return; }
+            // INV, Look, MessageHistory — need modal UIs, no-op for now
+            _ => return,
+        }
+    }
+    // RUN button needs special handling (needs a direction)
+    if touch::is_run_button(screen_x, screen_y) {
+        if let Some(dir) = last_direction() {
+            start_autorun(dir);
+        }
+        return;
+    }
+
+    // 2. Check automap tap
     let g = game();
     let (px, py) = g.player_xy();
     let (map_w, map_h) = g.map_dims();
@@ -333,19 +414,12 @@ fn handle_touch(screen_x: u16, screen_y: u16) {
     } else if dist == 1 {
         // Tap adjacent → move (attacks if monster is there)
         if let Some(dir) = Direction::from_offset(dx, dy) {
+            set_last_direction(dir);
             g.step_view(GameCommand::Move(dir));
         }
     } else {
         // Tap distant → start animated BFS pathfinding
-        if !g.map.in_bounds(wx, wy) || !g.fov.is_explored(wx, wy) || !g.map.is_walkable(wx, wy) {
-            return; // can't pathfind to walls, unexplored, or OOB
-        }
-        let stairs_vis = stairs_in_fov(&g.map, &g.fov);
-        unsafe {
-            (*BFS_SLOT.0.get()).write(BfsBuffers::new());
-            (*STEPPER_SLOT.0.get()).write(CompactBfsStepper::new(wx, wy, stairs_vis));
-        }
-        set_pathfinding(true);
+        start_pathfind(wx, wy);
     }
 }
 
@@ -458,6 +532,14 @@ fn read_keys() -> u16 {
 fn keys_to_command(keys: u16, prev: u16) -> Option<GameCommand> {
     let pressed = keys & !prev;
 
+    // R + D-pad = Autorun — handled directly in the main loop via
+    // start_autorun(), not through keys_to_command, because the compact
+    // tier's step() treats Autorun as a no-op (it needs animation).
+    if keys & KEY_R != 0 && pressed & (KEY_UP | KEY_DOWN | KEY_LEFT | KEY_RIGHT) != 0 {
+        return None; // main loop checks R + d-pad separately
+    }
+
+    // D-pad = Move
     if pressed & KEY_UP != 0 {
         Some(GameCommand::Move(Direction::North))
     } else if pressed & KEY_DOWN != 0 {
@@ -467,7 +549,11 @@ fn keys_to_command(keys: u16, prev: u16) -> Option<GameCommand> {
     } else if pressed & KEY_RIGHT != 0 {
         Some(GameCommand::Move(Direction::East))
     } else if pressed & KEY_A != 0 {
-        Some(GameCommand::Descend)
+        Some(GameCommand::Interact) // context-sensitive: pickup / descend
+    } else if pressed & KEY_B != 0 {
+        Some(GameCommand::Look) // no-op until look mode UI is built
+    } else if pressed & KEY_L != 0 {
+        None // AutoExplore — handled directly in main loop
     } else {
         None
     }
@@ -613,13 +699,44 @@ extern "C" fn main() -> ! {
                     let v = gpu_sink::fog_shift().saturating_sub(1);
                     gpu_sink::set_fog_shift(v);
                 }
+            } else if pressed & KEY_L != 0 {
+                start_auto_explore();
+            } else if keys & KEY_R != 0 {
+                // R + d-pad = autorun in that direction
+                let dir = if pressed & KEY_UP != 0 { Some(Direction::North) }
+                    else if pressed & KEY_DOWN != 0 { Some(Direction::South) }
+                    else if pressed & KEY_LEFT != 0 { Some(Direction::West) }
+                    else if pressed & KEY_RIGHT != 0 { Some(Direction::East) }
+                    else { None };
+                if let Some(d) = dir {
+                    set_last_direction(d);
+                    start_autorun(d);
+                }
             } else if let Some(cmd) = keys_to_command(keys, prev_keys) {
+                if let GameCommand::Move(dir) | GameCommand::Autorun(dir) = cmd {
+                    set_last_direction(dir);
+                }
                 game().step_view(cmd);
             }
 
             // Software path: always dispatch normally (no fog tuning).
             #[cfg(feature = "software3d")]
-            if let Some(cmd) = keys_to_command(keys, prev_keys) {
+            if pressed & KEY_L != 0 {
+                start_auto_explore();
+            } else if keys & KEY_R != 0 {
+                let dir = if pressed & KEY_UP != 0 { Some(Direction::North) }
+                    else if pressed & KEY_DOWN != 0 { Some(Direction::South) }
+                    else if pressed & KEY_LEFT != 0 { Some(Direction::West) }
+                    else if pressed & KEY_RIGHT != 0 { Some(Direction::East) }
+                    else { None };
+                if let Some(d) = dir {
+                    set_last_direction(d);
+                    start_autorun(d);
+                }
+            } else if let Some(cmd) = keys_to_command(keys, prev_keys) {
+                if let GameCommand::Move(dir) | GameCommand::Autorun(dir) = cmd {
+                    set_last_direction(dir);
+                }
                 game().step_view(cmd);
             }
         } else if is_pathfinding() {

@@ -76,10 +76,15 @@ if shmem_addr is None:
 # ---------------------------------------------------------------------------
 # Register and constant addresses
 # ---------------------------------------------------------------------------
-SPICNT  = 0x040001C0
-SPIDATA = 0x040001C2
-IME     = 0x04000208
-SHMEM   = shmem_addr
+SPICNT   = 0x040001C0
+SPIDATA  = 0x040001C2
+IME      = 0x04000208
+IE       = 0x04000210
+IF       = 0x04000214
+HALTCNT  = 0x04000301   # ARM7 only, byte register
+IRQ_FLAG = 0x0380FFF8   # BIOS IntrWait check flags (ARM7 WRAM)
+IRQ_HAND = 0x0380FFFC   # BIOS user IRQ handler pointer (ARM7 WRAM)
+SHMEM    = shmem_addr
 
 # SPICNT values for PM (device 1, 4MHz baud — proven on real hardware)
 SPICNT_PM_HOLD = 0x0980   # enable | device_1 | hold
@@ -97,7 +102,7 @@ SPICNT_TSC_LAST = 0x8281  # bus_en | enable | device_2 | no hold | 2MHz
 
 # TSC control bytes (12-bit differential mode)
 TSC_READ_X = 0xD1  # Start | Channel 5 (X) | 12-bit | Diff | PD=01 (ADC on)
-TSC_READ_Y = 0x91  # Start | Channel 1 (Y) | 12-bit | Diff | PD=01 (ADC on)
+TSC_READ_Y = 0x90  # Start | Channel 1 (Y) | 12-bit | Diff | PD=00 (pen IRQ)
 
 # ---------------------------------------------------------------------------
 # ARM instruction encoding helpers
@@ -153,6 +158,12 @@ w32(0)  # placeholder
 POOL_SPICNT   = pc_offset; w32(SPICNT)
 POOL_SPIDATA  = pc_offset; w32(SPIDATA)
 POOL_IME      = pc_offset; w32(IME)
+POOL_IE       = pc_offset; w32(IE)
+POOL_IF       = pc_offset; w32(IF)
+POOL_HALTCNT  = pc_offset; w32(HALTCNT)
+POOL_IRQ_FLAG = pc_offset; w32(IRQ_FLAG)
+POOL_IRQ_HAND = pc_offset; w32(IRQ_HAND)
+POOL_IRQ_ADDR = pc_offset; w32(0)        # handler address, fixed up later
 POOL_SHMEM    = pc_offset; w32(SHMEM)
 
 code_start = pc_offset
@@ -205,6 +216,38 @@ busy2 = pc_offset
 w32(0xE1D400B0)                   # ldrh r0, [r4]
 w32(0xE3100080)                   # tst r0, #0x80
 w32(0x1AFFFFFC)                   # bne busy2
+
+# ---------------------------------------------------------------------------
+# VBlank IRQ setup: install handler, enable VBlank interrupt, enable IME
+# ---------------------------------------------------------------------------
+# The DS ARM7 BIOS reads a user IRQ handler pointer from 0x0380FFFC and
+# calls it with r0-r3 saved. Our handler acknowledges IF and updates the
+# BIOS IntrWait check flags at 0x0380FFF8. After this, HALTCNT halt mode
+# will wake on VBlank (~60Hz) instead of requiring a busy-wait delay.
+
+# Install IRQ handler: write irq_handler address to [0x0380FFFC].
+# The handler is emitted after the main loop — pool entry fixed up later.
+ldr_rd_pool(0, POOL_IRQ_HAND)     # ldr r0, =0x0380FFFC
+ldr_rd_pool(1, POOL_IRQ_ADDR)     # ldr r1, =irq_handler (fixup below)
+w32(0xE5801000)                    # str r1, [r0]
+
+# Set IE = 1 (VBlank only)
+ldr_rd_pool(0, POOL_IE)           # ldr r0, =IE
+w32(0xE3A01001)                    # mov r1, #1
+w32(0xE5801000)                    # str r1, [r0]
+
+# Acknowledge any pending interrupts (write all-ones to IF)
+ldr_rd_pool(0, POOL_IF)           # ldr r0, =IF
+w32(0xE3E01000)                    # mvn r1, #0           → r1 = 0xFFFFFFFF
+w32(0xE5801000)                    # str r1, [r0]
+
+# Enable IME (must be last — interrupts can fire after this)
+ldr_rd_pool(0, POOL_IME)          # ldr r0, =IME
+w32(0xE3A01001)                    # mov r1, #1
+w32(0xE5801000)                    # str r1, [r0]
+
+# Load HALTCNT address into r8 (used in sleep section)
+ldr_rd_pool(8, POOL_HALTCNT)      # ldr r8, =HALTCNT
 
 # ---------------------------------------------------------------------------
 # Load touchscreen-related register pointers
@@ -269,7 +312,7 @@ w32(0xE18221A7)                   # orr r2, r2, r7, lsr #3
 
 # Transfer 1: send control byte (hold CS)
 w32(0xE1C4A0B0)                   # strh r10, [r4]   → SPICNT = TSC + hold
-w32(0xE3A00091)                   # mov r0, #0x91    → Y control byte (PD=01, ADC on)
+w32(0xE3A00090)                   # mov r0, #0x90    → Y control byte (PD=00, pen IRQ)
 w32(0xE1C500B0)                   # strh r0, [r5]    → SPIDATA = 0x90
 busy6 = pc_offset
 w32(0xE1D400B0)                   # ldrh r0, [r4]
@@ -312,23 +355,42 @@ w32(0xC3A00001)                   # movgt r0, #1       (GT: pen touching)
 w32(0xD3A00000)                   # movle r0, #0       (LE: pen released)
 w32(0xE1C900B4)                   # strh r0, [r9, #4]  → pen_down
 
-# ---- sleep ----
+# ---- sleep: halt until VBlank then loop ----
 
-# --- Delay ~16ms (one frame period) then loop ---
-# The ARM7TDMI has no WFI instruction (mcr p15,c7,c0,4 is ARM946E-S only;
-# on ARM7 it traps as undefined and the BIOS handler returns, making it a
-# NOP). We need a real delay to give the TSC analog circuitry time to
-# charge the touchscreen plates between reads. Without this, the TSC
-# returns stale "pen released" values because it's being polled too fast.
-# ~172K iterations × 3 cycles/iter ÷ 33MHz ≈ 16ms ≈ one VBlank period.
 sleep = pc_offset
-w32(0xE3A00A2A)                   # mov r0, #0x2A000   (~172K)
-# delay_loop:
-w32(0xE2500001)                   # subs r0, r0, #1
-w32(0x1AFFFFFD)                   # bne delay_loop     (back to subs)
+w32(0xE3A00080)                   # mov r0, #0x80      (HALTCNT value: halt mode)
+w32(0xE5C80000)                   # strb r0, [r8]      → HALTCNT = 0x80 (halt)
+# CPU sleeps here until VBlank IRQ fires (~60Hz), then resumes.
 branch(0xE, tsc_loop)             # b tsc_loop
 
-# (No forward branches to fix up — linear flow to sleep.)
+# ---------------------------------------------------------------------------
+# IRQ handler (called by BIOS dispatcher via pointer at 0x0380FFFC)
+# ---------------------------------------------------------------------------
+# The BIOS saves r0-r3, r12, r14 before calling. We must:
+#   1. Read IF (pending interrupts)
+#   2. Acknowledge by writing back to IF (write-1-to-clear)
+#   3. Update BIOS IntrWait check flags at 0x0380FFF8
+#   4. Return via BX LR
+
+irq_handler = pc_offset
+ldr_rd_pool(0, POOL_IF)           # ldr r0, =IF
+w32(0xE5901000)                   # ldr r1, [r0]       → r1 = pending IRQs
+w32(0xE5801000)                   # str r1, [r0]       → acknowledge (write-1-to-clear)
+ldr_rd_pool(0, POOL_IRQ_FLAG)     # ldr r0, =0x0380FFF8
+w32(0xE5902000)                   # ldr r2, [r0]       → r2 = current flags
+w32(0xE1822001)                   # orr r2, r2, r1     → r2 |= pending
+w32(0xE5802000)                   # str r2, [r0]       → update BIOS flags
+w32(0xE12FFF1E)                   # bx lr
+
+# ---------------------------------------------------------------------------
+# Fix up forward references
+# ---------------------------------------------------------------------------
+
+# Write the IRQ handler's runtime address into the pool entry.
+handler_addr = ENTRY + irq_handler
+buf.seek(POOL_IRQ_ADDR)
+buf.write(struct.pack("<I", handler_addr))
+buf.seek(0, 2)  # back to end
 
 # ---------------------------------------------------------------------------
 # Build ELF

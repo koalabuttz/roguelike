@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - ANSI CSI parser unbounded buffer (DoS) (#243)
 
 ### Added
+- NDS: Replace ARM7 delay loop with VBlank IRQ halt + restore PD=00 pen IRQ (#316)
 - NDS: Phase 5 — Touchscreen input via bare-metal ARM7 TSC + IPC (#311)
 - NDS: Phase 4b — screen swap + 2D automap + Engine A debug overlay (#310)
 - NDS: Document that hardware fog requires the matrix stack; register scaffolding preserved for Phase 2 (#305)

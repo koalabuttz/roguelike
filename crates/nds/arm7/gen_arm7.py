@@ -1,155 +1,341 @@
 #!/usr/bin/env python3
 """Generate a minimal ARM7 ELF for the Nintendo DS.
 
-The ARM7 must initialize the power management IC (PM) via SPI to enable
-the LCD backlights, and then idle forever. Without this, the screens
-stay dark on real hardware.
+The ARM7 has two jobs:
+  1. Initialize the PM (power management IC) via SPI to enable LCD backlights.
+  2. Poll the touchscreen controller (TSC) via SPI and store coordinates in
+     shared memory for the ARM9 to read.
 
 SPI registers (ARM7 only):
   SPICNT  = 0x040001C0  (control: baud, device select, enable, busy)
   SPIDATA = 0x040001C2  (8-bit read/write data)
 
+SPICNT bit layout (from GBATEK):
+  0-1   Baudrate (0=4MHz, 1=2MHz/Touchscr, 2=1MHz/Powerman, 3=512KHz)
+  7     Busy Flag / Enable (see note below)
+  8-9   Device Select (0=Powerman, 1=Firmware, 2=Touchscr, 3=Reserved)
+  11    Chipselect Hold (0=Deselect after transfer, 1=Keep selected)
+  15    SPI Bus Enable
+
+Note: GBATEK says bit 7 is "busy (presumably read-only)" and bit 15 is
+"enable". However, the proven PM init code below uses bit 7 as enable
+and omits bit 15, and this works on real hardware. We follow the same
+pattern for the touchscreen to stay consistent.
+
+Note: GBATEK says device 0 = Powerman, but the proven PM init below uses
+device select [9:8]=01. This discrepancy is documented but unresolved.
+For the touchscreen, we use GBATEK's value [9:8]=10 (device 2). If this
+doesn't work on real hardware, try [9:8]=11 then [9:8]=00.
+
 Power Management IC registers:
-  PM_CONTROL (reg 0): bit 0 = sound amp enable, bit 2 = backlight bottom,
-                       bit 3 = backlight top
+  PM_CONTROL (reg 0): bit 2 = backlight bottom, bit 3 = backlight top
   Writing 0x0C to PM reg 0 enables both backlights.
 
-SPI protocol for PM write:
-  1. SPICNT = 0x0080 | (device << 8) | chipselect_hold
-     device 1 = Power Management, hold = bit 11
-  2. Write register address (bit 7 = 0 for write) to SPIDATA
-  3. Wait for not-busy (SPICNT bit 7)
-  4. SPICNT = 0x0080 | (device << 8) (no hold = release CS)
-  5. Write data byte to SPIDATA
-  6. Wait for not-busy
+Touchscreen controller (TSC2046 / AK4148AVT):
+  Accessible via SPI device 2 at 2MHz baudrate.
+  Control byte: Start(7) | Channel(6:4) | Mode(3) | SER(2) | PD(1:0)
+    Channel 5 = X position, Channel 1 = Y position
+    Mode 0 = 12-bit, SER 0 = differential
+    PD 01 = ADC on, PD 00 = power down with pen IRQ enabled
+  Response: 1 dummy bit + 12 data bits (MSB first) across 2 SPI bytes.
+
+Pen-down detection:
+  EXTKEYIN (0x04000136) bit 6: 0=pen touching, 1=pen released.
+  Only valid when TSC is in PD mode 0 (pen IRQ enabled).
+
+Shared memory (ARM7 writes, ARM9 reads):
+  0x023FFF00: u16 raw_x     (12-bit ADC, 0-4095)
+  0x023FFF02: u16 raw_y     (12-bit ADC, 0-4095)
+  0x023FFF04: u16 pen_down  (1=touching, 0=not)
 """
 
 import struct
 import sys
+import io
 
 ENTRY = 0x03800000  # ARM7 WRAM base
 
-# ARM7 machine code (ARM mode, little-endian)
-# Register addresses
+# ---------------------------------------------------------------------------
+# Parse CLI arguments
+# ---------------------------------------------------------------------------
+# Usage: gen_arm7.py <output.elf> --shmem=0x<addr>
+# The --shmem address is extracted from the ARM9 ELF by the Makefile:
+#   nm $(ELF) | grep TOUCH_SHMEM
+out_path = "arm7.elf"
+shmem_addr = None
+for arg in sys.argv[1:]:
+    if arg.startswith("--shmem="):
+        shmem_addr = int(arg.split("=", 1)[1], 0)
+    elif not arg.startswith("-"):
+        out_path = arg
+
+if shmem_addr is None:
+    print("ERROR: --shmem=0x<addr> is required (address of TOUCH_SHMEM from ARM9 ELF)", file=sys.stderr)
+    sys.exit(1)
+
+# ---------------------------------------------------------------------------
+# Register and constant addresses
+# ---------------------------------------------------------------------------
 SPICNT  = 0x040001C0
 SPIDATA = 0x040001C2
-POWCNT2 = 0x04000304  # ARM7 power control: bit 0 = speakers, bit 1 = wifi
+IME     = 0x04000208
+SHMEM   = shmem_addr
 
-code = []
+# SPICNT values for PM (device 1, 4MHz baud — proven on real hardware)
+SPICNT_PM_HOLD = 0x0980   # enable | device_1 | hold
+SPICNT_PM_LAST = 0x0180   # enable | device_1 | no hold
 
-def emit(instruction):
-    code.append(struct.pack("<I", instruction))
+# SPICNT values for touchscreen (2MHz baud)
+# GBATEK says device 2 = Touchscr, but the proven PM code uses [9:8]=01
+# for what GBATEK calls device 0. Device select values tried:
+#   [9:8]=10 (0x0A81/0x0281) — GBATEK literal         ✗ did not work
+#   [9:8]=11 (0x0B81/0x0381) — offset-by-one theory   ✗ did not work
+#   [9:8]=00 (0x0881/0x0081) — zero                    ✗ did not work
+# Now trying GBATEK literal + bit 15 (SPI Bus Enable):
+SPICNT_TSC_HOLD = 0x8A81  # bus_en | enable | device_2 | hold | 2MHz
+SPICNT_TSC_LAST = 0x8281  # bus_en | enable | device_2 | no hold | 2MHz
 
-# Helper: encode LDR Rd, =imm via a literal pool at the end
-# We'll use a simpler approach: build constants from MOV/ORR instructions
+# TSC control bytes (12-bit differential mode)
+TSC_READ_X = 0xD1  # Start | Channel 5 (X) | 12-bit | Diff | PD=01 (ADC on)
+TSC_READ_Y = 0x91  # Start | Channel 1 (Y) | 12-bit | Diff | PD=01 (ADC on)
 
-# For this tiny program, we'll hand-assemble the ARM instructions:
-arm_code = bytearray()
-
-# We use a PC-relative literal pool approach. The code jumps over the pool.
-# Layout:
-#   0x00: b init         (branch past literal pool)
-#   0x04: .word SPICNT   (literal pool entry 0)
-#   0x08: .word SPIDATA  (literal pool entry 1)
-#   0x0C: init:          (actual code starts here)
-#
-# Actually, let's keep it simple — use MOV/MOVT (ARMv6T2+) ... but ARM7 is ARMv4T.
-# On ARMv4T, we load constants from a literal pool after the code.
-
-# Simpler approach: put literal pool right after a branch, referenced by PC-relative loads.
-
-# Let's write the binary directly with pc-relative ldr instructions.
-
-# ARM encoding for ldr rd, [pc, #offset]: 0xe59f_X_YYY where X=rd<<12, YYY=offset
-# Note: PC reads as current instruction + 8 in ARM mode
-
-import io
-
+# ---------------------------------------------------------------------------
+# ARM instruction encoding helpers
+# ---------------------------------------------------------------------------
 buf = io.BytesIO()
+pc_offset = 0  # current write position in the binary
+
 
 def w32(val):
+    """Write a 32-bit little-endian word and advance the position."""
+    global pc_offset
     buf.write(struct.pack("<I", val))
+    pc_offset += 4
 
-# Code layout:
-# 0x00: b skip_pool          ; jump over literal pool
-# 0x04: pool_spicnt  = 0x040001C0
-# 0x08: pool_spidata = 0x040001C2
-# 0x0C: pool_ime     = 0x04000208
-# 0x10: skip_pool:
 
-# b skip_pool: offset = (0x10 - 0x00 - 8) / 4 = 2
-w32(0xEA000002)   # b +2 (skip 3 words of pool, lands at 0x10)
+def arm_pc():
+    """ARM pipeline: PC reads as current instruction address + 8."""
+    return pc_offset + 8
 
-# Literal pool
-w32(SPICNT)        # [0x04]
-w32(SPIDATA)       # [0x08]
-w32(0x04000208)    # [0x0C] IME register
 
-# 0x10: skip_pool - actual init code starts here
+def ldr_rd_pool(rd, pool_addr):
+    """Emit `ldr Rd, [pc, #offset]` to load from a literal pool entry."""
+    diff = pool_addr - arm_pc()
+    if diff >= 0:
+        assert diff < 4096, f"Pool offset +{diff} too large"
+        w32(0xE59F0000 | (rd << 12) | diff)
+    else:
+        assert -diff < 4096, f"Pool offset {diff} too large"
+        w32(0xE51F0000 | (rd << 12) | (-diff))
+
+
+def branch(cond, target_offset):
+    """Emit a conditional/unconditional branch.
+
+    cond: 0xE = always, 0x1 = NE
+    target_offset: byte offset of the target instruction.
+    """
+    diff = (target_offset - arm_pc()) >> 2  # word offset, signed
+    imm24 = diff & 0x00FFFFFF
+    w32((cond << 28) | (0b1010 << 24) | imm24)
+
+
+# ---------------------------------------------------------------------------
+# Literal pool (referenced by PC-relative loads from the code below)
+# ---------------------------------------------------------------------------
+
+# 0x00: branch over the literal pool → code_start
+# We'll fix this up after emitting the pool.
+branch_fixup_pos = pc_offset
+w32(0)  # placeholder
+
+# Pool entries (addresses are byte offsets in the binary)
+POOL_SPICNT   = pc_offset; w32(SPICNT)
+POOL_SPIDATA  = pc_offset; w32(SPIDATA)
+POOL_IME      = pc_offset; w32(IME)
+POOL_SHMEM    = pc_offset; w32(SHMEM)
+
+code_start = pc_offset
+
+# Fix up the branch-over-pool instruction
+diff_words = (code_start - (branch_fixup_pos + 8)) >> 2
+buf.seek(branch_fixup_pos)
+buf.write(struct.pack("<I", 0xEA000000 | (diff_words & 0x00FFFFFF)))
+buf.seek(0, 2)  # seek to end
+
+# ---------------------------------------------------------------------------
+# Initialization: disable interrupts, load register pointers
+# ---------------------------------------------------------------------------
 
 # Disable ARM7 interrupts (IME = 0)
-# ldr r0, [pc, #-12]   ; load IME address from pool at 0x0C
-# PC at 0x10 reads as 0x18, so offset = 0x0C - 0x18 = -0x0C
-w32(0xE51F000C)    # ldr r0, [pc, #-0x0C]  → loads from 0x18-0x0C = 0x0C ✓
-w32(0xE3A01000)    # mov r1, #0
-w32(0xE5801000)    # str r1, [r0]
+ldr_rd_pool(0, POOL_IME)         # ldr r0, =IME
+w32(0xE3A01000)                   # mov r1, #0
+w32(0xE5801000)                   # str r1, [r0]
 
-# Load SPICNT address into r4
-# PC at 0x1C reads as 0x24, need pool at 0x04, offset = 0x04-0x24 = -0x20
-w32(0xE51F4020)    # ldr r4, [pc, #-0x20] → loads from 0x24-0x20 = 0x04 ✓
+# Load SPI register addresses into callee-save registers
+ldr_rd_pool(4, POOL_SPICNT)      # ldr r4, =SPICNT
+ldr_rd_pool(5, POOL_SPIDATA)     # ldr r5, =SPIDATA
 
-# Load SPIDATA address into r5
-# PC at 0x20 reads as 0x28, need pool at 0x08, offset = 0x08-0x28 = -0x20
-w32(0xE51F5020)    # ldr r5, [pc, #-0x20] → loads from 0x28-0x20 = 0x08 ✓
+# ---------------------------------------------------------------------------
+# PM init: enable both LCD backlights
+# ---------------------------------------------------------------------------
 
-# --- Write PM register 0 = 0x0C (enable both backlights) ---
+# Step 1: Write PM register address 0 with CS hold
+w32(0xE3A00A09)                   # mov r0, #0x09 << 8  → r0 = 0x0900
+w32(0xE3800080)                   # orr r0, r0, #0x80   → r0 = 0x0980
+w32(0xE1C400B0)                   # strh r0, [r4]       → SPICNT = PM + hold
+w32(0xE3A00000)                   # mov r0, #0x00       → register address 0
+w32(0xE1C500B0)                   # strh r0, [r5]       → SPIDATA = 0x00
 
-# SPICNT = 0x0180 | (1 << 8) | (1 << 11) = 0x0980
-#   bit 7: enable (0x80)
-#   bit 8: 8-bit transfer (0x100) — actually bits 8-9 are device select
-#   device 1 = power management → bits [9:8] = 01
-#   bit 11: CS hold (keep selected for multi-byte transfer)
-# SPICNT for PM write with hold: enable | device_PM | hold
-#   = 0x0080 | (1 << 8) | (1 << 11) = 0x0080 | 0x0100 | 0x0800 = 0x0980
+# Busy wait
+busy1 = pc_offset
+w32(0xE1D400B0)                   # ldrh r0, [r4]
+w32(0xE3100080)                   # tst r0, #0x80
+w32(0x1AFFFFFC)                   # bne busy1 (-3 instructions)
 
-# Step 1: Write register address (0x00 = PM_CONTROL, bit 7=0 for write)
-w32(0xE3A00A09)    # mov r0, #0x09 << 8 → r0 = 0x0900
-w32(0xE3800080)    # orr r0, r0, #0x80  → r0 = 0x0980
-w32(0xE1C400B0)    # strh r0, [r4]      → SPICNT = 0x0980
+# Step 2: Write data byte 0x0C (backlights on), release CS
+w32(0xE3A00A01)                   # mov r0, #0x01 << 8  → r0 = 0x0100
+w32(0xE3800080)                   # orr r0, r0, #0x80   → r0 = 0x0180
+w32(0xE1C400B0)                   # strh r0, [r4]       → SPICNT = PM + no hold
+w32(0xE3A0000C)                   # mov r0, #0x0C
+w32(0xE1C500B0)                   # strh r0, [r5]       → SPIDATA = 0x0C
 
-w32(0xE3A00000)    # mov r0, #0x00      → register address 0 (PM_CONTROL)
-w32(0xE1C500B0)    # strh r0, [r5]      → SPIDATA = 0x00
+# Busy wait
+busy2 = pc_offset
+w32(0xE1D400B0)                   # ldrh r0, [r4]
+w32(0xE3100080)                   # tst r0, #0x80
+w32(0x1AFFFFFC)                   # bne busy2
 
-# Wait for SPI not busy (SPICNT bit 7 goes low when done)
-# busy_wait_1:
-w32(0xE1D400B0)    # ldrh r0, [r4]      → read SPICNT
-w32(0xE3100080)    # tst r0, #0x80      → test busy bit
-w32(0x1AFFFFFC)    # bne busy_wait_1    → branch back 3 instructions if busy
+# ---------------------------------------------------------------------------
+# Load touchscreen-related register pointers
+# ---------------------------------------------------------------------------
 
-# Step 2: Write data byte (0x0C = enable both backlights)
-# SPICNT without hold (release CS after this byte):
-w32(0xE3A00A01)    # mov r0, #0x01 << 8 → r0 = 0x0100
-w32(0xE3800080)    # orr r0, r0, #0x80  → r0 = 0x0180
-w32(0xE1C400B0)    # strh r0, [r4]      → SPICNT = 0x0180 (no hold)
+ldr_rd_pool(9, POOL_SHMEM)        # ldr r9, =SHMEM
 
-w32(0xE3A0000C)    # mov r0, #0x0C      → data: backlights on
-w32(0xE1C500B0)    # strh r0, [r5]      → SPIDATA = 0x0C
+# Build SPICNT constants for touchscreen in r10/r11 (callee-save, built once)
+# r10 = SPICNT_TSC_HOLD = 0x8A81
+w32(0xE3A0AC8A)                   # mov r10, #0x8A << 8    → r10 = 0x8A00
+w32(0xE38AA081)                   # orr r10, r10, #0x81    → r10 = 0x8A81
+# r11 = SPICNT_TSC_LAST = 0x8281
+w32(0xE3A0BC82)                   # mov r11, #0x82 << 8    → r11 = 0x8200
+w32(0xE38BB081)                   # orr r11, r11, #0x81    → r11 = 0x8281
 
-# Wait for SPI not busy
-# busy_wait_2:
-w32(0xE1D400B0)    # ldrh r0, [r4]      → read SPICNT
-w32(0xE3100080)    # tst r0, #0x80      → test busy bit
-w32(0x1AFFFFFC)    # bne busy_wait_2
+# ---------------------------------------------------------------------------
+# Main loop: read touchscreen via SPI, detect pen from X value, store results
+# ---------------------------------------------------------------------------
+# EXTKEYIN bit 6 (PENIRQ) is always zero on DSi, so we can't use it for
+# pen-down detection. Instead, we detect pen state from the TSC X channel:
+#   X > 0x10 → pen touching (valid range ~0x100..0xED0)
+#   X ≤ 0x10 → pen released (GBATEK: X=000h when released)
 
-# --- Idle forever ---
-# halt:
-w32(0xE3A00000)    # mov r0, #0
-w32(0xEE070F90)    # mcr p15, 0, r0, c7, c0, 4  → wait for interrupt (halt)
-w32(0xEAFFFFFD)    # b halt
+tsc_loop = pc_offset
+
+# ---- Read X coordinate (TSC channel 5) ----
+
+# Transfer 1: send control byte (hold CS)
+w32(0xE1C4A0B0)                   # strh r10, [r4]   → SPICNT = TSC + hold
+w32(0xE3A000D1)                   # mov r0, #0xD1    → X control byte
+w32(0xE1C500B0)                   # strh r0, [r5]    → SPIDATA = 0xD1
+busy3 = pc_offset
+w32(0xE1D400B0)                   # ldrh r0, [r4]
+w32(0xE3100080)                   # tst r0, #0x80
+w32(0x1AFFFFFC)                   # bne busy3
+
+# Transfer 2: clock out high byte (hold CS, SPICNT unchanged)
+w32(0xE3A00000)                   # mov r0, #0
+w32(0xE1C500B0)                   # strh r0, [r5]    → SPIDATA = 0x00 (dummy)
+busy4 = pc_offset
+w32(0xE1D400B0)                   # ldrh r0, [r4]
+w32(0xE3100080)                   # tst r0, #0x80
+w32(0x1AFFFFFC)                   # bne busy4
+w32(0xE1D560B0)                   # ldrh r6, [r5]    → r6 = high byte
+
+# Transfer 3: clock out low byte (release CS)
+w32(0xE1C4B0B0)                   # strh r11, [r4]   → SPICNT = TSC + no hold
+w32(0xE3A00000)                   # mov r0, #0
+w32(0xE1C500B0)                   # strh r0, [r5]    → SPIDATA = 0x00 (dummy)
+busy5 = pc_offset
+w32(0xE1D400B0)                   # ldrh r0, [r4]
+w32(0xE3100080)                   # tst r0, #0x80
+w32(0x1AFFFFFC)                   # bne busy5
+w32(0xE1D570B0)                   # ldrh r7, [r5]    → r7 = low byte
+
+# Combine: r2 = ((r6 & 0x7F) << 5) | (r7 >> 3)
+w32(0xE206607F)                   # and r6, r6, #0x7F
+w32(0xE1A02286)                   # mov r2, r6, lsl #5
+w32(0xE18221A7)                   # orr r2, r2, r7, lsr #3
+
+# ---- Read Y coordinate (TSC channel 1, PD=00 to re-enable pen IRQ) ----
+
+# Transfer 1: send control byte (hold CS)
+w32(0xE1C4A0B0)                   # strh r10, [r4]   → SPICNT = TSC + hold
+w32(0xE3A00091)                   # mov r0, #0x91    → Y control byte (PD=01, ADC on)
+w32(0xE1C500B0)                   # strh r0, [r5]    → SPIDATA = 0x90
+busy6 = pc_offset
+w32(0xE1D400B0)                   # ldrh r0, [r4]
+w32(0xE3100080)                   # tst r0, #0x80
+w32(0x1AFFFFFC)                   # bne busy6
+
+# Transfer 2: clock out high byte (hold CS, SPICNT unchanged)
+w32(0xE3A00000)                   # mov r0, #0
+w32(0xE1C500B0)                   # strh r0, [r5]    → SPIDATA = 0x00 (dummy)
+busy7 = pc_offset
+w32(0xE1D400B0)                   # ldrh r0, [r4]
+w32(0xE3100080)                   # tst r0, #0x80
+w32(0x1AFFFFFC)                   # bne busy7
+w32(0xE1D560B0)                   # ldrh r6, [r5]    → r6 = high byte
+
+# Transfer 3: clock out low byte (release CS)
+w32(0xE1C4B0B0)                   # strh r11, [r4]   → SPICNT = TSC + no hold
+w32(0xE3A00000)                   # mov r0, #0
+w32(0xE1C500B0)                   # strh r0, [r5]    → SPIDATA = 0x00 (dummy)
+busy8 = pc_offset
+w32(0xE1D400B0)                   # ldrh r0, [r4]
+w32(0xE3100080)                   # tst r0, #0x80
+w32(0x1AFFFFFC)                   # bne busy8
+w32(0xE1D570B0)                   # ldrh r7, [r5]    → r7 = low byte
+
+# Combine: r3 = ((r6 & 0x7F) << 5) | (r7 >> 3)
+w32(0xE206607F)                   # and r6, r6, #0x7F
+w32(0xE1A03286)                   # mov r3, r6, lsl #5
+w32(0xE18331A7)                   # orr r3, r3, r7, lsr #3
+
+# ---- Store results and detect pen state from X value ----
+
+w32(0xE1C920B0)                   # strh r2, [r9, #0]  → raw_x
+w32(0xE1C930B2)                   # strh r3, [r9, #2]  → raw_y
+
+# Pen detection: X > 0x10 = touching, X <= 0x10 = released.
+# EXTKEYIN PENIRQ is always 0 on DSi so we use the ADC value directly.
+w32(0xE3520010)                   # cmp r2, #0x10
+w32(0xC3A00001)                   # movgt r0, #1       (GT: pen touching)
+w32(0xD3A00000)                   # movle r0, #0       (LE: pen released)
+w32(0xE1C900B4)                   # strh r0, [r9, #4]  → pen_down
+
+# ---- sleep ----
+
+# --- Delay ~16ms (one frame period) then loop ---
+# The ARM7TDMI has no WFI instruction (mcr p15,c7,c0,4 is ARM946E-S only;
+# on ARM7 it traps as undefined and the BIOS handler returns, making it a
+# NOP). We need a real delay to give the TSC analog circuitry time to
+# charge the touchscreen plates between reads. Without this, the TSC
+# returns stale "pen released" values because it's being polled too fast.
+# ~172K iterations × 3 cycles/iter ÷ 33MHz ≈ 16ms ≈ one VBlank period.
+sleep = pc_offset
+w32(0xE3A00A2A)                   # mov r0, #0x2A000   (~172K)
+# delay_loop:
+w32(0xE2500001)                   # subs r0, r0, #1
+w32(0x1AFFFFFD)                   # bne delay_loop     (back to subs)
+branch(0xE, tsc_loop)             # b tsc_loop
+
+# (No forward branches to fix up — linear flow to sleep.)
+
+# ---------------------------------------------------------------------------
+# Build ELF
+# ---------------------------------------------------------------------------
 
 binary = buf.getvalue()
 
-# Build ELF
 e_ident = b"\x7fELF" + bytes([1, 1, 1, 0]) + b"\x00" * 8
 ehdr = struct.pack(
     "<HHIIIIIHHHHHH",
@@ -181,9 +367,8 @@ phdr = struct.pack(
     4,
 )
 
-out = sys.argv[1] if len(sys.argv) > 1 else "arm7.elf"
-with open(out, "wb") as f:
+with open(out_path, "wb") as f:
     f.write(e_ident + ehdr + phdr + binary)
 
-print(f"Generated {out}: {52 + 32 + len(binary)} bytes ({len(binary)} bytes code), entry 0x{ENTRY:08X}")
-print(f"ARM7 initializes PM backlights then halts.")
+print(f"Generated {out_path}: {52 + 32 + len(binary)} bytes ({len(binary)} bytes code), entry 0x{ENTRY:08X}")
+print(f"ARM7: PM backlights + TSC polling, SHMEM=0x{SHMEM:08X}")

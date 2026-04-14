@@ -14,6 +14,7 @@ mod gpu_sink;
 #[cfg(not(feature = "software3d"))]
 mod gx;
 mod hud;
+mod touch;
 
 use core::arch::naked_asm;
 use core::cell::UnsafeCell;
@@ -23,7 +24,9 @@ use roguelike_core::rules::command::GameCommand;
 use roguelike_core::rules::direction::Direction;
 #[allow(unused_imports)]
 use roguelike_core::rules::game_view::GameView;
+use roguelike_core::tier_compact::autorun::{stairs_in_fov, CompactBfsStepper, CompactStepOutcome};
 use roguelike_core::tier_compact::game::CompactGameState;
+use roguelike_core::tier_compact::pathfinding::BfsBuffers;
 use roguelike_core::tier_compact::types::{MAP_HEIGHT, MAP_WIDTH};
 #[cfg(feature = "software3d")]
 use roguelike_renderer3d::framebuffer::Framebuffer;
@@ -246,6 +249,7 @@ const POWCNT1_ENABLE: u16 = 0x820F; // LCD + 2D-A + 3D + 3D-geo + 2D-B, A=top
 const KEY_A: u16 = 1 << 0;
 #[cfg(not(feature = "software3d"))]
 const KEY_SELECT: u16 = 1 << 2; // used for fog tuning (hardware 3D only)
+const KEY_START: u16 = 1 << 3; // cycles debug overlay mode
 const KEY_RIGHT: u16 = 1 << 4;
 const KEY_LEFT: u16 = 1 << 5;
 const KEY_UP: u16 = 1 << 6;
@@ -278,6 +282,83 @@ static GAME_SLOT: GameSlot = GameSlot(UnsafeCell::new(MaybeUninit::uninit()));
 
 fn game() -> &'static mut CompactGameState {
     unsafe { &mut *(*GAME_SLOT.0.get()).as_mut_ptr() }
+}
+
+// ---------------------------------------------------------------------------
+// Touchscreen pathfinding state
+// ---------------------------------------------------------------------------
+
+/// BFS buffers for touch-initiated pathfinding (~2,450 bytes).
+/// Stored in a static to avoid DTCM stack pressure (same MaybeUninit
+/// pattern as GAME_SLOT).
+struct BfsSlot(UnsafeCell<MaybeUninit<BfsBuffers>>);
+unsafe impl Sync for BfsSlot {}
+static BFS_SLOT: BfsSlot = BfsSlot(UnsafeCell::new(MaybeUninit::uninit()));
+
+struct StepperSlot(UnsafeCell<MaybeUninit<CompactBfsStepper>>);
+unsafe impl Sync for StepperSlot {}
+static STEPPER_SLOT: StepperSlot = StepperSlot(UnsafeCell::new(MaybeUninit::uninit()));
+
+/// Whether a touch-initiated pathfind is currently animating.
+struct PathfindFlag(UnsafeCell<bool>);
+unsafe impl Sync for PathfindFlag {}
+static PATHFINDING: PathfindFlag = PathfindFlag(UnsafeCell::new(false));
+
+fn is_pathfinding() -> bool {
+    unsafe { *PATHFINDING.0.get() }
+}
+fn set_pathfinding(v: bool) {
+    unsafe { *PATHFINDING.0.get() = v; }
+}
+
+/// Process a single touch-tap and either dispatch a GameCommand or start
+/// animated pathfinding.
+fn handle_touch(screen_x: u16, screen_y: u16) {
+    let g = game();
+    let (px, py) = g.player_xy();
+    let (map_w, map_h) = g.map_dims();
+    let (vx, vy) = automap::viewport_offset(px, py, map_w, map_h);
+
+    let Some((wx, wy)) = touch::screen_to_world(screen_x, screen_y, vx, vy) else {
+        return; // tapped status bar or messages
+    };
+
+    let dx = wx - px;
+    let dy = wy - py;
+    let dist = dx.abs().max(dy.abs()); // Chebyshev distance
+
+    if dist == 0 {
+        // Tap on self → context-sensitive interact (pickup / descend)
+        g.step_view(GameCommand::Interact);
+    } else if dist == 1 {
+        // Tap adjacent → move (attacks if monster is there)
+        if let Some(dir) = Direction::from_offset(dx, dy) {
+            g.step_view(GameCommand::Move(dir));
+        }
+    } else {
+        // Tap distant → start animated BFS pathfinding
+        if !g.map.in_bounds(wx, wy) || !g.fov.is_explored(wx, wy) || !g.map.is_walkable(wx, wy) {
+            return; // can't pathfind to walls, unexplored, or OOB
+        }
+        let stairs_vis = stairs_in_fov(&g.map, &g.fov);
+        unsafe {
+            (*BFS_SLOT.0.get()).write(BfsBuffers::new());
+            (*STEPPER_SLOT.0.get()).write(CompactBfsStepper::new(wx, wy, stairs_vis));
+        }
+        set_pathfinding(true);
+    }
+}
+
+/// Advance the current pathfind by one BFS step. Returns `true` if the
+/// pathfind is still active after this step.
+fn pathfind_step() -> bool {
+    let g = game();
+    let buf = unsafe { (*BFS_SLOT.0.get()).assume_init_mut() };
+    let stepper = unsafe { (*STEPPER_SLOT.0.get()).assume_init_mut() };
+    match stepper.next_step(g, buf) {
+        CompactStepOutcome::Continue => true,
+        CompactStepOutcome::Done(_) => false,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -498,38 +579,69 @@ extern "C" fn main() -> ! {
 
     let mut frame: u32 = 0;
     let mut prev_keys: u16 = 0;
+    let mut prev_pen_down: bool = false;
+    #[cfg(not(feature = "software3d"))]
+    let mut debug_mode: u8 = 0; // 0=Perf, 1=Touch, 2=Off
 
     loop {
         let keys = read_keys();
+        let pressed = keys & !prev_keys;
 
-        // Select + d-pad: fog parameter tuning (hardware path only).
-        // Holding SELECT hijacks the d-pad for fog controls instead of
-        // player movement. This avoids a rebuild/flash cycle per tuning
-        // iteration on real DS hardware.
-        #[cfg(not(feature = "software3d"))]
-        if keys & KEY_SELECT != 0 {
-            let pressed = keys & !prev_keys;
-            if pressed & KEY_UP != 0 {
-                let v = gpu_sink::fog_offset().saturating_add(0x100).min(0x7F00);
-                gpu_sink::set_fog_offset(v);
-            } else if pressed & KEY_DOWN != 0 {
-                let v = gpu_sink::fog_offset().saturating_sub(0x100);
-                gpu_sink::set_fog_offset(v);
-            } else if pressed & KEY_RIGHT != 0 {
-                let v = gpu_sink::fog_shift().saturating_add(1).min(10);
-                gpu_sink::set_fog_shift(v);
-            } else if pressed & KEY_LEFT != 0 {
-                let v = gpu_sink::fog_shift().saturating_sub(1);
-                gpu_sink::set_fog_shift(v);
+        // --- Input priority: buttons > pathfinding > new touch ---
+        //
+        // Any button press cancels an active pathfind and is processed
+        // normally. If no button was pressed, an active pathfind advances
+        // one BFS step. If idle and no button, we check for a new touch.
+
+        if pressed != 0 {
+            // Button pressed — cancel any active pathfind
+            set_pathfinding(false);
+
+            // Select + d-pad: fog parameter tuning (hardware path only).
+            #[cfg(not(feature = "software3d"))]
+            if keys & KEY_SELECT != 0 {
+                if pressed & KEY_UP != 0 {
+                    let v = gpu_sink::fog_offset().saturating_add(0x100).min(0x7F00);
+                    gpu_sink::set_fog_offset(v);
+                } else if pressed & KEY_DOWN != 0 {
+                    let v = gpu_sink::fog_offset().saturating_sub(0x100);
+                    gpu_sink::set_fog_offset(v);
+                } else if pressed & KEY_RIGHT != 0 {
+                    let v = gpu_sink::fog_shift().saturating_add(1).min(10);
+                    gpu_sink::set_fog_shift(v);
+                } else if pressed & KEY_LEFT != 0 {
+                    let v = gpu_sink::fog_shift().saturating_sub(1);
+                    gpu_sink::set_fog_shift(v);
+                }
+            } else if let Some(cmd) = keys_to_command(keys, prev_keys) {
+                game().step_view(cmd);
             }
-        } else if let Some(cmd) = keys_to_command(keys, prev_keys) {
-            game().step_view(cmd);
+
+            // Software path: always dispatch normally (no fog tuning).
+            #[cfg(feature = "software3d")]
+            if let Some(cmd) = keys_to_command(keys, prev_keys) {
+                game().step_view(cmd);
+            }
+        } else if is_pathfinding() {
+            // Animated BFS: one step per frame (same pattern as GBA
+            // game_loop.rs run_auto_explore_compact)
+            if !pathfind_step() {
+                set_pathfinding(false);
+            }
+        } else {
+            // No button, no active pathfind — check for new touch
+            let (pen_now, tap) = touch::read_edge(prev_pen_down);
+            prev_pen_down = pen_now;
+            if let Some((sx, sy)) = tap {
+                handle_touch(sx, sy);
+            }
         }
 
-        // Software path: always dispatch normally (no fog tuning).
-        #[cfg(feature = "software3d")]
-        if let Some(cmd) = keys_to_command(keys, prev_keys) {
-            game().step_view(cmd);
+        // Update prev_pen_down even when buttons consumed the frame,
+        // so we don't get a stale edge on the next idle frame.
+        if pressed != 0 || is_pathfinding() {
+            let (pen_now, _) = touch::read_edge(prev_pen_down);
+            prev_pen_down = pen_now;
         }
 
         prev_keys = keys;
@@ -544,11 +656,40 @@ extern "C" fn main() -> ! {
         let t1 = read_timer32();
         let frame_ticks = t1.wrapping_sub(t0);
 
-        // Display "FPS NN MS MMMM" on Engine B (top screen). Works in
-        // both hardware and software 3D paths — the HUD lives on Engine
-        // B regardless of which engine the game is on.
+        // Debug overlay (Engine A BG1, hardware-3D only).
+        // START cycles: 0=Performance → 1=Touch → 2=Off → 0=...
         #[cfg(not(feature = "software3d"))]
-        update_hud_fps(frame_ticks);
+        {
+            if pressed & KEY_START != 0 {
+                debug_mode = (debug_mode + 1) % 3;
+                // Clear all debug rows on mode switch
+                let blank = [b' '; 16];
+                for row in 0..5 {
+                    debug_overlay::write_text(0, row, &blank);
+                }
+            }
+
+            match debug_mode {
+                0 => update_hud_fps(frame_ticks),
+                1 => {
+                    let base = touch::shmem_addr() as *const u16;
+                    let rx = unsafe { base.add(0).read_volatile() };
+                    let ry = unsafe { base.add(1).read_volatile() };
+                    let pd = unsafe { base.add(2).read_volatile() };
+                    let mut row0 = [b' '; 16];
+                    let mut p = debug_hud::write_str(&mut row0, 0, b"X ");
+                    p = debug_hud::write_u16_hex(&mut row0, p, rx);
+                    p = debug_hud::write_str(&mut row0, p, b" Y ");
+                    let _ = debug_hud::write_u16_hex(&mut row0, p, ry);
+                    debug_overlay::write_text(0, 0, &row0);
+                    let mut row1 = [b' '; 16];
+                    let p = debug_hud::write_str(&mut row1, 0, b"PEN ");
+                    let _ = debug_hud::write_u16_hex(&mut row1, p, pd);
+                    debug_overlay::write_text(0, 1, &row1);
+                }
+                _ => {} // Off — overlay was cleared on switch
+            }
+        }
         automap::render_automap(game());
         hud::render_hud(game());
 

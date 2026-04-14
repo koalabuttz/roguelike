@@ -18,10 +18,10 @@ use roguelike_core::rules::game_view::{GameView, TileVisibility};
 use crate::debug_hud;
 
 /// Tile rows available for the map viewport.
-const MAP_ROWS: usize = 20;
+pub(crate) const MAP_ROWS: usize = 20;
 
 /// Tile columns (full screen width).
-const MAP_COLS: usize = 32;
+pub(crate) const MAP_COLS: usize = 32;
 
 /// Palette bank for explored-but-not-visible tiles.
 const PAL_DIM: u16 = 9;
@@ -42,16 +42,12 @@ fn game_color_to_pal(color: GameColor) -> u16 {
     }
 }
 
-/// Render the full automap: terrain, items, entities.
+/// Compute the automap viewport origin in world coordinates.
 ///
-/// Map tiles are drawn first, then items overlay visible cells, then
-/// entities overlay everything (corpses first, living on top) — same
-/// layering order as the terminal renderer.
-pub fn render_automap(state: &impl GameView) {
-    let (map_w, map_h) = state.map_dims();
-    let (px, py) = state.player_xy();
-
-    // Viewport: center on player, clamp to map edges.
+/// Centers on the player, clamped to map edges so the viewport never
+/// extends past the map boundary. Returns `(view_x, view_y)` in tile
+/// coordinates — the world tile at the top-left corner of the viewport.
+pub(crate) fn viewport_offset(px: i32, py: i32, map_w: i32, map_h: i32) -> (usize, usize) {
     let view_x = if (map_w as usize) <= MAP_COLS {
         0usize
     } else {
@@ -67,6 +63,19 @@ pub fn render_automap(state: &impl GameView) {
         let ideal = (py as usize).saturating_sub(half);
         ideal.min((map_h as usize) - MAP_ROWS)
     };
+
+    (view_x, view_y)
+}
+
+/// Render the full automap: terrain, items, entities.
+///
+/// Map tiles are drawn first, then items overlay visible cells, then
+/// entities overlay everything (corpses first, living on top) — same
+/// layering order as the terminal renderer.
+pub fn render_automap(state: &impl GameView) {
+    let (map_w, map_h) = state.map_dims();
+    let (px, py) = state.player_xy();
+    let (view_x, view_y) = viewport_offset(px, py, map_w, map_h);
 
     // Pass 1: Map tiles with FOV dimming.
     for screen_y in 0..MAP_ROWS {

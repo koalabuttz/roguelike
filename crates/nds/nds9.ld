@@ -44,7 +44,16 @@ SECTIONS
         __bss_end = .;
     } > main
 
-    /* Heap starts after BSS (grows up) */
+    /* ARM7↔ARM9 shared touch data (written by ARM7, read by ARM9).
+     * Placed after BSS so it's part of our binary's address space.
+     * The ARM7 gen_arm7.py SHMEM constant must match __touch_shmem. */
+    .shared (NOLOAD) : ALIGN(16)
+    {
+        __touch_shmem = .;
+        *(.shared .shared.*)
+    } > main
+
+    /* Heap starts after shared section (grows up) */
     . = ALIGN(8);
     __heap_start = .;
 

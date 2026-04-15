@@ -1,0 +1,11 @@
+[build]
+target = "armv7-sony-vita-newlibeabihf"
+
+# build-std is configured via [package.metadata.vita] build_std field,
+# which cargo-vita picks up. The [unstable] section here is left out
+# to avoid conflicts with cargo-vita's own build-std injection.
+
+[target.armv7-sony-vita-newlibeabihf]
+# vitasdk provides arm-vita-eabi-gcc. Requires VITASDK env var set,
+# e.g. export VITASDK=/usr/local/vitasdk
+linker = "arm-vita-eabi-gcc"

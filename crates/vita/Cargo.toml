@@ -1,0 +1,47 @@
+[package]
+name = "roguelike-vita"
+version = "0.5.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "PlayStation Vita port of the roguelike dungeon crawler"
+
+# Standalone workspace — not part of the parent workspace.
+# The Vita target (armv7-sony-vita-newlibeabihf) requires cargo-vita,
+# nightly build-std, and vitasdk. Isolating it prevents the parent
+# workspace from inheriting those constraints.
+[workspace]
+
+[package.metadata.vita]
+title_id = "RGLK00001"
+title_name = "Roguelike"
+# build-std is handled by cargo-vita via this field.
+# "std,panic_unwind" matches the examples workspace convention.
+build_std = "std,panic_unwind"
+
+[dependencies]
+# Full std features: GameState (standard tier), serde for saves later.
+# No dev-tools or data-files — we don't need the debug console or
+# hot-reload game.toml on Vita. GameData::defaults() is used instead.
+roguelike-core = { path = "../core", default-features = false, features = ["std"] }
+
+# Raw FFI bindings to vitasdk.
+# all-stubs ensures vita2d (which internally calls SceGxm, SceDisplay,
+# SceSysmem, SceAppMgr, SceKernelDmacMgr, etc.) links correctly without
+# needing to enumerate every transitive stub dependency manually.
+# Narrow this down in a later phase once the full stub dependency set
+# is confirmed from a successful build.
+vitasdk-sys = { version = "0.3.3", features = ["all-stubs"] }
+
+# Shims for libc functions not provided by Vita SDK newlib
+# (e.g. pthread stubs, environment variables).
+vita-newlib-shims = "0.3.1"
+
+[[bin]]
+name = "roguelike-vita"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+debug = true  # Keep DWARF in ELF for addr2line post-mortem; stripped from .vpk

@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - ANSI CSI parser unbounded buffer (DoS) (#243)
 
 ### Added
+- VITA Phase 1: Scaffold and static rendering (#317)
 - NDS: Phase 5b — Touch buttons on bottom screen (Inventory, Look, etc.) (#312)
 - NDS: Replace ARM7 delay loop with VBlank IRQ halt + restore PD=00 pen IRQ (#316)
 - NDS: Phase 5 — Touchscreen input via bare-metal ARM7 TSC + IPC (#311)

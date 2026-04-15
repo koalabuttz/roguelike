@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - ANSI CSI parser unbounded buffer (DoS) (#243)
 
 ### Added
+- SSH: Auto-save game on disconnect for seamless reconnect (#284)
 - VITA Phase 1: Scaffold and static rendering (#317)
 - NDS: Phase 5b — Touch buttons on bottom screen (Inventory, Look, etc.) (#312)
 - NDS: Replace ARM7 delay loop with VBlank IRQ halt + restore PD=00 pen IRQ (#316)
@@ -103,6 +104,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Docs: Update CLAUDE.md with renderer3d, NDS, and VITA crate entries (#323)
 - NDS: Phase 4 — Engine B tile-based HUD (status, messages, minimap) (#309)
 - NDS Phase 3: glyph billboard rendering via A3I5 textures (#307)
 - NDS Phase 2: hardware matrix stack + hardware fog (#306)

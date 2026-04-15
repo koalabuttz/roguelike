@@ -65,21 +65,22 @@ pub fn game_color_to_rgba(c: GameColor) -> u32 {
 /// Dim a vita2d color to ~15% brightness (explored-but-not-visible tiles).
 /// On OLED, 15% is genuinely dim — not the "dark grey on LCD backlight"
 /// that terminal emulators produce.
+/// Uses integer math: 39/256 ≈ 15.2%.
 fn dim_color(color: u32) -> u32 {
-    let r = ((color & 0xFF) as f32 * 0.15) as u32;
-    let g = (((color >> 8) & 0xFF) as f32 * 0.15) as u32;
-    let b = (((color >> 16) & 0xFF) as f32 * 0.15) as u32;
+    let r = ((color & 0xFF) * 39) >> 8;
+    let g = (((color >> 8) & 0xFF) * 39) >> 8;
+    let b = (((color >> 16) & 0xFF) * 39) >> 8;
     r | (g << 8) | (b << 16) | 0xFF000000
 }
 
 // ── Viewport ─────────────────────────────────────────────────────────────────
 
 fn viewport_origin(state: &dyn GameView) -> (i32, i32) {
-    let (px, py) = state.player_xy();
-    let (mw, mh) = state.map_dims();
-    let vx = (px - VP_COLS / 2).clamp(0, (mw - VP_COLS).max(0));
-    let vy = (py - VP_ROWS / 2).clamp(0, (mh - VP_ROWS).max(0));
-    (vx, vy)
+    state.viewport_origin(VP_COLS, VP_ROWS)
+}
+
+fn in_viewport(sx: i32, sy: i32) -> bool {
+    (0..VP_COLS).contains(&sx) && (0..VP_ROWS).contains(&sy)
 }
 
 // ── Main render entry ─────────────────────────────────────────────────────────
@@ -152,7 +153,7 @@ fn render_items(vita2d: &Vita2d, state: &dyn GameView, vx: i32, vy: i32) {
         }
         let sx = ix - vx;
         let sy = iy - vy;
-        if sx < 0 || sx >= VP_COLS || sy < 0 || sy >= VP_ROWS {
+        if !in_viewport(sx, sy) {
             continue;
         }
         let (_, color) = state.render_item(i);
@@ -183,7 +184,7 @@ fn render_entities(vita2d: &Vita2d, state: &dyn GameView, vx: i32, vy: i32) {
             }
             let sx = ex - vx;
             let sy = ey - vy;
-            if sx < 0 || sx >= VP_COLS || sy < 0 || sy >= VP_ROWS {
+            if !in_viewport(sx, sy) {
                 continue;
             }
 

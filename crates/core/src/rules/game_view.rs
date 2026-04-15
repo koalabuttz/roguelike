@@ -146,6 +146,16 @@ pub trait GameView {
         let kind = self.item_kind_at(i);
         (rules_items::glyph(kind), rules_items::color(kind))
     }
+
+    /// Viewport origin (top-left world tile) for a player-centered camera
+    /// clamped to map boundaries.
+    fn viewport_origin(&self, viewport_w: i32, viewport_h: i32) -> (i32, i32) {
+        let (px, py) = self.player_xy();
+        let (mw, mh) = self.map_dims();
+        let vx = (px - viewport_w / 2).clamp(0, (mw - viewport_w).max(0));
+        let vy = (py - viewport_h / 2).clamp(0, (mh - viewport_h).max(0));
+        (vx, vy)
+    }
 }
 
 #[cfg(test)]
@@ -418,5 +428,35 @@ mod tests {
         let (glyph, color) = v.render_item(0);
         assert_eq!(glyph, rules_items::glyph(ItemKind::HealthPotion));
         assert_eq!(color, rules_items::color(ItemKind::HealthPotion));
+    }
+
+    #[test]
+    fn viewport_origin_centers_on_player() {
+        // MockView: map 10×10, player at (5,5). Viewport 6×4 → origin (2,3).
+        let v = MockView::default();
+        let (vx, vy) = v.viewport_origin(6, 4);
+        assert_eq!(vx, 2);
+        assert_eq!(vy, 3);
+    }
+
+    #[test]
+    fn viewport_origin_clamps_to_zero() {
+        // MockView: map 10×10, player at (5,5). Viewport larger than offset → clamp.
+        let v = MockView::default();
+        let (vx, vy) = v.viewport_origin(12, 12);
+        assert_eq!(vx, 0);
+        assert_eq!(vy, 0);
+    }
+
+    #[test]
+    fn viewport_origin_clamps_to_max() {
+        // Player at (5,5) in a 10×10 map with small viewport → no clamp.
+        // Player at (9,9) would clamp to (map - viewport).
+        // MockView player is at (5,5), map is 10×10, viewport 4×4.
+        // vx = (5-2).clamp(0, 6) = 3, vy = (5-2).clamp(0, 6) = 3.
+        let v = MockView::default();
+        let (vx, vy) = v.viewport_origin(4, 4);
+        assert_eq!(vx, 3);
+        assert_eq!(vy, 3);
     }
 }

@@ -1,6 +1,7 @@
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
+use crate::rules::dungeon::{self, CorridorSegment};
 use crate::types::{Coord, Pos, Stat};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -205,6 +206,13 @@ impl Map {
         }
     }
 
+    fn carve_segment(&mut self, seg: CorridorSegment) {
+        match seg {
+            CorridorSegment::Horizontal { x1, x2, y } => self.carve_h_tunnel(x1, x2, y),
+            CorridorSegment::Vertical { y1, y2, x } => self.carve_v_tunnel(y1, y2, x),
+        }
+    }
+
     fn carve_h_tunnel(&mut self, x1: Coord, x2: Coord, y: Coord) {
         for x in x1.min(x2)..=x1.max(x2) {
             if self.in_bounds(x, y) {
@@ -266,12 +274,10 @@ impl Map {
                 player_start = (new_cx, new_cy);
             } else {
                 let (prev_cx, prev_cy) = self.rooms.last().unwrap().center();
-                if rng.gen_bool(0.5) {
-                    self.carve_h_tunnel(prev_cx, new_cx, prev_cy);
-                    self.carve_v_tunnel(prev_cy, new_cy, new_cx);
-                } else {
-                    self.carve_v_tunnel(prev_cy, new_cy, prev_cx);
-                    self.carve_h_tunnel(prev_cx, new_cx, new_cy);
+                for seg in
+                    dungeon::corridor_between(prev_cx, prev_cy, new_cx, new_cy, rng.gen_bool(0.5))
+                {
+                    self.carve_segment(seg);
                 }
             }
 

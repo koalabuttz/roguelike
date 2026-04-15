@@ -9,6 +9,7 @@
 use super::prng::LfsrRng16;
 use super::types::*;
 use crate::rules::balance;
+use crate::rules::dungeon::{self, CorridorSegment};
 
 pub const TILE_WALL: u8 = 0;
 pub const TILE_STRUCTURAL: u8 = 1;
@@ -176,6 +177,17 @@ impl MicroMap {
         }
     }
 
+    fn carve_segment(&mut self, seg: CorridorSegment) {
+        match seg {
+            CorridorSegment::Horizontal { x1, x2, y } => {
+                self.carve_h_tunnel(x1 as u8, x2 as u8, y as u8);
+            }
+            CorridorSegment::Vertical { y1, y2, x } => {
+                self.carve_v_tunnel(y1 as u8, y2 as u8, x as u8);
+            }
+        }
+    }
+
     fn carve_h_tunnel(&mut self, x1: u8, x2: u8, y: u8) {
         let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
         let mut x = min_x;
@@ -256,7 +268,11 @@ impl MicroMap {
             // Check for overlap with existing rooms
             let mut overlaps = false;
             for i in 0..self.room_count {
-                if new_room.intersects(&self.rooms[i as usize]) {
+                let r = &self.rooms[i as usize];
+                if dungeon::rooms_intersect(
+                    x as i32, y as i32, w as i32, h as i32, r.x as i32, r.y as i32, r.w as i32,
+                    r.h as i32,
+                ) {
                     overlaps = true;
                     break;
                 }
@@ -267,19 +283,20 @@ impl MicroMap {
 
             self.carve_room(&new_room);
 
+            let (new_cx, new_cy) = dungeon::room_center(x as i32, y as i32, w as i32, h as i32);
             if self.room_count == 0 {
-                start_x = new_room.cx();
-                start_y = new_room.cy();
+                start_x = new_cx as u8;
+                start_y = new_cy as u8;
             } else {
                 let prev = self.rooms[(self.room_count - 1) as usize];
-                let (px, py) = (prev.cx(), prev.cy());
-                let (nx, ny) = (new_room.cx(), new_room.cy());
-                if rng.coin() {
-                    self.carve_h_tunnel(px, nx, py);
-                    self.carve_v_tunnel(py, ny, nx);
-                } else {
-                    self.carve_v_tunnel(py, ny, px);
-                    self.carve_h_tunnel(px, nx, ny);
+                let (prev_cx, prev_cy) = dungeon::room_center(
+                    prev.x as i32,
+                    prev.y as i32,
+                    prev.w as i32,
+                    prev.h as i32,
+                );
+                for seg in dungeon::corridor_between(prev_cx, prev_cy, new_cx, new_cy, rng.coin()) {
+                    self.carve_segment(seg);
                 }
             }
 

@@ -104,6 +104,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Unify dungeon helpers into shared rules/dungeon.rs module (#331)
+- Unify spawn logic into shared rules/spawn.rs module (#330)
+- Unify AI logic into shared rules/ai.rs module (#329)
 - Docs: Update CLAUDE.md with renderer3d, NDS, and VITA crate entries (#323)
 - NDS: Phase 4 — Engine B tile-based HUD (status, messages, minimap) (#309)
 - NDS Phase 3: glyph billboard rendering via A3I5 textures (#307)

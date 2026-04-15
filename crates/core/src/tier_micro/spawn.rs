@@ -1,6 +1,7 @@
 //! Weighted monster and item spawning for the micro tier.
 //!
-//! Uses `rules::monster_table` and `rules::items` spawn weights and stat lookups.
+//! Uses `rules::spawn` for weighted selection and depth scaling,
+//! `rules::monster_table` and `rules::items` for spawn data.
 
 use super::entity::EntityStore;
 use super::item_store::ItemStore;
@@ -10,24 +11,16 @@ use super::types::*;
 use crate::rules::balance;
 use crate::rules::items::{self as rules_items, ItemKind, KIND_COUNT as ITEM_KIND_COUNT};
 use crate::rules::monster_table::{self, KIND_COUNT, MonsterKind, SPAWN_KINDS, SPAWN_WEIGHTS};
+use crate::rules::spawn as spawn_rules;
 
 /// Pick a random monster kind using the rules/ spawn weights.
 pub fn pick_monster_kind(rng: &mut LfsrRng16) -> MonsterKind {
-    let mut total: u8 = 0;
-    for &w in &SPAWN_WEIGHTS[..KIND_COUNT] {
-        total = total.saturating_add(w);
-    }
+    let total = spawn_rules::total_weight(&SPAWN_WEIGHTS[..KIND_COUNT]);
     if total == 0 {
         return SPAWN_KINDS[0];
     }
-    let mut roll = rng.range_u8(0, total - 1);
-    for i in 0..KIND_COUNT {
-        if roll < SPAWN_WEIGHTS[i] {
-            return SPAWN_KINDS[i];
-        }
-        roll -= SPAWN_WEIGHTS[i];
-    }
-    SPAWN_KINDS[0]
+    let roll = rng.range_u8(0, total - 1);
+    SPAWN_KINDS[spawn_rules::weighted_select(roll, &SPAWN_WEIGHTS[..KIND_COUNT])]
 }
 
 /// Spawn monsters in rooms (skip room 0 = player start).
@@ -56,28 +49,19 @@ pub fn spawn_monsters(entities: &mut EntityStore, map: &MicroMap, rng: &mut Lfsr
 
 /// Pick a random item kind using the rules/ spawn weights, filtered by depth.
 pub fn pick_item_kind(rng: &mut LfsrRng16, depth: u8) -> ItemKind {
-    let mut total: u8 = 0;
-    for i in 0..ITEM_KIND_COUNT {
-        let (kind, weight) = rules_items::SPAWN_TABLE[i];
+    let mut weights = [0u8; ITEM_KIND_COUNT];
+    for (i, &(kind, weight)) in rules_items::SPAWN_TABLE.iter().enumerate() {
         if rules_items::min_depth(kind) <= depth {
-            total = total.saturating_add(weight);
+            weights[i] = weight;
         }
     }
+    let total = spawn_rules::total_weight(&weights);
     if total == 0 {
         return rules_items::SPAWN_TABLE[0].0;
     }
-    let mut roll = rng.range_u8(0, total - 1);
-    for i in 0..ITEM_KIND_COUNT {
-        let (kind, weight) = rules_items::SPAWN_TABLE[i];
-        if rules_items::min_depth(kind) > depth {
-            continue;
-        }
-        if roll < weight {
-            return kind;
-        }
-        roll -= weight;
-    }
-    rules_items::SPAWN_TABLE[0].0
+    let roll = rng.range_u8(0, total - 1);
+    let idx = spawn_rules::weighted_select(roll, &weights);
+    rules_items::SPAWN_TABLE[idx].0
 }
 
 /// Spawn items in rooms (skip room 0 = player start, max 1 per room).
@@ -103,17 +87,8 @@ pub fn spawn_items(items: &mut ItemStore, map: &MicroMap, depth: u8, rng: &mut L
 // ---------------------------------------------------------------------------
 
 /// Apply per-floor stat increases to a single entity at `idx`.
-///
-/// Monsters gain +1 HP/ATK every `DEPTH_SCALE_INTERVAL` floors (integer
-/// division), so difficulty ramps gradually over 22 levels instead of
-/// becoming unwinnable by floor 10.
 pub fn scale_monster(entities: &mut EntityStore, idx: usize, depth: u8) {
-    if depth <= 1 {
-        return;
-    }
-    let steps = (depth - 1) / balance::DEPTH_SCALE_INTERVAL;
-    let hp_bonus = balance::MONSTER_HP_PER_FLOOR.saturating_mul(steps);
-    let atk_bonus = balance::MONSTER_ATK_PER_FLOOR.saturating_mul(steps);
+    let (hp_bonus, atk_bonus) = spawn_rules::depth_bonus(depth);
     entities.hp[idx] = entities.hp[idx].saturating_add(hp_bonus);
     entities.max_hp[idx] = entities.max_hp[idx].saturating_add(hp_bonus);
     entities.atk[idx] = entities.atk[idx].saturating_add(atk_bonus);
@@ -206,7 +181,6 @@ mod tests {
 
     #[test]
     fn apply_depth_scaling_noop_within_first_interval() {
-        // Depths 2 and 3 should give 0 bonus: (2-1)/3 = 0, (3-1)/3 = 0
         let mut entities = EntityStore::new();
         entities.spawn_player(0, 0);
         entities.spawn_monster(MonsterKind::Goblin, 5, 5, AiBehavior::Chase);
@@ -254,7 +228,6 @@ mod tests {
         let mut items = ItemStore::new();
         spawn_items(&mut items, &map, 1, &mut rng);
 
-        // No item should be at the player start room center
         use crate::tier_micro::item_store::NO_ITEM;
         assert_eq!(
             items.item_at(sx, sy),

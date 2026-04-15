@@ -7,6 +7,7 @@
 use super::prng::LfsrRng32;
 use super::types::*;
 use crate::rules::balance;
+use crate::rules::dungeon::{self, CorridorSegment};
 
 pub const TILE_WALL: u8 = 0;
 pub const TILE_STRUCTURAL: u8 = 1;
@@ -157,6 +158,13 @@ impl CompactMap {
         }
     }
 
+    fn carve_segment(&mut self, seg: CorridorSegment) {
+        match seg {
+            CorridorSegment::Horizontal { x1, x2, y } => self.carve_h_tunnel(x1, x2, y),
+            CorridorSegment::Vertical { y1, y2, x } => self.carve_v_tunnel(y1, y2, x),
+        }
+    }
+
     fn carve_h_tunnel(&mut self, x1: Coord, x2: Coord, y: Coord) {
         let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
         for x in min_x..=max_x {
@@ -228,7 +236,8 @@ impl CompactMap {
             // Check for overlap with existing rooms.
             let mut overlaps = false;
             for i in 0..self.room_count as usize {
-                if new_room.intersects(&self.rooms[i]) {
+                let r = &self.rooms[i];
+                if dungeon::rooms_intersect(x, y, w, h, r.x, r.y, r.w, r.h) {
                     overlaps = true;
                     break;
                 }
@@ -239,19 +248,15 @@ impl CompactMap {
 
             self.carve_room(&new_room);
 
+            let (new_cx, new_cy) = dungeon::room_center(x, y, w, h);
             if self.room_count == 0 {
-                start_x = new_room.cx();
-                start_y = new_room.cy();
+                start_x = new_cx;
+                start_y = new_cy;
             } else {
                 let prev = self.rooms[(self.room_count - 1) as usize];
-                let (px, py) = (prev.cx(), prev.cy());
-                let (nx, ny) = (new_room.cx(), new_room.cy());
-                if rng.coin() {
-                    self.carve_h_tunnel(px, nx, py);
-                    self.carve_v_tunnel(py, ny, nx);
-                } else {
-                    self.carve_v_tunnel(py, ny, px);
-                    self.carve_h_tunnel(px, nx, ny);
+                let (prev_cx, prev_cy) = dungeon::room_center(prev.x, prev.y, prev.w, prev.h);
+                for seg in dungeon::corridor_between(prev_cx, prev_cy, new_cx, new_cy, rng.coin()) {
+                    self.carve_segment(seg);
                 }
             }
 

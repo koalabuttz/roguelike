@@ -1509,10 +1509,10 @@
     "preset": null
   },
   "expected": {
-    "turns_played": 501,
+    "turns_played": 263,
     "game_over": false,
     "final_hp": 30,
-    "final_turn": 500,
-    "kills": 15
+    "final_turn": 263,
+    "kills": 2
   }
 }

@@ -66,6 +66,16 @@ impl Direction {
         }
     }
 
+    /// Convert an `ALL_DIRECTIONS` index (0..7) back to a Direction.
+    /// Returns `None` if `idx >= DIRECTION_COUNT`.
+    pub const fn from_index(idx: u8) -> Option<Direction> {
+        if idx < DIRECTION_COUNT as u8 {
+            Some(ALL_DIRECTIONS[idx as usize])
+        } else {
+            None
+        }
+    }
+
     /// Convert a signum'd `(dx, dy)` offset back to a Direction.
     /// Returns `None` for `(0, 0)` or non-unit offsets.
     pub const fn from_offset(dx: i32, dy: i32) -> Option<Direction> {
@@ -129,6 +139,20 @@ mod tests {
             let (ox, oy) = dir.opposite().to_offset();
             assert_eq!((dx + ox, dy + oy), (0, 0));
         }
+    }
+
+    #[test]
+    fn from_index_roundtrips_with_discriminant() {
+        for &dir in &ALL_DIRECTIONS {
+            let idx = dir as u8;
+            assert_eq!(Direction::from_index(idx), Some(dir));
+        }
+    }
+
+    #[test]
+    fn from_index_out_of_range() {
+        assert_eq!(Direction::from_index(8), None);
+        assert_eq!(Direction::from_index(255), None);
     }
 
     #[test]

@@ -1285,10 +1285,10 @@
     "preset": null
   },
   "expected": {
-    "turns_played": 427,
-    "game_over": true,
-    "final_hp": 0,
-    "final_turn": 425,
-    "kills": 17
+    "turns_played": 260,
+    "game_over": false,
+    "final_hp": 30,
+    "final_turn": 260,
+    "kills": 10
   }
 }

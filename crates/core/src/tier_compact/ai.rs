@@ -1,4 +1,4 @@
-//! Monster AI for the compact tier (GBA) — chase/wander with Bresenham LOS awareness.
+//! Monster AI for the compact tier (GBA) — delegates decisions to `rules::ai`.
 
 use super::combat;
 use super::entity::EntityStore;
@@ -7,6 +7,8 @@ use super::map::CompactMap;
 use super::msglog::CompactMessageLog;
 use super::prng::LfsrRng32;
 use super::types::*;
+use crate::rules::ai::{self, AiMode, ChaseResult};
+use crate::rules::direction::ALL_DIRECTIONS;
 use crate::rules::message::{Combatant, GameEvent};
 use crate::rules::monster_table::AiBehavior;
 
@@ -40,26 +42,23 @@ pub fn run_monster_turns(
             AiBehavior::None => false,
         };
 
-        match behavior {
-            AiBehavior::Chase => {
-                if aware {
-                    chase(i, px, py, entities, map, log, player_def);
-                }
+        match ai::ai_mode(behavior, aware) {
+            AiMode::Chase => {
+                chase(i, px, py, entities, map, log, player_def);
             }
-            AiBehavior::Wander => {
-                if aware {
-                    entities.ai[idx] = AiBehavior::Chase;
-                    let who = match entities.kind[idx] {
-                        Some(mk) => Combatant::Monster(mk),
-                        None => Combatant::UnknownMonster,
-                    };
-                    log.add(GameEvent::EntityNotice { who });
-                    chase(i, px, py, entities, map, log, player_def);
-                } else {
-                    wander(i, entities, map, rng);
-                }
+            AiMode::WakeUp => {
+                entities.ai[idx] = AiBehavior::Chase;
+                let who = match entities.kind[idx] {
+                    Some(mk) => Combatant::Monster(mk),
+                    None => Combatant::UnknownMonster,
+                };
+                log.add(GameEvent::EntityNotice { who });
+                chase(i, px, py, entities, map, log, player_def);
             }
-            AiBehavior::None => {}
+            AiMode::Wander => {
+                wander(i, px, py, entities, map, rng);
+            }
+            AiMode::Idle => {}
         }
 
         if !entities.alive[PLAYER_IDX as usize] {
@@ -69,7 +68,7 @@ pub fn run_monster_turns(
     false
 }
 
-/// Greedy chase: try diagonal, then horizontal, then vertical toward player.
+/// Chase: compute candidate passability and delegate to `rules::ai::chase_step`.
 fn chase(
     idx: u8,
     px: Coord,
@@ -81,75 +80,68 @@ fn chase(
 ) {
     let mx = entities.x[idx as usize];
     let my = entities.y[idx as usize];
-
     let dx = px - mx;
     let dy = py - my;
-    let dist_x = dx.abs();
-    let dist_y = dy.abs();
-
-    // If adjacent, attack instead of moving.
-    if dist_x <= 1 && dist_y <= 1 {
-        let atk = entities.atk[idx as usize];
-        combat::melee_attack(idx, PLAYER_IDX, atk, player_def, entities, log);
-        return;
-    }
-
     let sx = dx.signum();
     let sy = dy.signum();
 
-    let candidates: [(Coord, Coord); 3] = [
-        (sx, sy), // diagonal (preferred)
-        (sx, 0),  // horizontal
-        (0, sy),  // vertical
+    let passable = [
+        passable_at(mx + sx, my + sy, idx, entities, map),
+        passable_at(mx + sx, my, idx, entities, map),
+        passable_at(mx, my + sy, idx, entities, map),
     ];
 
-    for &(cx, cy) in candidates.iter() {
-        if cx == 0 && cy == 0 {
-            continue;
+    match ai::chase_step(dx, dy, passable) {
+        ChaseResult::Attack => {
+            let atk = entities.atk[idx as usize];
+            combat::melee_attack(idx, PLAYER_IDX, atk, player_def, entities, log);
         }
-        let nx = mx + cx;
-        let ny = my + cy;
-        if map.is_walkable(nx, ny) && !entities.is_occupied(nx, ny, idx) {
-            entities.x[idx as usize] = nx;
-            entities.y[idx as usize] = ny;
-            return;
+        ChaseResult::Move(dir) => {
+            let (ddx, ddy) = dir.to_offset();
+            entities.x[idx as usize] = mx + ddx;
+            entities.y[idx as usize] = my + ddy;
         }
+        ChaseResult::Blocked => {}
     }
 }
 
-/// Random walk: pick a random walkable, unoccupied neighbor.
-fn wander(idx: u8, entities: &mut EntityStore, map: &CompactMap, rng: &mut LfsrRng32) {
+/// Wander: build passable neighbor mask and delegate to `rules::ai::wander_step`.
+fn wander(
+    idx: u8,
+    px: Coord,
+    py: Coord,
+    entities: &mut EntityStore,
+    map: &CompactMap,
+    rng: &mut LfsrRng32,
+) {
     let mx = entities.x[idx as usize];
     let my = entities.y[idx as usize];
-    let px = entities.x[PLAYER_IDX as usize];
-    let py = entities.y[PLAYER_IDX as usize];
-
-    let mut candidates: [(Coord, Coord); 8] = [(0, 0); 8];
+    let mut mask: u8 = 0;
     let mut count: u8 = 0;
 
-    for dy in -1..=1_i32 {
-        for dx in -1..=1_i32 {
-            if dx == 0 && dy == 0 {
-                continue;
-            }
-            let nx = mx + dx;
-            let ny = my + dy;
-            if !(nx == px && ny == py)
-                && map.is_walkable(nx, ny)
-                && !entities.is_occupied(nx, ny, idx)
-            {
-                candidates[count as usize] = (nx, ny);
-                count += 1;
-            }
+    for (i, &dir) in ALL_DIRECTIONS.iter().enumerate() {
+        let (ddx, ddy) = dir.to_offset();
+        let nx = mx + ddx;
+        let ny = my + ddy;
+        if !(nx == px && ny == py) && map.is_walkable(nx, ny) && !entities.is_occupied(nx, ny, idx)
+        {
+            mask |= 1 << i;
+            count += 1;
         }
     }
 
     if count > 0 {
-        let pick = rng.range_u8(0, count - 1);
-        let (nx, ny) = candidates[pick as usize];
-        entities.x[idx as usize] = nx;
-        entities.y[idx as usize] = ny;
+        let roll = rng.range_u8(0, count - 1);
+        if let Some(dir) = ai::wander_step(mask, roll) {
+            let (ddx, ddy) = dir.to_offset();
+            entities.x[idx as usize] = mx + ddx;
+            entities.y[idx as usize] = my + ddy;
+        }
     }
+}
+
+fn passable_at(x: Coord, y: Coord, idx: u8, entities: &EntityStore, map: &CompactMap) -> bool {
+    map.is_walkable(x, y) && !entities.is_occupied(x, y, idx)
 }
 
 #[cfg(test)]
@@ -158,7 +150,6 @@ mod tests {
     use crate::rules::monster_table::MonsterKind;
     use crate::tier_compact::map::TILE_FLOOR;
 
-    /// Create a small open arena for AI testing.
     fn arena_map() -> CompactMap {
         let mut map = CompactMap::new(MAP_WIDTH, MAP_HEIGHT);
         for y in 5..25 {

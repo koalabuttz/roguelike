@@ -1,10 +1,12 @@
 use rand::Rng;
 
 use crate::combat;
-use crate::entity::{AiBehavior, Entity};
+use crate::entity::Entity;
 use crate::fov;
 use crate::map::Map;
 use crate::message_log::MessageLog;
+use crate::rules::ai::{self, AiMode, ChaseResult};
+use crate::rules::direction::ALL_DIRECTIONS;
 use crate::rules::message::GameEvent;
 use crate::types::{Coord, Stat};
 
@@ -13,6 +15,7 @@ use crate::types::{Coord, Stat};
 /// Each AI behavior has its own awareness model. Chase monsters use
 /// line-of-sight within their individual `sight_radius`.
 fn is_aware(entities: &[Entity], idx: usize, px: Coord, py: Coord, map: &Map) -> bool {
+    use crate::rules::monster_table::AiBehavior;
     match entities[idx].ai {
         AiBehavior::Chase | AiBehavior::Wander => fov::can_see(
             map,
@@ -46,32 +49,31 @@ pub fn run_monster_turns(
         }
 
         let aware = is_aware(entities, i, px, py, map);
+        let behavior = entities[i].ai;
 
-        match entities[i].ai {
-            AiBehavior::Chase => {
-                if aware {
-                    chase_ai(entities, i, px, py, map, log, player_def);
-                }
+        match ai::ai_mode(behavior, aware) {
+            AiMode::Chase => {
+                do_chase(entities, i, px, py, map, log, player_def);
             }
-            AiBehavior::Wander => {
-                if aware {
-                    entities[i].ai = AiBehavior::Chase;
-                    log.add_event(GameEvent::EntityNotice {
-                        who: entities[i].combatant(),
-                    });
-                    chase_ai(entities, i, px, py, map, log, player_def);
-                } else {
-                    wander_ai(entities, i, map, rng);
-                }
+            AiMode::WakeUp => {
+                entities[i].ai = crate::entity::AiBehavior::Chase;
+                log.add_event(GameEvent::EntityNotice {
+                    who: entities[i].combatant(),
+                });
+                do_chase(entities, i, px, py, map, log, player_def);
             }
-            AiBehavior::None => {}
+            AiMode::Wander => {
+                do_wander(entities, i, map, rng);
+            }
+            AiMode::Idle => {}
         }
     }
 
     !entities[0].alive
 }
 
-fn chase_ai(
+/// Chase: compute candidate passability and delegate to `rules::ai::chase_step`.
+fn do_chase(
     entities: &mut [Entity],
     idx: usize,
     px: Coord,
@@ -82,76 +84,67 @@ fn chase_ai(
 ) {
     let mx = entities[idx].x;
     let my = entities[idx].y;
-    let dist_x = (px - mx).abs();
-    let dist_y = (py - my).abs();
+    let dx = px - mx;
+    let dy = py - my;
+    let sx = dx.signum();
+    let sy = dy.signum();
 
-    // If adjacent, attack
-    if dist_x <= 1 && dist_y <= 1 {
-        let atk = entities[idx].attack;
-        combat::melee_attack(entities, idx, 0, atk, player_def, log);
-        return;
-    }
-
-    // Greedy chase: step toward player
-    let step_x = (px - mx).signum();
-    let step_y = (py - my).signum();
-
-    let candidates = [
-        (mx + step_x, my + step_y),
-        (mx + step_x, my),
-        (mx, my + step_y),
+    let passable = [
+        passable_at(mx + sx, my + sy, entities, map, idx), // diagonal
+        passable_at(mx + sx, my, entities, map, idx),      // horizontal
+        passable_at(mx, my + sy, entities, map, idx),      // vertical
     ];
 
-    for (nx, ny) in candidates {
-        if map.is_walkable(nx, ny) && !is_occupied_by_monster(entities, nx, ny, idx) {
-            entities[idx].x = nx;
-            entities[idx].y = ny;
-            break;
+    match ai::chase_step(dx, dy, passable) {
+        ChaseResult::Attack => {
+            let atk = entities[idx].attack;
+            combat::melee_attack(entities, idx, 0, atk, player_def, log);
         }
+        ChaseResult::Move(dir) => {
+            let (ddx, ddy) = dir.to_offset();
+            entities[idx].x = mx + ddx;
+            entities[idx].y = my + ddy;
+        }
+        ChaseResult::Blocked => {}
     }
 }
 
-/// Random walk AI — pick a random walkable, unoccupied neighbor.
-///
-/// No pathfinding needed: in a 1-wide corridor, only 2 directions are walkable,
-/// so the monster naturally follows corridors. In open rooms, movement is Brownian.
-fn wander_ai(entities: &mut [Entity], idx: usize, map: &Map, rng: &mut impl Rng) {
+/// Wander: build passable neighbor mask, delegate to `rules::ai::wander_step`.
+fn do_wander(entities: &mut [Entity], idx: usize, map: &Map, rng: &mut impl Rng) {
     let mx = entities[idx].x;
     let my = entities[idx].y;
     let px = entities[0].x;
     let py = entities[0].y;
 
-    // Collect walkable, unoccupied neighbor tiles (excluding player's tile).
-    // Stack-local array: max 8 neighbors, zero heap allocation.
-    let mut candidates = [(0i32, 0i32); 8];
-    let mut count = 0;
+    let mut mask: u8 = 0;
+    let mut count: u8 = 0;
 
-    for &(dx, dy) in &[
-        (-1, -1),
-        (0, -1),
-        (1, -1),
-        (-1, 0),
-        (1, 0),
-        (-1, 1),
-        (0, 1),
-        (1, 1),
-    ] {
-        let nx = mx + dx;
-        let ny = my + dy;
+    for (i, &dir) in ALL_DIRECTIONS.iter().enumerate() {
+        let (ddx, ddy) = dir.to_offset();
+        let nx = mx + ddx;
+        let ny = my + ddy;
         if nx == px && ny == py {
             continue;
         }
         if map.is_walkable(nx, ny) && !is_occupied_by_monster(entities, nx, ny, idx) {
-            candidates[count] = (nx, ny);
+            mask |= 1 << i;
             count += 1;
         }
     }
 
     if count > 0 {
-        let pick = rng.gen_range(0..count);
-        entities[idx].x = candidates[pick].0;
-        entities[idx].y = candidates[pick].1;
+        let roll = rng.gen_range(0..count);
+        if let Some(dir) = ai::wander_step(mask, roll) {
+            let (ddx, ddy) = dir.to_offset();
+            entities[idx].x = mx + ddx;
+            entities[idx].y = my + ddy;
+        }
     }
+}
+
+/// Check if a tile is passable for monster movement (walkable + unoccupied by other monsters).
+fn passable_at(x: Coord, y: Coord, entities: &[Entity], map: &Map, skip: usize) -> bool {
+    map.is_walkable(x, y) && !is_occupied_by_monster(entities, x, y, skip)
 }
 
 fn is_occupied_by_monster(entities: &[Entity], x: Coord, y: Coord, skip: usize) -> bool {

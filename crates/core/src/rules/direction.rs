@@ -82,8 +82,20 @@ impl Direction {
     /// Uses branch-based sign extraction instead of `i32::signum()` to avoid
     /// the `G_SCMP` instruction that the 6502 LLVM backend can't legalize.
     pub const fn from_offset(dx: i32, dy: i32) -> Option<Direction> {
-        let sx = if dx > 0 { 1 } else if dx < 0 { -1 } else { 0 };
-        let sy = if dy > 0 { 1 } else if dy < 0 { -1 } else { 0 };
+        let sx = if dx > 0 {
+            1
+        } else if dx < 0 {
+            -1
+        } else {
+            0
+        };
+        let sy = if dy > 0 {
+            1
+        } else if dy < 0 {
+            -1
+        } else {
+            0
+        };
         match (sx, sy) {
             (0, -1) => Some(Direction::North),
             (0, 1) => Some(Direction::South),

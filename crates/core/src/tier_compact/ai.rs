@@ -84,6 +84,7 @@ fn chase(
     let dy = py - my;
     let sx = dx.signum();
     let sy = dy.signum();
+    let adjacent = dx.abs() <= 1 && dy.abs() <= 1;
 
     let passable = [
         passable_at(mx + sx, my + sy, idx, entities, map),
@@ -91,7 +92,7 @@ fn chase(
         passable_at(mx, my + sy, idx, entities, map),
     ];
 
-    match ai::chase_step(dx, dy, passable) {
+    match ai::chase_step(sx, sy, adjacent, passable) {
         ChaseResult::Attack => {
             let atk = entities.atk[idx as usize];
             combat::melee_attack(idx, PLAYER_IDX, atk, player_def, entities, log);

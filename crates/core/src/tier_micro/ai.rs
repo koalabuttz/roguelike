@@ -68,7 +68,7 @@ pub fn run_monster_turns(
     false
 }
 
-/// Chase: widen u8→i32, compute candidate passability, delegate to `rules::ai`.
+/// Chase: compute signum in i8, delegate decision to `rules::ai`.
 fn chase(
     idx: u8,
     px: u8,
@@ -80,24 +80,39 @@ fn chase(
 ) {
     let mx = entities.x[idx as usize];
     let my = entities.y[idx as usize];
-    let dx = px as i32 - mx as i32;
-    let dy = py as i32 - my as i32;
-    let sx = dx.signum();
-    let sy = dy.signum();
+
+    // i8 arithmetic avoids i32 signum (G_SCMP) which 6502 can't legalize.
+    let dx = (px as i8) - (mx as i8);
+    let dy = (py as i8) - (my as i8);
+    let sx: i8 = if dx > 0 {
+        1
+    } else if dx < 0 {
+        -1
+    } else {
+        0
+    };
+    let sy: i8 = if dy > 0 {
+        1
+    } else if dy < 0 {
+        -1
+    } else {
+        0
+    };
+    let adjacent = dx.unsigned_abs() <= 1 && dy.unsigned_abs() <= 1;
 
     let passable = [
         passable_at(
-            (mx as i8 + sx as i8) as u8,
-            (my as i8 + sy as i8) as u8,
+            (mx as i8 + sx) as u8,
+            (my as i8 + sy) as u8,
             idx,
             entities,
             map,
         ),
-        passable_at((mx as i8 + sx as i8) as u8, my, idx, entities, map),
-        passable_at(mx, (my as i8 + sy as i8) as u8, idx, entities, map),
+        passable_at((mx as i8 + sx) as u8, my, idx, entities, map),
+        passable_at(mx, (my as i8 + sy) as u8, idx, entities, map),
     ];
 
-    match ai::chase_step(dx, dy, passable) {
+    match ai::chase_step(sx as i32, sy as i32, adjacent, passable) {
         ChaseResult::Attack => {
             let atk = entities.atk[idx as usize];
             combat::melee_attack(idx, PLAYER_IDX, atk, player_def, entities, log);

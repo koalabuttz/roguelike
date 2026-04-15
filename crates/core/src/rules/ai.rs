@@ -57,8 +57,11 @@ pub const fn ai_mode(behavior: AiBehavior, aware: bool) -> AiMode {
 
 /// Chase decision: greedy step toward the player.
 ///
-/// `dx`, `dy`: signed delta from monster to player (`px - mx`, `py - my`).
-/// Micro tier widens `u8` to `i32` at the call site.
+/// `sx`, `sy`: signum of the delta from monster to player. The caller computes
+/// these using their native coord type (i8 on micro, i32 on compact/standard).
+///
+/// `adjacent`: whether the monster is within 1 tile of the player in both axes.
+/// The caller computes this as `|dx| <= 1 && |dy| <= 1`.
 ///
 /// `candidates_passable`: three booleans for the chase candidates in priority
 /// order: \[diagonal, horizontal-only, vertical-only\]. The caller computes
@@ -66,16 +69,10 @@ pub const fn ai_mode(behavior: AiBehavior, aware: bool) -> AiMode {
 ///   - `(mx + sx, my + sy)` — diagonal
 ///   - `(mx + sx, my)` — horizontal (skipped when `sx == 0`)
 ///   - `(mx, my + sy)` — vertical (skipped when `sy == 0`)
-///
-/// where `sx = dx.signum()`, `sy = dy.signum()`.
-pub fn chase_step(dx: i32, dy: i32, candidates_passable: [bool; 3]) -> ChaseResult {
-    // Adjacent → attack.
-    if dx.abs() <= 1 && dy.abs() <= 1 {
+pub fn chase_step(sx: i32, sy: i32, adjacent: bool, candidates_passable: [bool; 3]) -> ChaseResult {
+    if adjacent {
         return ChaseResult::Attack;
     }
-
-    let sx = dx.signum();
-    let sy = dy.signum();
 
     let offsets: [(i32, i32); 3] = [(sx, sy), (sx, 0), (0, sy)];
 
@@ -165,58 +162,61 @@ mod tests {
 
     #[test]
     fn adjacent_returns_attack() {
-        // All 8 adjacent positions + (0,0).
-        for dx in -1..=1_i32 {
-            for dy in -1..=1_i32 {
-                let result = chase_step(dx, dy, [true, true, true]);
-                assert_eq!(result, ChaseResult::Attack, "dx={dx}, dy={dy}");
-            }
-        }
+        assert_eq!(
+            chase_step(1, 1, true, [true, true, true]),
+            ChaseResult::Attack
+        );
+        assert_eq!(
+            chase_step(0, 0, true, [true, true, true]),
+            ChaseResult::Attack
+        );
+        assert_eq!(
+            chase_step(-1, 0, true, [true, true, true]),
+            ChaseResult::Attack
+        );
     }
 
     #[test]
     fn diagonal_preferred() {
-        let result = chase_step(5, 3, [true, true, true]);
+        let result = chase_step(1, 1, false, [true, true, true]);
         assert_eq!(result, ChaseResult::Move(Direction::SouthEast));
     }
 
     #[test]
     fn horizontal_fallback() {
-        let result = chase_step(5, 3, [false, true, true]);
+        let result = chase_step(1, 1, false, [false, true, true]);
         assert_eq!(result, ChaseResult::Move(Direction::East));
     }
 
     #[test]
     fn vertical_fallback() {
-        let result = chase_step(5, 3, [false, false, true]);
+        let result = chase_step(1, 1, false, [false, false, true]);
         assert_eq!(result, ChaseResult::Move(Direction::South));
     }
 
     #[test]
     fn all_blocked() {
-        let result = chase_step(5, 3, [false, false, false]);
+        let result = chase_step(1, 1, false, [false, false, false]);
         assert_eq!(result, ChaseResult::Blocked);
     }
 
     #[test]
     fn negative_deltas() {
-        let result = chase_step(-3, -5, [true, true, true]);
+        let result = chase_step(-1, -1, false, [true, true, true]);
         assert_eq!(result, ChaseResult::Move(Direction::NorthWest));
     }
 
     #[test]
     fn horizontal_only_chase() {
-        // dy == 0: sx=1, sy=0. Candidates: (1,0), (1,0), (0,0).
-        // The diagonal candidate IS the horizontal candidate when sy==0.
-        let result = chase_step(5, 0, [true, true, true]);
+        // sy == 0: candidates are (1,0), (1,0), (0,0).
+        let result = chase_step(1, 0, false, [true, true, true]);
         assert_eq!(result, ChaseResult::Move(Direction::East));
     }
 
     #[test]
     fn vertical_only_chase() {
-        // dx == 0: sx=0, sy=1. Candidates: (0,1), (0,0), (0,1).
-        // The diagonal candidate IS the vertical candidate when sx==0.
-        let result = chase_step(0, 5, [true, true, true]);
+        // sx == 0: candidates are (0,1), (0,0), (0,1).
+        let result = chase_step(0, 1, false, [true, true, true]);
         assert_eq!(result, ChaseResult::Move(Direction::South));
     }
 

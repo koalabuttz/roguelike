@@ -74,8 +74,7 @@ Significant investment. May depend on earlier tiers being complete.
 | Tileset support | 0 | Medium | L | Alternative renderer. |
 | Scripting | 0 | Medium | XL | Lua/Rhai embedding. Only if community content demands it. |
 | Map editor | 0 | Low | L | For hand-crafted content if needed. |
-| Game Boy Advance | 0 | Low | XL | Runs at tier compact (i16 coords, no_std). Compiles `core::rules` + `core::tier_micro` + `core::tier_compact` (compact is stubs until GBA work begins). Frontend crate needed. |
-| PS Vita | 0 | Low | L | Native ARM via vita-sdk; hardware buttons, OLED display, memory card saves. |
+| PS Vita (remaining) | 0 | Low | M | Phase 1 complete (scaffold render). Remaining: input handling, UI menus, save/load, audio, networking. |
 | Commodore 64 (remaining) | 0 | Low | M | Core C64 port is complete and production — see Completed section. Remaining work: further hardware polish, potential cartridge support. |
 | C64 AT Protocol bridge | 0 | Low | L | Self-hostable Docker bridge connecting C64 (via Ultimate64 Ethernet) to PDS saves and spectating. External companion service, not a workspace crate. [Design doc.](platforms/c64-atproto-bridge.md) |
 
@@ -106,10 +105,15 @@ Spectating branch:
         → Atproto spectating (federated live spectating via Jetstream)
           → Web spectate viewer (lightweight JS, no full WASM needed)
 
+Platform ports:
+  Compact tier ✓ → GBA ✓ → NDS Phase 3 ✓
+  Vita Phase 1 ✓ → Vita remaining phases
+
 Other completed branches:
   Input abstraction ✓ → Controller support ✓ → Steam Deck + Steam Cloud
   Seeded RNG ✓ → Replay system ✓ → Daily challenges / Seed sharing ✓ (seed sharing done)
   A* pathfinding ✓ → MCP pathfind_to ✓, Auto-explore ✓, MCP exploration graph ✓
+  Tier unification ✓ → AI/spawn/dungeon shared via rules/ (scalar boundary pattern)
 ```
 
 Items and stairs are complete. The **immediate priority is Item-based progression**
@@ -178,8 +182,13 @@ Items that have been implemented, organized by original tier.
 | Parameter sweeps | Sweep across player stats (HP, ATK, DEF) to find balance boundaries; JSON config, structured output. |
 | LLM playtesting | Strategic LLM-driven playtesting via `/playtest` skill and `tools/llm_playtest.py`; dual backends, parallel execution, token optimization. [Docs.](tooling/llm-playtesting.md) |
 | CI balance check | GitHub Actions workflow runs headless presets on every gameplay change, diffs against cached baseline, posts verdict to workflow summary and PR comments. |
-| Capability tier system | `rules/` module (no_std pure game rules), `tier_micro/` (complete C64 game engine with BFS pathfinding, auto\_fight, autorun with stop conditions, item storage, binary save/load), `tier_compact/` stubs (GBA, deferred), `GameStep` trait (cross-tier interface), `RenderSource` trait (unified rendering), standard-tier code gated behind `std` feature. |
+| Capability tier system | `rules/` module (no_std pure game rules: AI, spawn, dungeon, combat, damage, balance, items, properties, interactions, game_view), `tier_micro/` (complete C64 game engine with BFS pathfinding, auto\_fight, autorun with stop conditions, item storage, binary save/load), `tier_compact/` (complete engine: 80x40 maps, 128 entities, LFSR-32, BFS pathfinding, binary saves), `GameStep` trait (cross-tier interface with `MicroGameStateAdapter` + `CompactGameStateAdapter`), `GameView` trait (unified query interface for all tiers), standard-tier code gated behind `std` feature. AI/spawn/dungeon logic unified via scalar boundary pattern. |
+| Property system | 16-property enum (Sharp, Hard, Heavy, Swift, Hot, Cold, Wet, Metal, Organic, Venomous, Magical, Volatile, Bright, Corrosive, Binding, Cursed), PropertyBag (8 bytes packed nibbles), 38-rule interaction table with chain reactions, combat stat integration. |
+| Software 3D renderer | `crates/renderer3d/` — `no_std` compatible, Fixed16 math, vertex pipeline, triangle rasterizer with distance fog, glyph-textured billboards, Lambert lighting. Used by NDS (hardware 3D path available). |
 | C64 production frontend | C64 crate (~5,200 lines) over `core::tier_micro` + `core::rules`. SID music, floppy disk saves, two-phase inventory, screen shake, I/O banking, ROM unmapping, help screen, message history, ATK/DEF stats, seed code display, sprite-based loading spinner, corpse rendering. See [cross-platform architecture](architecture/cross-platform.md). |
+| GBA production frontend | GBA crate (~2,800 lines) over `core::tier_compact` + `core::tier_micro` + `core::rules`. Dual-tier EWRAM union, Mode 0 tiles, CP437 font, SRAM saves, animated title screen, inventory UI, pause/settings menus, help screen, message history, game over screens, seed entry via base36 roller. |
+| NDS frontend (Phase 3) | NDS crate over `core::tier_compact` + `core::rules`. Hardware 3D (Engine A) + 2D automap (Engine B), touchscreen input, HUD, A3I5 textured billboards, hardware fog, bare-metal from GBATEK. |
+| Vita Phase 1 scaffold | Vita crate over `core::tier_compact` + `core::rules`. vita2d renderer, compact-tier game loop, static render. No input yet. |
 | Viewport scrolling | Player-centered viewport for maps larger than terminal, universal across tiers. |
 
 ### Tier 4

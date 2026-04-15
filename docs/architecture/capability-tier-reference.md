@@ -15,18 +15,20 @@ see the [C64 platform guide](../platforms/c64-platform-guide.md).
 
 `roguelike-core` is organized around three capability tiers, plus a `rules/` module containing pure game rules shared by all tiers:
 
-- **rules** (all platforms): Pure functions and constants — damage formulas, balance constants, `MonsterKind` enum, `GameEvent` structured messages, `no_std` seed encoding. No game state interaction. Spawn logic produces `SpawnDirective` structs; each tier applies them to its own state.
+- **rules** (all platforms): Pure functions and constants — damage formulas, balance constants, `MonsterKind` enum, `GameEvent` structured messages, `no_std` seed encoding. No game state interaction. AI decisions (`rules/ai.rs`), spawn selection (`rules/spawn.rs`), dungeon geometry (`rules/dungeon.rs`), and combat resolution (`rules/combat.rs`) are pure shared functions; each tier wraps them with its own state types.
 - **tier micro** (C64): `u8` coords/stats, 64 entities, 64x48 maps, LFSR-16, iterative shadowcasting FOV, `no_std`
-- **tier compact** (GBA): `i32` coords (ARM7-native), `u8` stats, 128 entities, 80x40 maps, LFSR-32, iterative integer shadowcasting FOV, `no_std` — built from standard tier patterns (same i32 coords) with fixed arrays instead of Vec
+- **tier compact** (GBA, NDS): `i32` coords (ARM7-native), `u8` stats, 128 entities, 80x40 maps, LFSR-32, iterative integer shadowcasting FOV, `no_std` — built from standard tier patterns (same i32 coords) with fixed arrays instead of Vec
 - **tier standard** (Vita/PC): `i32` coords/stats, 512-1024 entities, 80x40+ maps, ChaCha20, shadowcasting FOV, `std`
 
 The distinction between **game rules** and **game mechanics** is key: rules are pure functions (damage calculation, item stat lookups, enchantment caps) that produce values; mechanics are stateful operations (applying damage to entities, inserting spawned monsters) that remain per-tier.
 
-Tier micro code lives in `tier_micro/` and is always compiled. Standard-tier
-code (shadowcasting FOV, A\* pathfinding, `Vec`-based collections) is gated
-behind the `std` feature. The C64 depends on core with
-`default-features = false`. Pure game rules (damage formulas, balance constants,
-item stats, enchantment caps, seed encoding) live in `rules/` and are used by all tiers:
+Tier micro and tier compact code live in `tier_micro/` and `tier_compact/`
+respectively, and are always compiled. Standard-tier code (recursive shadowcasting
+FOV, A\* pathfinding, `Vec`-based collections) is gated behind the `std` feature.
+The C64 and GBA depend on core with `default-features = false`. Pure game rules
+(damage, balance, items, AI decisions, spawn selection, dungeon geometry, combat
+resolution, properties, interactions, seed encoding) live in `rules/` and are
+used by all tiers:
 
 ```
 roguelike/
@@ -37,18 +39,26 @@ roguelike/
         lib.rs        # #![cfg_attr(not(feature = "std"), no_std)]
         rules/        # Pure functions + constants, always compiled, no_std
           mod.rs
+          ai.rs       # ai_mode(), chase_step(), wander_step() — pure AI decisions
           balance.rs  # numeric constants: HP, ATK, DEF, spawn weights, regen,
-                      #   item stats, enchantment caps, depth scaling, wandering spawn
-                      #   config, mood thresholds (see gameplay-implementation-plan.md)
-          damage.rs   # const fn damage(), effective_attack(), effective_defense()
-          items.rs    # ItemKind enum, stat lookup tables (heal amount, ATK/DEF bonus,
-                      #   enchantment limits, permanent consumable bonuses)
-          seed_code.rs # no_std encode_to_buf()/decode_from_bytes(), Tier enum, tier_from_seed()
-          monster_table.rs # MonsterKind enum, stat lookup by kind
-          message.rs  # GameEvent enum — structured message events (Copy, no_std)
-          tiles.rs    # TileKind enum, pure tile display definitions (glyph, color)
+                      #   item stats, depth scaling, wandering spawn config
+          combat.rs   # resolve_melee() → CombatOutcome — shared combat resolution
           color.rs    # GameColor enum (#[repr(u8)]), palette management
-        command.rs    # GameCommand with Direction enum — no Coord dependency, no_std
+          command.rs  # GameCommand enum — platform-independent input abstraction
+          damage.rs   # const fn damage(), effective_attack(), effective_defense()
+          direction.rs # Direction enum (#[repr(u8)]), to_offset/from_offset/from_index
+          dungeon.rs  # rooms_intersect(), room_center(), corridor_between() — shared geometry
+          game_view.rs # GameView trait — minimal query interface for all tiers
+          health.rs   # HealthTier enum, health_tier(), health_description()
+          interactions.rs # 38-rule interaction table, chain reactions (depth 3)
+          items.rs    # ItemKind enum, stat lookup tables, Inventory, InvSlot
+          message.rs  # GameEvent enum — structured message events (Copy, no_std)
+          monster_table.rs # MonsterKind enum, stat lookup by kind
+          properties.rs # Property enum (16 variants), PropertyBag (8 bytes packed nibbles)
+          save_common.rs # Shared save format constants and helpers
+          seed_code.rs # no_std encode/decode, Tier enum, tier_from_seed()
+          spawn.rs    # weighted_select(), total_weight(), depth_bonus() — shared spawn math
+          tiles.rs    # TileKind enum, pure tile display definitions (glyph, color)
         tier_micro/   # u8 types, LFSR-16, shadowcasting FOV, fixed arrays — no_std
           mod.rs
           types.rs    # Coord = u8, Stat = u8, Pos = (u8, u8)
@@ -57,28 +67,41 @@ roguelike/
           game.rs     # MicroGameState with fixed-size arrays
           map.rs      # generate() on fixed-size tile arrays (64×48)
           fov.rs      # Iterative shadowcasting FOV → bitfield (Bresenham LOS)
-          ai.rs       # monster AI (micro tier)
-          spawn.rs    # micro-tier spawn: weighted monster spawning to fixed arrays
+          ai.rs       # monster turn orchestration (delegates to rules::ai)
+          combat.rs   # melee attack resolution
+          spawn.rs    # monster/item spawning (delegates to rules::spawn)
           item_store.rs # fixed-size item storage (floor items and inventory)
           pathfinding.rs # BFS pathfinding with fixed-size buffers (1.1 KB)
           autorun.rs  # MicroBfsStepper for BFS-guided autorun with stop conditions
           save.rs     # Binary save/load for MicroGameState
           msglog.rs   # Circular buffer for GameEvent values (no string formatting)
-        tier_compact/ # Stubs only until GBA port begins — no_std
+        tier_compact/ # Complete compact-tier engine — i32 coords, fixed arrays, no_std
           mod.rs
-          types.rs    # Coord = i32 (ARM7-native), Stat = u8
-          prng.rs     # LfsrRng32 — 32-bit Galois LFSR (minimal)
+          types.rs    # Coord = i32 (ARM7-native), Stat = u8, 80×40 map, 128 entities
+          prng.rs     # LfsrRng32 — 32-bit Galois LFSR
+          entity.rs   # fixed-size entity array (max 128 entities)
+          game.rs     # CompactGameState with fixed-size arrays, new_into() placement
+          map.rs      # room generation, corridor carving on 80×40 tile arrays
+          fov.rs      # Iterative shadowcasting FOV with i32 coords, Bresenham LOS
+          ai.rs       # monster turn orchestration (delegates to rules::ai)
+          combat.rs   # melee attack resolution
+          spawn.rs    # monster/item spawning (delegates to rules::spawn)
+          item_store.rs # fixed-size item storage (floor items and inventory)
+          pathfinding.rs # BFS pathfinding with fixed-size buffers
+          autorun.rs  # CompactBfsStepper for BFS-guided autorun with stop conditions
+          save.rs     # Binary save/load for CompactGameState (GBA SRAM)
+          msglog.rs   # Circular buffer for GameEvent values
         game_step.rs  # #[cfg(feature = "std")] trait GameStep — cross-tier interface;
-                      #   MicroGameStateAdapter wraps MicroGameState (u8→i32 widening);
-                      #   create_game() factory routes micro seeds to adapter, std seeds to GameState
+                      #   MicroGameStateAdapter (u8→i32), CompactGameStateAdapter (native i32);
+                      #   create_game() factory routes by seed tier
         # --- tier standard (top-level modules): i32 types, ChaCha, Vec — std ---
         types.rs      # Coord = i32, Stat = i32
         entity.rs     # Vec<Entity> (512-1024 entities)
         game.rs       # GameState with Vec-based collections
-        ai.rs         # monster AI
-        fov.rs        # shadowcasting FOV (gated behind std)
+        ai.rs         # monster turn orchestration (delegates to rules::ai)
+        fov.rs        # recursive shadowcasting FOV (gated behind std)
         pathfinding.rs # A* — requires HashMap, BinaryHeap (gated behind std)
-        spawn.rs      # standard-tier spawn: applies SpawnDirectives to Vec<Entity>
+        spawn.rs      # monster/item spawning (delegates to rules::spawn)
         ...           # other existing modules
 ```
 
@@ -111,11 +134,12 @@ toml = { version = "0.8", optional = true }
 #![cfg_attr(not(feature = "std"), no_std)]
 
 // --- Always compiled (no_std compatible) ---
-pub mod rules;         // pure game rules: damage, balance, items, enchantment,
+pub mod rules;         // pure game rules: ai, spawn, dungeon, combat, damage,
+                       //   balance, items, properties, interactions, game_view,
                        //   seed_code, monster_table, GameEvent — no state interaction
-pub mod command;       // GameCommand with Direction enum — no Coord dependency
+pub mod command;       // re-exports GameCommand + Direction from rules
 pub mod tier_micro;    // u8 types, LFSR-16, shadowcasting FOV, fixed arrays
-pub mod tier_compact;  // stubs: type aliases + PRNG only (until GBA port)
+pub mod tier_compact;  // i32 types, LFSR-32, 80×40 maps, 128 entities, fixed arrays
 
 // --- Cross-tier interface (requires std) ---
 #[cfg(feature = "std")]
@@ -139,14 +163,17 @@ pub mod data;          // game.toml loading
 ```
 
 Each tier uses concrete types appropriate to its capability level. Tier micro
-uses `u8` coords and fixed-size arrays; tier compact uses `i32` coords (ARM7-native) with
-`u8` stats (stubs only until GBA port); tier standard uses `i32` types and
-`Vec`-based collections. Game rules in `rules/` (damage formulas, balance
-constants, item definitions, `MonsterKind` enum, `GameEvent` messages, seed
-encoding) are pure functions and constants — tier-agnostic, `no_std`, used by
-all platforms. Game mechanics (applying damage, inserting spawned monsters) remain
-per-tier. The only `cfg` gates are on `std` features (serde derives, TOML
-loading, A\* pathfinding, `StdRng`) and the `GameStep` cross-tier trait.
+uses `u8` coords and fixed-size arrays; tier compact uses `i32` coords
+(ARM7-native) with `u8` stats and fixed arrays; tier standard uses `i32` types
+and `Vec`-based collections. Game rules in `rules/` (AI decisions, spawn
+selection, dungeon geometry, combat resolution, damage formulas, balance
+constants, item definitions, properties, interactions, `GameView` trait,
+`MonsterKind` enum, `GameEvent` messages, seed encoding) are pure functions and
+constants — tier-agnostic, `no_std`, used by all platforms. Game mechanics
+(entity iteration, state mutation, FOV computation) remain per-tier but delegate
+algorithmic decisions to `rules/` via the scalar boundary pattern. The only
+`cfg` gates are on `std` features (serde derives, TOML loading, A\* pathfinding,
+`StdRng`) and the `GameStep` cross-tier trait.
 
 ### 1.2 Tier Micro PRNG: `LfsrRng`
 
@@ -298,6 +325,12 @@ globals replaced by parameters. No generics, no trait bounds — just a function
 that fills a byte slice and a room array. The compact and standard tiers have
 their own `map::generate()` with wider coordinate types and larger map sizes.
 
+Shared sub-algorithms live in `rules/dungeon.rs`: `rooms_intersect()` (AABB
+overlap with wall padding), `room_center()`, and `corridor_between()` (returns
+`CorridorSegment` pairs for L-shaped corridors). Each tier's map generator calls
+these shared functions, widening coords at the call site if needed (micro widens
+`u8` → `i32`), then carves the returned segments into its own tile storage.
+
 ### 1.4 Platform Usage Patterns
 
 **C64 — production frontend over `tier_micro` + `rules`:**
@@ -328,100 +361,113 @@ See [cross-platform architecture](../architecture/cross-platform.md) for the
 full feature list. With llvm-mos's static stack allocation + LTO, `state` gets
 a fixed static address — field access uses absolute addressing.
 
-**GBA — uses `tier_compact`:**
+**GBA — dual-tier via EWRAM union:**
 
 ```rust
-// gba/src/main.rs
-use roguelike_core::tier_compact::*;
+// gba/src/game_loop.rs (simplified)
+use roguelike_core::tier_compact::game::CompactGameState;
+use roguelike_core::tier_micro::game::MicroGameState;
+
+// EWRAM union holds either CompactGameState or MicroGameState
+static mut COMPACT_STATE: MaybeUninit<CompactGameState> = MaybeUninit::uninit();
+static mut MICRO_STATE: MaybeUninit<MicroGameState> = MaybeUninit::uninit();
+static mut IS_MICRO: bool = false;
+
+fn start_game(seed: u64) {
+    if seed <= 0xFFFF {
+        unsafe { MICRO_STATE.write(MicroGameState::new(seed as u16)); }
+        IS_MICRO = true;
+    } else {
+        unsafe { CompactGameState::new_into(COMPACT_STATE.as_mut_ptr(), seed as u32); }
+        IS_MICRO = false;
+    }
+}
+```
+
+The GBA crate is a full production frontend (~2,800 lines) with animated title
+screen, inventory UI, SRAM saves, pause/settings menus, help screen, message
+history, and game over screens.
+
+**NDS — hardware 3D over `tier_compact`:**
+
+```rust
+// nds/src/main.rs (simplified)
+use roguelike_core::tier_compact::game::CompactGameState;
+
+// CompactGameState lives in EWRAM, 3D rendering via DS GX hardware
+static mut STATE: MaybeUninit<CompactGameState> = MaybeUninit::uninit();
 
 fn main() {
-    let seed = get_seed();
-    let mut state = CompactGameState::new(seed);
-    // 80×40 maps, up to 128 entities, LFSR-32, iterative shadowcasting FOV
-    run_game_loop(&mut state);
+    // ARM9 bootstrap: MPU, caches, VRAM banking, GX init
+    unsafe { CompactGameState::new_into(STATE.as_mut_ptr(), seed); }
+    // Top screen: hardware 3D (Engine A) — GX FIFO commands
+    // Bottom screen: 2D automap + HUD + touch buttons (Engine B)
 }
 ```
 
 **PC/Vita — tier switching based on seed:**
 
 ```rust
-// terminal/src/main.rs (simplified)
-use roguelike_core::rules::seed_code;
-use roguelike_core::game_step::GameStep;
+// game_step.rs (simplified)
+use roguelike_core::game_step::{create_game, GameStep};
 
-fn main() {
-    let seed_input = get_seed_from_user();
-    let (seed, tier) = seed_code::decode(&seed_input);
-
-    // Tier detection by numeric value: seed <= 0xFFFF → micro
-    let mut game: Box<dyn GameStep> = match tier {
-        Tier::Micro => {
-            // Small seed → micro tier (compatible with C64)
-            // Wrap MicroGameState with adapter — don't reimplement
-            use roguelike_core::tier_micro::MicroGameState;
-            Box::new(MicroGameState::new(seed as u16))
-        }
-        Tier::Compact => {
-            // Compact tier: stubs only — not yet playable
-            unimplemented!("compact tier deferred until GBA port")
-        }
-        Tier::Standard => {
-            // Full seed → standard tier (Vita/PC only)
-            use roguelike_core::game::GameState;
-            Box::new(GameState::new(seed))
-            // ChaCha20 RNG, shadowcasting FOV, Vec-based entities
-        }
-    };
-
-    run_game_loop(&mut *game, ...);
+fn start_game(seed: u64, w: i32, h: i32) -> Box<dyn GameStep> {
+    // create_game() routes by seed tier automatically:
+    //   seed <= 0xFFFF     → MicroGameStateAdapter (u8→i32 widening)
+    //   seed <= 0xFFFFFFFF → CompactGameStateAdapter (native i32)
+    //   else               → GameState (standard tier)
+    create_game(seed, w, h, preset, game_data)
 }
 ```
 
 Seed decode determines which tier to instantiate. The numeric seed value
-determines the tier (`seed <= 0xFFFF` → micro); encoding length is a
-consequence of numeric range, not the detection mechanism. The PC runs micro
-seeds by instantiating `MicroGameState` with an adapter (wrap, not
-reimplement) — producing the same dungeon a C64 would generate. The PC gets
-additional features (serde serialization, TOML loading, A\* pathfinding) via
-the `std` feature. The C64 uses `default-features = false` and only accesses
-`tier_micro` and `rules`.
+determines the tier (`seed <= 0xFFFF` → micro, `<= 0xFFFF_FFFF` → compact,
+else → standard); encoding length is a consequence of numeric range, not the
+detection mechanism. The PC runs micro seeds by instantiating `MicroGameState`
+with an adapter (wrap, not reimplement) — producing the same dungeon a C64
+would generate. The GBA runs both micro and compact seeds via an EWRAM union
+with runtime tier selection. The PC gets additional features (serde
+serialization, TOML loading, A\* pathfinding) via the `std` feature. The C64
+and GBA use `default-features = false` and only access `tier_micro`,
+`tier_compact`, and `rules`.
 
 ### 1.5 Sharing Matrix
 
 | Category | Tier | Shared? | Where | Form |
 |----------|------|---------|-------|------|
 | **PRNG (16-bit)** | micro | Per-tier | `core/tier_micro/prng.rs` | `LfsrRng` — 16-bit Galois LFSR |
-| **PRNG (32-bit)** | compact | Per-tier | `core/tier_compact/prng.rs` | `LfsrRng32` — 32-bit Galois LFSR (stub) |
+| **PRNG (32-bit)** | compact | Per-tier | `core/tier_compact/prng.rs` | `LfsrRng32` — 32-bit Galois LFSR |
 | **PRNG (ChaCha20)** | standard | Per-tier | `rand` crate (std) | `StdRng` — cryptographic PRNG |
-| **Map generation** | Per-tier | Per-tier | `core/tier_*/map.rs` | `generate()` — tier-appropriate coord types and map sizes |
+| **Map generation** | Per-tier | **Rules** + Per-tier | `core/rules/dungeon.rs` + `core/tier_*/map.rs` | Shared geometry (`rooms_intersect`, `room_center`, `corridor_between`); per-tier `generate()` loops (RNG coupling prevents full extraction) |
+| **AI decisions** | All | **Rules** + Per-tier | `core/rules/ai.rs` + `core/tier_*/ai.rs` | `ai_mode()`, `chase_step()`, `wander_step()` shared; per-tier wrappers handle entity iteration and FOV |
+| **Combat resolution** | All | **Rules** | `core/rules/combat.rs` | `resolve_melee()` → `CombatOutcome` with events |
+| **Spawn selection** | All | **Rules** + Per-tier | `core/rules/spawn.rs` + `core/tier_*/spawn.rs` | `weighted_select()`, `total_weight()`, `depth_bonus()` shared; per-tier wrappers apply to own state |
 | **Damage formula** | All | **Rules** | `core/rules/damage.rs` | `const fn damage(atk: u8, def: u8) -> u8`, `effective_attack()`, `effective_defense()` |
-| **Spawn directives** | All | **Rules** (planned) | `core/rules/` | Planned: `pick_monster()` returns `SpawnDirective`; each tier applies to its own state. Currently spawn logic is per-tier. |
-| **Spawn mechanics** | Per-tier | Per-tier | `core/tier_*/spawn.rs`, `core/spawn.rs` | Per-tier spawn implementation |
 | **Balance constants** | All | **Rules** | `core/rules/balance.rs` | All HP/ATK/DEF/sight/spawn_weight/regen values |
 | **Item definitions** | All | **Rules** | `core/rules/items.rs` | Item type IDs, stat lookup tables (heal amount, ATK/DEF bonus, spawn weights) |
 | **Inventory** | All | **Rules** | `core/rules/items.rs` | `Inventory` struct (26-slot Brogue-style, slots a–z), `InvSlot` type with stacking; `MAX_INVENTORY = 26` |
-| **Enchantment config** | All | **Rules** | `core/rules/items.rs` | Max enchant level, enchantment stat bonus per level |
+| **Properties** | All | **Rules** | `core/rules/properties.rs` | `Property` enum (16 variants), `PropertyBag` (8 bytes packed nibbles) |
+| **Interactions** | All | **Rules** | `core/rules/interactions.rs` | 38-rule interaction table, chain reactions (depth 3), `Effect`/`EffectType` |
 | **Depth scaling** | All | **Rules** | `core/rules/balance.rs` | Monster stat scaling per floor, `min_depth` thresholds |
 | **Wandering spawn config** | All | **Rules** | `core/rules/balance.rs` | Spawn interval, delay, max active constants |
-| **Mood thresholds** | All | **Rules** | `core/rules/balance.rs` | Mood trigger values, decay rate, flee/enrage thresholds |
 | **Monster table** | All | **Rules** | `core/rules/monster_table.rs` | `MonsterKind` enum, stat lookup by kind |
 | **GameEvent messages** | All | **Rules** | `core/rules/message.rs` | `GameEvent` enum — structured, `Copy`, `no_std` |
 | **Seed codes** | All | **Rules** | `core/rules/seed_code.rs` | `no_std` `encode_to_buf()`/`decode_from_bytes()`, `Tier` enum; `core/seed_code.rs` has std `SeedParams`/format parsing |
-| **Direction** | All | **Rules** | `core/rules/direction.rs` | `Direction` enum in `GameCommand::Move(Direction)` — `no_std` |
+| **Direction** | All | **Rules** | `core/rules/direction.rs` | `Direction` enum, `to_offset()`/`from_offset()`/`from_index()`/`opposite()` |
 | **Tile display** | All | **Rules** | `core/rules/tiles.rs` | `TileKind` enum, pure glyph/color lookups shared across tiers |
 | **Color system** | All | **Rules** | `core/rules/color.rs` | `GameColor` enum (`#[repr(u8)]`), palette management |
-| **GameStep trait** | std | **Cross-tier** | `core/game_step.rs` | `#[cfg(feature = "std")]` — uniform interface for FrameSink/MCP/TUI; `MicroGameStateAdapter` wraps micro tier |
-| **RenderSource trait** | std | **Cross-tier** | `tui/render_source.rs` | Unified rendering: per-tile, entity, item, and status queries; implemented for both GameState and MicroGameStateAdapter |
-| **Entity system** | Per-tier | Per-tier | `core/tier_*/entity.rs` | micro: 64-entry parallel arrays (`EntityStore`); compact: stubs; standard: `Vec<Entity>` |
-| **AI** | Per-tier | Per-tier | `core/tier_*/ai.rs`, `core/ai.rs` | Chase, wander, mood logic — same algorithms, tier-appropriate types |
-| **Game state** | Per-tier | Per-tier | `core/tier_*/game.rs` | `MicroGameState` / `CompactGameState` (stub) / `GameState` |
+| **Health display** | All | **Rules** | `core/rules/health.rs` | `HealthTier` enum, `health_tier()`, `health_description()` |
+| **GameStep trait** | std | **Cross-tier** | `core/game_step.rs` | `#[cfg(feature = "std")]` — uniform interface; `MicroGameStateAdapter` + `CompactGameStateAdapter` wrap lower tiers |
+| **GameView trait** | All | **Cross-tier** | `core/rules/game_view.rs` | Minimal query interface for rendering and MCP — implemented by all three tiers |
+| **Entity system** | Per-tier | Per-tier | `core/tier_*/entity.rs` | micro: 64-entry parallel arrays (`EntityStore`); compact: 128-entry parallel arrays (`EntityStore`); standard: `Vec<Entity>` |
+| **Game state** | Per-tier | Per-tier | `core/tier_*/game.rs` | `MicroGameState` / `CompactGameState` / `GameState` |
 | **FOV** | Per-tier | Per-tier | `core/tier_*/fov.rs` | micro/compact: iterative shadowcasting with integer slopes → bitfield (`no_std`); standard: recursive shadowcasting with `f64` slopes → `HashSet` (`std`). Constrained tiers use iterative because standard's recursive impl depends on `f64` and heap — not available in `no_std`. |
-| **BFS pathfinding** | micro | Per-tier | `core/tier_micro/pathfinding.rs` | Fixed-size buffers (1.1 KB), enables auto\_explore and pathfind\_to on micro tier |
+| **BFS pathfinding** | micro, compact | Per-tier | `core/tier_*/pathfinding.rs` | Fixed-size buffers, enables auto\_explore and pathfind\_to on micro and compact tiers |
 | A\* pathfinding | standard | **No** | PC only (`std`) | Requires heap (HashMap, BinaryHeap) |
-| Rendering | N/A | **No** | Separate impls | crossterm vs VIC-II vs GBA hardware |
-| Input handling | N/A | **No** | Separate impls | crossterm vs CIA keyboard/joystick vs GBA buttons |
-| Save persistence | N/A | **No** | Separate impls | JSON vs binary; different backends |
-| Data loading | standard | **No** | PC only (`data-files`) | TOML parse; C64/GBA use compiled-in balance constants |
+| Rendering | N/A | **No** | Separate impls | crossterm vs VIC-II vs GBA Mode 0 vs NDS GX vs vita2d |
+| Input handling | N/A | **No** | Separate impls | crossterm vs CIA keyboard/joystick vs GBA joypad vs NDS touch vs Vita buttons |
+| Save persistence | N/A | **No** | Separate impls | JSON vs binary; different backends (filesystem, SRAM, floppy) |
+| Data loading | standard | **No** | PC only (`data-files`) | TOML parse; C64/GBA/NDS use compiled-in balance constants |
 
 ### 1.6 Balance Constants
 
@@ -492,16 +538,24 @@ Each tier defines its own types, algorithms, and storage representations:
 | Map | 64x48, flat `[u8; W*H]` | 80x40, flat `[u8; W*H]` | 80x40+, `Vec<Vec<Tile>>` |
 | PRNG | LFSR-16 | LFSR-32 | ChaCha20 |
 | FOV | Iterative shadowcasting (integer slopes, 6502-optimized) | Iterative shadowcasting (integer slopes, i32, bitfield — fresh rewrite, not adapted from micro) | Recursive shadowcasting (`f64` slopes, `HashSet`) |
-| Pathfinding | BFS (fixed buffers) | BFS or A* with fixed-size heap (TBD) | A* |
+| Pathfinding | BFS (fixed buffers) | BFS (fixed buffers) | A* |
 | Messages | GameEvent enum (Copy) | GameEvent enum (Copy) | GameEvent → String formatting |
 | Enchantment cap | 5 (u8) | 5 (u8) | 5 (configurable) |
 | Save format | Binary (platform-specific) | Binary (platform-specific) | JSON via serde |
 
-The compact tier will initially be stubs only — `tier_compact/types.rs` (type aliases) and `tier_compact/prng.rs` (`LfsrRng32`). Full implementation (game state, mapgen, entity storage) is deferred until the GBA port begins.
+All three tiers are fully implemented. The compact tier uses no heap allocator —
+fixed arrays and `no_std` integer algorithms throughout. This was an explicit
+architectural decision for the GBA port (see #206, resolved).
 
-> **Open design decision:** Whether the GBA needs a dedicated compact tier depends on the allocation strategy (#206). If a heap allocator is used on GBA, the standard `GameState` could run directly, making compact tier vestigial. If no allocator, the compact tier's fixed arrays and `no_std` algorithms are necessary. See [GBA port — Key Open Decision](../platforms/gba-port.md#key-open-decision-allocation-strategy).
-
-When a higher platform runs a lower-tier game, it uses the lower tier's types and algorithms. Tier compatibility is downward only — higher tiers play lower-tier seeds, not vice versa. A PC running a tier micro seed instantiates `MicroGameState` with an adapter (wrap, not reimplement) — using `u8` coords, LFSR-16, and iterative shadowcasting FOV to produce the same dungeon a C64 would generate. The GBA runs both micro seeds (via `MicroGameStateAdapter`) and compact seeds (its native tier). Standard seeds are not supported on GBA. Remaining values (turn counts, kill counts, etc.) are sized per-field based on their value ranges.
+When a higher platform runs a lower-tier game, it uses the lower tier's types
+and algorithms. Tier compatibility is downward only — higher tiers play
+lower-tier seeds, not vice versa. A PC running a tier micro seed instantiates
+`MicroGameState` with an adapter (wrap, not reimplement) — using `u8` coords,
+LFSR-16, and iterative shadowcasting FOV to produce the same dungeon a C64
+would generate. The GBA runs both micro seeds (via `MicroGameState`) and compact
+seeds (via `CompactGameState`) through an EWRAM union with runtime tier
+selection. The NDS runs compact seeds only. Standard seeds are not supported on
+GBA or NDS.
 
 ### 1.9 Seed System and Cross-Platform Seeds
 
@@ -523,11 +577,11 @@ numeric value directly: `seed <= 0xFFFF` → micro.
 
 ```
 Seed: r7z              (value: 0x2E93, fits u16)
-Plays on: C64 · GBA · Vita · PC
+Plays on: C64 · GBA · NDS · Vita · PC
 Map: 64×48 · 64 entities · Iterative shadowcasting FOV
 
 Seed: r7z3kq           (value: 0x3A1B_C4E2, fits u32)
-Plays on: GBA · Vita · PC
+Plays on: GBA · NDS · Vita · PC
 Map: 80×40 · 128 entities · Iterative shadowcasting FOV
 
 Seed: r7z3kq9ab2x      (value: 0x1F3C_7A2B_0E91_D4F6, u64)
@@ -562,8 +616,8 @@ identically — same PRNG, same map, same FOV, same entity count. No divergence
 within a tier.
 
 Leaderboards are per-tier. A micro-tier daily challenge leaderboard includes
-scores from C64, GBA, Vita, and PC players competing on the same dungeon with
-the same algorithms. Standard-tier leaderboards include Vita and PC players.
+scores from C64, GBA, NDS, Vita, and PC players competing on the same dungeon
+with the same algorithms. Standard-tier leaderboards include Vita and PC players.
 
 ### 1.10 Tier Divergence
 
@@ -571,8 +625,11 @@ All intentional tier differences are documented in the comparison table in §1.8
 above. These reflect principled trade-offs for each tier's hardware constraints,
 not bugs or limitations.
 
-The `rules/` module produces tier-independent values (damage amounts, item
-stats, enchantment caps, monster stats) that all tiers consume identically.
-Divergence occurs in how tiers *apply* those values to their state — entity
-insertion, map storage layout, message formatting, and save serialization are
-all per-tier mechanics.
+The `rules/` module provides both tier-independent data (damage amounts, item
+stats, monster stats, balance constants) and shared algorithmic logic (AI
+decisions, spawn selection, dungeon geometry, combat resolution) that all tiers
+use identically. Per-tier code extracts scalars from its data structures, calls
+the shared `rules/` functions, and applies the results back — the "scalar
+boundary pattern." Divergence occurs in how tiers *store and iterate* their
+state — entity arrays, map storage layout, FOV computation, message formatting,
+and save serialization remain per-tier mechanics.

@@ -26,14 +26,19 @@ roguelike/
 │   │   └── src/
 │   │       ├── lib.rs      ← #![cfg_attr(not(feature = "std"), no_std)]
 │   │       ├── rules/      ← Pure game rules (no_std, always compiled)
+│   │       │   ├── ai.rs, combat.rs, spawn.rs, dungeon.rs
 │   │       │   ├── balance.rs, damage.rs, items.rs, monster_table.rs
-│   │       │   ├── message.rs, direction.rs, seed_code.rs
-│   │       │   └── tiles.rs, color.rs
+│   │       │   ├── properties.rs, interactions.rs, game_view.rs, health.rs
+│   │       │   ├── message.rs, direction.rs, command.rs, seed_code.rs
+│   │       │   └── tiles.rs, color.rs, save_common.rs
 │   │       ├── tier_micro/  ← Complete micro-tier game engine (no_std)
 │   │       │   ├── game.rs, map.rs, entity.rs, fov.rs, ai.rs
 │   │       │   ├── combat.rs, spawn.rs, prng.rs, msglog.rs, types.rs
 │   │       │   ├── item_store.rs, pathfinding.rs, autorun.rs, save.rs
-│   │       ├── tier_compact/ ← GBA tier stubs (types.rs, prng.rs)
+│   │       ├── tier_compact/ ← Complete compact-tier engine (no_std, i32 coords, 80×40)
+│   │       │   ├── game.rs, map.rs, entity.rs, fov.rs, ai.rs
+│   │       │   ├── combat.rs, spawn.rs, prng.rs, msglog.rs, types.rs
+│   │       │   ├── item_store.rs, pathfinding.rs, autorun.rs, save.rs
 │   │       ├── game_step.rs ← GameStep trait, MicroGameStateAdapter, create_game()
 │   │       ├── command.rs  ← GameCommand enum (Move(Direction), Pickup, etc.)
 │   │       ├── types.rs    ← Coord = i32, Stat = i32, Pos (standard tier)
@@ -53,8 +58,7 @@ roguelike/
 │   │   ├── Cargo.toml      depends on core + saves + crossterm
 │   │   └── src/
 │   │       ├── game_loop.rs (unified game loop, uses dyn GameStep)
-│   │       ├── render.rs    (CrosstermRenderer, uses dyn RenderSource)
-│   │       ├── render_source.rs (RenderSource trait: GameState + MicroGameStateAdapter impls)
+│   │       ├── render.rs    (CrosstermRenderer, renders via GameView trait)
 │   │       ├── input.rs     (key-to-command translation)
 │   │       ├── input_provider.rs (InputProvider trait, InputResult, GameInput)
 │   │       └── saves.rs     (re-exports SaveBackend from roguelike-saves)
@@ -221,14 +225,12 @@ All development happens on one branch:
 
 ## Planned Work
 
-- **Compact tier full implementation** — `tier_compact/` currently has stubs only (types + PRNG). Full game state, mapgen, entity storage deferred until GBA port begins. See [capability tier reference](capability-tier-reference.md).
-- **SpawnDirective structs** — spawn logic is currently per-tier; planned to produce tier-agnostic directives that each tier applies to its own state.
 - **AT Protocol integration** — Bluesky OAuth login, PDS-based portable saves. See [design doc](../design/atproto.md).
 - **WASM frontend** — browser-based play via `web` crate. See [design doc](../design/atproto.md#wasm-frontend).
 
 ## Implemented (formerly planned)
 
-- **Capability tier hierarchy** — `no_std` support, per-tier types, shared `rules/` module, `tier_micro/` complete game engine, `GameStep` cross-tier trait, `RenderSource` unified rendering trait. See [capability tier reference](capability-tier-reference.md).
+- **Capability tier hierarchy** — `no_std` support, per-tier types, shared `rules/` module (AI, spawn, dungeon, combat, properties, interactions), `tier_micro/` and `tier_compact/` complete game engines, `GameStep` cross-tier trait, `GameView` unified query trait. See [capability tier reference](capability-tier-reference.md).
 - **Cross-platform seed system** — tier inference from seed numeric value (`seed <= 0xFFFF` → micro), base36 encode/decode, MCP seed_code param. See [capability tier reference](capability-tier-reference.md#19-seed-system-and-cross-platform-seeds).
 - **C64 production frontend** — rewritten from standalone POC to production frontend (~5,200 lines) over `core::tier_micro` + `core::rules`.
 
@@ -249,5 +251,5 @@ Key milestones in the cross-platform architecture:
 - Rules module extracted — `rules/` with pure game rules (damage, balance, items, monster_table, GameEvent, Direction, seed_code, tiles, color)
 - Standard-tier code gated behind `std` feature — `#![cfg_attr(not(feature = "std"), no_std)]`
 - GameStep cross-tier trait — `game_step.rs` with MicroGameStateAdapter, create_game() factory
-- RenderSource unified rendering trait — `tui/render_source.rs` eliminates duplicate render code paths
+- GameView unified query trait — `rules/game_view.rs` provides cross-tier rendering and MCP interface
 - C64 production frontend — depends on `core::tier_micro` + `core::rules`, ~5,200 lines with SID music, floppy saves, inventory, screen shake, help screen, message history, I/O banking

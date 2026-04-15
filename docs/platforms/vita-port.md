@@ -1,6 +1,6 @@
 # PS Vita Port
 
-> **Status:** Proposed. Design and implementation plan for the Vita frontend crate (`crates/vita/`).
+> **Status:** Phase 1 complete (scaffold — vita2d renderer, compact-tier game loop, static render). No input yet. See issues #318–#322 for Phase 2–6 roadmap.
 
 How to bring the roguelike to the PlayStation Vita while keeping all game logic in `roguelike-core`, exploiting Vita hardware for features that genuinely benefit the game, and fitting cleanly into the workspace alongside existing and planned ports.
 

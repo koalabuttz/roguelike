@@ -1,8 +1,6 @@
 # Game Boy Advance Port
 
-> **Status:** Proposed. Design and implementation plan for the GBA frontend crate (`crates/gba/`).
->
-> **Gating decision:** The allocation strategy (#206) determines whether GBA uses a dedicated compact tier or runs the standard tier with an allocator. See [Key Open Decision](#key-open-decision-allocation-strategy) below. Much of this doc assumes the no-allocator / compact tier path — sections affected are noted.
+> **Status:** Implemented. The GBA frontend crate (`crates/gba/`) is complete with full features: animated title screen, inventory UI, SRAM saves, pause/settings menus, help screen, message history, game over screens, seed entry via base36 roller. Uses compact tier (`tier_compact`) with no heap allocator. Dual-tier support: compact seeds via `CompactGameState`, micro seeds via `MicroGameState`, selected at runtime via EWRAM union.
 
 How to bring the roguelike to the Game Boy Advance while keeping all game logic in `roguelike-core`, leveraging GBA hardware for features that benefit the game across platforms, and establishing patterns reusable by other constrained ports (Vita, C64).
 
@@ -88,7 +86,7 @@ crates/core/src/
   command.rs      # GameCommand with Direction enum — no Coord dependency, no_std
   tier_micro/     # u8 coords, u8 stats, LFSR-16, iterative shadowcasting FOV, fixed arrays — no_std
   tier_compact/   # i32 coords, u8 stats, LFSR-32, iterative shadowcasting FOV, fixed arrays — no_std
-                  #   (stubs only — types.rs + prng.rs — until GBA port fleshes it out)
+                  #   Complete engine: game.rs, map.rs, entity.rs, fov.rs, ai.rs, etc.
   game_step.rs    # #[cfg(feature = "std")] GameStep trait — cross-tier interface
   (top-level)     # tier standard: i32 coords, i32 stats, ChaCha20, shadowcasting FOV, Vec — std
 ```
@@ -167,7 +165,7 @@ pub struct EntityStore {
 
 This matches the micro tier's existing implementation. The capacity constants are baked into each tier module, not set dynamically.
 
-**Risk:** The tier system is already the target architecture for core. The compact tier will initially be stubs only (type aliases + PRNG); the full compact tier (game state, mapgen, entity storage, FOV) will be fleshed out when GBA work begins. The GBA-specific work is writing the GBA frontend crate and completing the compact tier — no other core refactoring is needed.
+**Status:** The tier system is fully implemented. The compact tier is complete (game state, mapgen, entity storage, FOV, AI, spawn, pathfinding, save/load). The GBA frontend crate is production-ready with full features.
 
 **"Don't close doors" note:** The tier hierarchy benefits every port. The GBA compiles `rules/` + tier compact (its native tier) + tier micro (for cross-platform seeds). The Vita compiles all tiers. The C64 compiles `rules/` + tier micro only. Desktop/terminal/SSH/MCP/web builds compile everything. Each platform gets exactly the types and capacities it needs without feature flags or `cfg` switching. Game rules in `rules/` are written once and reused across all tiers; game mechanics remain per-tier.
 
@@ -492,7 +490,7 @@ The budget is comfortable. Even doubling all estimates leaves significant headro
 - Map generation algorithm: match standard tier if it fits comfortably in GBA constraints (80×40, fixed arrays). Diverge only where necessary.
 - Add `CompactGameStateAdapter` to `game_step.rs` (follows `MicroGameStateAdapter` pattern).
 - Wire into `create_game()` factory: seeds ≤ `0xFFFFFFFF` route to compact tier.
-- Implement `RenderSource` for compact adapter — compact tier is now playable in the terminal.
+- Implement `GameView` for compact state — compact tier is now playable in the terminal.
 - Add compact-tier golden replays and balance integration tests.
 - Run headless parameter sweeps on compact seeds to validate balance.
 - **Test:** `cargo test --workspace`, MCP playtesting with compact seeds, headless sweeps.

@@ -104,6 +104,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Update stale project documentation (7 files) (#332)
 - Unify dungeon helpers into shared rules/dungeon.rs module (#331)
 - Unify spawn logic into shared rules/spawn.rs module (#330)
 - Unify AI logic into shared rules/ai.rs module (#329)

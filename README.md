@@ -181,7 +181,7 @@ Frames are written atomically after every action. See the [spectator mode design
 ## Development
 
 ```sh
-cargo test --workspace               # All ~1006 tests across all crates
+cargo test --workspace               # All ~1520 tests across all crates
 cargo clippy --workspace -- -D warnings
 cargo fmt --all --check
 ```
@@ -199,15 +199,19 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for test categories, scenario/golden repl
 
 ```
 crates/
-  core/       roguelike-core: game logic, zero platform deps
-  saves/      roguelike-saves: SaveBackend trait (connected platforms)
-  tui/        roguelike-tui: shared terminal game loop + rendering
-  terminal/   roguelike-terminal: crossterm frontend (local play)
-  ssh/        roguelike-ssh: SSH server frontend (multiplayer)
-  mcp/        roguelike-mcp: MCP server (AI play)
-  c64/        roguelike-c64: C64 frontend (production, no_std)
+  core/           roguelike-core: game logic, zero platform deps
+  saves/          roguelike-saves: SaveBackend trait (connected platforms)
+  tui/            roguelike-tui: shared terminal game loop + rendering
+  terminal/       roguelike-terminal: crossterm frontend (local play)
+  ssh/            roguelike-ssh: SSH server frontend (multiplayer)
+  mcp/            roguelike-mcp: MCP server (AI play)
+  c64/            roguelike-c64: C64 frontend (production, no_std)
+  gba/            roguelike-gba: GBA frontend (no_std, standalone workspace)
+  nds/            roguelike-nds: NDS frontend (no_std, standalone workspace)
+  renderer3d/     roguelike-renderer3d: software 3D renderer (no_std)
+  vita/           roguelike-vita: PS Vita frontend (standalone workspace)
   libudev-sys-dlopen/  Drop-in libudev-sys replacement via dlopen
-tools/        Python analytics, visualization, and playtesting scripts
+tools/            Python analytics, visualization, and playtesting scripts
 ```
 
 See [docs/architecture/cross-platform.md](docs/architecture/cross-platform.md) for detailed crate responsibilities and the platform abstraction design.
@@ -223,8 +227,9 @@ See [docs/roadmap.md](docs/roadmap.md) for the full breakdown with dependencies,
 - Web (WASM) frontend
 - AT Protocol integration (Bluesky login, PDS saves)
 - Daily challenges and shared leaderboard
+- Vita remaining phases (input, UI, saves, audio)
 
-**Completed highlights:** 26-slot inventory (a–z) with stacking and equipment; multi-level dungeons with stairs and a win condition; wandering monsters with time pressure and sound cues; capability tier system (micro/standard) with cross-tier GameStep and RenderSource traits; C64 production frontend with SID music, floppy disk saves, inventory, screen shake, help screen, message history, and I/O banking; micro tier BFS pathfinding, auto\_fight, and autorun stop conditions; platform abstraction; save/load; A\* pathfinding; gamepad support; SSH multiplayer; MCP server for AI play; data-driven content with hot reload; full CI/CD with balance regression testing; seed sharing.
+**Completed highlights:** 26-slot inventory (a–z) with stacking and equipment; multi-level dungeons with stairs and a win condition; wandering monsters with time pressure and sound cues; capability tier system (micro/compact/standard) with shared rules module (AI, spawn, dungeon, combat, properties, interactions), cross-tier GameStep and GameView traits; property system (16 properties, 38 interaction rules, chain reactions, combat integration); C64 production frontend with SID music, floppy disk saves, inventory, screen shake, help screen, message history, and I/O banking; GBA production frontend with SRAM saves, animated title screen, inventory UI, dual-tier EWRAM support; NDS frontend (Phase 3) with hardware 3D, 2D automap, and touchscreen; Vita Phase 1 scaffold; software 3D renderer crate; micro and compact tier BFS pathfinding, auto\_fight, and autorun stop conditions; platform abstraction; save/load; A\* pathfinding; gamepad support; SSH multiplayer; MCP server for AI play; data-driven content with hot reload; full CI/CD with balance regression testing; seed sharing.
 
 ## David's Statement on AI Use
 

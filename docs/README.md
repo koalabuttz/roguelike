@@ -17,7 +17,7 @@ Project documentation for the roguelike dungeon crawler.
 |----------|---------|--------|
 | [architecture/cross-platform.md](architecture/cross-platform.md) | Workspace layout, crate responsibilities, development workflow | Current |
 | [architecture/simulation.md](architecture/simulation.md) | Future design for emergent simulation (properties, events, CA) | Future design |
-| [architecture/capability-tier-reference.md](architecture/capability-tier-reference.md) | Cross-platform capability tier hierarchy: per-tier types, algorithms, sharing matrix, seed system, tier divergence | Reference (micro tier complete: inventory, BFS pathfinding, save/load, autorun) |
+| [architecture/capability-tier-reference.md](architecture/capability-tier-reference.md) | Cross-platform capability tier hierarchy: per-tier types, algorithms, sharing matrix, seed system, tier divergence | Reference (all tiers complete; AI/spawn/dungeon unified via rules/) |
 
 ### Platforms
 
@@ -28,8 +28,9 @@ Project documentation for the roguelike dungeon crawler.
 | [platforms/c64-demo-techniques-for-roguelike.md](platforms/c64-demo-techniques-for-roguelike.md) | VIC-II demo scene techniques evaluated for the roguelike C64 port | Reference |
 | [platforms/c64-display-mode-analysis.md](platforms/c64-display-mode-analysis.md) | VIC-II display mode evaluation: why standard character mode is optimal | Reference |
 | [platforms/c64-atproto-bridge.md](platforms/c64-atproto-bridge.md) | Self-hostable bridge server connecting C64 (via Ultimate64 Ethernet) to AT Protocol for PDS saves and spectating | Future design |
-| [platforms/gba-port.md](platforms/gba-port.md) | GBA frontend: rendering, input, save, audio, no_std core adaptations | Proposed |
-| [platforms/vita-port.md](platforms/vita-port.md) | PS Vita frontend: vita2d rendering, dual touch, spatial audio, WiFi networking | Proposed |
+| [platforms/gba-port.md](platforms/gba-port.md) | GBA frontend: rendering, input, save, audio, no_std core adaptations | Implemented |
+| [platforms/vita-port.md](platforms/vita-port.md) | PS Vita frontend: vita2d rendering, dual touch, spatial audio, WiFi networking | Phase 1 complete |
+| NDS frontend (no dedicated doc) | NDS frontend: hardware 3D, 2D automap, touchscreen, compact tier, bare-metal from GBATEK. See [CLAUDE.md](../CLAUDE.md) for crate details. | Phase 3 complete |
 
 ### Game & Feature Design
 

@@ -104,6 +104,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Cargo audit ignore for unfixable RUSTSEC-2023-0071 (rsa crate)
 
 ### Changed
+- Pin CI toolchain to 1.93.1 (rust-mos fork rebase point) + fix tui collapsible_match (#336)
 - Android port Phase 1: proof-of-life APK with winit+softbuffer (#333)
 - Update stale project documentation (7 files) (#332)
 - Unify dungeon helpers into shared rules/dungeon.rs module (#331)

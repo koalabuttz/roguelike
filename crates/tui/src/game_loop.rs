@@ -856,10 +856,10 @@ fn run_dev_console<W: Write>(
                 KeyCode::Backspace => {
                     text_buf.pop();
                 }
-                KeyCode::Char(c) if c.is_ascii_graphic() || c == ' ' => {
-                    if text_buf.len() < 60 {
-                        text_buf.push(c);
-                    }
+                KeyCode::Char(c)
+                    if (c.is_ascii_graphic() || c == ' ') && text_buf.len() < 60 =>
+                {
+                    text_buf.push(c);
                 }
                 _ => {}
             },

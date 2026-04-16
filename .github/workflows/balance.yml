@@ -33,6 +33,11 @@ on:
 permissions:
   pull-requests: write
 
+env:
+  # Pinned to the rust-mos fork's rebase point (see ci.yml for rationale).
+  # Bump in lockstep when the local rust-mos fork is rebased.
+  RUST_TOOLCHAIN: "1.93.1"
+
 jobs:
   balance:
     name: Balance Report
@@ -43,6 +48,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - name: Restore baseline cache
         id: baseline

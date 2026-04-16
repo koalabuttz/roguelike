@@ -16,6 +16,11 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Pinned to the rust-mos fork's rebase point. Local development uses a
+  # custom rustc fork (for MOS 6502 / SM83 targets) so we pin CI to match
+  # and avoid clippy-lint drift between local and CI. Bump in lockstep when
+  # the local fork is rebased onto a newer upstream Rust release.
+  RUST_TOOLCHAIN: "1.93.1"
 
 jobs:
   lint:
@@ -27,6 +32,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
@@ -54,6 +60,8 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
       - name: Test with raw-usb feature (Linux only)
@@ -67,6 +75,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
       - uses: actions/cache@v4
         with:
@@ -88,5 +98,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-audit --locked && cargo audit

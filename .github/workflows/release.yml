@@ -6,6 +6,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Pinned to the rust-mos fork's rebase point (see ci.yml for rationale).
+  # Bump in lockstep when the local rust-mos fork is rebased.
+  RUST_TOOLCHAIN: "1.93.1"
 
 jobs:
   build:
@@ -42,6 +45,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: ${{ matrix.target }}
       - run: cargo build --release --target ${{ matrix.target }}
 

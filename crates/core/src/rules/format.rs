@@ -73,8 +73,40 @@ pub fn write_str(buf: &mut [u8], pos: usize, s: &str) -> usize {
     p
 }
 
+/// Write a `u32` as 8-digit uppercase hexadecimal into `buf` starting at `pos`.
+/// Always writes exactly 8 bytes (the full width of a u32). Returns `pos + 8`.
+pub fn write_u32_hex(buf: &mut [u8], pos: usize, val: u32) -> usize {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut p = pos;
+    for i in (0..8).rev() {
+        if p < buf.len() {
+            buf[p] = HEX[((val >> (i * 4)) & 0xF) as usize];
+        }
+        p += 1;
+    }
+    p
+}
+
+/// Write a `u16` as 4-digit uppercase hexadecimal into `buf` starting at `pos`.
+/// Always writes exactly 4 bytes (the full width of a u16). Returns `pos + 4`.
+pub fn write_u16_hex(buf: &mut [u8], pos: usize, val: u16) -> usize {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut p = pos;
+    for shift in [12, 8, 4, 0] {
+        if p < buf.len() {
+            buf[p] = HEX[((val >> shift) & 0xF) as usize];
+        }
+        p += 1;
+    }
+    p
+}
+
 /// Write a combatant name: "You" for the player, the monster name otherwise.
-fn write_combatant(buf: &mut [u8], pos: usize, who: Combatant) -> usize {
+///
+/// Exposed so ports that want the "You vs. monster" convention but need custom
+/// sentence structure (e.g. C64's PETSCII formatter) can reuse it without
+/// duplicating the logic.
+pub fn write_combatant(buf: &mut [u8], pos: usize, who: Combatant) -> usize {
     match who {
         Combatant::Player => write_str(buf, pos, "You"),
         _ => write_str(buf, pos, who.name()),

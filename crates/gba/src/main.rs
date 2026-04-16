@@ -50,7 +50,7 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
         let mut buf = [b' '; 30];
         let mut p = 0;
         p = format::write_str(&mut buf, p, "SP:");
-        p = format::write_hex(&mut buf, p, sp);
+        p = format::write_u32_hex(&mut buf, p, sp);
         if let Ok(s) = core::str::from_utf8(&buf[..p]) {
             display::write_map_string(0, 1, s, 4);
         }
@@ -59,7 +59,7 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
         let mut buf = [b' '; 30];
         let mut p = 0;
         p = format::write_str(&mut buf, p, "LR:");
-        p = format::write_hex(&mut buf, p, lr);
+        p = format::write_u32_hex(&mut buf, p, lr);
         if let Ok(s) = core::str::from_utf8(&buf[..p]) {
             display::write_map_string(0, 2, s, 4);
         }

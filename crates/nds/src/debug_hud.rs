@@ -1298,20 +1298,7 @@ pub fn write_u32_dec(buf: &mut [u8], pos: usize, val: u32) -> usize {
     p
 }
 
-/// Write a u16 as 4-digit uppercase hex into `buf` starting at `pos`.
-/// Returns the new position (pos + 4).
-#[allow(dead_code)] // used only in hardware-3D path (fog HUD)
-pub fn write_u16_hex(buf: &mut [u8], pos: usize, val: u16) -> usize {
-    const HEX: [u8; 16] = *b"0123456789ABCDEF";
-    let mut p = pos;
-    for shift in [12, 8, 4, 0] {
-        if p < buf.len() {
-            buf[p] = HEX[((val >> shift) & 0xF) as usize];
-        }
-        p += 1;
-    }
-    p
-}
+pub use roguelike_core::rules::format::write_u16_hex;
 
 /// Write a `&str` (as bytes) into `buf` starting at `pos`.
 /// Returns the new position after the string.

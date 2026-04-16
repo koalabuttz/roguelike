@@ -432,7 +432,7 @@ pub fn damage_flow(games: &[GameAnalytics]) -> DamageFlow {
             total_damage,
         })
         .collect();
-    flows.sort_by(|a, b| b.total_damage.cmp(&a.total_damage));
+    flows.sort_by_key(|b| std::cmp::Reverse(b.total_damage));
 
     DamageFlow { flows }
 }

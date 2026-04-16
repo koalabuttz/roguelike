@@ -229,10 +229,8 @@ pub const fn from_name(s: &str) -> Option<Property> {
                 return Some(Property::Volatile);
             }
         }
-        9 => {
-            if ci_eq(b, b"corrosive") {
-                return Some(Property::Corrosive);
-            }
+        9 if ci_eq(b, b"corrosive") => {
+            return Some(Property::Corrosive);
         }
         _ => {}
     }

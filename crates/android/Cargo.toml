@@ -1,0 +1,39 @@
+[package]
+name = "roguelike-android"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "Android port of the roguelike dungeon crawler"
+
+# Standalone workspace — not part of the parent workspace.
+# The Android target (aarch64-linux-android) requires the Android NDK
+# and cargo-apk2 for APK packaging. Isolating it prevents the parent
+# workspace from inheriting those constraints.
+[workspace]
+
+[dependencies]
+roguelike-core = { path = "../core", default-features = false, features = ["std", "serde", "data-files"] }
+winit = "0.30"
+softbuffer = "0.4"
+
+[lib]
+# cdylib is required for android-activity's NativeActivity glue.
+# lib is needed for desktop `cargo run --example` usage.
+crate-type = ["cdylib", "lib"]
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
+
+[package.metadata.android]
+package = "com.koalabuttz.roguelike"
+label = "Roguelike"
+target_sdk_version = 34
+min_sdk_version = 28
+
+[package.metadata.android.application]
+theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+
+[profile.release]
+opt-level = 2
+lto = true
+codegen-units = 1

@@ -1,0 +1,13 @@
+# Android cross-compilation config.
+#
+# Uses Rust's built-in LLD linker (rust-lld) instead of the NDK's x86_64
+# clang, since our host is aarch64 Linux and the NDK doesn't ship ARM64
+# Linux host binaries. The NDK sysroot provides Android system libraries.
+
+[target.aarch64-linux-android]
+linker = "rust-lld"
+rustflags = [
+    "-C", "link-arg=--target=aarch64-linux-android28",
+    "-C", "link-arg=--sysroot=/home/david/android-ndk/android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+    "-C", "link-arg=-L/home/david/android-ndk/android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/28",
+]

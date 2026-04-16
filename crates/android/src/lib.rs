@@ -31,6 +31,9 @@ use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::EventLoop;
 use winit::window::Window;
 
+#[cfg(target_os = "android")]
+use winit::platform::android::EventLoopBuilderExtAndroid;
+
 /// Active rendering surface, created on Resumed and dropped on Suspended.
 struct RenderState {
     window: Arc<Window>,
@@ -153,6 +156,17 @@ impl App {
             rs.window.request_redraw();
         }
     }
+}
+
+/// Android entry point. Called by android-activity's NativeActivity glue.
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+fn android_main(app: android_activity::AndroidApp) {
+    let event_loop = EventLoop::builder()
+        .with_android_app(app)
+        .build()
+        .expect("failed to create event loop");
+    run(event_loop);
 }
 
 /// Run the game. Called from both desktop main() and android_main().

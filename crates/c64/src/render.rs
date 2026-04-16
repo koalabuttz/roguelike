@@ -37,12 +37,20 @@ const VIEW_H: u8 = 22;
 
 /// Compute viewport origin so the player is centered on screen.
 /// Clamps to map edges so we never show out-of-bounds tiles.
+///
+/// Thin wrapper over [`roguelike_core::rules::viewport::player_centered_u8`].
+/// Stays `u8`-native throughout so 6502 codegen avoids i32 arithmetic.
 pub fn viewport_pos(state: &MicroGameState) -> (u8, u8) {
     let px = state.entities.x[PLAYER_IDX as usize];
     let py = state.entities.y[PLAYER_IDX as usize];
-    let vx = px.saturating_sub(VIEW_W / 2).min(state.map.width.saturating_sub(VIEW_W));
-    let vy = py.saturating_sub(VIEW_H / 2).min(state.map.height.saturating_sub(VIEW_H));
-    (vx, vy)
+    roguelike_core::rules::viewport::player_centered_u8(
+        px,
+        py,
+        state.map.width,
+        state.map.height,
+        VIEW_W,
+        VIEW_H,
+    )
 }
 
 /// Dead-zone margin: the player can roam this many tiles from the

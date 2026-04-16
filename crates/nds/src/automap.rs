@@ -47,24 +47,19 @@ fn game_color_to_pal(color: GameColor) -> u16 {
 /// Centers on the player, clamped to map edges so the viewport never
 /// extends past the map boundary. Returns `(view_x, view_y)` in tile
 /// coordinates — the world tile at the top-left corner of the viewport.
+///
+/// Thin wrapper over [`roguelike_core::rules::viewport::player_centered_i32`]
+/// that narrows to `usize` for the automap's indexing conventions.
 pub(crate) fn viewport_offset(px: i32, py: i32, map_w: i32, map_h: i32) -> (usize, usize) {
-    let view_x = if (map_w as usize) <= MAP_COLS {
-        0usize
-    } else {
-        let half = MAP_COLS / 2;
-        let ideal = (px as usize).saturating_sub(half);
-        ideal.min((map_w as usize) - MAP_COLS)
-    };
-
-    let view_y = if (map_h as usize) <= MAP_ROWS {
-        0usize
-    } else {
-        let half = MAP_ROWS / 2;
-        let ideal = (py as usize).saturating_sub(half);
-        ideal.min((map_h as usize) - MAP_ROWS)
-    };
-
-    (view_x, view_y)
+    let (vx, vy) = roguelike_core::rules::viewport::player_centered_i32(
+        px,
+        py,
+        map_w,
+        map_h,
+        MAP_COLS as i32,
+        MAP_ROWS as i32,
+    );
+    (vx as usize, vy as usize)
 }
 
 /// Render the full automap: terrain, items, entities.

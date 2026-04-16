@@ -149,12 +149,13 @@ pub trait GameView {
 
     /// Viewport origin (top-left world tile) for a player-centered camera
     /// clamped to map boundaries.
+    ///
+    /// Delegates to [`crate::rules::viewport::player_centered_i32`] so the
+    /// math lives in one place; the micro tier's u8 variant lives alongside.
     fn viewport_origin(&self, viewport_w: i32, viewport_h: i32) -> (i32, i32) {
         let (px, py) = self.player_xy();
         let (mw, mh) = self.map_dims();
-        let vx = (px - viewport_w / 2).clamp(0, (mw - viewport_w).max(0));
-        let vy = (py - viewport_h / 2).clamp(0, (mh - viewport_h).max(0));
-        (vx, vy)
+        crate::rules::viewport::player_centered_i32(px, py, mw, mh, viewport_w, viewport_h)
     }
 }
 

@@ -15,18 +15,9 @@ const VP_W: i32 = SCREEN_COLS as i32;
 /// Viewport height in tiles.
 const VP_H: i32 = MAP_ROWS as i32;
 
-/// Compute viewport origin (top-left world coordinate), player-centered.
-fn viewport_origin(state: &impl GameView) -> (i32, i32) {
-    let (px, py) = state.player_xy();
-    let (mw, mh) = state.map_dims();
-    let vx = (px - VP_W / 2).clamp(0, (mw - VP_W).max(0));
-    let vy = (py - VP_H / 2).clamp(0, (mh - VP_H).max(0));
-    (vx, vy)
-}
-
 /// Full screen redraw from game state.
 pub fn render_game(state: &impl GameView) {
-    let (vx, vy) = viewport_origin(state);
+    let (vx, vy) = state.viewport_origin(VP_W, VP_H);
     render_viewport(state, vx, vy);
     render_items(state, vx, vy);
     render_entities(state, vx, vy);

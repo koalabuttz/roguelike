@@ -75,10 +75,6 @@ fn dim_color(color: u32) -> u32 {
 
 // ── Viewport ─────────────────────────────────────────────────────────────────
 
-fn viewport_origin(state: &dyn GameView) -> (i32, i32) {
-    state.viewport_origin(VP_COLS, VP_ROWS)
-}
-
 fn in_viewport(sx: i32, sy: i32) -> bool {
     (0..VP_COLS).contains(&sx) && (0..VP_ROWS).contains(&sy)
 }
@@ -89,7 +85,7 @@ fn in_viewport(sx: i32, sy: i32) -> bool {
 ///
 /// Must be called between `vita2d.start_frame()` and `vita2d.end_frame()`.
 pub fn render_frame(vita2d: &Vita2d, state: &dyn GameView) {
-    let (vx, vy) = viewport_origin(state);
+    let (vx, vy) = state.viewport_origin(VP_COLS, VP_ROWS);
     render_viewport(vita2d, state, vx, vy);
     render_items(vita2d, state, vx, vy);
     render_entities(vita2d, state, vx, vy);

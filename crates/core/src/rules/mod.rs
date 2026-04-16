@@ -12,6 +12,7 @@ pub mod command;
 pub mod damage;
 pub mod direction;
 pub mod dungeon;
+pub mod format;
 pub mod game_view;
 pub mod health;
 pub mod interactions;

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::entity::AiBehavior;
+use crate::entity::AiPersonality;
 use crate::rules::balance;
 use crate::rules::monster_table::{self, MonsterKind};
 use crate::types::{Coord, GameColor, Stat};
@@ -198,12 +198,12 @@ impl MonsterDef {
         parse_color(&self.color)
     }
 
-    /// Parse the AI string into an AiBehavior.
-    pub fn ai_behavior(&self) -> AiBehavior {
+    /// Parse the AI string into an AiPersonality.
+    pub fn ai_personality(&self) -> AiPersonality {
         match self.ai.to_lowercase().as_str() {
-            "chase" => AiBehavior::Chase,
-            "wander" => AiBehavior::Wander,
-            _ => AiBehavior::None,
+            "chase" | "aggressive" => AiPersonality::Aggressive,
+            "wander" | "patrol" => AiPersonality::Patrol,
+            _ => AiPersonality::Player,
         }
     }
 
@@ -267,8 +267,8 @@ mod data_files {
         "Cyan",
     ];
 
-    /// Known AI behavior names — must match the arms of `MonsterDef::ai_behavior()`.
-    const KNOWN_AI: &[&str] = &["chase", "wander"];
+    /// Known AI personality names — must match the arms of `MonsterDef::ai_personality()`.
+    const KNOWN_AI: &[&str] = &["chase", "wander", "aggressive", "patrol"];
 
     const DEFAULT_TOML: &str = include_str!("../data/game.toml");
 
@@ -698,7 +698,7 @@ mod tests {
     fn glyph_and_color_parsing() {
         assert_eq!(goblin().glyph_char(), 'g');
         assert_eq!(goblin().game_color(), GameColor::Green);
-        assert_eq!(goblin().ai_behavior(), AiBehavior::Chase);
+        assert_eq!(goblin().ai_personality(), AiPersonality::Aggressive);
         assert_eq!(defaults().player.glyph_char(), '@');
         assert_eq!(defaults().player.game_color(), GameColor::Yellow);
     }
@@ -794,7 +794,7 @@ mod tests {
     #[test]
     fn validate_catches_unknown_ai() {
         let mut data = defaults().clone();
-        data.monsters[0].ai = "Patrol".to_string();
+        data.monsters[0].ai = "Sleepwalk".to_string();
         let warnings = validate_game_data(&data);
         assert!(warnings.iter().any(|w| w.contains("unknown AI")));
     }
@@ -858,7 +858,7 @@ mod tests {
         let mut data = defaults().clone();
         data.monsters[0].ai = "chase".to_string();
         let warnings = validate_game_data(&data);
-        // "chase" (lowercase) matches ai_behavior() and should not warn.
+        // "chase" (lowercase) matches ai_personality() and should not warn.
         assert!(
             !warnings.iter().any(|w| w.contains("unknown AI")),
             "chase should be valid AI, got warnings: {:?}",

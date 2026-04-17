@@ -1264,12 +1264,17 @@ impl GameState {
             return;
         }
 
-        // Cap alive wandering monsters (Wander AI = not yet seen player).
+        // Cap alive wandering monsters (Patrol = not yet seen player, or
+        // unaware Cowards that haven't edge-triggered awareness yet).
         let wander_alive = self
             .entities
             .iter()
             .skip(1)
-            .filter(|e| e.alive && e.ai == crate::entity::AiBehavior::Wander)
+            .filter(|e| {
+                e.alive
+                    && (e.ai == crate::entity::AiPersonality::Patrol
+                        || (e.ai == crate::entity::AiPersonality::Coward && !e.aware_last_turn))
+            })
             .count() as Stat;
         if wander_alive >= max_wandering {
             return;
@@ -1280,7 +1285,19 @@ impl GameState {
         {
             entity.x = sx;
             entity.y = sy;
-            entity.ai = crate::entity::AiBehavior::Wander;
+            // Default to Patrol; stochastically convert Goblin Patrols to Coward.
+            entity.ai = crate::entity::AiPersonality::Patrol;
+            if let Some(kind) = entity.monster_kind {
+                let chance = crate::rules::monster_table::coward_chance(kind);
+                if chance != 0 {
+                    let roll: u8 = rng.gen_range(0..100);
+                    entity.ai = crate::rules::spawn::roll_coward(
+                        chance,
+                        roll,
+                        crate::entity::AiPersonality::Patrol,
+                    );
+                }
+            }
             self.apply_depth_scaling(&mut entity);
             self.emit_spawn_sound_cue(sx, sy);
             self.entities.push(entity);
@@ -1363,10 +1380,15 @@ impl GameState {
         let py = self.entities[0].y;
         let cfg = &self.wandering_config;
 
-        // Find the closest alive wandering monster.
+        // Find the closest alive wandering monster (Patrol or unaware Coward).
         let mut closest_dist = Coord::MAX;
         for e in self.entities.iter().skip(1) {
-            if e.alive && e.ai == crate::entity::AiBehavior::Wander {
+            if !e.alive {
+                continue;
+            }
+            let wandering = e.ai == crate::entity::AiPersonality::Patrol
+                || (e.ai == crate::entity::AiPersonality::Coward && !e.aware_last_turn);
+            if wandering {
                 let dist = (px - e.x).abs() + (py - e.y).abs();
                 if dist < closest_dist {
                     closest_dist = dist;

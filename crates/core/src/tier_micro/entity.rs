@@ -5,7 +5,7 @@
 
 use super::types::*;
 use crate::rules::balance;
-use crate::rules::monster_table::{self, AiBehavior, MonsterKind};
+use crate::rules::monster_table::{self, AiPersonality, MonsterKind};
 
 pub struct EntityStore {
     pub x: [u8; MAX_ENTITIES],
@@ -15,9 +15,12 @@ pub struct EntityStore {
     pub atk: [Stat; MAX_ENTITIES],
     pub def: [Stat; MAX_ENTITIES],
     pub kind: [Option<MonsterKind>; MAX_ENTITIES],
-    pub ai: [AiBehavior; MAX_ENTITIES],
+    pub ai: [AiPersonality; MAX_ENTITIES],
     pub alive: [bool; MAX_ENTITIES],
     pub sight: [u8; MAX_ENTITIES],
+    /// Whether this entity saw the player on its most recent turn. Used to
+    /// detect the rising edge of awareness so EntityNotice fires exactly once.
+    pub aware_last_turn: [bool; MAX_ENTITIES],
     pub count: u8,
 }
 
@@ -37,9 +40,10 @@ impl EntityStore {
             atk: [0; MAX_ENTITIES],
             def: [0; MAX_ENTITIES],
             kind: [None; MAX_ENTITIES],
-            ai: [AiBehavior::None; MAX_ENTITIES],
+            ai: [AiPersonality::Player; MAX_ENTITIES],
             alive: [false; MAX_ENTITIES],
             sight: [0; MAX_ENTITIES],
+            aware_last_turn: [false; MAX_ENTITIES],
             count: 0,
         }
     }
@@ -53,7 +57,7 @@ impl EntityStore {
         self.max_hp[i] = balance::PLAYER_HP;
         self.atk[i] = balance::PLAYER_ATK;
         self.def[i] = balance::PLAYER_DEF;
-        self.ai[i] = AiBehavior::None;
+        self.ai[i] = AiPersonality::Player;
         self.alive[i] = true;
         self.sight[i] = balance::MICRO_FOV_RADIUS;
         if self.count == 0 {
@@ -67,7 +71,7 @@ impl EntityStore {
         kind: MonsterKind,
         mx: u8,
         my: u8,
-        behavior: AiBehavior,
+        personality: AiPersonality,
     ) -> bool {
         if self.count as usize >= MAX_ENTITIES {
             return false;
@@ -80,9 +84,10 @@ impl EntityStore {
         self.max_hp[i] = monster_table::max_hp(kind);
         self.atk[i] = monster_table::attack(kind);
         self.def[i] = monster_table::defense(kind);
-        self.ai[i] = behavior;
+        self.ai[i] = personality;
         self.alive[i] = true;
         self.sight[i] = monster_table::sight_radius(kind);
+        self.aware_last_turn[i] = false;
         self.count += 1;
         true
     }
@@ -147,7 +152,7 @@ mod tests {
     fn spawn_monster_increments_count() {
         let mut e = EntityStore::new();
         e.spawn_player(5, 5);
-        assert!(e.spawn_monster(MonsterKind::Goblin, 10, 10, AiBehavior::Wander));
+        assert!(e.spawn_monster(MonsterKind::Goblin, 10, 10, AiPersonality::Patrol));
         assert_eq!(e.count, 2);
         assert_eq!(e.kind[1], Some(MonsterKind::Goblin));
     }
@@ -157,16 +162,16 @@ mod tests {
         let mut e = EntityStore::new();
         e.spawn_player(5, 5);
         for i in 1..MAX_ENTITIES {
-            assert!(e.spawn_monster(MonsterKind::Goblin, i as u8, 0, AiBehavior::Wander,));
+            assert!(e.spawn_monster(MonsterKind::Goblin, i as u8, 0, AiPersonality::Patrol,));
         }
-        assert!(!e.spawn_monster(MonsterKind::Goblin, 20, 20, AiBehavior::Wander));
+        assert!(!e.spawn_monster(MonsterKind::Goblin, 20, 20, AiPersonality::Patrol));
     }
 
     #[test]
     fn entity_at_finds_alive() {
         let mut e = EntityStore::new();
         e.spawn_player(5, 5);
-        e.spawn_monster(MonsterKind::Orc, 10, 10, AiBehavior::Chase);
+        e.spawn_monster(MonsterKind::Orc, 10, 10, AiPersonality::Aggressive);
         assert_eq!(e.entity_at(5, 5), 0);
         assert_eq!(e.entity_at(10, 10), 1);
         assert_eq!(e.entity_at(99, 99), NO_ENTITY);
@@ -183,7 +188,7 @@ mod tests {
     fn kill_marks_dead() {
         let mut e = EntityStore::new();
         e.spawn_player(5, 5);
-        e.spawn_monster(MonsterKind::Goblin, 10, 10, AiBehavior::Chase);
+        e.spawn_monster(MonsterKind::Goblin, 10, 10, AiPersonality::Aggressive);
         e.kill(1);
         assert!(!e.alive[1]);
         assert_eq!(e.entity_at(10, 10), NO_ENTITY);
@@ -193,7 +198,7 @@ mod tests {
     fn is_occupied_respects_skip() {
         let mut e = EntityStore::new();
         e.spawn_player(5, 5);
-        e.spawn_monster(MonsterKind::Goblin, 10, 10, AiBehavior::Chase);
+        e.spawn_monster(MonsterKind::Goblin, 10, 10, AiPersonality::Aggressive);
         assert!(e.is_occupied(10, 10, 0));
         assert!(!e.is_occupied(10, 10, 1));
     }
@@ -202,7 +207,7 @@ mod tests {
     fn stats_from_rules() {
         let mut e = EntityStore::new();
         e.spawn_player(0, 0);
-        e.spawn_monster(MonsterKind::Troll, 1, 1, AiBehavior::Chase);
+        e.spawn_monster(MonsterKind::Troll, 1, 1, AiPersonality::Aggressive);
         assert_eq!(e.hp[1], monster_table::max_hp(MonsterKind::Troll));
         assert_eq!(e.atk[1], monster_table::attack(MonsterKind::Troll));
         assert_eq!(e.def[1], monster_table::defense(MonsterKind::Troll));

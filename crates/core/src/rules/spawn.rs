@@ -4,6 +4,7 @@
 //! the random roll from their tier-specific RNG and pass it in.
 
 use super::balance;
+use super::monster_table::AiPersonality;
 
 /// Weighted selection from a parallel weights array.
 ///
@@ -33,6 +34,35 @@ pub fn total_weight(weights: &[u8]) -> u8 {
         total = total.saturating_add(w);
     }
     total
+}
+
+/// Decide whether a freshly spawned monster rolls Coward.
+///
+/// `chance`: percent chance (0-100) from [`super::monster_table::coward_chance`].
+/// `roll`: random value in `[0, 99]` produced by the caller's RNG.
+/// `default`: personality to use when the roll fails (the kind's default).
+///
+/// Keeping this as a pure function means the RNG stays in the tier layer, so
+/// `rules::spawn` remains no-std and tier-portable.
+pub fn roll_coward(chance: u8, roll: u8, default: AiPersonality) -> AiPersonality {
+    if chance == 0 {
+        return default;
+    }
+    if roll < chance {
+        AiPersonality::Coward
+    } else {
+        default
+    }
+}
+
+/// Whether a monster's HP is below the flee threshold
+/// (`hp * FLEE_THRESHOLD_RECIP < max_hp`). Zero `max_hp` defensively returns
+/// false.
+pub const fn hp_below_flee_threshold(hp: u8, max_hp: u8) -> bool {
+    if max_hp == 0 {
+        return false;
+    }
+    (hp as u16) * (balance::FLEE_THRESHOLD_RECIP as u16) < (max_hp as u16)
 }
 
 /// Compute depth-scaled stat bonuses using the default balance constants.
@@ -165,5 +195,72 @@ mod tests {
     fn custom_rates() {
         // interval=5, hp=2, atk=3, depth=11: (11-1)/5 = 2 steps → (4, 6)
         assert_eq!(depth_bonus_custom(11, 5, 2, 3), (4, 6));
+    }
+
+    // -- roll_coward --
+
+    #[test]
+    fn roll_coward_zero_chance_always_default() {
+        for roll in 0..=99u8 {
+            assert_eq!(
+                roll_coward(0, roll, AiPersonality::Aggressive),
+                AiPersonality::Aggressive
+            );
+        }
+    }
+
+    #[test]
+    fn roll_coward_full_chance_always_coward() {
+        for roll in 0..=99u8 {
+            assert_eq!(
+                roll_coward(100, roll, AiPersonality::Aggressive),
+                AiPersonality::Coward
+            );
+        }
+    }
+
+    #[test]
+    fn roll_coward_boundary() {
+        // chance=25: rolls 0..24 → Coward, 25..99 → default.
+        assert_eq!(
+            roll_coward(25, 0, AiPersonality::Aggressive),
+            AiPersonality::Coward
+        );
+        assert_eq!(
+            roll_coward(25, 24, AiPersonality::Aggressive),
+            AiPersonality::Coward
+        );
+        assert_eq!(
+            roll_coward(25, 25, AiPersonality::Aggressive),
+            AiPersonality::Aggressive
+        );
+        assert_eq!(
+            roll_coward(25, 99, AiPersonality::Aggressive),
+            AiPersonality::Aggressive
+        );
+    }
+
+    // -- hp_below_flee_threshold --
+
+    #[test]
+    fn hp_threshold_full_hp_not_low() {
+        assert!(!hp_below_flee_threshold(6, 6));
+    }
+
+    #[test]
+    fn hp_threshold_at_third_not_low() {
+        // With recip=3: hp*3 < max? 2*3=6 < 6 is false. Exactly at threshold is NOT low.
+        assert!(!hp_below_flee_threshold(2, 6));
+    }
+
+    #[test]
+    fn hp_threshold_below_third_is_low() {
+        // 1*3=3 < 6 → true.
+        assert!(hp_below_flee_threshold(1, 6));
+    }
+
+    #[test]
+    fn hp_threshold_zero_max_not_low() {
+        assert!(!hp_below_flee_threshold(0, 0));
     }
 }

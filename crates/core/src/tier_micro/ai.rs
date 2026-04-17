@@ -7,10 +7,11 @@ use super::map::MicroMap;
 use super::msglog::MicroMessageLog;
 use super::prng::LfsrRng16;
 use super::types::*;
-use crate::rules::ai::{self, AiMode, ChaseResult};
+use crate::rules::ai::{self, AiMode, ChaseResult, FleeResult};
 use crate::rules::direction::ALL_DIRECTIONS;
 use crate::rules::message::{Combatant, GameEvent};
-use crate::rules::monster_table::AiBehavior;
+use crate::rules::monster_table::AiPersonality;
+use crate::rules::spawn as rules_spawn;
 
 /// Run all monster turns. Returns true if the player died.
 ///
@@ -34,29 +35,43 @@ pub fn run_monster_turns(
 
         let mx = entities.x[idx];
         let my = entities.y[idx];
-        let behavior = entities.ai[idx];
+        let personality = entities.ai[idx];
         let sight = entities.sight[idx];
 
-        let aware = match behavior {
-            AiBehavior::Chase | AiBehavior::Wander => fov::can_see(mx, my, px, py, sight, map),
-            AiBehavior::None => false,
+        let aware = match personality {
+            AiPersonality::Aggressive | AiPersonality::Patrol | AiPersonality::Coward => {
+                fov::can_see(mx, my, px, py, sight, map)
+            }
+            AiPersonality::Player => false,
         };
 
-        match ai::ai_mode(behavior, aware) {
+        let was_aware = entities.aware_last_turn[idx];
+        entities.aware_last_turn[idx] = aware;
+        if aware && !was_aware {
+            let who = match entities.kind[idx] {
+                Some(mk) => Combatant::Monster(mk),
+                None => Combatant::UnknownMonster,
+            };
+            log.add(GameEvent::EntityNotice { who });
+        }
+
+        let hp_low = rules_spawn::hp_below_flee_threshold(entities.hp[idx], entities.max_hp[idx]);
+
+        match ai::ai_mode(personality, aware, hp_low) {
             AiMode::Chase => {
                 chase(i, px, py, entities, map, log, player_def);
             }
             AiMode::WakeUp => {
-                entities.ai[idx] = AiBehavior::Chase;
-                let who = match entities.kind[idx] {
-                    Some(mk) => Combatant::Monster(mk),
-                    None => Combatant::UnknownMonster,
-                };
-                log.add(GameEvent::EntityNotice { who });
+                // Patrol → Aggressive transition. EntityNotice was already
+                // emitted above via the awareness-edge detector.
+                entities.ai[idx] = AiPersonality::Aggressive;
                 chase(i, px, py, entities, map, log, player_def);
             }
             AiMode::Wander => {
                 wander(i, px, py, entities, map, rng);
+            }
+            AiMode::Flee => {
+                flee(i, px, py, entities, map);
             }
             AiMode::Idle => {}
         }
@@ -126,6 +141,48 @@ fn chase(
     }
 }
 
+/// Flee: greedy step away from the player. Cornered cowards stand still
+/// rather than trade blows, so this never invokes `combat::melee_attack`.
+fn flee(idx: u8, px: u8, py: u8, entities: &mut EntityStore, map: &MicroMap) {
+    let mx = entities.x[idx as usize];
+    let my = entities.y[idx as usize];
+
+    let dx = (px as i8) - (mx as i8);
+    let dy = (py as i8) - (my as i8);
+    let sx: i8 = if dx > 0 {
+        1
+    } else if dx < 0 {
+        -1
+    } else {
+        0
+    };
+    let sy: i8 = if dy > 0 {
+        1
+    } else if dy < 0 {
+        -1
+    } else {
+        0
+    };
+
+    let passable = [
+        passable_at(
+            (mx as i8 - sx) as u8,
+            (my as i8 - sy) as u8,
+            idx,
+            entities,
+            map,
+        ),
+        passable_at((mx as i8 - sx) as u8, my, idx, entities, map),
+        passable_at(mx, (my as i8 - sy) as u8, idx, entities, map),
+    ];
+
+    if let FleeResult::Move(dir) = ai::flee_step(sx as i32, sy as i32, passable) {
+        let (ddx, ddy) = dir.to_offset();
+        entities.x[idx as usize] = (mx as i8 + ddx as i8) as u8;
+        entities.y[idx as usize] = (my as i8 + ddy as i8) as u8;
+    }
+}
+
 /// Wander: build passable neighbor mask, delegate to `rules::ai`.
 fn wander(
     idx: u8,
@@ -185,7 +242,7 @@ mod tests {
         let map = arena_map();
         let mut entities = EntityStore::new();
         entities.spawn_player(10, 10);
-        entities.spawn_monster(MonsterKind::Goblin, 15, 10, AiBehavior::Chase);
+        entities.spawn_monster(MonsterKind::Goblin, 15, 10, AiPersonality::Aggressive);
         let orig_x = entities.x[1];
         let player_def = entities.def[PLAYER_IDX as usize];
 
@@ -201,7 +258,7 @@ mod tests {
         let map = arena_map();
         let mut entities = EntityStore::new();
         entities.spawn_player(10, 10);
-        entities.spawn_monster(MonsterKind::Goblin, 11, 10, AiBehavior::Chase);
+        entities.spawn_monster(MonsterKind::Goblin, 11, 10, AiPersonality::Aggressive);
         let hp_before = entities.hp[0];
         let player_def = entities.def[PLAYER_IDX as usize];
 
@@ -217,14 +274,14 @@ mod tests {
         let map = arena_map();
         let mut entities = EntityStore::new();
         entities.spawn_player(10, 10);
-        entities.spawn_monster(MonsterKind::Goblin, 13, 10, AiBehavior::Wander);
+        entities.spawn_monster(MonsterKind::Goblin, 13, 10, AiPersonality::Patrol);
         let player_def = entities.def[PLAYER_IDX as usize];
 
         let mut rng = LfsrRng16::new(42);
         let mut log = MicroMessageLog::new();
         run_monster_turns(&mut entities, &map, &mut rng, &mut log, player_def);
 
-        assert_eq!(entities.ai[1], AiBehavior::Chase);
+        assert_eq!(entities.ai[1], AiPersonality::Aggressive);
     }
 
     #[test]
@@ -232,7 +289,7 @@ mod tests {
         let map = arena_map();
         let mut entities = EntityStore::new();
         entities.spawn_player(10, 10);
-        entities.spawn_monster(MonsterKind::Goblin, 11, 10, AiBehavior::Chase);
+        entities.spawn_monster(MonsterKind::Goblin, 11, 10, AiPersonality::Aggressive);
         entities.kill(1);
         let player_def = entities.def[PLAYER_IDX as usize];
 

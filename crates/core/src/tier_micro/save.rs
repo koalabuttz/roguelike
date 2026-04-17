@@ -38,7 +38,7 @@ use crate::rules::save_common::*;
 
 pub use crate::rules::save_common::{SAVE_MAGIC, SaveError, crc16, crc16_update};
 
-pub const SAVE_VERSION: u8 = 3;
+pub const SAVE_VERSION: u8 = 4;
 
 // ---------------------------------------------------------------------------
 // Size helpers
@@ -173,7 +173,7 @@ pub fn serialize<F: FnMut(u8)>(state: &MicroGameState, emit: &mut F) -> usize {
     }
     i = 0;
     while i < ec {
-        wb!(encode_ai_behavior(state.entities.ai[i]));
+        wb!(encode_ai_personality(state.entities.ai[i]));
         i += 1;
     }
     i = 0;
@@ -184,6 +184,11 @@ pub fn serialize<F: FnMut(u8)>(state: &MicroGameState, emit: &mut F) -> usize {
     i = 0;
     while i < ec {
         wb!(state.entities.sight[i]);
+        i += 1;
+    }
+    i = 0;
+    while i < ec {
+        wb!(state.entities.aware_last_turn[i] as u8);
         i += 1;
     }
 
@@ -415,7 +420,7 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
     }
     i = 0;
     while i < ec {
-        state.entities.ai[i] = decode_ai_behavior(rb!());
+        state.entities.ai[i] = decode_ai_personality(rb!());
         i += 1;
     }
     i = 0;
@@ -426,6 +431,11 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
     i = 0;
     while i < ec {
         state.entities.sight[i] = rb!();
+        i += 1;
+    }
+    i = 0;
+    while i < ec {
+        state.entities.aware_last_turn[i] = rb!() != 0;
         i += 1;
     }
 

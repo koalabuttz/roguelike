@@ -149,7 +149,7 @@ fn is_aware(entities: &[Entity], idx: usize, px: Coord, py: Coord,
             map: &Map, sound_grid: &[u8]) -> bool {
     // Visual awareness (existing)
     let visual = match entities[idx].ai {
-        AiBehavior::Chase => fov::can_see(map, ex, ey, px, py, sight_radius),
+        AiPersonality::Aggressive => fov::can_see(map, ex, ey, px, py, sight_radius),
         _ => false,
     };
 

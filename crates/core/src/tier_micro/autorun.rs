@@ -439,7 +439,7 @@ mod tests {
 
     #[test]
     fn has_adjacent_monster_detects_neighbor() {
-        use crate::rules::monster_table::{AiBehavior, MonsterKind};
+        use crate::rules::monster_table::{AiPersonality, MonsterKind};
 
         let mut state = MicroGameState::new(42, DEFAULT_MAP_WIDTH, DEFAULT_MAP_HEIGHT);
         let pi = PLAYER_IDX as usize;
@@ -450,13 +450,13 @@ mod tests {
         // Spawn one adjacent.
         state
             .entities
-            .spawn_monster(MonsterKind::Goblin, px + 1, py, AiBehavior::Chase);
+            .spawn_monster(MonsterKind::Goblin, px + 1, py, AiPersonality::Aggressive);
         assert!(has_adjacent_monster(&state.entities));
     }
 
     #[test]
     fn has_adjacent_monster_ignores_distant() {
-        use crate::rules::monster_table::{AiBehavior, MonsterKind};
+        use crate::rules::monster_table::{AiPersonality, MonsterKind};
 
         let mut state = MicroGameState::new(42, DEFAULT_MAP_WIDTH, DEFAULT_MAP_HEIGHT);
         let pi = PLAYER_IDX as usize;
@@ -466,13 +466,13 @@ mod tests {
         // Spawn monster 3 tiles away.
         state
             .entities
-            .spawn_monster(MonsterKind::Goblin, px + 3, py, AiBehavior::Chase);
+            .spawn_monster(MonsterKind::Goblin, px + 3, py, AiPersonality::Aggressive);
         assert!(!has_adjacent_monster(&state.entities));
     }
 
     #[test]
     fn autorun_stops_on_adjacent_monster_at_start() {
-        use crate::rules::monster_table::{AiBehavior, MonsterKind};
+        use crate::rules::monster_table::{AiPersonality, MonsterKind};
 
         let mut state = MicroGameState::new(42, DEFAULT_MAP_WIDTH, DEFAULT_MAP_HEIGHT);
         let pi = PLAYER_IDX as usize;
@@ -482,7 +482,7 @@ mod tests {
         // Place monster adjacent — autorun should refuse to start.
         state
             .entities
-            .spawn_monster(MonsterKind::Goblin, px + 1, py, AiBehavior::Chase);
+            .spawn_monster(MonsterKind::Goblin, px + 1, py, AiPersonality::Aggressive);
 
         let mut stepper =
             MicroAutorunStepper::new(Direction::East, stairs_in_fov(&state.map, &state.fov));

@@ -319,7 +319,7 @@ impl CompactBfsStepper {
 mod tests {
     use super::*;
     use crate::rules::balance;
-    use crate::rules::monster_table::{AiBehavior, MonsterKind};
+    use crate::rules::monster_table::{AiPersonality, MonsterKind};
     use crate::tier_compact::map::{CompactMap, TILE_FLOOR};
     use crate::tier_compact::types::{MAP_HEIGHT, MAP_WIDTH};
 
@@ -327,7 +327,7 @@ mod tests {
     fn has_adjacent_monster_detects_neighbor() {
         let mut entities = EntityStore::new();
         entities.spawn_player(10, 10);
-        entities.spawn_monster(MonsterKind::Goblin, 11, 10, AiBehavior::Chase);
+        entities.spawn_monster(MonsterKind::Goblin, 11, 10, AiPersonality::Aggressive);
         assert!(has_adjacent_monster(&entities));
     }
 
@@ -335,7 +335,7 @@ mod tests {
     fn has_adjacent_monster_ignores_distant() {
         let mut entities = EntityStore::new();
         entities.spawn_player(10, 10);
-        entities.spawn_monster(MonsterKind::Goblin, 13, 10, AiBehavior::Chase);
+        entities.spawn_monster(MonsterKind::Goblin, 13, 10, AiPersonality::Aggressive);
         assert!(!has_adjacent_monster(&entities));
     }
 
@@ -343,7 +343,7 @@ mod tests {
     fn has_adjacent_monster_ignores_dead() {
         let mut entities = EntityStore::new();
         entities.spawn_player(10, 10);
-        entities.spawn_monster(MonsterKind::Goblin, 11, 10, AiBehavior::Chase);
+        entities.spawn_monster(MonsterKind::Goblin, 11, 10, AiPersonality::Aggressive);
         entities.kill(1);
         assert!(!has_adjacent_monster(&entities));
     }

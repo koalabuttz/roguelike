@@ -5,12 +5,12 @@
 //! storage, call the shared function, and apply results back.
 
 use super::direction::{DIRECTION_COUNT, Direction};
-use super::monster_table::AiBehavior;
+use super::monster_table::AiPersonality;
 
 /// AI behavior mode for a single monster turn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AiMode {
-    /// Do nothing (dead, out of sight for Chase, or AiBehavior::None).
+    /// Do nothing (dead, out of sight for Aggressive, or AiPersonality::Player).
     Idle,
     /// Execute chase logic (greedy step toward player).
     Chase,
@@ -19,6 +19,8 @@ pub enum AiMode {
     /// Transition from Wander to Chase: caller emits EntityNotice, sets
     /// behavior to Chase, then executes Chase logic.
     WakeUp,
+    /// Execute flee logic (greedy step away from player, no attack).
+    Flee,
 }
 
 /// Result of the chase decision.
@@ -32,26 +34,47 @@ pub enum ChaseResult {
     Blocked,
 }
 
-/// Decide the AI mode for this turn based on behavior and awareness.
+/// Result of the flee decision. Like [`ChaseResult`] but cannot Attack — a
+/// cornered coward stands still rather than trade blows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FleeResult {
+    /// Move in this direction (away from player).
+    Move(Direction),
+    /// All three retreat candidates are blocked — cower in place.
+    Blocked,
+}
+
+/// Decide the AI mode for this turn.
 ///
-/// `aware` should be pre-computed by the caller using their tier's FOV.
-pub const fn ai_mode(behavior: AiBehavior, aware: bool) -> AiMode {
-    match behavior {
-        AiBehavior::Chase => {
+/// `aware`: whether the monster can see the player this turn.
+/// `hp_low`: whether the monster is below its flee threshold — only consulted
+/// for the `Coward` personality, other personalities ignore it.
+pub const fn ai_mode(personality: AiPersonality, aware: bool, hp_low: bool) -> AiMode {
+    match personality {
+        AiPersonality::Aggressive => {
             if aware {
                 AiMode::Chase
             } else {
                 AiMode::Idle
             }
         }
-        AiBehavior::Wander => {
+        AiPersonality::Patrol => {
             if aware {
                 AiMode::WakeUp
             } else {
                 AiMode::Wander
             }
         }
-        AiBehavior::None => AiMode::Idle,
+        AiPersonality::Coward => {
+            if aware && hp_low {
+                AiMode::Flee
+            } else if aware {
+                AiMode::Chase
+            } else {
+                AiMode::Wander
+            }
+        }
+        AiPersonality::Player => AiMode::Idle,
     }
 }
 
@@ -89,6 +112,32 @@ pub fn chase_step(sx: i32, sy: i32, adjacent: bool, candidates_passable: [bool; 
     }
 
     ChaseResult::Blocked
+}
+
+/// Flee decision: greedy step *away* from the player.
+///
+/// Mirrors [`chase_step`] with offsets negated — candidates are
+/// \[`(-sx, -sy)`, `(-sx, 0)`, `(0, -sy)`\]. `adjacent` is not accepted as a
+/// parameter because a cornered fleer never attacks; it simply returns
+/// `Blocked` when every retreat square is impassable.
+///
+/// `sx`, `sy`: signum of the delta from monster to player (same as chase).
+/// `candidates_passable`: three booleans matching the inverted offsets above.
+pub fn flee_step(sx: i32, sy: i32, candidates_passable: [bool; 3]) -> FleeResult {
+    let offsets: [(i32, i32); 3] = [(-sx, -sy), (-sx, 0), (0, -sy)];
+
+    for (i, &(cx, cy)) in offsets.iter().enumerate() {
+        if cx == 0 && cy == 0 {
+            continue;
+        }
+        if candidates_passable[i]
+            && let Some(dir) = Direction::from_offset(cx, cy)
+        {
+            return FleeResult::Move(dir);
+        }
+    }
+
+    FleeResult::Blocked
 }
 
 /// Wander decision: pick a random passable neighbor.
@@ -133,29 +182,61 @@ mod tests {
     // -- ai_mode tests --
 
     #[test]
-    fn chase_aware_returns_chase() {
-        assert_eq!(ai_mode(AiBehavior::Chase, true), AiMode::Chase);
+    fn aggressive_aware_returns_chase() {
+        assert_eq!(
+            ai_mode(AiPersonality::Aggressive, true, false),
+            AiMode::Chase
+        );
+        // hp_low is ignored for aggressive personalities.
+        assert_eq!(
+            ai_mode(AiPersonality::Aggressive, true, true),
+            AiMode::Chase
+        );
     }
 
     #[test]
-    fn chase_unaware_returns_idle() {
-        assert_eq!(ai_mode(AiBehavior::Chase, false), AiMode::Idle);
+    fn aggressive_unaware_returns_idle() {
+        assert_eq!(
+            ai_mode(AiPersonality::Aggressive, false, false),
+            AiMode::Idle
+        );
+        assert_eq!(
+            ai_mode(AiPersonality::Aggressive, false, true),
+            AiMode::Idle
+        );
     }
 
     #[test]
-    fn wander_aware_returns_wakeup() {
-        assert_eq!(ai_mode(AiBehavior::Wander, true), AiMode::WakeUp);
+    fn patrol_aware_returns_wakeup() {
+        assert_eq!(ai_mode(AiPersonality::Patrol, true, false), AiMode::WakeUp);
     }
 
     #[test]
-    fn wander_unaware_returns_wander() {
-        assert_eq!(ai_mode(AiBehavior::Wander, false), AiMode::Wander);
+    fn patrol_unaware_returns_wander() {
+        assert_eq!(ai_mode(AiPersonality::Patrol, false, false), AiMode::Wander);
     }
 
     #[test]
-    fn none_always_idle() {
-        assert_eq!(ai_mode(AiBehavior::None, true), AiMode::Idle);
-        assert_eq!(ai_mode(AiBehavior::None, false), AiMode::Idle);
+    fn player_always_idle() {
+        assert_eq!(ai_mode(AiPersonality::Player, true, false), AiMode::Idle);
+        assert_eq!(ai_mode(AiPersonality::Player, false, false), AiMode::Idle);
+        assert_eq!(ai_mode(AiPersonality::Player, true, true), AiMode::Idle);
+    }
+
+    #[test]
+    fn coward_healthy_aware_chases() {
+        assert_eq!(ai_mode(AiPersonality::Coward, true, false), AiMode::Chase);
+    }
+
+    #[test]
+    fn coward_hurt_aware_flees() {
+        assert_eq!(ai_mode(AiPersonality::Coward, true, true), AiMode::Flee);
+    }
+
+    #[test]
+    fn coward_unaware_wanders_regardless_of_hp() {
+        assert_eq!(ai_mode(AiPersonality::Coward, false, false), AiMode::Wander);
+        assert_eq!(ai_mode(AiPersonality::Coward, false, true), AiMode::Wander);
     }
 
     // -- chase_step tests --
@@ -257,5 +338,54 @@ mod tests {
     fn type_sizes_bounded() {
         assert!(core::mem::size_of::<AiMode>() <= 1);
         assert!(core::mem::size_of::<ChaseResult>() <= 2);
+        assert!(core::mem::size_of::<FleeResult>() <= 2);
+    }
+
+    // -- flee_step tests --
+
+    #[test]
+    fn flee_diagonal_preferred() {
+        // Player is SE (sx=1, sy=1). Flee should go NW via (-1,-1).
+        let result = flee_step(1, 1, [true, true, true]);
+        assert_eq!(result, FleeResult::Move(Direction::NorthWest));
+    }
+
+    #[test]
+    fn flee_horizontal_fallback() {
+        let result = flee_step(1, 1, [false, true, true]);
+        assert_eq!(result, FleeResult::Move(Direction::West));
+    }
+
+    #[test]
+    fn flee_vertical_fallback() {
+        let result = flee_step(1, 1, [false, false, true]);
+        assert_eq!(result, FleeResult::Move(Direction::North));
+    }
+
+    #[test]
+    fn flee_all_blocked() {
+        // A cornered coward stands still rather than attack.
+        assert_eq!(flee_step(1, 1, [false, false, false]), FleeResult::Blocked);
+    }
+
+    #[test]
+    fn flee_negative_deltas() {
+        // Player is NW (sx=-1, sy=-1). Flee should go SE via (+1,+1).
+        let result = flee_step(-1, -1, [true, true, true]);
+        assert_eq!(result, FleeResult::Move(Direction::SouthEast));
+    }
+
+    #[test]
+    fn flee_horizontal_only() {
+        // sy == 0: candidates (-1,0), (-1,0), (0,0). Second filtered by cx==0 check.
+        let result = flee_step(1, 0, [true, true, true]);
+        assert_eq!(result, FleeResult::Move(Direction::West));
+    }
+
+    #[test]
+    fn flee_vertical_only() {
+        // sx == 0: candidates (0,-1), (0,0), (0,-1). Middle filtered.
+        let result = flee_step(0, 1, [true, true, true]);
+        assert_eq!(result, FleeResult::Move(Direction::North));
     }
 }

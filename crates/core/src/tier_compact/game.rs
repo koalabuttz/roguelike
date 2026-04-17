@@ -19,7 +19,7 @@ use crate::rules::damage;
 use crate::rules::interactions;
 use crate::rules::items::{self as rules_items, Equipment, Inventory};
 use crate::rules::message::{GameEvent, SoundDistance};
-use crate::rules::monster_table::{AiBehavior, MonsterKind};
+use crate::rules::monster_table::{AiPersonality, MonsterKind};
 
 /// Result of a single step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -735,7 +735,13 @@ impl CompactGameState {
 
         let mut wander_alive: u8 = 0;
         for i in 1..self.entities.count as usize {
-            if self.entities.alive[i] && self.entities.ai[i] == AiBehavior::Wander {
+            if !self.entities.alive[i] {
+                continue;
+            }
+            let p = self.entities.ai[i];
+            let wandering = p == AiPersonality::Patrol
+                || (p == AiPersonality::Coward && !self.entities.aware_last_turn[i]);
+            if wandering {
                 wander_alive += 1;
             }
         }
@@ -745,10 +751,18 @@ impl CompactGameState {
 
         if let Some((sx, sy)) = self.pick_offscreen_spawn_pos() {
             let kind = spawn::pick_monster_kind(&mut self.rng);
-            if self
-                .entities
-                .spawn_monster(kind, sx, sy, AiBehavior::Wander)
-            {
+            let personality = {
+                use crate::rules::monster_table as mt;
+                use crate::rules::spawn as rules_spawn;
+                let chance = mt::coward_chance(kind);
+                if chance == 0 {
+                    AiPersonality::Patrol
+                } else {
+                    let roll = self.rng.range_u8(0, 99);
+                    rules_spawn::roll_coward(chance, roll, AiPersonality::Patrol)
+                }
+            };
+            if self.entities.spawn_monster(kind, sx, sy, personality) {
                 let idx = (self.entities.count - 1) as usize;
                 spawn::scale_monster(&mut self.entities, idx, self.depth);
                 self.wandering_spawned += 1;
@@ -834,7 +848,13 @@ impl CompactGameState {
 
         let mut closest_dist: u8 = u8::MAX;
         for i in 1..self.entities.count as usize {
-            if self.entities.alive[i] && self.entities.ai[i] == AiBehavior::Wander {
+            if !self.entities.alive[i] {
+                continue;
+            }
+            let p = self.entities.ai[i];
+            let wandering = p == AiPersonality::Patrol
+                || (p == AiPersonality::Coward && !self.entities.aware_last_turn[i]);
+            if wandering {
                 let dist =
                     ((px - self.entities.x[i]).abs() + (py - self.entities.y[i]).abs()) as u8;
                 if dist < closest_dist {
@@ -1379,7 +1399,7 @@ mod tests {
         // Spawn weak monster adjacent
         state
             .entities
-            .spawn_monster(MonsterKind::Goblin, px + 1, py, AiBehavior::Chase);
+            .spawn_monster(MonsterKind::Goblin, px + 1, py, AiPersonality::Aggressive);
         let target_idx = state.entities.count - 1;
         state.entities.hp[target_idx as usize] = 1;
 

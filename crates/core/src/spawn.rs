@@ -4,7 +4,21 @@ use crate::data::MonsterDef;
 use crate::entity::Entity;
 use crate::item::{self, Item, ItemKind};
 use crate::map::Map;
+use crate::rules::monster_table as mt;
+use crate::rules::spawn as rules_spawn;
 use crate::types::Stat;
+
+fn apply_coward_roll(entity: &mut Entity, template: &MonsterDef, rng: &mut impl Rng) {
+    let Some(kind) = template.monster_kind() else {
+        return;
+    };
+    let chance = mt::coward_chance(kind);
+    if chance == 0 {
+        return;
+    }
+    let roll: u8 = rng.gen_range(0..100);
+    entity.ai = rules_spawn::roll_coward(chance, roll, entity.ai);
+}
 
 /// Pick a random monster from the weighted spawn table.
 ///
@@ -19,7 +33,9 @@ pub fn pick_monster(table: &[MonsterDef], rng: &mut impl Rng) -> Option<Entity> 
     let mut roll = rng.gen_range(0..total_weight);
     for entry in &entries {
         if roll < entry.spawn_weight {
-            return Some(Entity::from_template(entry, 0, 0));
+            let mut e = Entity::from_template(entry, 0, 0);
+            apply_coward_roll(&mut e, entry, rng);
+            return Some(e);
         }
         roll -= entry.spawn_weight;
     }
@@ -51,7 +67,9 @@ pub fn spawn_monsters(
             let mut roll = rng.gen_range(0..total_weight);
             for entry in &entries {
                 if roll < entry.spawn_weight {
-                    monsters.push(Entity::from_template(entry, x, y));
+                    let mut e = Entity::from_template(entry, x, y);
+                    apply_coward_roll(&mut e, entry, rng);
+                    monsters.push(e);
                     break;
                 }
                 roll -= entry.spawn_weight;

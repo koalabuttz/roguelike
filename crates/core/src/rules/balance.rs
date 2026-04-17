@@ -27,6 +27,13 @@ pub const GOBLIN_DEF: u8 = 0;
 pub const GOBLIN_SIGHT: u8 = 6;
 pub const GOBLIN_SPAWN_WEIGHT: u8 = 60;
 pub const GOBLIN_GLYPH: char = 'g';
+/// Percent chance that a newly spawned Goblin is a Coward (0-100).
+/// Cowards chase when healthy but flee when HP drops below 33%.
+pub const GOBLIN_COWARD_CHANCE: u8 = 25;
+
+/// Flee threshold: a coward flees once `hp * FLEE_THRESHOLD_RECIP < max_hp`.
+/// Recip 3 ⇒ below ~33% HP.
+pub const FLEE_THRESHOLD_RECIP: u8 = 3;
 
 // Orc
 pub const ORC_HP: u8 = 12;

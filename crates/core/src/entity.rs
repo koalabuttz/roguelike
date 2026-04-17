@@ -5,9 +5,9 @@ use crate::rules::message::Combatant;
 use crate::rules::monster_table::MonsterKind;
 use crate::types::{Coord, GameColor, Stat};
 
-// AiBehavior is defined in rules::monster_table, re-exported here for
-// backwards compatibility — existing `use crate::entity::AiBehavior` keeps working.
-pub use crate::rules::monster_table::AiBehavior;
+// AiPersonality is defined in rules::monster_table, re-exported here for
+// ergonomics — existing `use crate::entity::AiPersonality` keeps working.
+pub use crate::rules::monster_table::AiPersonality;
 
 fn default_entity_sight_radius() -> Coord {
     8
@@ -27,7 +27,7 @@ pub struct Entity {
     pub color: GameColor,
     pub name: String,
     pub kind: EntityKind,
-    pub ai: AiBehavior,
+    pub ai: AiPersonality,
     pub hp: Stat,
     pub max_hp: Stat,
     pub attack: Stat,
@@ -39,6 +39,10 @@ pub struct Entity {
     /// `None` for the player or custom/modded monsters without a matching kind.
     #[serde(default)]
     pub monster_kind: Option<MonsterKind>,
+    /// Whether this entity saw the player on its most recent turn. Used to
+    /// fire EntityNotice exactly once on the rising edge of awareness.
+    #[serde(default)]
+    pub aware_last_turn: bool,
 }
 
 impl Entity {
@@ -51,7 +55,7 @@ impl Entity {
             color: def.game_color(),
             name: "Player".into(),
             kind: EntityKind::Player,
-            ai: AiBehavior::None,
+            ai: AiPersonality::Player,
             hp: def.hp,
             max_hp: def.hp,
             attack: def.attack,
@@ -59,6 +63,7 @@ impl Entity {
             alive: true,
             sight_radius: 0, // Player FOV managed by GameState.fov_radius
             monster_kind: None,
+            aware_last_turn: false,
         }
     }
 
@@ -86,7 +91,7 @@ impl Entity {
             color: template.game_color(),
             name: template.name.clone(),
             kind: EntityKind::Monster,
-            ai: template.ai_behavior(),
+            ai: template.ai_personality(),
             hp: template.hp,
             max_hp: template.hp,
             attack: template.attack,
@@ -94,6 +99,7 @@ impl Entity {
             alive: true,
             sight_radius: template.sight_radius,
             monster_kind: template.monster_kind(),
+            aware_last_turn: false,
         }
     }
 }
@@ -115,7 +121,7 @@ mod tests {
         assert_eq!(p.defense, 2);
         assert!(p.alive);
         assert_eq!(p.kind, EntityKind::Player);
-        assert_eq!(p.ai, AiBehavior::None);
+        assert_eq!(p.ai, AiPersonality::Player);
     }
 
     #[test]
@@ -130,7 +136,7 @@ mod tests {
         assert_eq!(e.attack, data::goblin().attack);
         assert_eq!(e.defense, data::goblin().defense);
         assert_eq!(e.kind, EntityKind::Monster);
-        assert_eq!(e.ai, data::goblin().ai_behavior());
+        assert_eq!(e.ai, data::goblin().ai_personality());
         assert!(e.alive);
     }
 

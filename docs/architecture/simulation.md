@@ -148,14 +148,14 @@ pub mood: i8,       // -128 (terrified) to 127 (enraged)
 pub memory: u8,     // Bitflags: SAW_ALLY_DIE, WAS_HIT, WAS_FED, etc.
 ```
 
-Expand `AiBehavior`:
+Expand `AiPersonality`:
 
 ```rust
-pub enum AiBehavior {
-    None,
-    Chase,
-    Flee,
-    Wander,
+pub enum AiPersonality {
+    Player,
+    Aggressive,
+    Patrol,
+    Coward,
     Guard { x: Coord, y: Coord },
 }
 ```

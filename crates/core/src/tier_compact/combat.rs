@@ -61,12 +61,12 @@ pub fn melee_attack(
 mod tests {
     use super::*;
     use crate::rules::message::GameEvent;
-    use crate::rules::monster_table::{AiBehavior, MonsterKind};
+    use crate::rules::monster_table::{AiPersonality, MonsterKind};
 
     fn setup() -> (EntityStore, CompactMessageLog) {
         let mut e = EntityStore::new();
         e.spawn_player(5, 5);
-        e.spawn_monster(MonsterKind::Goblin, 6, 5, AiBehavior::Chase);
+        e.spawn_monster(MonsterKind::Goblin, 6, 5, AiPersonality::Aggressive);
         (e, CompactMessageLog::new())
     }
 

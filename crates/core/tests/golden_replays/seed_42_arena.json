@@ -1114,10 +1114,10 @@
     "preset": "arena"
   },
   "expected": {
-    "turns_played": 314,
-    "game_over": true,
-    "final_hp": 0,
-    "final_turn": 314,
+    "turns_played": 495,
+    "game_over": false,
+    "final_hp": 30,
+    "final_turn": 495,
     "kills": 0
   }
 }

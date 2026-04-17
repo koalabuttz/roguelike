@@ -5,19 +5,20 @@ use crate::entity::Entity;
 use crate::fov;
 use crate::map::Map;
 use crate::message_log::MessageLog;
-use crate::rules::ai::{self, AiMode, ChaseResult};
+use crate::rules::ai::{self, AiMode, ChaseResult, FleeResult};
 use crate::rules::direction::ALL_DIRECTIONS;
 use crate::rules::message::GameEvent;
+use crate::rules::spawn as rules_spawn;
 use crate::types::{Coord, Stat};
 
 /// Check whether a monster is aware of the player.
 ///
-/// Each AI behavior has its own awareness model. Chase monsters use
-/// line-of-sight within their individual `sight_radius`.
+/// Each AI personality has its own awareness model. Non-player personalities
+/// use line-of-sight within the entity's individual `sight_radius`.
 fn is_aware(entities: &[Entity], idx: usize, px: Coord, py: Coord, map: &Map) -> bool {
-    use crate::rules::monster_table::AiBehavior;
+    use crate::rules::monster_table::AiPersonality;
     match entities[idx].ai {
-        AiBehavior::Chase | AiBehavior::Wander => fov::can_see(
+        AiPersonality::Aggressive | AiPersonality::Patrol | AiPersonality::Coward => fov::can_see(
             map,
             entities[idx].x,
             entities[idx].y,
@@ -25,7 +26,7 @@ fn is_aware(entities: &[Entity], idx: usize, px: Coord, py: Coord, map: &Map) ->
             py,
             entities[idx].sight_radius,
         ),
-        AiBehavior::None => false,
+        AiPersonality::Player => false,
     }
 }
 
@@ -49,21 +50,35 @@ pub fn run_monster_turns(
         }
 
         let aware = is_aware(entities, i, px, py, map);
-        let behavior = entities[i].ai;
+        let personality = entities[i].ai;
 
-        match ai::ai_mode(behavior, aware) {
+        let was_aware = entities[i].aware_last_turn;
+        entities[i].aware_last_turn = aware;
+        if aware && !was_aware {
+            let who = entities[i].combatant();
+            log.add_event(GameEvent::EntityNotice { who });
+        }
+
+        let hp_low = rules_spawn::hp_below_flee_threshold(
+            entities[i].hp.clamp(0, u8::MAX as Stat) as u8,
+            entities[i].max_hp.clamp(0, u8::MAX as Stat) as u8,
+        );
+
+        match ai::ai_mode(personality, aware, hp_low) {
             AiMode::Chase => {
                 do_chase(entities, i, px, py, map, log, player_def);
             }
             AiMode::WakeUp => {
-                entities[i].ai = crate::entity::AiBehavior::Chase;
-                log.add_event(GameEvent::EntityNotice {
-                    who: entities[i].combatant(),
-                });
+                // Patrol → Aggressive transition. EntityNotice was already
+                // emitted above via the awareness-edge detector.
+                entities[i].ai = crate::entity::AiPersonality::Aggressive;
                 do_chase(entities, i, px, py, map, log, player_def);
             }
             AiMode::Wander => {
                 do_wander(entities, i, map, rng);
+            }
+            AiMode::Flee => {
+                do_flee(entities, i, px, py, map);
             }
             AiMode::Idle => {}
         }
@@ -107,6 +122,29 @@ fn do_chase(
             entities[idx].y = my + ddy;
         }
         ChaseResult::Blocked => {}
+    }
+}
+
+/// Flee: greedy step away from the player. Never attacks — cornered cowards
+/// idle rather than trade blows.
+fn do_flee(entities: &mut [Entity], idx: usize, px: Coord, py: Coord, map: &Map) {
+    let mx = entities[idx].x;
+    let my = entities[idx].y;
+    let dx = px - mx;
+    let dy = py - my;
+    let sx = dx.signum();
+    let sy = dy.signum();
+
+    let passable = [
+        passable_at(mx - sx, my - sy, entities, map, idx),
+        passable_at(mx - sx, my, entities, map, idx),
+        passable_at(mx, my - sy, entities, map, idx),
+    ];
+
+    if let FleeResult::Move(dir) = ai::flee_step(sx, sy, passable) {
+        let (ddx, ddy) = dir.to_offset();
+        entities[idx].x = mx + ddx;
+        entities[idx].y = my + ddy;
     }
 }
 

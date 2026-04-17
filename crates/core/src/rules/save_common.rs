@@ -7,7 +7,7 @@
 use super::health::HealthTier;
 use super::items::ItemKind;
 use super::message::{AutorunStopCause, Combatant, GameEvent, SoundDistance};
-use super::monster_table::{AiBehavior, MonsterKind};
+use super::monster_table::{AiPersonality, MonsterKind};
 
 // ---------------------------------------------------------------------------
 // Format constants
@@ -86,19 +86,21 @@ pub fn decode_opt_monster_kind(b: u8) -> Option<MonsterKind> {
     }
 }
 
-pub fn encode_ai_behavior(ai: AiBehavior) -> u8 {
+pub fn encode_ai_personality(ai: AiPersonality) -> u8 {
     match ai {
-        AiBehavior::None => 0,
-        AiBehavior::Chase => 1,
-        AiBehavior::Wander => 2,
+        AiPersonality::Player => 0,
+        AiPersonality::Aggressive => 1,
+        AiPersonality::Patrol => 2,
+        AiPersonality::Coward => 3,
     }
 }
 
-pub fn decode_ai_behavior(b: u8) -> AiBehavior {
+pub fn decode_ai_personality(b: u8) -> AiPersonality {
     match b {
-        1 => AiBehavior::Chase,
-        2 => AiBehavior::Wander,
-        _ => AiBehavior::None,
+        1 => AiPersonality::Aggressive,
+        2 => AiPersonality::Patrol,
+        3 => AiPersonality::Coward,
+        _ => AiPersonality::Player,
     }
 }
 
@@ -389,10 +391,15 @@ mod tests {
         assert_eq!(decode_opt_monster_kind(encode_opt_monster_kind(None)), None);
         assert_eq!(decode_opt_monster_kind(0xFE), None); // unknown
 
-        // AiBehavior
-        for &ai in &[AiBehavior::None, AiBehavior::Chase, AiBehavior::Wander] {
-            let encoded = encode_ai_behavior(ai);
-            assert_eq!(decode_ai_behavior(encoded), ai);
+        // AiPersonality
+        for &ai in &[
+            AiPersonality::Player,
+            AiPersonality::Aggressive,
+            AiPersonality::Patrol,
+            AiPersonality::Coward,
+        ] {
+            let encoded = encode_ai_personality(ai);
+            assert_eq!(decode_ai_personality(encoded), ai);
         }
 
         // ItemKind

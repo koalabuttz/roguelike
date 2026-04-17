@@ -1,6 +1,6 @@
 //! Pure monster type definitions and lookup functions for all capability tiers.
 //!
-//! This module defines `MonsterKind`, `AiBehavior`, and all tier-portable
+//! This module defines `MonsterKind`, `AiPersonality`, and all tier-portable
 //! monster queries. Every lookup is a `const fn` with explicit exhaustive
 //! matches — no wildcard arms — so the compiler forces coverage when variants
 //! are added.
@@ -14,15 +14,21 @@ use core::mem::size_of;
 use super::balance;
 use super::color::GameColor;
 
-/// Monster AI behavior. Shared by all tiers — the C64 maps discriminants to
-/// `u8` constants, the standard tier uses enum variants directly.
+/// Monster AI personality — a stable identity, not a per-turn action.
+///
+/// Personalities map to per-turn `AiMode` decisions via [`rules::ai::ai_mode`].
+/// A single personality can choose among multiple actions (e.g. `Coward` picks
+/// Chase when healthy, Flee when wounded). Shared by all tiers — the C64 maps
+/// discriminants to `u8` constants, the standard tier uses enum variants
+/// directly.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum AiBehavior {
-    None = 0,   // Player — no automatic AI
-    Chase = 1,  // Greedy chase toward player
-    Wander = 2, // Random walk; switches to Chase when player enters LOS
+pub enum AiPersonality {
+    Player = 0,     // Player — no automatic AI
+    Aggressive = 1, // Greedy chase toward player
+    Patrol = 2,     // Random walk; switches to Aggressive when player enters LOS
+    Coward = 3,     // Chase when healthy, flee when hurt
 }
 
 /// The type of monster. Each variant is a `u8` discriminant — no 16-bit bloat
@@ -129,12 +135,22 @@ pub const fn spawn_weight(kind: MonsterKind) -> u8 {
     WEIGHTS[kind as usize]
 }
 
-/// Default AI behavior for a monster kind.
-pub const fn ai_behavior(kind: MonsterKind) -> AiBehavior {
+/// Default AI personality for a monster kind.
+pub const fn ai_personality(kind: MonsterKind) -> AiPersonality {
     match kind {
-        MonsterKind::Goblin => AiBehavior::Chase,
-        MonsterKind::Orc => AiBehavior::Chase,
-        MonsterKind::Troll => AiBehavior::Chase,
+        MonsterKind::Goblin => AiPersonality::Aggressive,
+        MonsterKind::Orc => AiPersonality::Aggressive,
+        MonsterKind::Troll => AiPersonality::Aggressive,
+    }
+}
+
+/// Percent chance (0–100) that a freshly spawned monster of this kind
+/// rolls `AiPersonality::Coward` instead of its default personality.
+pub const fn coward_chance(kind: MonsterKind) -> u8 {
+    match kind {
+        MonsterKind::Goblin => balance::GOBLIN_COWARD_CHANCE,
+        MonsterKind::Orc => 0,
+        MonsterKind::Troll => 0,
     }
 }
 
@@ -190,7 +206,7 @@ const fn str_eq(a: &str, b: &str) -> bool {
 
 // Compile-time guarantee: enums fit in a single byte on all tiers.
 const _: () = assert!(size_of::<MonsterKind>() == 1);
-const _: () = assert!(size_of::<AiBehavior>() == 1);
+const _: () = assert!(size_of::<AiPersonality>() == 1);
 
 #[cfg(test)]
 mod tests {
@@ -206,7 +222,10 @@ mod tests {
         assert_eq!(defense(MonsterKind::Goblin), 0);
         assert_eq!(sight_radius(MonsterKind::Goblin), 6);
         assert_eq!(spawn_weight(MonsterKind::Goblin), 60);
-        assert_eq!(ai_behavior(MonsterKind::Goblin), AiBehavior::Chase);
+        assert_eq!(
+            ai_personality(MonsterKind::Goblin),
+            AiPersonality::Aggressive
+        );
     }
 
     #[test]
@@ -219,7 +238,7 @@ mod tests {
         assert_eq!(defense(MonsterKind::Orc), 1);
         assert_eq!(sight_radius(MonsterKind::Orc), 7);
         assert_eq!(spawn_weight(MonsterKind::Orc), 30);
-        assert_eq!(ai_behavior(MonsterKind::Orc), AiBehavior::Chase);
+        assert_eq!(ai_personality(MonsterKind::Orc), AiPersonality::Aggressive);
     }
 
     #[test]
@@ -232,7 +251,10 @@ mod tests {
         assert_eq!(defense(MonsterKind::Troll), 3);
         assert_eq!(sight_radius(MonsterKind::Troll), 5);
         assert_eq!(spawn_weight(MonsterKind::Troll), 10);
-        assert_eq!(ai_behavior(MonsterKind::Troll), AiBehavior::Chase);
+        assert_eq!(
+            ai_personality(MonsterKind::Troll),
+            AiPersonality::Aggressive
+        );
     }
 
     #[test]
@@ -257,10 +279,21 @@ mod tests {
     }
 
     #[test]
-    fn ai_behavior_repr_u8() {
-        assert_eq!(AiBehavior::None as u8, 0);
-        assert_eq!(AiBehavior::Chase as u8, 1);
-        assert_eq!(AiBehavior::Wander as u8, 2);
+    fn ai_personality_repr_u8() {
+        assert_eq!(AiPersonality::Player as u8, 0);
+        assert_eq!(AiPersonality::Aggressive as u8, 1);
+        assert_eq!(AiPersonality::Patrol as u8, 2);
+        assert_eq!(AiPersonality::Coward as u8, 3);
+    }
+
+    #[test]
+    fn coward_chance_values() {
+        assert_eq!(
+            coward_chance(MonsterKind::Goblin),
+            balance::GOBLIN_COWARD_CHANCE
+        );
+        assert_eq!(coward_chance(MonsterKind::Orc), 0);
+        assert_eq!(coward_chance(MonsterKind::Troll), 0);
     }
 
     #[test]

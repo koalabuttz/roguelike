@@ -13,6 +13,23 @@ use crate::rules::items::{self as rules_items, ItemKind, KIND_COUNT as ITEM_KIND
 use crate::rules::monster_table::{self, KIND_COUNT, MonsterKind, SPAWN_KINDS, SPAWN_WEIGHTS};
 use crate::rules::spawn as spawn_rules;
 
+/// Roll the AI personality for a newly spawned monster of this kind.
+///
+/// Some monsters (currently only Goblin) have a per-kind Coward chance; others
+/// always return the default personality from the rules table.
+pub fn roll_personality(
+    rng: &mut LfsrRng32,
+    kind: MonsterKind,
+) -> crate::rules::monster_table::AiPersonality {
+    let default = monster_table::ai_personality(kind);
+    let chance = monster_table::coward_chance(kind);
+    if chance == 0 {
+        return default;
+    }
+    let roll = rng.range_u8(0, 99);
+    spawn_rules::roll_coward(chance, roll, default)
+}
+
 /// Pick a random monster kind using the rules/ spawn weights.
 pub fn pick_monster_kind(rng: &mut LfsrRng32) -> MonsterKind {
     let total = spawn_rules::total_weight(&SPAWN_WEIGHTS[..KIND_COUNT]);
@@ -38,7 +55,8 @@ pub fn spawn_monsters(entities: &mut EntityStore, map: &CompactMap, rng: &mut Lf
                 continue;
             }
             let kind = pick_monster_kind(rng);
-            entities.spawn_monster(kind, mx, my, monster_table::ai_behavior(kind));
+            let personality = roll_personality(rng, kind);
+            entities.spawn_monster(kind, mx, my, personality);
         }
     }
 }
@@ -104,7 +122,7 @@ pub fn apply_depth_scaling(entities: &mut EntityStore, depth: u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules::monster_table::AiBehavior;
+    use crate::rules::monster_table::AiPersonality;
 
     #[test]
     fn pick_monster_kind_returns_valid_kind() {
@@ -151,7 +169,7 @@ mod tests {
     fn apply_depth_scaling_increases_stats() {
         let mut entities = EntityStore::new();
         entities.spawn_player(0, 0);
-        entities.spawn_monster(MonsterKind::Goblin, 5, 5, AiBehavior::Chase);
+        entities.spawn_monster(MonsterKind::Goblin, 5, 5, AiPersonality::Aggressive);
 
         let base_hp = entities.hp[1];
         let base_atk = entities.atk[1];
@@ -169,7 +187,7 @@ mod tests {
     fn apply_depth_scaling_noop_at_depth_1() {
         let mut entities = EntityStore::new();
         entities.spawn_player(0, 0);
-        entities.spawn_monster(MonsterKind::Goblin, 5, 5, AiBehavior::Chase);
+        entities.spawn_monster(MonsterKind::Goblin, 5, 5, AiPersonality::Aggressive);
 
         let base_hp = entities.hp[1];
         apply_depth_scaling(&mut entities, 1);

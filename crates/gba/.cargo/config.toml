@@ -3,8 +3,3 @@ target = "thumbv4t-none-eabi"
 
 [unstable]
 build-std = ["core"]
-
-[target.thumbv4t-none-eabi]
-rustflags = [
-  "-Clink-arg=-Tmono_boot.ld",
-]

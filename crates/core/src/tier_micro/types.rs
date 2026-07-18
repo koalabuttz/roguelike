@@ -50,6 +50,17 @@ pub const MAX_PACKED_MAP_SIZE: usize = MAX_MAP_SIZE.div_ceil(2);
 /// 6502 (~18 cycles). A table lookup is ~8 cycles (LDA abs,X).
 pub const BIT: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128];
 
+const _: () = {
+    assert!(MAX_MAP_WIDTH > 0);
+    assert!(MAX_MAP_HEIGHT > 0);
+    assert!(MAX_ENTITIES <= 256);
+    assert!(MAX_ROOMS <= 256);
+    assert!(DEFAULT_MAP_WIDTH <= MAX_MAP_WIDTH);
+    assert!(DEFAULT_MAP_HEIGHT <= MAX_MAP_HEIGHT);
+    assert!(MAX_BITFIELD_SIZE * 8 >= MAX_MAP_SIZE);
+    assert!((MAX_BITFIELD_SIZE - 1) * 8 < MAX_MAP_SIZE);
+};
+
 /// Compute `y * width + x` for map/bitfield indexing.
 ///
 /// On C64 (feature `c64-overlay`), uses shift for the common width=64
@@ -75,28 +86,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn constants_fit_u8() {
-        assert!(MAX_MAP_WIDTH > 0);
-        assert!(MAX_MAP_HEIGHT > 0);
-        assert!(MAX_ENTITIES <= 256);
-        assert!(MAX_ROOMS <= 256);
-    }
-
-    #[test]
     fn max_map_size_is_product() {
         assert_eq!(MAX_MAP_SIZE, 80 * 60);
-    }
-
-    #[test]
-    fn default_dims_within_max() {
-        assert!(DEFAULT_MAP_WIDTH <= MAX_MAP_WIDTH);
-        assert!(DEFAULT_MAP_HEIGHT <= MAX_MAP_HEIGHT);
-    }
-
-    #[test]
-    fn bitfield_covers_map() {
-        assert!(MAX_BITFIELD_SIZE * 8 >= MAX_MAP_SIZE);
-        assert!((MAX_BITFIELD_SIZE - 1) * 8 < MAX_MAP_SIZE);
     }
 
     #[test]

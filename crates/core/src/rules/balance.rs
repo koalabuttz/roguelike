@@ -189,6 +189,37 @@ pub const COMPACT_MAX_ITEMS: u8 = 48;
 pub const STANDARD_MAP_WIDTH: u8 = 80;
 pub const STANDARD_MAP_HEIGHT: u8 = 40;
 
+// These relationships are part of the portable profile. Keep them at compile
+// time so an invalid built-in balance cannot reach any target binary.
+const _: () = {
+    assert!(HEALTH_POTION_SPAWN_WEIGHT > 0);
+    assert!(SHORT_SWORD_SPAWN_WEIGHT > 0);
+    assert!(LEATHER_ARMOR_SPAWN_WEIGHT > 0);
+    assert!(IRON_MACE_SPAWN_WEIGHT > 0);
+    assert!(LONG_SWORD_SPAWN_WEIGHT > 0);
+    assert!(CHAIN_MAIL_SPAWN_WEIGHT > 0);
+    assert!(GREATER_HEALTH_POTION_SPAWN_WEIGHT > 0);
+    assert!(STRENGTH_POTION_SPAWN_WEIGHT > 0);
+
+    assert!(ROOM_SIZE_MIN <= ROOM_SIZE_MAX);
+    assert!(WANDERING_SOUND_FAR > WANDERING_SOUND_MEDIUM);
+    assert!(WANDERING_SOUND_MEDIUM > WANDERING_SOUND_NEAR);
+    assert!(WANDERING_SOUND_NEAR > 0);
+
+    assert!(PLAYER_ATK > GOBLIN_DEF);
+    assert!(PLAYER_ATK > ORC_DEF);
+    assert!(PLAYER_ATK > TROLL_DEF);
+
+    assert!(MICRO_MAP_WIDTH > 0);
+    assert!(MICRO_MAP_HEIGHT > 0);
+    assert!((MICRO_MAP_WIDTH as u32) * (MICRO_MAP_HEIGHT as u32) <= u16::MAX as u32);
+    assert!(MICRO_MAX_MAP_WIDTH > 0);
+    assert!(MICRO_MAX_MAP_HEIGHT > 0);
+    assert!((MICRO_MAX_MAP_WIDTH as u32) * (MICRO_MAX_MAP_HEIGHT as u32) <= u16::MAX as u32);
+    assert!(MICRO_MAP_WIDTH <= MICRO_MAX_MAP_WIDTH);
+    assert!(MICRO_MAP_HEIGHT <= MICRO_MAX_MAP_HEIGHT);
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,64 +232,10 @@ mod tests {
     }
 
     #[test]
-    fn all_item_spawn_weights_positive() {
-        assert!(HEALTH_POTION_SPAWN_WEIGHT > 0);
-        assert!(SHORT_SWORD_SPAWN_WEIGHT > 0);
-        assert!(LEATHER_ARMOR_SPAWN_WEIGHT > 0);
-        assert!(IRON_MACE_SPAWN_WEIGHT > 0);
-        assert!(LONG_SWORD_SPAWN_WEIGHT > 0);
-        assert!(CHAIN_MAIL_SPAWN_WEIGHT > 0);
-        assert!(GREATER_HEALTH_POTION_SPAWN_WEIGHT > 0);
-        assert!(STRENGTH_POTION_SPAWN_WEIGHT > 0);
-    }
-
-    #[test]
-    fn room_size_range_valid() {
-        assert!(ROOM_SIZE_MIN <= ROOM_SIZE_MAX);
-    }
-
-    #[test]
-    fn wandering_sound_distances_ordered() {
-        assert!(WANDERING_SOUND_FAR > WANDERING_SOUND_MEDIUM);
-        assert!(WANDERING_SOUND_MEDIUM > WANDERING_SOUND_NEAR);
-        assert!(WANDERING_SOUND_NEAR > 0);
-    }
-
-    #[test]
-    fn player_can_damage_all_monsters() {
-        // Player ATK must exceed every monster's DEF for combat to work
-        assert!(PLAYER_ATK > GOBLIN_DEF);
-        assert!(PLAYER_ATK > ORC_DEF);
-        assert!(PLAYER_ATK > TROLL_DEF);
-    }
-
-    #[test]
-    fn micro_tier_fits_u8() {
-        assert!(MICRO_MAP_WIDTH > 0);
-        assert!(MICRO_MAP_HEIGHT > 0);
-        // 64 * 48 = 3072, fits in a flat [u8] array
-        assert!((MICRO_MAP_WIDTH as u16 * MICRO_MAP_HEIGHT as u16) <= u16::MAX);
-    }
-
-    #[test]
     fn micro_balance_matches_standard() {
         assert_eq!(MICRO_FOV_RADIUS, FOV_RADIUS);
         assert_eq!(MICRO_MAX_ROOMS, MAX_ROOMS);
         assert_eq!(MICRO_ROOM_SIZE_MIN, ROOM_SIZE_MIN);
         assert_eq!(MICRO_ROOM_SIZE_MAX, ROOM_SIZE_MAX);
-    }
-
-    #[test]
-    fn micro_max_dims_fit_u8() {
-        assert!(MICRO_MAX_MAP_WIDTH > 0);
-        assert!(MICRO_MAX_MAP_HEIGHT > 0);
-        // 80 * 60 = 4800, fits in u16
-        assert!((MICRO_MAX_MAP_WIDTH as u16 * MICRO_MAX_MAP_HEIGHT as u16) <= u16::MAX);
-    }
-
-    #[test]
-    fn micro_defaults_within_max() {
-        assert!(MICRO_MAP_WIDTH <= MICRO_MAX_MAP_WIDTH);
-        assert!(MICRO_MAP_HEIGHT <= MICRO_MAX_MAP_HEIGHT);
     }
 }

@@ -67,6 +67,8 @@ pub enum DevCommand {
     ToggleOverlay(OverlayLayer),
     /// Reload game data from CWD `game.toml`.
     ReloadData,
+    /// Reload and explicitly reconcile portable content into the active run.
+    ReloadDataAndReconcile,
 }
 
 /// Debug state owned by the caller (main loop, headless runner), not by
@@ -92,6 +94,76 @@ pub struct DevSession {
     pub monster_fov_cursor: Option<Pos>,
     /// Custom game data loaded from disk (used by Spawn and hot reload).
     pub game_data: Option<data::GameData>,
+    /// True after a live reconciliation makes the active run non-canonical.
+    pub dev_modified: bool,
+}
+
+fn reconcile_game_data(gs: &mut GameState, new_data: &data::GameData) -> usize {
+    let old_defaults = std::array::from_fn(|index| gs.item_catalog[index].default_properties());
+    let new_defaults = std::array::from_fn(|index| new_data.items[index].default_properties());
+
+    gs.inventory
+        .reconcile_default_properties(&old_defaults, &new_defaults);
+    if let Some(kind) = gs.equipment.weapon {
+        let index = kind as usize;
+        if gs.equipment.weapon_props == old_defaults[index] {
+            gs.equipment.weapon_props = new_defaults[index];
+        }
+    }
+    if let Some(kind) = gs.equipment.armor {
+        let index = kind as usize;
+        if gs.equipment.armor_props == old_defaults[index] {
+            gs.equipment.armor_props = new_defaults[index];
+        }
+    }
+
+    let mut reconciled = 0;
+    for entity in gs.entities.iter_mut().skip(1).filter(|entity| entity.alive) {
+        let Some(kind) = entity.monster_kind else {
+            continue;
+        };
+        let old = gs
+            .wandering_spawn_table
+            .iter()
+            .find(|definition| definition.monster_kind() == Some(kind))
+            .cloned()
+            .unwrap_or_else(|| data::compiled_defaults().monster_by_kind(kind).clone());
+        let new = new_data.monster_by_kind(kind);
+        let old_max = entity.max_hp.max(1);
+        let hp_bonus = (entity.max_hp - old.hp).max(0);
+        let attack_bonus = (entity.attack - old.attack).max(0);
+        let defense_bonus = (entity.defense - old.defense).max(0);
+        let new_max = (new.hp + hp_bonus).max(1);
+        let scaled_hp =
+            ((entity.hp as i64 * new_max as i64 + old_max as i64 / 2) / old_max as i64) as Stat;
+
+        entity.name = new.name.clone();
+        entity.glyph = new.glyph_char();
+        entity.color = new.game_color();
+        entity.ai = new.ai_personality();
+        entity.max_hp = new_max;
+        entity.hp = scaled_hp.clamp(1, new_max);
+        entity.attack = new.attack + attack_bonus;
+        entity.defense = new.defense + defense_bonus;
+        entity.sight_radius = new.sight_radius;
+        reconciled += 1;
+    }
+
+    gs.regen_interval = new_data.config.regen_interval;
+    gs.max_autorun_steps = new_data.config.max_autorun_steps;
+    gs.wandering_config = new_data.wandering.clone();
+    gs.wandering_spawn_table = new_data.monsters.clone();
+    gs.item_catalog = new_data.items.clone();
+    gs.depth_scaling = new_data.depth_scaling.clone();
+    gs.target_depth = new_data.config.target_depth;
+    gs.max_rooms = new_data.config.max_rooms;
+    gs.room_size_min = new_data.config.room_size_min;
+    gs.room_size_max = new_data.config.room_size_max;
+    gs.max_monsters_per_room = new_data.config.max_monsters_per_room;
+    gs.max_items_per_room = new_data.config.max_items_per_room;
+    gs.fov_radius = new_data.config.fov_radius;
+    gs.update_fov();
+    reconciled
 }
 
 /// Execute a dev command against the game state. Returns a user-facing message.
@@ -249,31 +321,45 @@ pub fn exec_dev(gs: &mut GameState, session: &mut DevSession, cmd: DevCommand) -
                 .game_data
                 .clone()
                 .unwrap_or_else(|| data::defaults().clone());
-            let new_data = data::load_game_data();
+            let new_data = match data::try_load_game_data() {
+                Ok(data) => data,
+                Err(error) => return format!("Data reload rejected: {error}"),
+            };
 
-            // Apply config changes to game state.
-            // Note: only global config values are patched here. Monster stat
-            // changes (HP, attack, etc.) apply to newly spawned entities only —
-            // existing live monsters keep their original stats.
-            gs.regen_interval = new_data.config.regen_interval;
-            gs.max_autorun_steps = new_data.config.max_autorun_steps;
-            let fov_changed = gs.fov_radius != new_data.config.fov_radius;
-            gs.fov_radius = new_data.config.fov_radius;
-            if fov_changed {
-                gs.update_fov();
-                if session.fov_disabled {
-                    apply_fov_override(gs);
-                }
-            }
-
-            // Generate diff report.
             let diffs = data::diff_game_data(&old_data, &new_data);
             session.game_data = Some(new_data);
 
             if diffs.is_empty() {
-                "Data reloaded (no changes detected).".to_string()
+                "Data staged for the next run (no changes detected).".to_string()
             } else {
-                format!("Data reloaded: {}", diffs.join("; "))
+                format!("Data staged for the next run: {}", diffs.join("; "))
+            }
+        }
+        DevCommand::ReloadDataAndReconcile => {
+            let old_data = session
+                .game_data
+                .clone()
+                .unwrap_or_else(|| data::defaults().clone());
+            let new_data = match data::try_load_game_data() {
+                Ok(data) => data,
+                Err(error) => return format!("Data reload rejected: {error}"),
+            };
+            let diffs = data::diff_game_data(&old_data, &new_data);
+            let reconciled = reconcile_game_data(gs, &new_data);
+            session.game_data = Some(new_data);
+            session.dev_modified = true;
+            if session.fov_disabled {
+                apply_fov_override(gs);
+            }
+            if diffs.is_empty() {
+                format!(
+                    "Active run reconciled ({reconciled} living monsters; no file changes). DEV-MODIFIED"
+                )
+            } else {
+                format!(
+                    "Active run reconciled ({reconciled} living monsters): {}. DEV-MODIFIED",
+                    diffs.join("; ")
+                )
             }
         }
     }
@@ -678,6 +764,10 @@ pub struct GoldenReplay {
     pub description: String,
     pub replay: Replay,
     pub expected: ReplayResult,
+    /// Live-reconciled runs are useful for iteration but are not canonical
+    /// deterministic regression artifacts.
+    #[serde(default)]
+    pub dev_modified: bool,
 }
 
 impl GoldenReplay {
@@ -686,6 +776,12 @@ impl GoldenReplay {
     /// Returns `Ok(())` if the result matches, or `Err(message)` describing
     /// the divergence.
     pub fn verify(&self) -> Result<(), String> {
+        if self.dev_modified {
+            return Err(format!(
+                "Golden replay '{}' came from a live-reconciled run",
+                self.name
+            ));
+        }
         let actual = self.replay.execute();
         if actual == self.expected {
             Ok(())
@@ -715,6 +811,7 @@ pub fn golden_from_session(
         description: description.to_string(),
         replay,
         expected,
+        dev_modified: session.dev_modified,
     }
 }
 
@@ -916,6 +1013,7 @@ mod tests {
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
+            item_catalog: data::compiled_defaults().items,
             equipment: Default::default(),
             inventory: Default::default(),
             auto_pickup: false,
@@ -927,6 +1025,7 @@ mod tests {
             room_size_min: 4,
             room_size_max: 10,
             max_monsters_per_room: 2,
+            max_items_per_room: 1,
         }
     }
 
@@ -1242,8 +1341,20 @@ mod tests {
                 final_turn: 999,
                 kills: 100,
             },
+            dev_modified: false,
         };
         assert!(golden.verify().is_err());
+    }
+
+    #[test]
+    fn live_reconciled_replay_is_not_canonical() {
+        let gs = GameState::with_seed(40, 30, 42);
+        let session = DevSession {
+            dev_modified: true,
+            ..DevSession::default()
+        };
+        let golden = golden_from_session("modified", "live content", &gs, &session, None);
+        assert!(golden.verify().unwrap_err().contains("live-reconciled"));
     }
 
     #[test]
@@ -1389,39 +1500,60 @@ mod tests {
     // --- Reload data tests ---
 
     #[test]
-    fn reload_data_updates_config_fields() {
+    fn reload_data_stages_without_mutating_active_run() {
         let mut gs = test_game();
         let mut session = DevSession::default();
-        // Pre-load custom data with different config values.
-        let mut custom = data::defaults().clone();
-        custom.config.regen_interval = 10;
-        custom.config.max_autorun_steps = 50;
-        custom.config.fov_radius = 5;
-        session.game_data = Some(custom);
-        // ReloadData reads from disk (no file → defaults), but we verify that
-        // exec_dev applies the new data's config fields to gs.
+        gs.regen_interval = 10;
+        gs.max_autorun_steps = 50;
+        gs.fov_radius = 5;
         let msg = exec_dev(&mut gs, &mut session, DevCommand::ReloadData);
-        // After reload (no CWD file → defaults), gs should have default values.
-        assert_eq!(gs.regen_interval, data::config().regen_interval);
-        assert_eq!(gs.max_autorun_steps, data::config().max_autorun_steps);
-        assert_eq!(gs.fov_radius, data::config().fov_radius);
-        assert!(msg.contains("reloaded"));
+        assert_eq!(gs.regen_interval, 10);
+        assert_eq!(gs.max_autorun_steps, 50);
+        assert_eq!(gs.fov_radius, 5);
+        assert_eq!(session.game_data.as_ref().unwrap(), data::defaults());
+        assert!(msg.contains("staged"));
     }
 
     #[test]
-    fn reload_data_fov_updates_on_radius_change() {
+    fn reconcile_updates_live_monsters_and_preserves_hp_ratio() {
         let mut gs = test_game();
-        let mut session = DevSession::default();
-        // Set a different fov_radius so reload triggers update_fov.
-        gs.fov_radius = 3;
-        gs.update_fov();
-        let visible_before = gs.visible.len();
-        let msg = exec_dev(&mut gs, &mut session, DevCommand::ReloadData);
-        // After reload, fov_radius should be restored to default (8).
-        assert_eq!(gs.fov_radius, data::config().fov_radius);
-        // With a larger FOV radius, more tiles should be visible.
-        assert!(gs.visible.len() >= visible_before);
-        assert!(msg.contains("reloaded"));
+        let mut goblin = Entity::from_template(data::goblin(), 3, 3);
+        goblin.hp = goblin.max_hp / 2;
+        gs.entities.push(goblin);
+        let mut new_data = data::defaults().clone();
+        new_data.monsters[0].hp = 12;
+        new_data.monsters[0].attack = 9;
+        new_data.monsters[0].name = "Redcap".into();
+        let count = reconcile_game_data(&mut gs, &new_data);
+        assert_eq!(count, 1);
+        assert_eq!(gs.entities[1].name, "Redcap");
+        assert_eq!(gs.entities[1].max_hp, 12);
+        assert_eq!(gs.entities[1].hp, 6);
+        assert_eq!(gs.entities[1].attack, 9);
+    }
+
+    #[test]
+    fn reconcile_updates_only_untouched_item_defaults() {
+        let mut gs = test_game();
+        let old_default = gs.item_catalog[0].default_properties();
+        assert!(
+            gs.inventory
+                .add_with_props(ItemKind::HealthPotion, old_default)
+        );
+        let mut modified = old_default;
+        properties::set(&mut modified, properties::Property::Hot, 7);
+        assert!(
+            gs.inventory
+                .add_with_props(ItemKind::HealthPotion, modified)
+        );
+
+        let mut new_data = data::defaults().clone();
+        new_data.items[0].properties.insert("wet".into(), 9);
+        let new_default = new_data.items[0].default_properties();
+        reconcile_game_data(&mut gs, &new_data);
+
+        assert_eq!(gs.inventory.get(0).unwrap().props, new_default);
+        assert_eq!(gs.inventory.get(1).unwrap().props, modified);
     }
 
     #[test]

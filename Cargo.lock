@@ -2082,12 +2082,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "roguelike-content"
+version = "0.5.0"
+dependencies = [
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "roguelike-core"
 version = "0.5.0"
 dependencies = [
  "criterion",
  "proptest",
  "rand 0.8.5",
+ "roguelike-content",
  "serde",
  "serde_json",
  "toml",

@@ -603,6 +603,7 @@ fn run_and_save_golden(
                 description,
                 replay,
                 expected,
+                dev_modified: false,
             };
 
             let json = serde_json::to_string_pretty(&golden).expect("failed to serialize");

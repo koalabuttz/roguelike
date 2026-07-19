@@ -8,7 +8,7 @@ license.workspace = true
 default = ["dev-tools", "data-files", "serde", "std"]
 std = ["dep:rand", "serde"]
 serde = ["dep:serde", "dep:serde_json"]
-data-files = ["dep:toml", "std"]
+data-files = ["dep:toml", "dep:roguelike-content", "std"]
 dev-tools = ["std"]
 c64-overlay = []
 
@@ -17,6 +17,10 @@ rand = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
+roguelike-content = { path = "../content", optional = true }
+
+[build-dependencies]
+roguelike-content = { path = "../content" }
 
 [dev-dependencies]
 serde_json = { workspace = true }

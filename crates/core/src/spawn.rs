@@ -101,9 +101,15 @@ pub fn pick_item(table: &[(ItemKind, u32)], rng: &mut impl Rng) -> Option<ItemKi
 
 /// Spawn items in each room (except room 0, where the player starts).
 /// Uses the weighted spawn table filtered by `depth` to pick item types.
-pub fn spawn_items(map: &Map, max_per_room: Stat, depth: u8, rng: &mut impl Rng) -> Vec<Item> {
+pub fn spawn_items(
+    map: &Map,
+    max_per_room: Stat,
+    depth: u8,
+    catalog: &[crate::data::ItemDef],
+    rng: &mut impl Rng,
+) -> Vec<Item> {
     let mut items = Vec::new();
-    let table = item::spawn_table_for_depth(depth);
+    let table = item::spawn_table_for_depth_with(catalog, depth);
     if table.is_empty() {
         return items;
     }
@@ -205,7 +211,7 @@ mod tests {
         let rooms = vec![Rect::new(1, 1, 8, 8)];
         let m = map_with_rooms(rooms);
         let mut rng = StdRng::seed_from_u64(42);
-        let items = spawn_items(&m, 5, 1, &mut rng);
+        let items = spawn_items(&m, 5, 1, &data::defaults().items, &mut rng);
         assert!(items.is_empty());
     }
 
@@ -221,7 +227,7 @@ mod tests {
         let m = map_with_rooms(rooms);
         for seed in 0..10 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let items = spawn_items(&m, 3, 1, &mut rng);
+            let items = spawn_items(&m, 3, 1, &data::defaults().items, &mut rng);
             for it in &items {
                 let room = &m.rooms[1];
                 assert!(

@@ -9,6 +9,7 @@ pub mod balance;
 pub mod color;
 pub mod combat;
 pub mod command;
+pub mod content;
 pub mod damage;
 pub mod direction;
 pub mod dungeon;

@@ -14,6 +14,7 @@ use crate::item::{self, Equipment, Item};
 use crate::map;
 use crate::message_log::MessageLog;
 use crate::pathfinding;
+use crate::rules::balance;
 use crate::rules::color::GameColor;
 use crate::rules::interactions;
 use crate::rules::items::{self as rules_items, Inventory};
@@ -380,6 +381,12 @@ fn default_room_size_max() -> Coord {
 fn default_max_monsters_per_room() -> Stat {
     2
 }
+fn default_max_items_per_room() -> Stat {
+    balance::MAX_ITEMS_PER_ROOM as Stat
+}
+fn default_item_catalog() -> Vec<data::ItemDef> {
+    data::compiled_defaults().items
+}
 
 /// Independent RNG streams derived from a master seed.
 /// Order matters for determinism: map (1st), spawn (2nd), wandering (3rd), items (4th).
@@ -443,6 +450,9 @@ pub struct GameState {
     /// Items lying on the ground.
     #[serde(default)]
     pub ground_items: Vec<Item>,
+    /// Portable item definitions captured when this run was created.
+    #[serde(default = "default_item_catalog")]
+    pub item_catalog: Vec<data::ItemDef>,
     /// Player's equipped items.
     #[serde(default)]
     pub equipment: Equipment,
@@ -473,9 +483,21 @@ pub struct GameState {
     pub room_size_max: Coord,
     #[serde(default = "default_max_monsters_per_room")]
     pub max_monsters_per_room: Stat,
+    #[serde(default = "default_max_items_per_room")]
+    pub max_items_per_room: Stat,
 }
 
 impl GameState {
+    fn add_inventory_item(
+        &mut self,
+        kind: rules_items::ItemKind,
+        props: crate::rules::properties::PropertyBag,
+    ) -> bool {
+        let stackable = item::is_consumable_with(&self.item_catalog, kind);
+        self.inventory
+            .add_with_props_and_stackable(kind, props, stackable)
+    }
+
     /// Create a new game with a random seed.
     #[cfg(feature = "data-files")]
     pub fn new(width: Coord, height: Coord) -> Self {
@@ -525,7 +547,13 @@ impl GameState {
         );
         entities.extend(monsters);
 
-        let ground_items = spawn::spawn_items(&map, item::MAX_ITEMS_PER_ROOM, 1, &mut item_rng);
+        let ground_items = spawn::spawn_items(
+            &map,
+            cfg.max_items_per_room,
+            1,
+            &game_data.items,
+            &mut item_rng,
+        );
 
         let visible = fov::compute_fov(&map, px, py, cfg.fov_radius);
         let explored = visible.clone();
@@ -555,6 +583,7 @@ impl GameState {
             wandering_spawned: 0,
             wandering_spawn_table: game_data.monsters.clone(),
             ground_items,
+            item_catalog: game_data.items.clone(),
             equipment: Equipment::default(),
             inventory: Inventory::new(),
             auto_pickup: false,
@@ -566,6 +595,7 @@ impl GameState {
             room_size_min: cfg.room_size_min,
             room_size_max: cfg.room_size_max,
             max_monsters_per_room: cfg.max_monsters_per_room,
+            max_items_per_room: cfg.max_items_per_room,
         }
     }
 
@@ -611,7 +641,13 @@ impl GameState {
         );
         entities.extend(monsters);
 
-        let ground_items = spawn::spawn_items(&map, item::MAX_ITEMS_PER_ROOM, 1, &mut item_rng);
+        let ground_items = spawn::spawn_items(
+            &map,
+            cfg.max_items_per_room,
+            1,
+            &game_data.items,
+            &mut item_rng,
+        );
 
         let visible = fov::compute_fov(&map, px, py, cfg.fov_radius);
         let explored = visible.clone();
@@ -639,6 +675,7 @@ impl GameState {
             wandering_spawned: 0,
             wandering_spawn_table: game_data.monsters.clone(),
             ground_items,
+            item_catalog: game_data.items.clone(),
             equipment: Equipment::default(),
             inventory: Inventory::new(),
             auto_pickup: false,
@@ -650,6 +687,7 @@ impl GameState {
             room_size_min: cfg.room_size_min,
             room_size_max: cfg.room_size_max,
             max_monsters_per_room: cfg.max_monsters_per_room,
+            max_items_per_room: cfg.max_items_per_room,
         }
     }
 
@@ -755,7 +793,12 @@ impl GameState {
                 .position(|it| it.x == x && it.y == y);
             let Some(idx) = idx else { break };
             let kind = self.ground_items[idx].kind;
-            if !self.inventory.add(kind) {
+            let props = item::default_properties_with(&self.item_catalog, kind);
+            let stackable = item::is_consumable_with(&self.item_catalog, kind);
+            if !self
+                .inventory
+                .add_with_props_and_stackable(kind, props, stackable)
+            {
                 break; // inventory full — remaining items get normal notifications
             }
             self.ground_items.remove(idx);
@@ -778,7 +821,12 @@ impl GameState {
         };
 
         let kind = self.ground_items[idx].kind;
-        if !self.inventory.add(kind) {
+        let props = item::default_properties_with(&self.item_catalog, kind);
+        let stackable = item::is_consumable_with(&self.item_catalog, kind);
+        if !self
+            .inventory
+            .add_with_props_and_stackable(kind, props, stackable)
+        {
             self.log.add_event(GameEvent::InventoryFull);
             return true; // turn consumed even on failure
         }
@@ -794,8 +842,9 @@ impl GameState {
             None => return false,
         };
 
-        if rules_items::is_consumable(inv_slot.kind) {
-            let heal = rules_items::heal_amount(inv_slot.kind) as Stat;
+        if item::is_consumable_with(&self.item_catalog, inv_slot.kind) {
+            let definition = &self.item_catalog[inv_slot.kind as usize];
+            let heal = definition.heal_amount as Stat;
             if heal > 0 {
                 let player = &mut self.entities[0];
                 let healed = heal.min(player.max_hp.saturating_sub(player.hp));
@@ -807,7 +856,7 @@ impl GameState {
                 });
                 return true;
             }
-            let boost = rules_items::strength_boost(inv_slot.kind);
+            let boost = definition.strength_boost;
             if boost > 0 {
                 self.entities[0].attack += boost as Stat;
                 self.inventory.remove_one(slot as usize);
@@ -853,7 +902,7 @@ impl GameState {
         // Source is removed if consumable OR if its material was destroyed
         // by the interaction (Cancel rules can reduce METAL/ORGANIC on both
         // items). Remove source first to free a slot for the split target.
-        let source_consumed = rules_items::is_consumable(source.kind);
+        let source_consumed = item::is_consumable_with(&self.item_catalog, source.kind);
         let source_destroyed =
             !source_consumed && rules_items::is_material_dead(source.kind, &b_props);
         let source_removed = source_consumed || source_destroyed;
@@ -866,14 +915,14 @@ impl GameState {
 
         // Remove target and re-add with modified props (unless destroyed).
         self.inventory.remove_one(target_slot as usize);
-        if !target_destroyed && !self.inventory.add_with_props(target.kind, a_props) {
+        if !target_destroyed && !self.add_inventory_item(target.kind, a_props) {
             // Inventory full — undo everything.
             // Invariant: remove_one never mutates props on the remaining
             // stack, so add_with_props with original props always re-stacks.
-            let ok = self.inventory.add_with_props(target.kind, target.props);
+            let ok = self.add_inventory_item(target.kind, target.props);
             debug_assert!(ok, "undo target re-insert must succeed");
             if source_removed {
-                let ok = self.inventory.add_with_props(source.kind, source.props);
+                let ok = self.add_inventory_item(source.kind, source.props);
                 debug_assert!(ok, "undo source re-insert must succeed");
             }
             self.log.add_event(GameEvent::InventoryFull);
@@ -922,11 +971,10 @@ impl GameState {
         let kind = inv_slot.kind;
         let props = inv_slot.props;
 
-        if rules_items::is_weapon(kind) {
+        if item::is_weapon_with(&self.item_catalog, kind) {
             self.inventory.remove_one(slot as usize);
             if let Some(old) = self.equipment.weapon {
-                self.inventory
-                    .add_with_props(old, self.equipment.weapon_props);
+                self.add_inventory_item(old, self.equipment.weapon_props);
             }
             self.equipment.weapon = Some(kind);
             self.equipment.weapon_props = props;
@@ -935,11 +983,10 @@ impl GameState {
                 bonus: rules_items::attack_from_bag(&props),
             });
             true
-        } else if rules_items::is_armor(kind) {
+        } else if item::is_armor_with(&self.item_catalog, kind) {
             self.inventory.remove_one(slot as usize);
             if let Some(old) = self.equipment.armor {
-                self.inventory
-                    .add_with_props(old, self.equipment.armor_props);
+                self.add_inventory_item(old, self.equipment.armor_props);
             }
             self.equipment.armor = Some(kind);
             self.equipment.armor_props = props;
@@ -956,10 +1003,7 @@ impl GameState {
     /// Unequip the current weapon, returning it to inventory.
     fn unequip_weapon(&mut self) -> bool {
         if let Some(kind) = self.equipment.weapon {
-            if !self
-                .inventory
-                .add_with_props(kind, self.equipment.weapon_props)
-            {
+            if !self.add_inventory_item(kind, self.equipment.weapon_props) {
                 self.log.add_event(GameEvent::InventoryFull);
                 return false;
             }
@@ -975,10 +1019,7 @@ impl GameState {
     /// Unequip the current armor, returning it to inventory.
     fn unequip_armor(&mut self) -> bool {
         if let Some(kind) = self.equipment.armor {
-            if !self
-                .inventory
-                .add_with_props(kind, self.equipment.armor_props)
-            {
+            if !self.add_inventory_item(kind, self.equipment.armor_props) {
                 self.log.add_event(GameEvent::InventoryFull);
                 return false;
             }
@@ -1027,13 +1068,13 @@ impl GameState {
         let mut colors = Vec::new();
         for (i, slot) in self.inventory.iter() {
             let letter = (b'a' + i as u8) as char;
-            let name = item::described_item_name(slot.kind, &slot.props);
+            let name = item::described_item_name_with(&self.item_catalog, slot.kind, &slot.props);
             if slot.count > 1 {
                 strings.push(format!("{}) {} (x{})", letter, name, slot.count));
             } else {
                 strings.push(format!("{}) {}", letter, name));
             }
-            colors.push(rules_items::color(slot.kind));
+            colors.push(item::item_color_with(&self.item_catalog, slot.kind));
         }
         (strings, colors)
     }
@@ -1125,8 +1166,9 @@ impl GameState {
         // Spawn items on new floor.
         let ground_items = spawn::spawn_items(
             &new_map,
-            item::MAX_ITEMS_PER_ROOM,
+            self.max_items_per_room,
             self.depth as u8,
+            &self.item_catalog,
             &mut item_rng,
         );
 
@@ -1692,8 +1734,8 @@ impl GameState {
             .iter()
             .filter(|it| self.visible.contains(&(it.x, it.y)))
             .map(|it| ItemInfo {
-                name: item::item_name(it.kind).to_string(),
-                glyph: item::item_glyph(it.kind),
+                name: item::item_name_with(&self.item_catalog, it.kind).to_string(),
+                glyph: item::item_glyph_with(&self.item_catalog, it.kind),
                 x: it.x,
                 y: it.y,
             })
@@ -1729,14 +1771,12 @@ impl GameState {
             recent_messages: self.log.recent(10),
             game_over: self.game_over,
             turn_count: self.turn_count,
-            weapon: self
-                .equipment
-                .weapon
-                .map(|k| item::described_item_name(k, &self.equipment.weapon_props)),
-            armor: self
-                .equipment
-                .armor
-                .map(|k| item::described_item_name(k, &self.equipment.armor_props)),
+            weapon: self.equipment.weapon.map(|k| {
+                item::described_item_name_with(&self.item_catalog, k, &self.equipment.weapon_props)
+            }),
+            armor: self.equipment.armor.map(|k| {
+                item::described_item_name_with(&self.item_catalog, k, &self.equipment.armor_props)
+            }),
             kills,
             rooms_found,
             explored_pct,
@@ -1973,8 +2013,8 @@ impl GameState {
                 .iter()
                 .filter(|it| it.x == x && it.y == y)
                 .map(|it| ItemInfo {
-                    name: item::item_name(it.kind).to_string(),
-                    glyph: item::item_glyph(it.kind),
+                    name: item::item_name_with(&self.item_catalog, it.kind).to_string(),
+                    glyph: item::item_glyph_with(&self.item_catalog, it.kind),
                     x: it.x,
                     y: it.y,
                 })
@@ -2016,7 +2056,7 @@ impl GameState {
         }
         // Item on ground
         if let Some(it) = self.ground_items.iter().find(|it| it.x == x && it.y == y) {
-            return Some(item::item_glyph(it.kind));
+            return Some(item::item_glyph_with(&self.item_catalog, it.kind));
         }
         None
     }
@@ -2192,6 +2232,7 @@ mod tests {
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
+            item_catalog: data::compiled_defaults().items,
             equipment: Default::default(),
             inventory: Default::default(),
             auto_pickup: false,
@@ -2203,6 +2244,7 @@ mod tests {
             room_size_min: 4,
             room_size_max: 10,
             max_monsters_per_room: 2,
+            max_items_per_room: 1,
         }
     }
 
@@ -2509,6 +2551,7 @@ mod tests {
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
+            item_catalog: data::compiled_defaults().items,
             equipment: Default::default(),
             inventory: Default::default(),
             auto_pickup: false,
@@ -2520,6 +2563,7 @@ mod tests {
             room_size_min: 4,
             room_size_max: 10,
             max_monsters_per_room: 2,
+            max_items_per_room: 1,
         }
     }
 
@@ -2598,6 +2642,7 @@ mod tests {
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
+            item_catalog: data::compiled_defaults().items,
             equipment: Default::default(),
             inventory: Default::default(),
             auto_pickup: false,
@@ -2609,6 +2654,7 @@ mod tests {
             room_size_min: 4,
             room_size_max: 10,
             max_monsters_per_room: 2,
+            max_items_per_room: 1,
         };
 
         let result = gs.autorun(Direction::East);
@@ -2661,6 +2707,7 @@ mod tests {
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
+            item_catalog: data::compiled_defaults().items,
             equipment: Default::default(),
             inventory: Default::default(),
             auto_pickup: false,
@@ -2672,6 +2719,7 @@ mod tests {
             room_size_min: 4,
             room_size_max: 10,
             max_monsters_per_room: 2,
+            max_items_per_room: 1,
         };
 
         let result = gs.autorun(Direction::East);
@@ -2713,6 +2761,7 @@ mod tests {
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
+            item_catalog: data::compiled_defaults().items,
             equipment: Default::default(),
             inventory: Default::default(),
             auto_pickup: false,
@@ -2724,6 +2773,7 @@ mod tests {
             room_size_min: 4,
             room_size_max: 10,
             max_monsters_per_room: 2,
+            max_items_per_room: 1,
         };
 
         let result = gs.autorun(Direction::East);
@@ -2792,6 +2842,7 @@ mod tests {
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
+            item_catalog: data::compiled_defaults().items,
             equipment: Default::default(),
             inventory: Default::default(),
             auto_pickup: false,
@@ -2803,6 +2854,7 @@ mod tests {
             room_size_min: 4,
             room_size_max: 10,
             max_monsters_per_room: 2,
+            max_items_per_room: 1,
         };
 
         let result = gs.autorun(Direction::East);
@@ -2848,6 +2900,7 @@ mod tests {
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
+            item_catalog: data::compiled_defaults().items,
             equipment: Default::default(),
             inventory: Default::default(),
             auto_pickup: false,
@@ -2859,6 +2912,7 @@ mod tests {
             room_size_min: 4,
             room_size_max: 10,
             max_monsters_per_room: 2,
+            max_items_per_room: 1,
         };
 
         let result = gs.autorun(Direction::East);
@@ -3927,6 +3981,21 @@ mod tests {
 
         // Visible is recomputed from FOV, should match
         assert_eq!(gs.visible, loaded.visible);
+    }
+
+    #[test]
+    fn old_save_without_content_catalog_uses_compiled_defaults() {
+        let gs = test_game();
+        let mut value = serde_json::to_value(&gs).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("item_catalog");
+        object.remove("max_items_per_room");
+        let loaded: GameState = serde_json::from_value(value).unwrap();
+        assert_eq!(loaded.item_catalog, data::compiled_defaults().items);
+        assert_eq!(
+            loaded.max_items_per_room,
+            balance::MAX_ITEMS_PER_ROOM as Stat
+        );
     }
 
     #[test]

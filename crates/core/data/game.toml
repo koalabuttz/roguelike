@@ -11,6 +11,7 @@ max_rooms = 30
 room_size_min = 4
 room_size_max = 10
 max_monsters_per_room = 2
+max_items_per_room = 1
 ui_bottom_rows = 5
 max_autorun_steps = 100
 regen_interval = 3
@@ -33,34 +34,121 @@ idle_threshold = 5
 idle_acceleration = 2
 
 [[monsters]]
+id = "goblin"
 name = "Goblin"
 glyph = "g"
 color = "Green"
 hp = 6
 attack = 3
 defense = 0
-ai = "Chase"
+ai = "aggressive"
 spawn_weight = 60
 sight_radius = 6
+coward_chance = 25
 
 [[monsters]]
+id = "orc"
 name = "Orc"
 glyph = "o"
 color = "DarkGreen"
 hp = 12
 attack = 4
 defense = 1
-ai = "Chase"
+ai = "aggressive"
 spawn_weight = 30
 sight_radius = 7
 
 [[monsters]]
+id = "troll"
 name = "Troll"
 glyph = "T"
 color = "DarkRed"
 hp = 20
 attack = 6
 defense = 3
-ai = "Chase"
+ai = "aggressive"
 spawn_weight = 10
 sight_radius = 5
+
+[[items]]
+id = "health_potion"
+name = "Health Potion"
+glyph = "!"
+color = "Red"
+category = "consumable"
+spawn_weight = 40
+min_depth = 1
+heal_amount = 10
+properties = { wet = 5, magical = 4 }
+
+[[items]]
+id = "short_sword"
+name = "Short Sword"
+glyph = "/"
+color = "Cyan"
+category = "weapon"
+spawn_weight = 20
+min_depth = 1
+properties = { sharp = 6, hard = 7, heavy = 4, metal = 8 }
+
+[[items]]
+id = "leather_armor"
+name = "Leather Armor"
+glyph = "["
+color = "Yellow"
+category = "armor"
+spawn_weight = 15
+min_depth = 1
+properties = { hard = 5, swift = 3, organic = 6 }
+
+[[items]]
+id = "iron_mace"
+name = "Iron Mace"
+glyph = "/"
+color = "White"
+category = "weapon"
+spawn_weight = 12
+min_depth = 3
+properties = { hard = 9, heavy = 8, metal = 8 }
+
+[[items]]
+id = "long_sword"
+name = "Long Sword"
+glyph = "/"
+color = "White"
+category = "weapon"
+spawn_weight = 8
+min_depth = 7
+properties = { sharp = 9, hard = 8, heavy = 7, metal = 9 }
+
+[[items]]
+id = "chain_mail"
+name = "Chain Mail"
+glyph = "["
+color = "Grey"
+category = "armor"
+spawn_weight = 8
+min_depth = 9
+properties = { hard = 8, heavy = 6, metal = 7 }
+
+[[items]]
+id = "greater_health_potion"
+name = "Greater Health Potion"
+glyph = "!"
+color = "DarkRed"
+category = "consumable"
+spawn_weight = 15
+min_depth = 11
+heal_amount = 20
+properties = { wet = 7, magical = 7 }
+
+[[items]]
+id = "strength_potion"
+name = "Potion of Strength"
+glyph = "!"
+color = "Green"
+category = "consumable"
+spawn_weight = 8
+min_depth = 5
+strength_boost = 1
+properties = { heavy = 3, hot = 4, magical = 6 }

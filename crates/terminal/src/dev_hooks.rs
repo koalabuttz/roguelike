@@ -2,7 +2,7 @@
 mod inner {
     use std::io::{self, Write};
 
-    use crossterm::event::{KeyCode, KeyEvent};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use roguelike_core::command::GameCommand;
     use roguelike_core::data::GameData;
@@ -113,6 +113,9 @@ mod inner {
                 KeyCode::F(7) => Some(DevCommand::ToggleOverlay(OverlayLayer::MonsterTargets)),
                 KeyCode::F(8) => Some(DevCommand::ToggleOverlay(OverlayLayer::Pathfinding)),
                 KeyCode::F(9) => Some(DevCommand::ToggleOverlay(OverlayLayer::Frontiers)),
+                KeyCode::F(10) if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                    Some(DevCommand::ReloadDataAndReconcile)
+                }
                 KeyCode::F(10) => Some(DevCommand::ReloadData),
                 KeyCode::F(11) => Some(DevCommand::ToggleOverlay(OverlayLayer::RevealMonsters)),
                 KeyCode::F(12) => Some(DevCommand::ToggleOverlay(OverlayLayer::MonsterFov)),
@@ -120,7 +123,10 @@ mod inner {
             };
 
             if let Some(cmd) = dev_cmd {
-                let is_reload = matches!(cmd, DevCommand::ReloadData);
+                let is_reload = matches!(
+                    cmd,
+                    DevCommand::ReloadData | DevCommand::ReloadDataAndReconcile
+                );
                 let msg = dev_tools::exec_dev(state, session, cmd);
                 state.log.add(&msg);
                 if is_reload && let Some(ref d) = session.game_data {

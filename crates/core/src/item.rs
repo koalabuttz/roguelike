@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::rules::{balance, items as rules_items, properties::PropertyBag};
 use crate::types::{Coord, GameColor, Stat};
+use crate::{data::ItemDef, rules::content::ItemCategory};
 
 // Re-export from rules so all existing `item::ItemKind` / `item::Equipment` paths work.
 pub use crate::rules::items::{Equipment, ItemKind};
@@ -31,14 +32,26 @@ pub fn item_glyph(kind: ItemKind) -> char {
     rules_items::glyph(kind)
 }
 
+pub fn item_glyph_with(catalog: &[ItemDef], kind: ItemKind) -> char {
+    catalog[kind as usize].glyph_char()
+}
+
 /// Display color for an item kind.
 pub fn item_color(kind: ItemKind) -> GameColor {
     rules_items::color(kind)
 }
 
+pub fn item_color_with(catalog: &[ItemDef], kind: ItemKind) -> GameColor {
+    catalog[kind as usize].game_color()
+}
+
 /// Human-readable name for an item kind.
 pub fn item_name(kind: ItemKind) -> &'static str {
     rules_items::name(kind)
+}
+
+pub fn item_name_with(catalog: &[ItemDef], kind: ItemKind) -> &str {
+    &catalog[kind as usize].name
 }
 
 /// Item name with qualitative adjectives for non-default properties.
@@ -50,6 +63,38 @@ pub fn described_item_name(kind: ItemKind, props: &PropertyBag) -> String {
     core::str::from_utf8(&buf[..len])
         .unwrap_or(rules_items::name(kind))
         .to_string()
+}
+
+pub fn described_item_name_with(
+    catalog: &[ItemDef],
+    kind: ItemKind,
+    props: &PropertyBag,
+) -> String {
+    let definition = &catalog[kind as usize];
+    if *props == definition.default_properties() {
+        return definition.name.clone();
+    }
+    let described = described_item_name(kind, props);
+    described
+        .strip_suffix(rules_items::name(kind))
+        .map(|prefix| format!("{prefix}{}", definition.name))
+        .unwrap_or_else(|| definition.name.clone())
+}
+
+pub fn is_consumable_with(catalog: &[ItemDef], kind: ItemKind) -> bool {
+    catalog[kind as usize].item_category() == ItemCategory::Consumable
+}
+
+pub fn is_weapon_with(catalog: &[ItemDef], kind: ItemKind) -> bool {
+    catalog[kind as usize].item_category() == ItemCategory::Weapon
+}
+
+pub fn is_armor_with(catalog: &[ItemDef], kind: ItemKind) -> bool {
+    catalog[kind as usize].item_category() == ItemCategory::Armor
+}
+
+pub fn default_properties_with(catalog: &[ItemDef], kind: ItemKind) -> PropertyBag {
+    catalog[kind as usize].default_properties()
 }
 
 /// Spawn weight for the weighted item spawn table.
@@ -125,6 +170,18 @@ pub fn spawn_table_for_depth(depth: u8) -> Vec<(ItemKind, u32)> {
         .iter()
         .filter(|&&(kind, w)| w > 0 && rules_items::min_depth(kind) <= depth)
         .map(|&(kind, w)| (kind, w as u32))
+        .collect()
+}
+
+pub fn spawn_table_for_depth_with(catalog: &[ItemDef], depth: u8) -> Vec<(ItemKind, u32)> {
+    rules_items::ALL_KINDS
+        .iter()
+        .copied()
+        .filter_map(|kind| {
+            let definition = &catalog[kind as usize];
+            (definition.spawn_weight > 0 && definition.min_depth <= depth)
+                .then_some((kind, definition.spawn_weight))
+        })
         .collect()
 }
 

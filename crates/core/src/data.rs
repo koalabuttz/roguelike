@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::entity::AiPersonality;
 use crate::rules::balance;
+use crate::rules::content::ItemCategory;
+use crate::rules::items::ItemKind;
 use crate::rules::monster_table::{self, MonsterKind};
+use crate::rules::properties::{self, PropertyBag};
 use crate::types::{Coord, GameColor, Stat};
 
 fn default_sight_radius() -> Coord {
@@ -10,7 +13,7 @@ fn default_sight_radius() -> Coord {
 }
 
 /// Top-level game data — player stats, config knobs, and monster definitions.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameData {
     pub player: PlayerDef,
     pub config: GameConfig,
@@ -19,10 +22,12 @@ pub struct GameData {
     #[serde(default)]
     pub depth_scaling: DepthScaling,
     pub monsters: Vec<MonsterDef>,
+    #[serde(default)]
+    pub items: Vec<ItemDef>,
 }
 
 /// Player template — starting stats and appearance.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlayerDef {
     pub hp: Stat,
     pub attack: Stat,
@@ -34,6 +39,8 @@ pub struct PlayerDef {
 /// Defines a type of monster — all stats, appearance, AI, and spawn weight.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MonsterDef {
+    #[serde(default)]
+    pub id: String,
     pub name: String,
     pub glyph: String,
     pub color: String,
@@ -44,6 +51,27 @@ pub struct MonsterDef {
     pub spawn_weight: u32,
     #[serde(default = "default_sight_radius")]
     pub sight_radius: Coord,
+    #[serde(default)]
+    pub coward_chance: u8,
+}
+
+/// Authored presentation, balance, category, and default property profile for
+/// one stable portable item identity.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ItemDef {
+    pub id: String,
+    pub name: String,
+    pub glyph: String,
+    pub color: String,
+    pub category: String,
+    pub spawn_weight: u32,
+    pub min_depth: u8,
+    #[serde(default)]
+    pub heal_amount: u8,
+    #[serde(default)]
+    pub strength_boost: u8,
+    #[serde(default)]
+    pub properties: std::collections::BTreeMap<String, u8>,
 }
 
 fn default_target_depth() -> Stat {
@@ -63,18 +91,24 @@ fn default_depth_scale_interval() -> Stat {
 }
 
 /// Game-wide tuning knobs — change these to rebalance without touching logic.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameConfig {
     pub fov_radius: Coord,
     pub max_rooms: Stat,
     pub room_size_min: Coord,
     pub room_size_max: Coord,
     pub max_monsters_per_room: Stat,
+    #[serde(default = "default_max_items_per_room")]
+    pub max_items_per_room: Stat,
     pub ui_bottom_rows: Stat,
     pub max_autorun_steps: Stat,
     pub regen_interval: Stat,
     #[serde(default = "default_target_depth")]
     pub target_depth: Stat,
+}
+
+fn default_max_items_per_room() -> Stat {
+    balance::MAX_ITEMS_PER_ROOM as Stat
 }
 
 /// Per-floor monster stat scaling for multi-level dungeons.
@@ -185,6 +219,20 @@ impl GameData {
             .iter()
             .find(|m| m.name.to_lowercase() == lower)
     }
+
+    pub fn monster_by_kind(&self, kind: MonsterKind) -> &MonsterDef {
+        &self.monsters[kind as usize]
+    }
+
+    pub fn item(&self, kind: ItemKind) -> &ItemDef {
+        &self.items[kind as usize]
+    }
+
+    pub fn item_by_id(&self, id: &str) -> Option<&ItemDef> {
+        self.items
+            .iter()
+            .find(|item| item.id.eq_ignore_ascii_case(id))
+    }
 }
 
 impl MonsterDef {
@@ -203,6 +251,7 @@ impl MonsterDef {
         match self.ai.to_lowercase().as_str() {
             "chase" | "aggressive" => AiPersonality::Aggressive,
             "wander" | "patrol" => AiPersonality::Patrol,
+            "coward" => AiPersonality::Coward,
             _ => AiPersonality::Player,
         }
     }
@@ -210,7 +259,40 @@ impl MonsterDef {
     /// Map this definition's name to a canonical `MonsterKind`.
     /// Returns `None` for custom/modded monsters without a matching kind.
     pub fn monster_kind(&self) -> Option<MonsterKind> {
-        monster_table::from_name(&self.name)
+        match self.id.as_str() {
+            "goblin" => Some(MonsterKind::Goblin),
+            "orc" => Some(MonsterKind::Orc),
+            "troll" => Some(MonsterKind::Troll),
+            _ => monster_table::from_name(&self.name),
+        }
+    }
+}
+
+impl ItemDef {
+    pub fn glyph_char(&self) -> char {
+        self.glyph.chars().next().unwrap_or('?')
+    }
+
+    pub fn game_color(&self) -> GameColor {
+        parse_color(&self.color)
+    }
+
+    pub fn item_category(&self) -> ItemCategory {
+        match self.category.as_str() {
+            "weapon" => ItemCategory::Weapon,
+            "armor" => ItemCategory::Armor,
+            _ => ItemCategory::Consumable,
+        }
+    }
+
+    pub fn default_properties(&self) -> PropertyBag {
+        let mut bag = properties::EMPTY;
+        for (name, value) in &self.properties {
+            if let Some(property) = properties::from_name(name) {
+                properties::set(&mut bag, property, *value);
+            }
+        }
+        bag
     }
 }
 
@@ -243,6 +325,148 @@ fn parse_color(s: &str) -> GameColor {
     }
 }
 
+fn color_name(color: GameColor) -> &'static str {
+    match color {
+        GameColor::Black => "Black",
+        GameColor::White => "White",
+        GameColor::Grey => "Grey",
+        GameColor::DarkGrey => "DarkGrey",
+        GameColor::Red => "Red",
+        GameColor::DarkRed => "DarkRed",
+        GameColor::Green => "Green",
+        GameColor::DarkGreen => "DarkGreen",
+        GameColor::Yellow => "Yellow",
+        GameColor::DarkBlue => "DarkBlue",
+        GameColor::Cyan => "Cyan",
+        GameColor::Rgb(_, _, _) => "White",
+    }
+}
+
+fn property_name(property: properties::Property) -> &'static str {
+    use properties::Property;
+    match property {
+        Property::Sharp => "sharp",
+        Property::Hard => "hard",
+        Property::Heavy => "heavy",
+        Property::Swift => "swift",
+        Property::Hot => "hot",
+        Property::Cold => "cold",
+        Property::Wet => "wet",
+        Property::Metal => "metal",
+        Property::Organic => "organic",
+        Property::Venomous => "venomous",
+        Property::Magical => "magical",
+        Property::Volatile => "volatile",
+        Property::Bright => "bright",
+        Property::Corrosive => "corrosive",
+        Property::Binding => "binding",
+        Property::Cursed => "cursed",
+    }
+}
+
+/// Reconstruct the owned Standard-tier catalog from the same generated tables
+/// used by the constrained tiers.
+pub fn compiled_defaults() -> GameData {
+    use crate::rules::content;
+
+    let monsters = content::MONSTERS
+        .iter()
+        .map(|monster| MonsterDef {
+            id: monster.id.into(),
+            name: monster.name.into(),
+            glyph: monster.glyph.to_string(),
+            color: color_name(monster.color).into(),
+            hp: monster.max_hp as Stat,
+            attack: monster.attack as Stat,
+            defense: monster.defense as Stat,
+            ai: match monster.ai {
+                AiPersonality::Patrol => "patrol",
+                AiPersonality::Coward => "coward",
+                _ => "aggressive",
+            }
+            .into(),
+            spawn_weight: monster.spawn_weight as u32,
+            sight_radius: monster.sight_radius as Coord,
+            coward_chance: monster.coward_chance,
+        })
+        .collect();
+    let items = content::ITEMS
+        .iter()
+        .map(|item| {
+            let properties = properties::ALL_PROPERTIES
+                .iter()
+                .filter_map(|&property| {
+                    let value = properties::get(&item.default_properties, property);
+                    (value > 0).then(|| (property_name(property).into(), value))
+                })
+                .collect();
+            ItemDef {
+                id: item.id.into(),
+                name: item.name.into(),
+                glyph: item.glyph.to_string(),
+                color: color_name(item.color).into(),
+                category: match item.category {
+                    ItemCategory::Consumable => "consumable",
+                    ItemCategory::Weapon => "weapon",
+                    ItemCategory::Armor => "armor",
+                }
+                .into(),
+                spawn_weight: item.spawn_weight as u32,
+                min_depth: item.min_depth,
+                heal_amount: item.heal_amount,
+                strength_boost: item.strength_boost,
+                properties,
+            }
+        })
+        .collect();
+
+    GameData {
+        player: PlayerDef {
+            hp: content::PLAYER.hp as Stat,
+            attack: content::PLAYER.attack as Stat,
+            defense: content::PLAYER.defense as Stat,
+            glyph: content::PLAYER.glyph.to_string(),
+            color: color_name(content::PLAYER.color).into(),
+        },
+        config: GameConfig {
+            fov_radius: content::CONFIG.fov_radius as Coord,
+            max_rooms: content::CONFIG.max_rooms as Stat,
+            room_size_min: content::CONFIG.room_size_min as Coord,
+            room_size_max: content::CONFIG.room_size_max as Coord,
+            max_monsters_per_room: content::CONFIG.max_monsters_per_room as Stat,
+            max_items_per_room: content::CONFIG.max_items_per_room as Stat,
+            ui_bottom_rows: content::CONFIG.ui_bottom_rows as Stat,
+            max_autorun_steps: content::CONFIG.max_autorun_steps as Stat,
+            regen_interval: content::CONFIG.regen_interval as Stat,
+            target_depth: content::CONFIG.target_depth as Stat,
+        },
+        wandering: WanderingConfig {
+            spawn_interval: content::WANDERING.spawn_interval as Stat,
+            spawn_chance: content::WANDERING.spawn_chance as Stat,
+            grace_period: content::WANDERING.grace_period as Stat,
+            max_wandering: content::WANDERING.max_wandering as Stat,
+            sound_far: content::WANDERING.sound_far as Coord,
+            sound_medium: content::WANDERING.sound_medium as Coord,
+            sound_near: content::WANDERING.sound_near as Coord,
+            idle_threshold: content::WANDERING.idle_threshold as Stat,
+            idle_acceleration: content::WANDERING.idle_acceleration as Stat,
+        },
+        depth_scaling: DepthScaling {
+            monster_hp_per_floor: content::DEPTH_SCALING.monster_hp_per_floor as Stat,
+            monster_atk_per_floor: content::DEPTH_SCALING.monster_atk_per_floor as Stat,
+            depth_scale_interval: content::DEPTH_SCALING.depth_scale_interval as Stat,
+        },
+        monsters,
+        items,
+    }
+}
+
+impl Default for GameData {
+    fn default() -> Self {
+        compiled_defaults()
+    }
+}
+
 // --- Feature-gated: data-files ---
 
 #[cfg(feature = "data-files")]
@@ -268,12 +492,13 @@ mod data_files {
     ];
 
     /// Known AI personality names — must match the arms of `MonsterDef::ai_personality()`.
-    const KNOWN_AI: &[&str] = &["chase", "wander", "aggressive", "patrol"];
+    const KNOWN_AI: &[&str] = &["chase", "wander", "aggressive", "patrol", "coward"];
 
     const DEFAULT_TOML: &str = include_str!("../data/game.toml");
 
-    static DEFAULT_DATA: LazyLock<GameData> =
-        LazyLock::new(|| parse_game_data(DEFAULT_TOML).expect("embedded game.toml is invalid"));
+    static DEFAULT_DATA: LazyLock<GameData> = LazyLock::new(|| {
+        parse_portable_game_data(DEFAULT_TOML).expect("embedded game.toml is invalid")
+    });
 
     /// Access the default game data (parsed once from embedded TOML).
     pub fn defaults() -> &'static GameData {
@@ -283,6 +508,25 @@ mod data_files {
     /// Parse a TOML string into GameData.
     pub fn parse_game_data(toml_str: &str) -> Result<GameData, String> {
         toml::from_str(toml_str).map_err(|e| format!("TOML parse error: {e}"))
+    }
+
+    /// Parse only content that is representable by every supported tier.
+    pub fn parse_portable_game_data(toml_str: &str) -> Result<GameData, String> {
+        roguelike_content::parse_game_data(toml_str)?;
+        let mut data = parse_game_data(toml_str)?;
+        data.monsters.sort_by_key(|monster| {
+            roguelike_content::MONSTER_IDS
+                .iter()
+                .position(|id| *id == monster.id)
+                .unwrap()
+        });
+        data.items.sort_by_key(|item| {
+            roguelike_content::ITEM_IDS
+                .iter()
+                .position(|id| *id == item.id)
+                .unwrap()
+        });
+        Ok(data)
     }
 
     /// Convenience: access the default game config.
@@ -311,31 +555,40 @@ mod data_files {
             .expect("Troll not found in game data")
     }
 
+    /// Load and validate game data from CWD `game.toml`.
+    ///
+    /// A missing file selects the compiled-in defaults. Invalid or unreadable
+    /// files are returned to the caller so interactive reloads can reject them
+    /// without changing the staged catalog.
+    pub fn try_load_game_data() -> Result<GameData, String> {
+        match std::fs::read_to_string("game.toml") {
+            Ok(content) => parse_portable_game_data(&content),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(defaults().clone()),
+            Err(error) => Err(format!("could not read game.toml: {error}")),
+        }
+    }
+
     /// Load game data from CWD `game.toml`, falling back to compiled-in defaults.
     ///
     /// This is the modding entry point: players can drop a `game.toml` in the
     /// working directory to override all balance values, monster definitions,
     /// and player stats.
     pub fn load_game_data() -> GameData {
-        match std::fs::read_to_string("game.toml") {
-            Ok(content) => match parse_game_data(&content) {
-                Ok(data) => {
+        match try_load_game_data() {
+            Ok(data) => {
+                if std::path::Path::new("game.toml").is_file() {
                     eprintln!("[data] Loaded game.toml from current directory.");
-                    let warnings = validate_game_data(&data);
-                    for w in &warnings {
-                        eprintln!("[data] Warning: {}", w);
-                    }
-                    data
                 }
-                Err(e) => {
-                    eprintln!(
-                        "[data] Warning: game.toml parse error: {}. Using defaults.",
-                        e
-                    );
-                    defaults().clone()
+                let warnings = validate_game_data(&data);
+                for warning in &warnings {
+                    eprintln!("[data] Warning: {warning}");
                 }
-            },
-            Err(_) => defaults().clone(),
+                data
+            }
+            Err(error) => {
+                eprintln!("[data] Warning: {error}. Using defaults.");
+                defaults().clone()
+            }
         }
     }
 
@@ -559,6 +812,7 @@ mod data_files {
         diff_config!(room_size_min);
         diff_config!(room_size_max);
         diff_config!(max_monsters_per_room);
+        diff_config!(max_items_per_room);
         diff_config!(ui_bottom_rows);
         diff_config!(max_autorun_steps);
         diff_config!(regen_interval);
@@ -605,8 +859,8 @@ mod data_files {
         }
 
         // Added/removed monsters.
-        let old_names: HashSet<&str> = old.monsters.iter().map(|m| m.name.as_str()).collect();
-        let new_names: HashSet<&str> = new.monsters.iter().map(|m| m.name.as_str()).collect();
+        let old_names: HashSet<&str> = old.monsters.iter().map(|m| m.id.as_str()).collect();
+        let new_names: HashSet<&str> = new.monsters.iter().map(|m| m.id.as_str()).collect();
 
         let mut added: Vec<&str> = new_names.difference(&old_names).copied().collect();
         added.sort();
@@ -622,7 +876,7 @@ mod data_files {
 
         // Monster stat changes for existing monsters.
         for new_m in &new.monsters {
-            if let Some(old_m) = old.monster_by_name(&new_m.name) {
+            if let Some(old_m) = old.monsters.iter().find(|old_m| old_m.id == new_m.id) {
                 let mut changes = Vec::new();
                 if old_m.hp != new_m.hp {
                     changes.push(format!("HP {} -> {}", old_m.hp, new_m.hp));
@@ -642,6 +896,14 @@ mod data_files {
                 if !changes.is_empty() {
                     diffs.push(format!("{} {}", new_m.name, changes.join(", ")));
                 }
+            }
+        }
+
+        for new_item in &new.items {
+            if let Some(old_item) = old.items.iter().find(|old_item| old_item.id == new_item.id)
+                && old_item != new_item
+            {
+                diffs.push(format!("{} item definition changed", new_item.name));
             }
         }
 
@@ -665,6 +927,22 @@ mod tests {
         assert_eq!(data.config.fov_radius, 8);
         assert_eq!(data.config.regen_interval, 3);
         assert_eq!(data.monsters.len(), 3);
+        assert_eq!(data.items.len(), 8);
+    }
+
+    #[test]
+    fn parsed_and_generated_defaults_match() {
+        assert_eq!(defaults(), &compiled_defaults());
+    }
+
+    #[test]
+    fn portable_parser_normalizes_authored_table_order() {
+        let mut value: toml::Value = toml::from_str(include_str!("../data/game.toml")).unwrap();
+        value["monsters"].as_array_mut().unwrap().reverse();
+        value["items"].as_array_mut().unwrap().reverse();
+        let parsed = parse_portable_game_data(&toml::to_string(&value).unwrap()).unwrap();
+        assert_eq!(parsed.monsters[0].id, "goblin");
+        assert_eq!(parsed.items[0].id, "health_potion");
     }
 
     #[test]

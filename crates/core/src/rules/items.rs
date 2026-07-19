@@ -13,8 +13,8 @@
 
 use core::mem::size_of;
 
-use super::balance;
 use super::color::GameColor;
+use super::content::{self, ItemCategory};
 use super::properties::{self, PropertyBag};
 
 /// The type of item. Each variant is a `u8` discriminant — no 16-bit bloat
@@ -56,44 +56,17 @@ pub const KIND_COUNT: usize = ALL_KINDS.len();
 
 /// Display glyph for an item kind.
 pub const fn glyph(kind: ItemKind) -> char {
-    match kind {
-        ItemKind::HealthPotion => '!',
-        ItemKind::ShortSword => '/',
-        ItemKind::LeatherArmor => '[',
-        ItemKind::IronMace => '/',
-        ItemKind::LongSword => '/',
-        ItemKind::ChainMail => '[',
-        ItemKind::GreaterHealthPotion => '!',
-        ItemKind::StrengthPotion => '!',
-    }
+    content::item_glyph!(kind)
 }
 
 /// Display color for an item kind.
 pub const fn color(kind: ItemKind) -> GameColor {
-    match kind {
-        ItemKind::HealthPotion => GameColor::Red,
-        ItemKind::ShortSword => GameColor::Cyan,
-        ItemKind::LeatherArmor => GameColor::Yellow,
-        ItemKind::IronMace => GameColor::White,
-        ItemKind::LongSword => GameColor::White,
-        ItemKind::ChainMail => GameColor::Grey,
-        ItemKind::GreaterHealthPotion => GameColor::DarkRed,
-        ItemKind::StrengthPotion => GameColor::Green,
-    }
+    content::item_color!(kind)
 }
 
 /// Human-readable name for an item kind.
 pub const fn name(kind: ItemKind) -> &'static str {
-    match kind {
-        ItemKind::HealthPotion => "Health Potion",
-        ItemKind::ShortSword => "Short Sword",
-        ItemKind::LeatherArmor => "Leather Armor",
-        ItemKind::IronMace => "Iron Mace",
-        ItemKind::LongSword => "Long Sword",
-        ItemKind::ChainMail => "Chain Mail",
-        ItemKind::GreaterHealthPotion => "Greater Health Potion",
-        ItemKind::StrengthPotion => "Potion of Strength",
-    }
+    content::item_name!(kind)
 }
 
 // ---------------------------------------------------------------------------
@@ -103,14 +76,14 @@ pub const fn name(kind: ItemKind) -> &'static str {
 /// Spawn weight — single source of truth, indexed by kind.
 /// `SPAWN_TABLE` and `spawn_weight()` both read from here.
 const WEIGHTS: [u8; KIND_COUNT] = [
-    balance::HEALTH_POTION_SPAWN_WEIGHT,
-    balance::SHORT_SWORD_SPAWN_WEIGHT,
-    balance::LEATHER_ARMOR_SPAWN_WEIGHT,
-    balance::IRON_MACE_SPAWN_WEIGHT,
-    balance::LONG_SWORD_SPAWN_WEIGHT,
-    balance::CHAIN_MAIL_SPAWN_WEIGHT,
-    balance::GREATER_HEALTH_POTION_SPAWN_WEIGHT,
-    balance::STRENGTH_POTION_SPAWN_WEIGHT,
+    content::item_spawn_weight!(ItemKind::HealthPotion),
+    content::item_spawn_weight!(ItemKind::ShortSword),
+    content::item_spawn_weight!(ItemKind::LeatherArmor),
+    content::item_spawn_weight!(ItemKind::IronMace),
+    content::item_spawn_weight!(ItemKind::LongSword),
+    content::item_spawn_weight!(ItemKind::ChainMail),
+    content::item_spawn_weight!(ItemKind::GreaterHealthPotion),
+    content::item_spawn_weight!(ItemKind::StrengthPotion),
 ];
 
 /// Spawn weight for the weighted item spawn table.
@@ -121,72 +94,35 @@ pub const fn spawn_weight(kind: ItemKind) -> u8 {
 
 /// Minimum dungeon depth at which this item can spawn.
 pub const fn min_depth(kind: ItemKind) -> u8 {
-    match kind {
-        ItemKind::HealthPotion => balance::HEALTH_POTION_MIN_DEPTH,
-        ItemKind::ShortSword => balance::SHORT_SWORD_MIN_DEPTH,
-        ItemKind::LeatherArmor => balance::LEATHER_ARMOR_MIN_DEPTH,
-        ItemKind::IronMace => balance::IRON_MACE_MIN_DEPTH,
-        ItemKind::LongSword => balance::LONG_SWORD_MIN_DEPTH,
-        ItemKind::ChainMail => balance::CHAIN_MAIL_MIN_DEPTH,
-        ItemKind::GreaterHealthPotion => balance::GREATER_HEALTH_POTION_MIN_DEPTH,
-        ItemKind::StrengthPotion => balance::STRENGTH_POTION_MIN_DEPTH,
-    }
+    content::item_min_depth!(kind)
 }
 
 /// HP restored when consumed. Returns 0 for non-consumables.
 pub const fn heal_amount(kind: ItemKind) -> u8 {
-    match kind {
-        ItemKind::HealthPotion => balance::HEALTH_POTION_HEAL,
-        ItemKind::ShortSword => 0,
-        ItemKind::LeatherArmor => 0,
-        ItemKind::IronMace => 0,
-        ItemKind::LongSword => 0,
-        ItemKind::ChainMail => 0,
-        ItemKind::GreaterHealthPotion => balance::GREATER_HEALTH_POTION_HEAL,
-        ItemKind::StrengthPotion => 0,
-    }
+    content::item_heal_amount!(kind)
 }
 
 /// Attack bonus granted by equipping this item. Returns 0 for non-weapons.
 pub const fn attack_bonus(kind: ItemKind) -> u8 {
-    match kind {
-        ItemKind::HealthPotion => 0,
-        ItemKind::ShortSword => balance::SHORT_SWORD_ATK_BONUS,
-        ItemKind::LeatherArmor => 0,
-        ItemKind::IronMace => balance::IRON_MACE_ATK_BONUS,
-        ItemKind::LongSword => balance::LONG_SWORD_ATK_BONUS,
-        ItemKind::ChainMail => 0,
-        ItemKind::GreaterHealthPotion => 0,
-        ItemKind::StrengthPotion => 0,
+    if is_weapon(kind) {
+        attack_from_bag(&content::item_default_properties!(kind))
+    } else {
+        0
     }
 }
 
 /// Defense bonus granted by equipping this item. Returns 0 for non-armor.
 pub const fn defense_bonus(kind: ItemKind) -> u8 {
-    match kind {
-        ItemKind::HealthPotion => 0,
-        ItemKind::ShortSword => 0,
-        ItemKind::LeatherArmor => balance::LEATHER_ARMOR_DEF_BONUS,
-        ItemKind::IronMace => 0,
-        ItemKind::LongSword => 0,
-        ItemKind::ChainMail => balance::CHAIN_MAIL_DEF_BONUS,
-        ItemKind::GreaterHealthPotion => 0,
-        ItemKind::StrengthPotion => 0,
+    if is_armor(kind) {
+        defense_from_bag(&content::item_default_properties!(kind))
+    } else {
+        0
     }
 }
 
 /// Permanent ATK boost granted when consumed. Returns 0 for non-boosting items.
 pub const fn strength_boost(kind: ItemKind) -> u8 {
-    match kind {
-        ItemKind::StrengthPotion => balance::STRENGTH_POTION_ATK_BOOST,
-        ItemKind::HealthPotion => 0,
-        ItemKind::ShortSword => 0,
-        ItemKind::LeatherArmor => 0,
-        ItemKind::IronMace => 0,
-        ItemKind::LongSword => 0,
-        ItemKind::ChainMail => 0,
-        ItemKind::GreaterHealthPotion => 0,
-    }
+    content::item_strength_boost!(kind)
 }
 
 // ---------------------------------------------------------------------------
@@ -224,44 +160,17 @@ const _: () = assert!(size_of::<InvSlot>() == 10);
 
 /// Whether this item is a consumable (used from inventory).
 pub const fn is_consumable(kind: ItemKind) -> bool {
-    match kind {
-        ItemKind::HealthPotion => true,
-        ItemKind::ShortSword => false,
-        ItemKind::LeatherArmor => false,
-        ItemKind::IronMace => false,
-        ItemKind::LongSword => false,
-        ItemKind::ChainMail => false,
-        ItemKind::GreaterHealthPotion => true,
-        ItemKind::StrengthPotion => true,
-    }
+    matches!(content::item_category!(kind), ItemCategory::Consumable)
 }
 
 /// Whether this item is a weapon (occupies weapon slot).
 pub const fn is_weapon(kind: ItemKind) -> bool {
-    match kind {
-        ItemKind::HealthPotion => false,
-        ItemKind::ShortSword => true,
-        ItemKind::LeatherArmor => false,
-        ItemKind::IronMace => true,
-        ItemKind::LongSword => true,
-        ItemKind::ChainMail => false,
-        ItemKind::GreaterHealthPotion => false,
-        ItemKind::StrengthPotion => false,
-    }
+    matches!(content::item_category!(kind), ItemCategory::Weapon)
 }
 
 /// Whether this item is armor (occupies armor slot).
 pub const fn is_armor(kind: ItemKind) -> bool {
-    match kind {
-        ItemKind::HealthPotion => false,
-        ItemKind::ShortSword => false,
-        ItemKind::LeatherArmor => true,
-        ItemKind::IronMace => false,
-        ItemKind::LongSword => false,
-        ItemKind::ChainMail => true,
-        ItemKind::GreaterHealthPotion => false,
-        ItemKind::StrengthPotion => false,
-    }
+    matches!(content::item_category!(kind), ItemCategory::Armor)
 }
 
 // ---------------------------------------------------------------------------
@@ -349,56 +258,7 @@ pub const fn from_snake_case(s: &str) -> Option<ItemKind> {
 /// If adding non-consumable elemental items, consider a per-item cooldown
 /// or diminishing returns on repeated combines.
 pub const fn default_properties(kind: ItemKind) -> PropertyBag {
-    let mut bag = properties::EMPTY;
-    match kind {
-        ItemKind::HealthPotion => {
-            // WET:5, MAG:4 — magical healing liquid
-            bag[3] = 0x50; // WET:5 (high nibble of byte 3)
-            bag[5] = 0x40; // MAG:4 (high nibble of byte 5)
-        }
-        ItemKind::ShortSword => {
-            // SHP:6, HRD:7, HVY:4, MTL:8
-            bag[0] = 0x67; // SHP:6 | HRD:7
-            bag[1] = 0x40; // HVY:4 | SWF:0
-            bag[3] = 0x08; // WET:0 | MTL:8
-        }
-        ItemKind::LeatherArmor => {
-            // HRD:5, SWF:3, ORG:6
-            bag[0] = 0x05; // SHP:0 | HRD:5
-            bag[1] = 0x03; // HVY:0 | SWF:3
-            bag[4] = 0x60; // ORG:6 | VNM:0
-        }
-        ItemKind::IronMace => {
-            // HRD:9, HVY:8, MTL:8 — blunt weapon, no SHARP
-            bag[0] = 0x09; // SHP:0 | HRD:9
-            bag[1] = 0x80; // HVY:8 | SWF:0
-            bag[3] = 0x08; // WET:0 | MTL:8
-        }
-        ItemKind::LongSword => {
-            // SHP:9, HRD:8, HVY:7, MTL:9
-            bag[0] = 0x98; // SHP:9 | HRD:8
-            bag[1] = 0x70; // HVY:7 | SWF:0
-            bag[3] = 0x09; // WET:0 | MTL:9
-        }
-        ItemKind::ChainMail => {
-            // HRD:8, HVY:6, MTL:7
-            bag[0] = 0x08; // SHP:0 | HRD:8
-            bag[1] = 0x60; // HVY:6 | SWF:0
-            bag[3] = 0x07; // WET:0 | MTL:7
-        }
-        ItemKind::GreaterHealthPotion => {
-            // WET:7, MAG:7 — stronger magical healing
-            bag[3] = 0x70; // WET:7 (high nibble of byte 3)
-            bag[5] = 0x70; // MAG:7 (high nibble of byte 5)
-        }
-        ItemKind::StrengthPotion => {
-            // HOT:4, HVY:3, MAG:6 — burning power concentrate
-            bag[1] = 0x30; // HVY:3 | SWF:0
-            bag[2] = 0x40; // HOT:4 | CLD:0
-            bag[5] = 0x60; // MAG:6 | VOL:0
-        }
-    }
-    bag
+    content::item_default_properties!(kind)
 }
 
 // ---------------------------------------------------------------------------
@@ -674,8 +534,20 @@ impl Inventory {
     /// that already have modified property bags (e.g., from the ground
     /// after environmental interactions).
     pub fn add_with_props(&mut self, kind: ItemKind, props: PropertyBag) -> bool {
+        self.add_with_props_and_stackable(kind, props, is_consumable(kind))
+    }
+
+    /// Add an item using a caller-provided stacking policy. The Standard tier
+    /// uses this for validated runtime catalogs; constrained tiers call the
+    /// static `add_with_props` path above.
+    pub fn add_with_props_and_stackable(
+        &mut self,
+        kind: ItemKind,
+        props: PropertyBag,
+        stackable: bool,
+    ) -> bool {
         // Try to stack consumables in an existing slot with matching props.
-        if is_consumable(kind) {
+        if stackable {
             for slot in self.slots.iter_mut().flatten() {
                 if slot.kind == kind && slot.props == props {
                     slot.count = slot.count.saturating_add(1);
@@ -776,6 +648,21 @@ impl Inventory {
         if idx < MAX_INVENTORY {
             if let Some(slot) = &mut self.slots[idx] {
                 slot.props = props;
+            }
+        }
+    }
+
+    /// Replace untouched default property bags while preserving instances
+    /// changed by environmental or item interactions.
+    pub fn reconcile_default_properties(
+        &mut self,
+        old_defaults: &[PropertyBag; KIND_COUNT],
+        new_defaults: &[PropertyBag; KIND_COUNT],
+    ) {
+        for slot in self.slots.iter_mut().flatten() {
+            let index = slot.kind as usize;
+            if slot.props == old_defaults[index] {
+                slot.props = new_defaults[index];
             }
         }
     }

@@ -308,6 +308,7 @@ mod tests {
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
+            item_catalog: data::compiled_defaults().items,
             equipment: Default::default(),
             inventory: Default::default(),
             auto_pickup: false,
@@ -319,6 +320,7 @@ mod tests {
             room_size_min: 4,
             room_size_max: 10,
             max_monsters_per_room: 2,
+            max_items_per_room: 1,
         }
     }
 
@@ -366,6 +368,7 @@ mod tests {
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
+            item_catalog: data::compiled_defaults().items,
             equipment: Default::default(),
             inventory: Default::default(),
             auto_pickup: false,
@@ -377,6 +380,7 @@ mod tests {
             room_size_min: 4,
             room_size_max: 10,
             max_monsters_per_room: 2,
+            max_items_per_room: 1,
         }
     }
 
@@ -490,6 +494,7 @@ mod tests {
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
+            item_catalog: data::compiled_defaults().items,
             equipment: Default::default(),
             inventory: Default::default(),
             auto_pickup: false,
@@ -501,6 +506,7 @@ mod tests {
             room_size_min: 4,
             room_size_max: 10,
             max_monsters_per_room: 2,
+            max_items_per_room: 1,
         };
 
         let graph = build_exploration_graph(&gs);
@@ -547,6 +553,7 @@ mod tests {
             wandering_spawned: 0,
             wandering_spawn_table: Vec::new(),
             ground_items: Vec::new(),
+            item_catalog: data::compiled_defaults().items,
             equipment: Default::default(),
             inventory: Default::default(),
             auto_pickup: false,
@@ -558,6 +565,7 @@ mod tests {
             room_size_min: 4,
             room_size_max: 10,
             max_monsters_per_room: 2,
+            max_items_per_room: 1,
         };
 
         let graph = build_exploration_graph(&gs);

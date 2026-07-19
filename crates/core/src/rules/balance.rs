@@ -7,92 +7,100 @@
 //!
 //! All types are `u8` — values that fit in the smallest tier's natural width.
 
+use super::content;
+
 // ---------------------------------------------------------------------------
 // Player defaults
 // ---------------------------------------------------------------------------
 
-pub const PLAYER_HP: u8 = 30;
-pub const PLAYER_ATK: u8 = 5;
-pub const PLAYER_DEF: u8 = 2;
-pub const PLAYER_GLYPH: char = '@';
+pub const PLAYER_HP: u8 = content::PLAYER.hp;
+pub const PLAYER_ATK: u8 = content::PLAYER.attack;
+pub const PLAYER_DEF: u8 = content::PLAYER.defense;
+pub const PLAYER_GLYPH: char = content::PLAYER.glyph;
 
 // ---------------------------------------------------------------------------
 // Monster stats — indexed by MonsterKind (future) or looked up by name (now)
 // ---------------------------------------------------------------------------
 
 // Goblin
-pub const GOBLIN_HP: u8 = 6;
-pub const GOBLIN_ATK: u8 = 3;
-pub const GOBLIN_DEF: u8 = 0;
-pub const GOBLIN_SIGHT: u8 = 6;
-pub const GOBLIN_SPAWN_WEIGHT: u8 = 60;
-pub const GOBLIN_GLYPH: char = 'g';
+pub const GOBLIN_HP: u8 = content::monster_max_hp!(super::monster_table::MonsterKind::Goblin);
+pub const GOBLIN_ATK: u8 = content::monster_attack!(super::monster_table::MonsterKind::Goblin);
+pub const GOBLIN_DEF: u8 = content::monster_defense!(super::monster_table::MonsterKind::Goblin);
+pub const GOBLIN_SIGHT: u8 =
+    content::monster_sight_radius!(super::monster_table::MonsterKind::Goblin);
+pub const GOBLIN_SPAWN_WEIGHT: u8 =
+    content::monster_spawn_weight!(super::monster_table::MonsterKind::Goblin);
+pub const GOBLIN_GLYPH: char = content::monster_glyph!(super::monster_table::MonsterKind::Goblin);
 /// Percent chance that a newly spawned Goblin is a Coward (0-100).
 /// Cowards chase when healthy but flee when HP drops below 33%.
-pub const GOBLIN_COWARD_CHANCE: u8 = 25;
+pub const GOBLIN_COWARD_CHANCE: u8 =
+    content::monster_coward_chance!(super::monster_table::MonsterKind::Goblin);
 
 /// Flee threshold: a coward flees once `hp * FLEE_THRESHOLD_RECIP < max_hp`.
 /// Recip 3 ⇒ below ~33% HP.
 pub const FLEE_THRESHOLD_RECIP: u8 = 3;
 
 // Orc
-pub const ORC_HP: u8 = 12;
-pub const ORC_ATK: u8 = 4;
-pub const ORC_DEF: u8 = 1;
-pub const ORC_SIGHT: u8 = 7;
-pub const ORC_SPAWN_WEIGHT: u8 = 30;
-pub const ORC_GLYPH: char = 'o';
+pub const ORC_HP: u8 = content::monster_max_hp!(super::monster_table::MonsterKind::Orc);
+pub const ORC_ATK: u8 = content::monster_attack!(super::monster_table::MonsterKind::Orc);
+pub const ORC_DEF: u8 = content::monster_defense!(super::monster_table::MonsterKind::Orc);
+pub const ORC_SIGHT: u8 = content::monster_sight_radius!(super::monster_table::MonsterKind::Orc);
+pub const ORC_SPAWN_WEIGHT: u8 =
+    content::monster_spawn_weight!(super::monster_table::MonsterKind::Orc);
+pub const ORC_GLYPH: char = content::monster_glyph!(super::monster_table::MonsterKind::Orc);
 
 // Troll
-pub const TROLL_HP: u8 = 20;
-pub const TROLL_ATK: u8 = 6;
-pub const TROLL_DEF: u8 = 3;
-pub const TROLL_SIGHT: u8 = 5;
-pub const TROLL_SPAWN_WEIGHT: u8 = 10;
-pub const TROLL_GLYPH: char = 'T';
+pub const TROLL_HP: u8 = content::monster_max_hp!(super::monster_table::MonsterKind::Troll);
+pub const TROLL_ATK: u8 = content::monster_attack!(super::monster_table::MonsterKind::Troll);
+pub const TROLL_DEF: u8 = content::monster_defense!(super::monster_table::MonsterKind::Troll);
+pub const TROLL_SIGHT: u8 =
+    content::monster_sight_radius!(super::monster_table::MonsterKind::Troll);
+pub const TROLL_SPAWN_WEIGHT: u8 =
+    content::monster_spawn_weight!(super::monster_table::MonsterKind::Troll);
+pub const TROLL_GLYPH: char = content::monster_glyph!(super::monster_table::MonsterKind::Troll);
 
 // ---------------------------------------------------------------------------
 // Game config
 // ---------------------------------------------------------------------------
 
-pub const FOV_RADIUS: u8 = 8;
+pub const FOV_RADIUS: u8 = content::CONFIG.fov_radius;
 /// Upper bound on FOV radius for quarter-square lookup table sizing.
 /// Increase if adding potions/effects that expand sight beyond FOV_RADIUS.
 pub const MAX_FOV_RADIUS: u8 = 16;
-pub const MAX_ROOMS: u8 = 30;
-pub const ROOM_SIZE_MIN: u8 = 4;
-pub const ROOM_SIZE_MAX: u8 = 10;
-pub const MAX_MONSTERS_PER_ROOM: u8 = 2;
-pub const UI_BOTTOM_ROWS: u8 = 5;
-pub const MAX_AUTORUN_STEPS: u8 = 100;
+pub const MAX_ROOMS: u8 = content::CONFIG.max_rooms;
+pub const ROOM_SIZE_MIN: u8 = content::CONFIG.room_size_min;
+pub const ROOM_SIZE_MAX: u8 = content::CONFIG.room_size_max;
+pub const MAX_MONSTERS_PER_ROOM: u8 = content::CONFIG.max_monsters_per_room;
+pub const UI_BOTTOM_ROWS: u8 = content::CONFIG.ui_bottom_rows;
+pub const MAX_AUTORUN_STEPS: u8 = content::CONFIG.max_autorun_steps;
 pub const MIN_MAP_WIDTH: u8 = 20;
 pub const MIN_MAP_HEIGHT: u8 = 15;
-pub const REGEN_INTERVAL: u8 = 3;
-pub const TARGET_DEPTH: u8 = 22;
+pub const REGEN_INTERVAL: u8 = content::CONFIG.regen_interval;
+pub const TARGET_DEPTH: u8 = content::CONFIG.target_depth;
 
 // ---------------------------------------------------------------------------
 // Depth scaling — per-floor monster stat increases
 // ---------------------------------------------------------------------------
 
-pub const MONSTER_HP_PER_FLOOR: u8 = 1;
-pub const MONSTER_ATK_PER_FLOOR: u8 = 1;
+pub const MONSTER_HP_PER_FLOOR: u8 = content::DEPTH_SCALING.monster_hp_per_floor;
+pub const MONSTER_ATK_PER_FLOOR: u8 = content::DEPTH_SCALING.monster_atk_per_floor;
 /// Monsters gain stat bonuses every N floors (integer division).
 /// At interval 3 over 22 floors: max bonus = (22-1)/3 = 7.
-pub const DEPTH_SCALE_INTERVAL: u8 = 3;
+pub const DEPTH_SCALE_INTERVAL: u8 = content::DEPTH_SCALING.depth_scale_interval;
 
 // ---------------------------------------------------------------------------
 // Wandering spawn config
 // ---------------------------------------------------------------------------
 
-pub const WANDERING_SPAWN_INTERVAL: u8 = 30;
-pub const WANDERING_SPAWN_CHANCE: u8 = 50;
-pub const WANDERING_GRACE_PERIOD: u8 = 50;
-pub const WANDERING_MAX_ACTIVE: u8 = 5;
-pub const WANDERING_SOUND_FAR: u8 = 20;
-pub const WANDERING_SOUND_MEDIUM: u8 = 10;
-pub const WANDERING_SOUND_NEAR: u8 = 5;
-pub const WANDERING_IDLE_THRESHOLD: u8 = 5;
-pub const WANDERING_IDLE_ACCELERATION: u8 = 2;
+pub const WANDERING_SPAWN_INTERVAL: u8 = content::WANDERING.spawn_interval;
+pub const WANDERING_SPAWN_CHANCE: u8 = content::WANDERING.spawn_chance;
+pub const WANDERING_GRACE_PERIOD: u8 = content::WANDERING.grace_period;
+pub const WANDERING_MAX_ACTIVE: u8 = content::WANDERING.max_wandering;
+pub const WANDERING_SOUND_FAR: u8 = content::WANDERING.sound_far;
+pub const WANDERING_SOUND_MEDIUM: u8 = content::WANDERING.sound_medium;
+pub const WANDERING_SOUND_NEAR: u8 = content::WANDERING.sound_near;
+pub const WANDERING_IDLE_THRESHOLD: u8 = content::WANDERING.idle_threshold;
+pub const WANDERING_IDLE_ACCELERATION: u8 = content::WANDERING.idle_acceleration;
 /// Right-shift amount equivalent to dividing by `WANDERING_IDLE_ACCELERATION`.
 /// Derived from the acceleration value so the micro tier can use `>>` instead
 /// of division (no __udivsi3 on 6502).
@@ -113,46 +121,70 @@ const _: () = assert!(DEPTH_SCALE_INTERVAL > 0, "DEPTH_SCALE_INTERVAL must be > 
 // ---------------------------------------------------------------------------
 
 // Health Potion
-pub const HEALTH_POTION_HEAL: u8 = 10;
-pub const HEALTH_POTION_SPAWN_WEIGHT: u8 = 40;
-pub const HEALTH_POTION_MIN_DEPTH: u8 = 1;
+pub const HEALTH_POTION_HEAL: u8 = content::item_heal_amount!(super::items::ItemKind::HealthPotion);
+pub const HEALTH_POTION_SPAWN_WEIGHT: u8 =
+    content::item_spawn_weight!(super::items::ItemKind::HealthPotion);
+pub const HEALTH_POTION_MIN_DEPTH: u8 =
+    content::item_min_depth!(super::items::ItemKind::HealthPotion);
 
 // Short Sword
-pub const SHORT_SWORD_ATK_BONUS: u8 = 3;
-pub const SHORT_SWORD_SPAWN_WEIGHT: u8 = 20;
-pub const SHORT_SWORD_MIN_DEPTH: u8 = 1;
+pub const SHORT_SWORD_ATK_BONUS: u8 = super::items::attack_from_bag(
+    &content::item_default_properties!(super::items::ItemKind::ShortSword),
+);
+pub const SHORT_SWORD_SPAWN_WEIGHT: u8 =
+    content::item_spawn_weight!(super::items::ItemKind::ShortSword);
+pub const SHORT_SWORD_MIN_DEPTH: u8 = content::item_min_depth!(super::items::ItemKind::ShortSword);
 
 // Leather Armor
-pub const LEATHER_ARMOR_DEF_BONUS: u8 = 2;
-pub const LEATHER_ARMOR_SPAWN_WEIGHT: u8 = 15;
-pub const LEATHER_ARMOR_MIN_DEPTH: u8 = 1;
+pub const LEATHER_ARMOR_DEF_BONUS: u8 = super::items::defense_from_bag(
+    &content::item_default_properties!(super::items::ItemKind::LeatherArmor),
+);
+pub const LEATHER_ARMOR_SPAWN_WEIGHT: u8 =
+    content::item_spawn_weight!(super::items::ItemKind::LeatherArmor);
+pub const LEATHER_ARMOR_MIN_DEPTH: u8 =
+    content::item_min_depth!(super::items::ItemKind::LeatherArmor);
 
 // Iron Mace
-pub const IRON_MACE_ATK_BONUS: u8 = 4;
-pub const IRON_MACE_SPAWN_WEIGHT: u8 = 12;
-pub const IRON_MACE_MIN_DEPTH: u8 = 3;
+pub const IRON_MACE_ATK_BONUS: u8 = super::items::attack_from_bag(
+    &content::item_default_properties!(super::items::ItemKind::IronMace),
+);
+pub const IRON_MACE_SPAWN_WEIGHT: u8 =
+    content::item_spawn_weight!(super::items::ItemKind::IronMace);
+pub const IRON_MACE_MIN_DEPTH: u8 = content::item_min_depth!(super::items::ItemKind::IronMace);
 
 // Long Sword
-pub const LONG_SWORD_ATK_BONUS: u8 = 5;
-pub const LONG_SWORD_SPAWN_WEIGHT: u8 = 8;
-pub const LONG_SWORD_MIN_DEPTH: u8 = 7;
+pub const LONG_SWORD_ATK_BONUS: u8 = super::items::attack_from_bag(
+    &content::item_default_properties!(super::items::ItemKind::LongSword),
+);
+pub const LONG_SWORD_SPAWN_WEIGHT: u8 =
+    content::item_spawn_weight!(super::items::ItemKind::LongSword);
+pub const LONG_SWORD_MIN_DEPTH: u8 = content::item_min_depth!(super::items::ItemKind::LongSword);
 
 // Chain Mail
-pub const CHAIN_MAIL_DEF_BONUS: u8 = 4;
-pub const CHAIN_MAIL_SPAWN_WEIGHT: u8 = 8;
-pub const CHAIN_MAIL_MIN_DEPTH: u8 = 9;
+pub const CHAIN_MAIL_DEF_BONUS: u8 = super::items::defense_from_bag(
+    &content::item_default_properties!(super::items::ItemKind::ChainMail),
+);
+pub const CHAIN_MAIL_SPAWN_WEIGHT: u8 =
+    content::item_spawn_weight!(super::items::ItemKind::ChainMail);
+pub const CHAIN_MAIL_MIN_DEPTH: u8 = content::item_min_depth!(super::items::ItemKind::ChainMail);
 
 // Greater Health Potion
-pub const GREATER_HEALTH_POTION_HEAL: u8 = 20;
-pub const GREATER_HEALTH_POTION_SPAWN_WEIGHT: u8 = 15;
-pub const GREATER_HEALTH_POTION_MIN_DEPTH: u8 = 11;
+pub const GREATER_HEALTH_POTION_HEAL: u8 =
+    content::item_heal_amount!(super::items::ItemKind::GreaterHealthPotion);
+pub const GREATER_HEALTH_POTION_SPAWN_WEIGHT: u8 =
+    content::item_spawn_weight!(super::items::ItemKind::GreaterHealthPotion);
+pub const GREATER_HEALTH_POTION_MIN_DEPTH: u8 =
+    content::item_min_depth!(super::items::ItemKind::GreaterHealthPotion);
 
 // Potion of Strength
-pub const STRENGTH_POTION_ATK_BOOST: u8 = 1;
-pub const STRENGTH_POTION_SPAWN_WEIGHT: u8 = 8;
-pub const STRENGTH_POTION_MIN_DEPTH: u8 = 5;
+pub const STRENGTH_POTION_ATK_BOOST: u8 =
+    content::item_strength_boost!(super::items::ItemKind::StrengthPotion);
+pub const STRENGTH_POTION_SPAWN_WEIGHT: u8 =
+    content::item_spawn_weight!(super::items::ItemKind::StrengthPotion);
+pub const STRENGTH_POTION_MIN_DEPTH: u8 =
+    content::item_min_depth!(super::items::ItemKind::StrengthPotion);
 
-pub const MAX_ITEMS_PER_ROOM: u8 = 1;
+pub const MAX_ITEMS_PER_ROOM: u8 = content::CONFIG.max_items_per_room;
 pub const MAX_INVENTORY: usize = super::items::MAX_INVENTORY;
 
 // ---------------------------------------------------------------------------

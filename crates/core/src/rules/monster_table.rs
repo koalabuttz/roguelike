@@ -11,8 +11,8 @@
 
 use core::mem::size_of;
 
-use super::balance;
 use super::color::GameColor;
+use super::content;
 
 /// Monster AI personality — a stable identity, not a per-turn action.
 ///
@@ -56,29 +56,17 @@ pub const KIND_COUNT: usize = ALL_KINDS.len();
 
 /// Display glyph for a monster kind.
 pub const fn glyph(kind: MonsterKind) -> char {
-    match kind {
-        MonsterKind::Goblin => balance::GOBLIN_GLYPH,
-        MonsterKind::Orc => balance::ORC_GLYPH,
-        MonsterKind::Troll => balance::TROLL_GLYPH,
-    }
+    content::monster_glyph!(kind)
 }
 
 /// Display color for a monster kind.
 pub const fn color(kind: MonsterKind) -> GameColor {
-    match kind {
-        MonsterKind::Goblin => GameColor::Green,
-        MonsterKind::Orc => GameColor::Red,
-        MonsterKind::Troll => GameColor::DarkGreen,
-    }
+    content::monster_color!(kind)
 }
 
 /// Human-readable name for a monster kind.
 pub const fn name(kind: MonsterKind) -> &'static str {
-    match kind {
-        MonsterKind::Goblin => "Goblin",
-        MonsterKind::Orc => "Orc",
-        MonsterKind::Troll => "Troll",
-    }
+    content::monster_name!(kind)
 }
 
 // ---------------------------------------------------------------------------
@@ -88,45 +76,29 @@ pub const fn name(kind: MonsterKind) -> &'static str {
 /// Spawn weight — single source of truth, indexed by kind.
 /// `SPAWN_TABLE` and `spawn_weight()` both read from here.
 const WEIGHTS: [u8; KIND_COUNT] = [
-    balance::GOBLIN_SPAWN_WEIGHT,
-    balance::ORC_SPAWN_WEIGHT,
-    balance::TROLL_SPAWN_WEIGHT,
+    content::monster_spawn_weight!(MonsterKind::Goblin),
+    content::monster_spawn_weight!(MonsterKind::Orc),
+    content::monster_spawn_weight!(MonsterKind::Troll),
 ];
 
 /// Maximum hit points for a monster kind.
 pub const fn max_hp(kind: MonsterKind) -> u8 {
-    match kind {
-        MonsterKind::Goblin => balance::GOBLIN_HP,
-        MonsterKind::Orc => balance::ORC_HP,
-        MonsterKind::Troll => balance::TROLL_HP,
-    }
+    content::monster_max_hp!(kind)
 }
 
 /// Attack stat for a monster kind.
 pub const fn attack(kind: MonsterKind) -> u8 {
-    match kind {
-        MonsterKind::Goblin => balance::GOBLIN_ATK,
-        MonsterKind::Orc => balance::ORC_ATK,
-        MonsterKind::Troll => balance::TROLL_ATK,
-    }
+    content::monster_attack!(kind)
 }
 
 /// Defense stat for a monster kind.
 pub const fn defense(kind: MonsterKind) -> u8 {
-    match kind {
-        MonsterKind::Goblin => balance::GOBLIN_DEF,
-        MonsterKind::Orc => balance::ORC_DEF,
-        MonsterKind::Troll => balance::TROLL_DEF,
-    }
+    content::monster_defense!(kind)
 }
 
 /// Sight radius for a monster kind (how far it can detect the player).
 pub const fn sight_radius(kind: MonsterKind) -> u8 {
-    match kind {
-        MonsterKind::Goblin => balance::GOBLIN_SIGHT,
-        MonsterKind::Orc => balance::ORC_SIGHT,
-        MonsterKind::Troll => balance::TROLL_SIGHT,
-    }
+    content::monster_sight_radius!(kind)
 }
 
 /// Spawn weight for the weighted monster spawn table.
@@ -137,21 +109,13 @@ pub const fn spawn_weight(kind: MonsterKind) -> u8 {
 
 /// Default AI personality for a monster kind.
 pub const fn ai_personality(kind: MonsterKind) -> AiPersonality {
-    match kind {
-        MonsterKind::Goblin => AiPersonality::Aggressive,
-        MonsterKind::Orc => AiPersonality::Aggressive,
-        MonsterKind::Troll => AiPersonality::Aggressive,
-    }
+    content::monster_ai!(kind)
 }
 
 /// Percent chance (0–100) that a freshly spawned monster of this kind
 /// rolls `AiPersonality::Coward` instead of its default personality.
 pub const fn coward_chance(kind: MonsterKind) -> u8 {
-    match kind {
-        MonsterKind::Goblin => balance::GOBLIN_COWARD_CHANCE,
-        MonsterKind::Orc => 0,
-        MonsterKind::Troll => 0,
-    }
+    content::monster_coward_chance!(kind)
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +195,7 @@ mod tests {
     #[test]
     fn orc_properties() {
         assert_eq!(glyph(MonsterKind::Orc), 'o');
-        assert_eq!(color(MonsterKind::Orc), GameColor::Red);
+        assert_eq!(color(MonsterKind::Orc), GameColor::DarkGreen);
         assert_eq!(name(MonsterKind::Orc), "Orc");
         assert_eq!(max_hp(MonsterKind::Orc), 12);
         assert_eq!(attack(MonsterKind::Orc), 4);
@@ -244,7 +208,7 @@ mod tests {
     #[test]
     fn troll_properties() {
         assert_eq!(glyph(MonsterKind::Troll), 'T');
-        assert_eq!(color(MonsterKind::Troll), GameColor::DarkGreen);
+        assert_eq!(color(MonsterKind::Troll), GameColor::DarkRed);
         assert_eq!(name(MonsterKind::Troll), "Troll");
         assert_eq!(max_hp(MonsterKind::Troll), 20);
         assert_eq!(attack(MonsterKind::Troll), 6);
@@ -290,7 +254,7 @@ mod tests {
     fn coward_chance_values() {
         assert_eq!(
             coward_chance(MonsterKind::Goblin),
-            balance::GOBLIN_COWARD_CHANCE
+            content::monster_coward_chance!(MonsterKind::Goblin)
         );
         assert_eq!(coward_chance(MonsterKind::Orc), 0);
         assert_eq!(coward_chance(MonsterKind::Troll), 0);

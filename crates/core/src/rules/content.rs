@@ -80,6 +80,7 @@ pub struct ItemContent {
     pub min_depth: u8,
     pub heal_amount: u8,
     pub strength_boost: u8,
+    pub defense_boost: u8,
     pub default_properties: PropertyBag,
 }
 

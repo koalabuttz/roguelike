@@ -264,6 +264,7 @@ mod tests {
                     | ItemKind::ChainMail
                     | ItemKind::GreaterHealthPotion
                     | ItemKind::StrengthPotion
+                    | ItemKind::ToughnessPotion
             ));
         }
     }

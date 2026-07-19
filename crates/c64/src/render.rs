@@ -791,6 +791,13 @@ fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
             let p = copy_num(buf, p, bonus);
             copy_bytes(buf, p, b" ATK)")
         }
+        GameEvent::UseToughnessPotion { bonus } => {
+            let p = copy_bytes(buf, 0, b"You drink ");
+            let p = copy_bytes(buf, p, items::name(items::ItemKind::ToughnessPotion).as_bytes());
+            let p = copy_bytes(buf, p, b". (+");
+            let p = copy_num(buf, p, bonus);
+            copy_bytes(buf, p, b" DEF)")
+        }
         GameEvent::EquipWeapon { kind, bonus } => {
             let p = copy_bytes(buf, 0, b"You equip ");
             let p = copy_bytes(buf, p, items::name(kind).as_bytes());

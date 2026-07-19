@@ -143,6 +143,11 @@ pub fn item_strength_boost(kind: ItemKind) -> Stat {
     rules_items::strength_boost(kind) as Stat
 }
 
+/// Permanent DEF boost granted when consumed. Returns 0 for non-boosting items.
+pub fn item_defense_boost(kind: ItemKind) -> Stat {
+    rules_items::defense_boost(kind) as Stat
+}
+
 /// Returns true if `new` is strictly better than `current` for the weapon slot.
 pub fn is_better_weapon(new: ItemKind, current: Option<ItemKind>) -> bool {
     rules_items::is_better_weapon(new, current)
@@ -231,7 +236,7 @@ mod tests {
     #[test]
     fn spawn_table_has_all_items() {
         let table = spawn_table();
-        assert_eq!(table.len(), 8);
+        assert_eq!(table.len(), 9);
         let total: u32 = table.iter().map(|(_, w)| w).sum();
         assert!(total > 0);
     }

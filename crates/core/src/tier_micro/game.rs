@@ -481,6 +481,14 @@ impl MicroGameState {
                 self.log.add(GameEvent::UseStrengthPotion { bonus: boost });
                 return true;
             }
+            let boost = rules_items::defense_boost(inv_slot.kind);
+            if boost > 0 {
+                let pi = PLAYER_IDX as usize;
+                self.entities.def[pi] = self.entities.def[pi].saturating_add(boost);
+                self.inventory.remove_one(slot as usize);
+                self.log.add(GameEvent::UseToughnessPotion { bonus: boost });
+                return true;
+            }
         }
         false
     }
@@ -1506,6 +1514,20 @@ mod tests {
         assert!(result.action_taken);
         assert!(g.entities.hp[pi] > hp_before, "potion should heal");
         assert!(g.inventory.is_empty(), "potion should be consumed");
+    }
+
+    #[test]
+    fn toughness_potion_permanently_increases_defense() {
+        let mut g = MicroGameState::new_default(42);
+        let pi = PLAYER_IDX as usize;
+        let defense_before = g.entities.def[pi];
+        g.inventory.add(ItemKind::ToughnessPotion);
+
+        let result = g.step(GameCommand::UseItem(0));
+
+        assert!(result.action_taken);
+        assert_eq!(g.entities.def[pi], defense_before + 1);
+        assert!(g.inventory.is_empty());
     }
 
     #[test]

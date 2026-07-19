@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use serde::{Deserialize, Serialize};
 
 pub const MONSTER_IDS: [&str; 3] = ["goblin", "orc", "troll"];
-pub const ITEM_IDS: [&str; 8] = [
+pub const ITEM_IDS: [&str; 9] = [
     "health_potion",
     "short_sword",
     "leather_armor",
@@ -15,6 +15,7 @@ pub const ITEM_IDS: [&str; 8] = [
     "chain_mail",
     "greater_health_potion",
     "strength_potion",
+    "toughness_potion",
 ];
 
 const COLORS: [&str; 11] = [
@@ -207,6 +208,8 @@ pub struct ItemDef {
     pub heal_amount: u8,
     #[serde(default)]
     pub strength_boost: u8,
+    #[serde(default)]
+    pub defense_boost: u8,
     #[serde(default)]
     pub properties: BTreeMap<String, u8>,
 }
@@ -423,7 +426,9 @@ pub fn validate_game_data(data: &GameData) -> Vec<String> {
         if item.min_depth == 0 {
             errors.push(format!("item {} min_depth must be > 0", item.id));
         }
-        if item.category != "consumable" && (item.heal_amount > 0 || item.strength_boost > 0) {
+        if item.category != "consumable"
+            && (item.heal_amount > 0 || item.strength_boost > 0 || item.defense_boost > 0)
+        {
             errors.push(format!(
                 "item {} non-consumable cannot have consumable effects",
                 item.id
@@ -522,6 +527,7 @@ fn emit_lookup(
             "ChainMail",
             "GreaterHealthPotion",
             "StrengthPotion",
+            "ToughnessPotion",
         ],
         _ => unreachable!(),
     };
@@ -571,11 +577,11 @@ pub fn emit_rust(data: &GameData) -> String {
                 _ => "Consumable",
             };
             let bag = property_bag(&v.properties);
-            format!("ItemContent {{ id: {:?}, name: {:?}, glyph: {:?}, color: GameColor::{}, category: ItemCategory::{}, spawn_weight: {}, min_depth: {}, heal_amount: {}, strength_boost: {}, default_properties: {:?} }}", v.id, v.name, v.glyph.chars().next().unwrap(), v.color, category, v.spawn_weight, v.min_depth, v.heal_amount, v.strength_boost, bag)
+            format!("ItemContent {{ id: {:?}, name: {:?}, glyph: {:?}, color: GameColor::{}, category: ItemCategory::{}, spawn_weight: {}, min_depth: {}, heal_amount: {}, strength_boost: {}, defense_boost: {}, default_properties: {:?} }}", v.id, v.name, v.glyph.chars().next().unwrap(), v.color, category, v.spawn_weight, v.min_depth, v.heal_amount, v.strength_boost, v.defense_boost, bag)
         })
         .collect();
 
-    out.push_str("pub const MONSTER_COUNT: usize = 3;\npub const ITEM_COUNT: usize = 8;\n");
+    out.push_str("pub const MONSTER_COUNT: usize = 3;\npub const ITEM_COUNT: usize = 9;\n");
     out.push_str("#[cfg(feature = \"data-files\")]\npub const MONSTERS: [MonsterContent; MONSTER_COUNT] = [\n");
     for literal in &monster_literals {
         writeln!(out, "    {literal},").unwrap();
@@ -739,6 +745,13 @@ pub fn emit_rust(data: &GameData) -> String {
                 .map(|v| v.strength_boost.to_string())
                 .collect::<Vec<_>>(),
         ),
+        (
+            "item_defense_boost",
+            items
+                .iter()
+                .map(|v| v.defense_boost.to_string())
+                .collect::<Vec<_>>(),
+        ),
     ] {
         emit_lookup(&mut out, name, "u8", values, "item");
     }
@@ -780,6 +793,8 @@ mod tests {
         let generated = emit_rust(&data);
         assert!(generated.contains("pub const ITEMS: [ItemContent; ITEM_COUNT]"));
         assert!(generated.contains("macro_rules! item_default_properties"));
+        assert!(generated.contains("macro_rules! item_defense_boost"));
+        assert!(generated.contains("ItemKind::ToughnessPotion => 1"));
     }
 
     #[test]
@@ -798,5 +813,18 @@ mod tests {
         props.insert("hard".into(), 7);
         props.insert("metal".into(), 8);
         assert_eq!(property_bag(&props), [0x67, 0, 0, 0x08, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn rejects_consumable_effect_on_equipment() {
+        let mut data = parse_game_data(DEFAULT).unwrap();
+        let sword = data
+            .items
+            .iter_mut()
+            .find(|item| item.id == "short_sword")
+            .unwrap();
+        sword.defense_boost = 1;
+        let errors = validate_game_data(&data).join("; ");
+        assert!(errors.contains("short_sword non-consumable cannot have consumable effects"));
     }
 }

@@ -259,6 +259,12 @@ fn format_event_inner(event: GameEvent, buf: &mut [u8]) -> usize {
             write_str(buf, p, "!")
         }
 
+        GameEvent::UseToughnessPotion { bonus } => {
+            let mut p = write_str(buf, 0, "DEF +");
+            p = write_u16(buf, p, bonus as u16);
+            write_str(buf, p, "!")
+        }
+
         GameEvent::CombineItems { target, .. } => {
             let p = write_str(buf, 0, "Combined ");
             write_str(buf, p, items::name(target))
@@ -572,6 +578,7 @@ mod tests {
     #[test]
     fn use_strength_potion() {
         assert_renders(GameEvent::UseStrengthPotion { bonus: 2 }, "ATK +2!");
+        assert_renders(GameEvent::UseToughnessPotion { bonus: 2 }, "DEF +2!");
     }
 
     #[test]

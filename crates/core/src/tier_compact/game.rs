@@ -504,6 +504,14 @@ impl CompactGameState {
                 self.log.add(GameEvent::UseStrengthPotion { bonus: boost });
                 return true;
             }
+            let boost = rules_items::defense_boost(inv_slot.kind);
+            if boost > 0 {
+                let pi = PLAYER_IDX as usize;
+                self.entities.def[pi] = self.entities.def[pi].saturating_add(boost);
+                self.inventory.remove_one(slot as usize);
+                self.log.add(GameEvent::UseToughnessPotion { bonus: boost });
+                return true;
+            }
         }
         false
     }
@@ -1271,6 +1279,20 @@ mod tests {
         let r = state.step(GameCommand::UseItem(0));
         assert!(r.action_taken);
         assert!(state.entities.hp[pi] > 1);
+    }
+
+    #[test]
+    fn toughness_potion_permanently_increases_defense() {
+        let mut state = CompactGameState::new(42, MAP_WIDTH, MAP_HEIGHT);
+        let pi = PLAYER_IDX as usize;
+        let defense_before = state.entities.def[pi];
+        state.inventory.add(rules_items::ItemKind::ToughnessPotion);
+
+        let result = state.step(GameCommand::UseItem(0));
+
+        assert!(result.action_taken);
+        assert_eq!(state.entities.def[pi], defense_before + 1);
+        assert!(state.inventory.is_empty());
     }
 
     #[test]

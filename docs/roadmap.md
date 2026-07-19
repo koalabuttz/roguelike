@@ -21,7 +21,7 @@ Fills out the core game loop and addresses high-value, low-effort improvements.
 | Item | Blocks | Impact | Effort | Notes |
 |------|--------|--------|--------|-------|
 | Hunger | 0 | Medium | S | Classic mechanic. Simple (decrement per turn, eat food). Depends on items. |
-| Item-based progression | 0 | High | M | Progression via enchantment scrolls, depth-gated gear, permanent consumables. [Implementation plan.](design/gameplay-implementation-plan.md#phase-4-item-based-progression) |
+| Item-based progression | 0 | High | M | In progress: depth-gated gear plus Strength/Toughness potions are portable; enchantment scrolls and sight progression remain. [Implementation plan.](design/gameplay-implementation-plan.md#phase-4-item-based-progression) |
 
 ## Tier 3: Extended Features
 
@@ -87,7 +87,7 @@ Gameplay branch (current focus):
     → Wandering monsters ✓
       → Items ✓
         → Stairs ✓
-          → Item-based progression               ← NEXT
+          → Item-based progression               ← IN PROGRESS
             = Complete game loop
 
 Platform/identity branch (deferred until gameplay branch completes):
@@ -117,7 +117,7 @@ Other completed branches:
 ```
 
 Items, stairs, and the canonical cross-tier content foundation are complete.
-The **immediate priority is Item-based progression**
+The **immediate priority remains Item-based progression**
 (Phase 4), the final piece of the core game loop. See the
 [gameplay implementation plan](design/gameplay-implementation-plan.md) for
 detailed designs and playtest gates for each phase.

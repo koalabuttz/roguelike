@@ -864,6 +864,14 @@ impl GameState {
                     .add_event(GameEvent::UseStrengthPotion { bonus: boost });
                 return true;
             }
+            let boost = definition.defense_boost;
+            if boost > 0 {
+                self.entities[0].defense += boost as Stat;
+                self.inventory.remove_one(slot as usize);
+                self.log
+                    .add_event(GameEvent::UseToughnessPotion { bonus: boost });
+                return true;
+            }
         }
         false
     }
@@ -3589,6 +3597,23 @@ mod tests {
         assert!(result.action_taken);
         assert_eq!(gs.entities[0].hp, 30);
         assert!(gs.inventory.is_empty());
+    }
+
+    #[test]
+    fn toughness_potion_permanently_increases_defense() {
+        let mut gs = test_game();
+        let defense_before = gs.entities[0].defense;
+        gs.inventory.add(ItemKind::ToughnessPotion);
+
+        let result = gs.step(GameCommand::UseItem(0));
+
+        assert!(result.action_taken);
+        assert_eq!(gs.entities[0].defense, defense_before + 1);
+        assert!(gs.inventory.is_empty());
+        assert!(
+            gs.log.recent(1)[0].contains("+1 DEF"),
+            "consumption should report the permanent defense gain"
+        );
     }
 
     #[test]

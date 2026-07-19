@@ -1,6 +1,6 @@
 # Gameplay Implementation Plan
 
-> **Status:** In progress. Phases 1-3 complete (wandering monsters, items, stairs). Phase 4 (item-based progression) is next.
+> **Status:** In progress. Phases 1-3 complete (wandering monsters, items, stairs). Phase 4 item-based progression has begun with the cross-tier content foundation and Potion of Toughness vertical slice.
 
 ## Motivation
 
@@ -24,7 +24,7 @@ Four phases, each addressing one playtest finding. Independently shippable. Sequ
 | 1 | [Wandering monsters](#phase-1-wandering-monsters) | S | Problem #2: Regen too generous | **Complete** |
 | 2 | [Items & inventory](#phase-2-items--inventory) | M-L | Problem #3: Combat is solved arithmetic | **Complete** |
 | 3 | [Stairs / multi-level dungeons](#phase-3-stairs--multi-level-dungeons) | M | Problem #1: No win condition | **Complete** |
-| 4 | [Item-based progression](#phase-4-item-based-progression) | M | Problem #4: No progression | Next |
+| 4 | [Item-based progression](#phase-4-item-based-progression) | M | Problem #4: No progression | **In progress** |
 
 Phase 4 benefits from Phase 3 (deeper floors drop better gear) but is not strictly blocked by it. Items is ordered before stairs because it blocks ~4 downstream features (the most of any item on the roadmap) and combines with wandering monsters to create a resource economy.
 
@@ -324,6 +324,12 @@ If LLMs don't engage with stairs, consider adding a `descend` action to the MCP 
 ## Phase 4: Item-Based Progression
 
 **Gives exploration and combat meaning beyond survival — through discovery and decisions, not counters.**
+
+**In progress.** The canonical portable catalog already supplies depth-gated
+equipment and the Potion of Strength. The first post-foundation vertical slice
+adds a depth-gated Potion of Toughness with identical permanent `+1 DEF`
+semantics on Standard, Compact, and Micro. Enchantment scrolls and Potion of
+Sight remain.
 
 ### Design
 

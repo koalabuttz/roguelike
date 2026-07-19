@@ -31,12 +31,13 @@ pub enum ItemKind {
     ChainMail = 5,
     GreaterHealthPotion = 6,
     StrengthPotion = 7,
+    ToughnessPotion = 8,
 }
 
 /// All item kinds, for iteration. Adding a variant to `ItemKind` without
 /// adding it here will cause exhaustive-match compile errors in `glyph()`
 /// et al., plus the `all_kinds_covers_every_variant` test catches desync.
-pub const ALL_KINDS: [ItemKind; 8] = [
+pub const ALL_KINDS: [ItemKind; 9] = [
     ItemKind::HealthPotion,
     ItemKind::ShortSword,
     ItemKind::LeatherArmor,
@@ -45,6 +46,7 @@ pub const ALL_KINDS: [ItemKind; 8] = [
     ItemKind::ChainMail,
     ItemKind::GreaterHealthPotion,
     ItemKind::StrengthPotion,
+    ItemKind::ToughnessPotion,
 ];
 
 /// Number of item kinds, derived from `ALL_KINDS` — never manually synced.
@@ -84,6 +86,7 @@ const WEIGHTS: [u8; KIND_COUNT] = [
     content::item_spawn_weight!(ItemKind::ChainMail),
     content::item_spawn_weight!(ItemKind::GreaterHealthPotion),
     content::item_spawn_weight!(ItemKind::StrengthPotion),
+    content::item_spawn_weight!(ItemKind::ToughnessPotion),
 ];
 
 /// Spawn weight for the weighted item spawn table.
@@ -125,6 +128,11 @@ pub const fn strength_boost(kind: ItemKind) -> u8 {
     content::item_strength_boost!(kind)
 }
 
+/// Permanent DEF boost granted when consumed. Returns 0 for non-boosting items.
+pub const fn defense_boost(kind: ItemKind) -> u8 {
+    content::item_defense_boost!(kind)
+}
+
 // ---------------------------------------------------------------------------
 // Spawn table (fixed-size, no allocation)
 // ---------------------------------------------------------------------------
@@ -144,6 +152,7 @@ pub const SPAWN_TABLE: [(ItemKind, u8); KIND_COUNT] = [
     (ItemKind::ChainMail, WEIGHTS[5]),
     (ItemKind::GreaterHealthPotion, WEIGHTS[6]),
     (ItemKind::StrengthPotion, WEIGHTS[7]),
+    (ItemKind::ToughnessPotion, WEIGHTS[8]),
 ];
 
 // Compile-time guard: each spawn table entry must be exactly 2 bytes.
@@ -816,7 +825,8 @@ mod tests {
                 | ItemKind::LongSword
                 | ItemKind::ChainMail
                 | ItemKind::GreaterHealthPotion
-                | ItemKind::StrengthPotion => {}
+                | ItemKind::StrengthPotion
+                | ItemKind::ToughnessPotion => {}
             }
             assert!(!name(kind).is_empty());
             assert!(spawn_weight(kind) > 0);
@@ -848,6 +858,7 @@ mod tests {
         assert_eq!(ItemKind::ChainMail as u8, 5);
         assert_eq!(ItemKind::GreaterHealthPotion as u8, 6);
         assert_eq!(ItemKind::StrengthPotion as u8, 7);
+        assert_eq!(ItemKind::ToughnessPotion as u8, 8);
     }
 
     #[test]
@@ -1065,6 +1076,16 @@ mod tests {
         assert_eq!(heal_amount(ItemKind::StrengthPotion), 0);
         assert!(is_consumable(ItemKind::StrengthPotion));
         assert_eq!(min_depth(ItemKind::StrengthPotion), 5);
+    }
+
+    #[test]
+    fn toughness_potion_properties() {
+        assert_eq!(name(ItemKind::ToughnessPotion), "Potion of Toughness");
+        assert_eq!(defense_boost(ItemKind::ToughnessPotion), 1);
+        assert_eq!(strength_boost(ItemKind::ToughnessPotion), 0);
+        assert_eq!(heal_amount(ItemKind::ToughnessPotion), 0);
+        assert!(is_consumable(ItemKind::ToughnessPotion));
+        assert_eq!(min_depth(ItemKind::ToughnessPotion), 8);
     }
 
     #[test]
@@ -1547,6 +1568,7 @@ mod tests {
             ItemKind::HealthPotion,
             ItemKind::GreaterHealthPotion,
             ItemKind::StrengthPotion,
+            ItemKind::ToughnessPotion,
         ] {
             // Zero out everything — potions still can't die (no material)
             let bag = properties::EMPTY;

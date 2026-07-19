@@ -161,6 +161,9 @@ pub fn format_event(event: GameEvent) -> String {
         GameEvent::UseStrengthPotion { bonus } => {
             format!("You drink the Potion of Strength. (+{} ATK)", bonus)
         }
+        GameEvent::UseToughnessPotion { bonus } => {
+            format!("You drink the Potion of Toughness. (+{} DEF)", bonus)
+        }
         GameEvent::CombineItems { target, source } => {
             format!(
                 "You combine the {} with the {}.",

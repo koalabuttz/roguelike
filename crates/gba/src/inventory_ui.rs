@@ -9,8 +9,8 @@ use gba::prelude::*;
 use roguelike_core::command::GameCommand;
 use roguelike_core::rules::game_view::GameView;
 use roguelike_core::rules::items::{
-    attack_bonus, color, defense_bonus, heal_amount, is_armor, is_consumable, is_weapon, name,
-    ItemKind,
+    attack_bonus, color, defense_bonus, defense_boost, heal_amount, is_armor, is_consumable,
+    is_weapon, name, ItemKind,
 };
 
 use crate::display;
@@ -421,6 +421,11 @@ fn render_detail(state: &impl GameView, cursor: u8) {
         if heal > 0 {
             p = format::write_str(&mut buf, p, "Heal:");
             p = format::write_u16(&mut buf, p, heal as u16);
+        }
+        let boost = defense_boost(kind);
+        if boost > 0 {
+            p = format::write_str(&mut buf, p, "DEF+");
+            p = format::write_u16(&mut buf, p, boost as u16);
         }
     }
     if p > 0 {

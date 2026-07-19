@@ -115,6 +115,7 @@ pub fn encode_opt_item_kind(k: Option<ItemKind>) -> u8 {
         Some(ItemKind::ChainMail) => 5,
         Some(ItemKind::GreaterHealthPotion) => 6,
         Some(ItemKind::StrengthPotion) => 7,
+        Some(ItemKind::ToughnessPotion) => 8,
     }
 }
 
@@ -128,6 +129,7 @@ pub fn decode_opt_item_kind(b: u8) -> Option<ItemKind> {
         5 => Some(ItemKind::ChainMail),
         6 => Some(ItemKind::GreaterHealthPotion),
         7 => Some(ItemKind::StrengthPotion),
+        8 => Some(ItemKind::ToughnessPotion),
         _ => None,
     }
 }
@@ -280,6 +282,7 @@ pub fn encode_game_event(event: Option<GameEvent>) -> [u8; ENCODED_EVENT_SIZE] {
             }
             GameEvent::CombineNoEffect => [24, 0, 0, 0],
             GameEvent::ItemDestroyed { kind } => [25, encode_item_kind(kind), 0, 0],
+            GameEvent::UseToughnessPotion { bonus } => [26, bonus, 0, 0],
         },
     }
 }
@@ -362,6 +365,7 @@ pub fn decode_game_event(bytes: [u8; ENCODED_EVENT_SIZE]) -> Option<GameEvent> {
         25 => Some(GameEvent::ItemDestroyed {
             kind: decode_item_kind(bytes[1]),
         }),
+        26 => Some(GameEvent::UseToughnessPotion { bonus: bytes[1] }),
         _ => None, // 0xFF (None) or unknown future tag
     }
 }
@@ -504,6 +508,7 @@ mod tests {
                 cause: AutorunStopCause::MonsterSpotted,
             }),
             Some(GameEvent::UseStrengthPotion { bonus: 1 }),
+            Some(GameEvent::UseToughnessPotion { bonus: 1 }),
             Some(GameEvent::CombineItems {
                 target: ItemKind::ShortSword,
                 source: ItemKind::IronMace,
@@ -531,7 +536,7 @@ mod tests {
     fn game_event_unknown_tag_decodes_to_none() {
         // Future tags or corrupt data → None (forward compat)
         assert_eq!(decode_game_event([0xFE, 0, 0, 0]), None);
-        assert_eq!(decode_game_event([26, 0, 0, 0]), None);
+        assert_eq!(decode_game_event([27, 0, 0, 0]), None);
         assert_eq!(decode_game_event([99, 1, 2, 3]), None);
     }
 }

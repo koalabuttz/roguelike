@@ -184,6 +184,14 @@ pub const STRENGTH_POTION_SPAWN_WEIGHT: u8 =
 pub const STRENGTH_POTION_MIN_DEPTH: u8 =
     content::item_min_depth!(super::items::ItemKind::StrengthPotion);
 
+// Potion of Toughness
+pub const TOUGHNESS_POTION_DEF_BOOST: u8 =
+    content::item_defense_boost!(super::items::ItemKind::ToughnessPotion);
+pub const TOUGHNESS_POTION_SPAWN_WEIGHT: u8 =
+    content::item_spawn_weight!(super::items::ItemKind::ToughnessPotion);
+pub const TOUGHNESS_POTION_MIN_DEPTH: u8 =
+    content::item_min_depth!(super::items::ItemKind::ToughnessPotion);
+
 pub const MAX_ITEMS_PER_ROOM: u8 = content::CONFIG.max_items_per_room;
 pub const MAX_INVENTORY: usize = super::items::MAX_INVENTORY;
 

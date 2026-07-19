@@ -71,6 +71,8 @@ pub struct ItemDef {
     #[serde(default)]
     pub strength_boost: u8,
     #[serde(default)]
+    pub defense_boost: u8,
+    #[serde(default)]
     pub properties: std::collections::BTreeMap<String, u8>,
 }
 
@@ -415,6 +417,7 @@ pub fn compiled_defaults() -> GameData {
                 min_depth: item.min_depth,
                 heal_amount: item.heal_amount,
                 strength_boost: item.strength_boost,
+                defense_boost: item.defense_boost,
                 properties,
             }
         })
@@ -927,7 +930,7 @@ mod tests {
         assert_eq!(data.config.fov_radius, 8);
         assert_eq!(data.config.regen_interval, 3);
         assert_eq!(data.monsters.len(), 3);
-        assert_eq!(data.items.len(), 8);
+        assert_eq!(data.items.len(), 9);
     }
 
     #[test]

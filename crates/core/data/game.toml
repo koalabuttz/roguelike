@@ -152,3 +152,14 @@ spawn_weight = 8
 min_depth = 5
 strength_boost = 1
 properties = { heavy = 3, hot = 4, magical = 6 }
+
+[[items]]
+id = "toughness_potion"
+name = "Potion of Toughness"
+glyph = "!"
+color = "DarkBlue"
+category = "consumable"
+spawn_weight = 5
+min_depth = 8
+defense_boost = 1
+properties = { hard = 3, cold = 4, magical = 6 }

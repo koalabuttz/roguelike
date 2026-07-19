@@ -20,13 +20,14 @@ time, with semantic tests on all three capability tiers.
 ## Canonical content contract
 
 `crates/core/data/game.toml` is the single authored source for player balance,
-game configuration, wandering/depth tuning, the three monsters, and the eight
+game configuration, wandering/depth tuning, the three monsters, and the nine
 current items. `roguelike-content` parses and validates it on the host. The
 core build script then emits bounded Rust tables into `OUT_DIR`; Micro and
 Compact consume generated exhaustive lookups without TOML, allocation, or
-`std`. Aggregate tables are emitted only for the Standard `data-files` path;
-keeping them out of constrained builds avoids materializing writable pointer
-tables on MOS.
+`std`. The catalog now contains nine items after the first Phase 4 vertical
+slice added the Potion of Toughness. Aggregate tables are emitted only for the
+Standard `data-files` path; keeping them out of constrained builds avoids
+materializing writable pointer tables on MOS.
 
 `ItemKind` and `MonsterKind` remain stable `u8` identities used by saves and
 constrained arrays. Every TOML record therefore has an explicit snake-case
@@ -86,7 +87,9 @@ and enum discriminants are unchanged.
 - Any content-system change must pass host schema tests, `no_std` checks, the
   full workspace suite, and real GBA/C64 release builds.
 
-The implementation was compared against `master` with `make size`. The final
-C64 image has 301 bytes of normal RAM and 25 bytes of high RAM free, versus 300
-and 24 bytes on the baseline. The content foundation therefore preserves the
-existing C64 memory budget; future catalog changes must repeat this comparison.
+The foundation implementation was compared against `master` with `make size`:
+301 bytes of normal RAM and 25 bytes of high RAM were free, versus 300 and 24
+bytes on the baseline. After the Potion of Toughness slice, a real release
+build leaves 181 bytes of normal RAM and 25 bytes of high RAM free. The packed
+inventory and save layouts are unchanged. Future catalog changes must repeat
+this comparison.

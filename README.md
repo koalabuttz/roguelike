@@ -31,6 +31,7 @@ The game adapts to your terminal size automatically.
 - Monsters have their own sight range and chase you when *they* see you (not when you see them). Trolls are dim-sighted and easy to sneak past; goblins are alert scouts.
 - New monsters spawn over time, creating time pressure — waiting to heal between fights means more enemies to deal with. Distance-based sound cues warn you when wandering monsters are nearby.
 - Items appear on the ground: potions (`!`), weapons (`/`), armor (`[`), scrolls (`?`). Pick them up with `g` into a 26-slot Brogue-style inventory (slots a–z) managed with `i`. Consumables stack; equipment takes one slot each. Equip weapons/armor for stat bonuses — equipped items are marked in the inventory display.
+- Rare Strength and Toughness potions permanently raise base ATK or DEF, providing item-driven progression across a run.
 - Stairs (`>`) lead to deeper floors with tougher monsters. Reach the target depth to win.
 - `%` marks a corpse. Dead monsters stay on the map.
 - The HP bar, equipment, depth, and message log are at the bottom of the screen.
@@ -229,8 +230,8 @@ See [docs/architecture/cross-platform.md](docs/architecture/cross-platform.md) f
 
 See [docs/roadmap.md](docs/roadmap.md) for the full breakdown with dependencies, effort estimates, and critical path. See [docs/design/gameplay-implementation-plan.md](docs/design/gameplay-implementation-plan.md) for the detailed implementation plan for the next features. See [docs/README.md](docs/README.md) for all design documents and session reports.
 
-**Next up** (gameplay branch — current focus):
-- Item-based progression (enchantment scrolls, depth-gated gear, permanent consumables)
+**Current work** (gameplay branch):
+- Item-based progression is in progress: depth-gated gear and permanent Strength/Toughness potions are implemented; enchantment scrolls and sight progression remain.
 
 **Later** (deferred until gameplay branch completes):
 - Web (WASM) frontend

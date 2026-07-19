@@ -1746,8 +1746,8 @@ mod tests {
     fn console_exec_give_all() {
         let mut inv = Inventory::new();
         let msg = exec_console(&mut inv, ConsoleCommand::GiveAll);
-        assert!(msg.contains("8"));
-        assert_eq!(inv.len(), 8);
+        assert!(msg.contains("9"));
+        assert_eq!(inv.len(), 9);
     }
 
     #[test]

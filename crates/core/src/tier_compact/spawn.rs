@@ -207,7 +207,8 @@ mod tests {
                 | ItemKind::LongSword
                 | ItemKind::ChainMail
                 | ItemKind::GreaterHealthPotion
-                | ItemKind::StrengthPotion => {}
+                | ItemKind::StrengthPotion
+                | ItemKind::ToughnessPotion => {}
             }
         }
     }

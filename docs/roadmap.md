@@ -116,7 +116,8 @@ Other completed branches:
   Tier unification ✓ → AI/spawn/dungeon shared via rules/ (scalar boundary pattern)
 ```
 
-Items and stairs are complete. The **immediate priority is Item-based progression**
+Items, stairs, and the canonical cross-tier content foundation are complete.
+The **immediate priority is Item-based progression**
 (Phase 4), the final piece of the core game loop. See the
 [gameplay implementation plan](design/gameplay-implementation-plan.md) for
 detailed designs and playtest gates for each phase.

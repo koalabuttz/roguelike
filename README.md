@@ -84,11 +84,20 @@ To build without gamepad support: `cargo build --no-default-features --features 
 | Orc     | `o`   | 12 | 4   | 1   | 7     | 30%          |
 | Troll   | `T`   | 20 | 6   | 3   | 5     | 10%          |
 
-Monsters are data-driven — add a `[[monsters]]` entry to `game.toml` to define new monsters without recompiling. See [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-monster) for details.
+Monster and item presentation/balance are authored in the canonical
+`game.toml` and compiled into all capability tiers. Stable `u8` IDs preserve
+save and constrained-tier compatibility; adding a new kind requires both a
+Rust enum variant and a TOML record. See
+[CONTRIBUTING.md](CONTRIBUTING.md#adding-portable-items-and-monsters).
 
 ## Configuration
 
-Game-wide tuning knobs are defined in `crates/core/data/game.toml` (compiled into the binary as defaults). To override any value, place a `game.toml` in the working directory — the terminal, headless runner, and MCP server all load it on startup. In dev-tools builds, press `F10` to hot-reload changes without restarting.
+Game-wide tuning and the fixed portable item/monster catalogs are defined in
+`crates/core/data/game.toml`. A host-side compiler validates this file and
+generates bounded tables for Standard, GBA, and C64. To override values on
+desktop, place a complete valid `game.toml` with the same IDs in the working
+directory. In dev-tools builds, `F10` stages it for the next run and
+`Shift+F10` explicitly reconciles it into the active run.
 
 Configurable fields under `[config]`:
 

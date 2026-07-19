@@ -37,6 +37,7 @@ Project documentation for the roguelike dungeon crawler.
 | Document | Purpose | Status |
 |----------|---------|--------|
 | [design/gameplay-implementation-plan.md](design/gameplay-implementation-plan.md) | Implementation plan for high-leverage gameplay features (6 phases) | In progress (Phases 1-3 complete) |
+| [design/cross-tier-content-foundation.md](design/cross-tier-content-foundation.md) | Canonical portable content pipeline, stable IDs, live reconciliation, and next-agent direction | Current |
 | [design/procgen-exploration.md](design/procgen-exploration.md) | Survey of procedural generation techniques with evaluation against project constraints | Exploration |
 | [design/procgen-terrain-and-themed-floors.md](design/procgen-terrain-and-themed-floors.md) | Terrain variety, themed procedural floors, and prefab integration | Exploration |
 | [design/acoustic-propagation.md](design/acoustic-propagation.md) | Sound as a game mechanic: acoustic propagation, SID/PSG integration, spatialized audio | Exploration |

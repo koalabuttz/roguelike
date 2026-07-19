@@ -68,7 +68,8 @@ When building with the `dev-tools` feature (enabled by default), the following d
 | `F7` | Toggle monster targets overlay |
 | `F8` | Toggle pathfinding overlay |
 | `F9` | Toggle frontiers overlay |
-| `F10` | Reload `game.toml` (hot reload) |
+| `F10` | Validate and stage `game.toml` for the next run |
+| `Shift+F10` | Reload and reconcile content into the active run (dev-modified) |
 | `F11` | Toggle reveal monsters overlay |
 | `F12` | Toggle monster FOV overlay |
 
@@ -110,7 +111,7 @@ Place functions based on **what they operate on**, not who calls them:
   - Prefer **enums over strings** for game concepts (item types, effects, equipment slots) — these map to `u8` discriminants on constrained platforms
   - Write **pure functions for rules** in `rules/` — if a calculation (damage, item effects) doesn't need `&self`, put it in `rules/` as a free/const function. See `rules::damage`, `rules::items`, `rules::monster_table` for examples. The `Inventory` struct and `InvSlot` type also live in `rules/items.rs`, shared across all tiers.
   - Use **named constants for limits** (inventory size, max items per room) rather than hardcoded literals. Per-tier constants live in `rules::balance`.
-  - Keep **balance data in `game.toml`** — constants in `rules::balance` are compiled-in defaults; `game.toml` can override them
+  - Keep **authored content in `game.toml`** — the host compiler validates it and generates the bounded tables used by every tier
 
 ## Testing Systems
 
@@ -283,32 +284,25 @@ The `tools/llm_playtest.py` script requires an `ANTHROPIC_API_KEY` environment v
 
 The `/playtest` skill works in Claude Code sessions with the MCP server connected — no API key needed since Claude Code uses its own session.
 
-## Adding a Monster
+## Adding Portable Items and Monsters
 
-The simplest way to contribute content.
+The canonical content file is `crates/core/data/game.toml`. Existing item and
+monster IDs may be rebalanced or reskinned there. A working-directory override
+must be a complete valid file with the same fixed IDs; desktop-only additions
+are rejected because GBA and C64 could not represent them.
 
-**Without recompiling** — add a `[[monsters]]` entry to `game.toml` in the working directory:
+Adding a genuinely new kind requires an intentional stable enum discriminant,
+an expected schema ID, a canonical TOML record, and any new shared behavior.
+Never renumber existing `ItemKind` or `MonsterKind` variants. See the
+[cross-tier content foundation](docs/design/cross-tier-content-foundation.md#adding-portable-content)
+for the complete workflow.
 
-```toml
-[[monsters]]
-name = "Dragon"
-glyph = "D"
-color = "Red"
-hp = 40
-attack = 10
-defense = 5
-ai = "Chase"
-spawn_weight = 5
-sight_radius = 8
-```
+Use `F10` to stage a validated override for the next run. Use `Shift+F10` only
+when deliberately reconciling an active development run. Reconciled runs are
+not valid golden-replay artifacts.
 
-The terminal, headless runner, and MCP server load `game.toml` on startup. In dev-tools builds, press `F10` to hot-reload without restarting.
-
-**Compiled-in** — edit `crates/core/data/game.toml` (the embedded defaults) to add monsters permanently.
-
-If a monster needs new AI, add a variant to `AiPersonality` in `crates/core/src/rules/monster_table.rs`, extend `ai_mode` in `crates/core/src/rules/ai.rs`, and implement the per-turn action in each tier's `ai.rs`.
-
-When adding a new monster, also add a scenario test to `crates/core/tests/scenarios.rs` to verify the player can survive (or not) as intended. See [Scenario Tests](#scenario-tests-balance-assertions) above.
+When adding a monster, add a scenario test to verify its intended balance. New
+item mechanics require equivalent Standard, Compact, and Micro semantic tests.
 
 ## Questions?
 

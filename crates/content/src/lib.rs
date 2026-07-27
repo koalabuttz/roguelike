@@ -757,6 +757,30 @@ pub fn emit_rust(data: &GameData) -> String {
     }
     emit_lookup(
         &mut out,
+        "item_consumable_effect",
+        "Option<ConsumableEffect>",
+        items.iter().map(|item| {
+            let effect = if item.heal_amount > 0 {
+                Some(("Heal", item.heal_amount))
+            } else if item.strength_boost > 0 {
+                Some(("BoostAttack", item.strength_boost))
+            } else if item.defense_boost > 0 {
+                Some(("BoostDefense", item.defense_boost))
+            } else {
+                None
+            };
+            match effect {
+                Some((kind, amount)) => format!(
+                    "Some(crate::rules::items::ConsumableEffect {{ kind: \
+                     crate::rules::items::ConsumableEffectKind::{kind}, amount: {amount} }})"
+                ),
+                None => "None".to_owned(),
+            }
+        }),
+        "item",
+    );
+    emit_lookup(
+        &mut out,
         "item_default_properties",
         "PropertyBag",
         items
@@ -793,6 +817,7 @@ mod tests {
         let generated = emit_rust(&data);
         assert!(generated.contains("pub const ITEMS: [ItemContent; ITEM_COUNT]"));
         assert!(generated.contains("macro_rules! item_default_properties"));
+        assert!(generated.contains("macro_rules! item_consumable_effect"));
         assert!(generated.contains("macro_rules! item_defense_boost"));
         assert!(generated.contains("ItemKind::ToughnessPotion => 1"));
     }

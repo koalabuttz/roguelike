@@ -253,14 +253,16 @@ fn format_event_inner(event: GameEvent, buf: &mut [u8]) -> usize {
             }
         },
 
-        GameEvent::UseStrengthPotion { bonus } => {
-            let mut p = write_str(buf, 0, "ATK +");
-            p = write_u16(buf, p, bonus as u16);
-            write_str(buf, p, "!")
-        }
-
-        GameEvent::UseToughnessPotion { bonus } => {
-            let mut p = write_str(buf, 0, "DEF +");
+        GameEvent::StatBoost { kind, bonus } => {
+            let mut p = write_str(
+                buf,
+                0,
+                match items::consumable_effect(kind).map(|effect| effect.kind) {
+                    Some(items::ConsumableEffectKind::BoostAttack) => "ATK +",
+                    Some(items::ConsumableEffectKind::BoostDefense) => "DEF +",
+                    _ => "STAT +",
+                },
+            );
             p = write_u16(buf, p, bonus as u16);
             write_str(buf, p, "!")
         }
@@ -576,9 +578,21 @@ mod tests {
     }
 
     #[test]
-    fn use_strength_potion() {
-        assert_renders(GameEvent::UseStrengthPotion { bonus: 2 }, "ATK +2!");
-        assert_renders(GameEvent::UseToughnessPotion { bonus: 2 }, "DEF +2!");
+    fn stat_boost_potions() {
+        assert_renders(
+            GameEvent::StatBoost {
+                kind: ItemKind::StrengthPotion,
+                bonus: 2,
+            },
+            "ATK +2!",
+        );
+        assert_renders(
+            GameEvent::StatBoost {
+                kind: ItemKind::ToughnessPotion,
+                bonus: 2,
+            },
+            "DEF +2!",
+        );
     }
 
     #[test]

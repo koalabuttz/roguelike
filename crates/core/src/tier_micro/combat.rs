@@ -108,7 +108,7 @@ mod tests {
         let def = e.def[1];
         let killed = melee_attack(0, 1, atk, def, &mut e, &mut log);
         assert!(killed);
-        assert!(!e.alive[1]);
+        assert!(!e.is_alive(1));
     }
 
     #[test]

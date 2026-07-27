@@ -481,39 +481,42 @@ impl CompactGameState {
             None => return false,
         };
 
-        if rules_items::is_consumable(inv_slot.kind) {
-            let heal = rules_items::heal_amount(inv_slot.kind);
-            if heal > 0 {
+        let effect = match rules_items::consumable_effect(inv_slot.kind) {
+            Some(effect) => effect,
+            None => return false,
+        };
+        let event = match effect.kind {
+            rules_items::ConsumableEffectKind::Heal => {
                 let pi = PLAYER_IDX as usize;
                 let hp = self.entities.hp[pi];
                 let max_hp = self.entities.max_hp[pi];
-                let healed = heal.min(max_hp.saturating_sub(hp));
+                let healed = effect.amount.min(max_hp.saturating_sub(hp));
                 self.entities.hp[pi] = hp.saturating_add(healed);
-                self.inventory.remove_one(slot as usize);
-                self.log.add(GameEvent::DrinkPotion {
+                GameEvent::DrinkPotion {
                     kind: inv_slot.kind,
                     healed,
-                });
-                return true;
+                }
             }
-            let boost = rules_items::strength_boost(inv_slot.kind);
-            if boost > 0 {
+            rules_items::ConsumableEffectKind::BoostAttack => {
                 let pi = PLAYER_IDX as usize;
-                self.entities.atk[pi] = self.entities.atk[pi].saturating_add(boost);
-                self.inventory.remove_one(slot as usize);
-                self.log.add(GameEvent::UseStrengthPotion { bonus: boost });
-                return true;
+                self.entities.atk[pi] = self.entities.atk[pi].saturating_add(effect.amount);
+                GameEvent::StatBoost {
+                    kind: inv_slot.kind,
+                    bonus: effect.amount,
+                }
             }
-            let boost = rules_items::defense_boost(inv_slot.kind);
-            if boost > 0 {
+            rules_items::ConsumableEffectKind::BoostDefense => {
                 let pi = PLAYER_IDX as usize;
-                self.entities.def[pi] = self.entities.def[pi].saturating_add(boost);
-                self.inventory.remove_one(slot as usize);
-                self.log.add(GameEvent::UseToughnessPotion { bonus: boost });
-                return true;
+                self.entities.def[pi] = self.entities.def[pi].saturating_add(effect.amount);
+                GameEvent::StatBoost {
+                    kind: inv_slot.kind,
+                    bonus: effect.amount,
+                }
             }
-        }
-        false
+        };
+        self.inventory.remove_one(slot as usize);
+        self.log.add(event);
+        true
     }
 
     fn drop_item(&mut self, slot: u8) -> bool {

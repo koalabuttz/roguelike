@@ -706,7 +706,7 @@ fn pick_micro_command(
 
     if has_adjacent_monster(&g.entities) {
         for i in 1..g.entities.count as usize {
-            if g.entities.alive[i] {
+            if g.entities.is_alive(i) {
                 let dx = g.entities.x[i].abs_diff(px);
                 let dy = g.entities.y[i].abs_diff(py);
                 if dx <= 1 && dy <= 1 {

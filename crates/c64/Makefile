@@ -4,7 +4,7 @@ PROJECT_ROOT = $(CURDIR)/../..
 DOCKER_RUN = sudo docker run --rm -e PATH=$(DOCKER_PATH) -v $(PROJECT_ROOT):/project -w /project/crates/c64 $(DOCKER_IMAGE)
 PRG = target/mos-c64-none/release/roguelike-c64
 
-.PHONY: build debug run clean size map profile
+.PHONY: build debug run clean size size-report map profile
 
 # Dev console build — release optimizations + menu-driven dev tools via ← key.
 debug:
@@ -21,7 +21,11 @@ map:
 
 # Show RAM/hiram usage from linker map
 size: map
-	@python3 memmap.py map.txt
+	@python3 memmap.py map.txt --budget memory-budget.json
+
+# Write a machine-readable report for CI/artifacts.
+size-report: map
+	@python3 memmap.py map.txt --budget memory-budget.json --json memory-report.json
 
 # Run in VICE emulator (requires x64sc in PATH)
 run: build

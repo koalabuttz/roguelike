@@ -104,6 +104,7 @@ impl MicroMap {
         if i & 1 == 0 { byte & 0x0F } else { byte >> 4 }
     }
 
+    #[cfg_attr(feature = "c64-overlay", unsafe(link_section = ".overlay"))]
     pub fn is_walkable(&self, x: u8, y: u8) -> bool {
         self.tile_at(x, y) >= TILE_FLOOR
     }

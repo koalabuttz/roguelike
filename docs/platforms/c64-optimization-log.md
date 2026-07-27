@@ -16,6 +16,32 @@ messages.
 
 Structural changes to how the binary uses the C64's address space.
 
+### Enforced reserves + progression cold-code overlay
+
+- **Date:** 2026-07-27
+- **Measured result:** normal RAM 181 → 515 B free; HIRAM 25 → 153 B free;
+  I/O overlay 1,088 → 153 B free
+- `memmap.py` now reports RAM, I/O-overlay, and HIRAM usage as text and JSON,
+  compares each region with a reviewed reference, and enforces the floors in
+  `memory-budget.json`. CI runs the pinned Rust-MOS map build, publishes the
+  deltas in the job summary, and uploads the map plus symbol analysis.
+- The recovery target is 512 B normal RAM and 128 B in both constrained
+  overlays. Hard floors are 384 B normal and 128 B for I/O/HIRAM so minor
+  codegen movement does not erase the reserve unnoticed.
+- Micro's pickup, use, drop, and equip handlers were outlined and placed under
+  I/O alongside map generation and FOV. The tiny pure `is_walkable` helper is
+  there as well. Combine/unequip/drop-equipped remain in normal RAM because
+  moving every cold handler overflowed the 4 KB overlay.
+- `EntityStore::alive` was removed: HP zero already represents death.
+  Awareness uses the otherwise-unused high bit of the sight-radius byte. The
+  old alive/awareness bytes remain in the save stream, so existing save tags
+  and layouts still decode. Full bit-packing of every entity/item flag was
+  rejected after measurement because accessor code overflowed normal RAM.
+- Strength and Toughness now share a compact consumable-effect descriptor and
+  `StatBoost` event. Save tags 22 and 26 remain unchanged. The C64 formatter
+  still prints the full potion name and explicit ATK/DEF result; descriptive
+  item names are unchanged across platforms.
+
 ### Shrink to fit + KERNAL unmap
 - **Commit:** `52c2024` (2026-02-28)
 - **Savings:** −10 KB code + 8 KB freed RAM (was 9,116 B over budget)

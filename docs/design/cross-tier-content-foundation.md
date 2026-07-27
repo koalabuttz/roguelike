@@ -91,5 +91,12 @@ The foundation implementation was compared against `master` with `make size`:
 301 bytes of normal RAM and 25 bytes of high RAM were free, versus 300 and 24
 bytes on the baseline. After the Potion of Toughness slice, a real release
 build leaves 181 bytes of normal RAM and 25 bytes of high RAM free. The packed
-inventory and save layouts are unchanged. Future catalog changes must repeat
-this comparison.
+inventory and save layouts are unchanged.
+
+The subsequent headroom pass established enforced stock-C64 reserves. The
+current release build leaves 515 bytes of normal RAM, 153 bytes under I/O, and
+153 bytes of high RAM free. `crates/c64/memory-budget.json` records the reviewed
+reference usage, hard floors, and recovery targets; CI builds the real Rust-MOS
+linker map, rejects floor regressions, reports per-region deltas, and uploads
+the map and largest-symbol report. Future catalog changes must pass that gate
+and explicitly update the reference only when memory is intentionally spent.

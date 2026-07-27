@@ -102,3 +102,43 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-audit --locked && cargo audit
+
+  c64-memory:
+    name: C64 memory budget
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build linker map with pinned Rust-MOS
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e CARGO_HOME=/tmp/cargo \
+            -e PATH=/usr/local/rust-mos/bin:/usr/local/bin:/usr/bin:/bin \
+            -v "${{ github.workspace }}:/repo" \
+            -w /repo/crates/c64 \
+            ghcr.io/koalabuttz/rust-mos:ac2fb2277-4537158-4aaa40e16 \
+            env RUSTFLAGS="-C link-arg=-Tlink.ld -C link-arg=-Wl,--no-check-sections -C link-arg=-Wl,--allow-multiple-definition -C link-arg=-Wl,-Map,map.txt -Z mir-opt-level=1" \
+            cargo build --release
+      - name: Enforce floors and report deltas
+        working-directory: crates/c64
+        run: |
+          python3 memmap.py map.txt \
+            --budget memory-budget.json \
+            --json memory-report.json | tee memory-report.txt
+          python3 analyze_map.py map.txt > symbol-report.txt
+          {
+            echo "### C64 memory report"
+            echo '```text'
+            cat memory-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c64-memory-report
+          path: |
+            crates/c64/map.txt
+            crates/c64/memory-report.json
+            crates/c64/memory-report.txt
+            crates/c64/symbol-report.txt
+          retention-days: 30

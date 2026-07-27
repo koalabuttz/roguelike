@@ -52,6 +52,22 @@ pub const ALL_KINDS: [ItemKind; 9] = [
 /// Number of item kinds, derived from `ALL_KINDS` — never manually synced.
 pub const KIND_COUNT: usize = ALL_KINDS.len();
 
+/// Kind of immediate effect produced by consuming an item.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConsumableEffectKind {
+    Heal = 0,
+    BoostAttack = 1,
+    BoostDefense = 2,
+}
+
+/// Compact, tier-portable description of a consumable's immediate effect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConsumableEffect {
+    pub kind: ConsumableEffectKind,
+    pub amount: u8,
+}
+
 // ---------------------------------------------------------------------------
 // Display lookups
 // ---------------------------------------------------------------------------
@@ -133,6 +149,14 @@ pub const fn defense_boost(kind: ItemKind) -> u8 {
     content::item_defense_boost!(kind)
 }
 
+/// Immediate effect produced by consuming this item.
+///
+/// Keeping the effect and magnitude together prevents each tier from growing
+/// a separate chain of item-specific lookup branches as progression expands.
+pub const fn consumable_effect(kind: ItemKind) -> Option<ConsumableEffect> {
+    content::item_consumable_effect!(kind)
+}
+
 // ---------------------------------------------------------------------------
 // Spawn table (fixed-size, no allocation)
 // ---------------------------------------------------------------------------
@@ -160,8 +184,12 @@ pub const SPAWN_TABLE: [(ItemKind, u8); KIND_COUNT] = [
 // Compile-time guarantee: enum fits in a single byte on all tiers.
 const _: () = assert!(size_of::<ItemKind>() == 1);
 const _: () = assert!(size_of::<(ItemKind, u8)>() == 2);
+const _: () = assert!(size_of::<ConsumableEffectKind>() == 1);
+const _: () = assert!(size_of::<ConsumableEffect>() == 2);
 // InvSlot: 1-byte kind + 1-byte count + 8-byte property bag = 10 bytes.
 const _: () = assert!(size_of::<InvSlot>() == 10);
+const _: () = assert!(size_of::<Equipment>() == 18);
+const _: () = assert!(size_of::<Inventory>() == 260);
 
 // ---------------------------------------------------------------------------
 // Type queries

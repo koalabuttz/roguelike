@@ -61,6 +61,10 @@ pub struct MicroGameState {
     pub(crate) ambient_sound_counter: u8,
 }
 
+// This object occupies scarce C64 HIRAM. Any growth must be an explicit,
+// measured decision rather than silently consuming the reserve.
+const _: () = assert!(core::mem::size_of::<MicroGameState>() <= 4904);
+
 impl MicroGameState {
     /// Create a new game with the given seed and map dimensions.
     pub fn new(seed: u16, width: u8, height: u8) -> Self {
@@ -147,7 +151,7 @@ impl MicroGameState {
         let px = self.entities.x[pi];
         let py = self.entities.y[pi];
         for i in 0..self.items.count as usize {
-            if self.items.alive[i] && self.items.x[i] == px && self.items.y[i] == py {
+            if self.items.is_alive(i) && self.items.x[i] == px && self.items.y[i] == py {
                 return Some(GameCommand::Pickup);
             }
         }
@@ -396,7 +400,7 @@ impl MicroGameState {
         // Notify about remaining items (if inventory was full).
         let mut counts = [0u8; rules_items::KIND_COUNT];
         for i in 0..self.items.count as usize {
-            if self.items.alive[i] && self.items.x[i] == x && self.items.y[i] == y {
+            if self.items.is_alive(i) && self.items.x[i] == x && self.items.y[i] == y {
                 counts[self.items.kind[i] as usize] += 1;
             }
         }
@@ -415,7 +419,7 @@ impl MicroGameState {
         loop {
             let mut found: Option<u8> = None;
             for i in 0..self.items.count as usize {
-                if self.items.alive[i] && self.items.x[i] == x && self.items.y[i] == y {
+                if self.items.is_alive(i) && self.items.x[i] == x && self.items.y[i] == y {
                     found = Some(i as u8);
                     break;
                 }
@@ -431,13 +435,15 @@ impl MicroGameState {
     }
 
     /// Pick up the first item at the player's position.
+    #[cfg_attr(feature = "c64-overlay", unsafe(link_section = ".overlay"))]
+    #[inline(never)]
     fn pickup_item(&mut self) -> bool {
         let pi = PLAYER_IDX as usize;
         let px = self.entities.x[pi];
         let py = self.entities.y[pi];
 
         for i in 0..self.items.count as usize {
-            if self.items.alive[i] && self.items.x[i] == px && self.items.y[i] == py {
+            if self.items.is_alive(i) && self.items.x[i] == px && self.items.y[i] == py {
                 let kind = self.items.kind[i];
                 if !self.inventory.add(kind) {
                     self.log.add(GameEvent::InventoryFull);
@@ -452,48 +458,54 @@ impl MicroGameState {
     }
 
     /// Use an item from inventory (consumables only).
+    #[cfg_attr(feature = "c64-overlay", unsafe(link_section = ".overlay"))]
+    #[inline(never)]
     fn use_item(&mut self, slot: u8) -> bool {
         let inv_slot = match self.inventory.get(slot as usize) {
             Some(s) => *s,
             None => return false,
         };
 
-        if rules_items::is_consumable(inv_slot.kind) {
-            let heal = rules_items::heal_amount(inv_slot.kind);
-            if heal > 0 {
+        let effect = match rules_items::consumable_effect(inv_slot.kind) {
+            Some(effect) => effect,
+            None => return false,
+        };
+        let event = match effect.kind {
+            rules_items::ConsumableEffectKind::Heal => {
                 let pi = PLAYER_IDX as usize;
                 let hp = self.entities.hp[pi];
                 let max_hp = self.entities.max_hp[pi];
-                let healed = heal.min(max_hp.saturating_sub(hp));
+                let healed = effect.amount.min(max_hp.saturating_sub(hp));
                 self.entities.hp[pi] = hp.saturating_add(healed);
-                self.inventory.remove_one(slot as usize);
-                self.log.add(GameEvent::DrinkPotion {
+                GameEvent::DrinkPotion {
                     kind: inv_slot.kind,
                     healed,
-                });
-                return true;
+                }
             }
-            let boost = rules_items::strength_boost(inv_slot.kind);
-            if boost > 0 {
+            rules_items::ConsumableEffectKind::BoostAttack => {
                 let pi = PLAYER_IDX as usize;
-                self.entities.atk[pi] = self.entities.atk[pi].saturating_add(boost);
-                self.inventory.remove_one(slot as usize);
-                self.log.add(GameEvent::UseStrengthPotion { bonus: boost });
-                return true;
+                self.entities.atk[pi] = self.entities.atk[pi].saturating_add(effect.amount);
+                GameEvent::StatBoost {
+                    kind: inv_slot.kind,
+                    bonus: effect.amount,
+                }
             }
-            let boost = rules_items::defense_boost(inv_slot.kind);
-            if boost > 0 {
+            rules_items::ConsumableEffectKind::BoostDefense => {
                 let pi = PLAYER_IDX as usize;
-                self.entities.def[pi] = self.entities.def[pi].saturating_add(boost);
-                self.inventory.remove_one(slot as usize);
-                self.log.add(GameEvent::UseToughnessPotion { bonus: boost });
-                return true;
+                self.entities.def[pi] = self.entities.def[pi].saturating_add(effect.amount);
+                GameEvent::StatBoost {
+                    kind: inv_slot.kind,
+                    bonus: effect.amount,
+                }
             }
-        }
-        false
+        };
+        self.inventory.remove_one(slot as usize);
+        self.log.add(event);
+        true
     }
 
     /// Combine two inventory items: apply source's properties onto target.
+    #[inline(never)]
     fn combine_items(&mut self, target_slot: u8, source_slot: u8) -> bool {
         if target_slot == source_slot {
             return false;
@@ -571,6 +583,8 @@ impl MicroGameState {
     }
 
     /// Drop an item from inventory onto the ground.
+    #[cfg_attr(feature = "c64-overlay", unsafe(link_section = ".overlay"))]
+    #[inline(never)]
     fn drop_item(&mut self, slot: u8) -> bool {
         if let Some(kind) = self.inventory.remove_one(slot as usize) {
             let pi = PLAYER_IDX as usize;
@@ -584,6 +598,8 @@ impl MicroGameState {
     }
 
     /// Equip an item from inventory (weapon or armor).
+    #[cfg_attr(feature = "c64-overlay", unsafe(link_section = ".overlay"))]
+    #[inline(never)]
     fn equip_item(&mut self, slot: u8) -> bool {
         let inv_slot = match self.inventory.get(slot as usize) {
             Some(s) => *s,
@@ -625,6 +641,7 @@ impl MicroGameState {
     }
 
     /// Unequip the current weapon, returning it to inventory.
+    #[inline(never)]
     fn unequip_weapon(&mut self) -> bool {
         if let Some(kind) = self.equipment.weapon {
             if !self
@@ -644,6 +661,7 @@ impl MicroGameState {
     }
 
     /// Unequip the current armor, returning it to inventory.
+    #[inline(never)]
     fn unequip_armor(&mut self) -> bool {
         if let Some(kind) = self.equipment.armor {
             if !self
@@ -664,6 +682,7 @@ impl MicroGameState {
 
     /// Drop an equipped weapon directly to the ground (bypasses inventory).
     /// Note: ground ItemStore doesn't carry PropertyBags yet — bag is lost on drop.
+    #[inline(never)]
     fn drop_equipped_weapon(&mut self) -> bool {
         if let Some(kind) = self.equipment.weapon.take() {
             self.equipment.weapon_props = crate::rules::properties::EMPTY;
@@ -680,6 +699,7 @@ impl MicroGameState {
 
     /// Drop equipped armor directly to the ground (bypasses inventory).
     /// Note: ground ItemStore doesn't carry PropertyBags yet — bag is lost on drop.
+    #[inline(never)]
     fn drop_equipped_armor(&mut self) -> bool {
         if let Some(kind) = self.equipment.armor.take() {
             self.equipment.armor_props = crate::rules::properties::EMPTY;
@@ -748,12 +768,12 @@ impl MicroGameState {
         // both start off-screen in wander mode, so both count toward the cap.
         let mut wander_alive: u8 = 0;
         for i in 1..self.entities.count as usize {
-            if !self.entities.alive[i] {
+            if !self.entities.is_alive(i) {
                 continue;
             }
             let p = self.entities.ai[i];
             let wandering = p == AiPersonality::Patrol
-                || (p == AiPersonality::Coward && !self.entities.aware_last_turn[i]);
+                || (p == AiPersonality::Coward && !self.entities.was_aware(i));
             if wandering {
                 wander_alive += 1;
             }
@@ -862,12 +882,12 @@ impl MicroGameState {
 
         let mut closest_dist: u8 = u8::MAX;
         for i in 1..self.entities.count as usize {
-            if !self.entities.alive[i] {
+            if !self.entities.is_alive(i) {
                 continue;
             }
             let p = self.entities.ai[i];
             let wandering = p == AiPersonality::Patrol
-                || (p == AiPersonality::Coward && !self.entities.aware_last_turn[i]);
+                || (p == AiPersonality::Coward && !self.entities.was_aware(i));
             if wandering {
                 let dist = px.abs_diff(self.entities.x[i]) + py.abs_diff(self.entities.y[i]);
                 if dist < closest_dist {
@@ -909,7 +929,7 @@ impl MicroGameState {
         let mut i: u8 = 1;
         while (i as usize) < self.entities.count as usize {
             let idx = i as usize;
-            if self.entities.alive[idx] {
+            if self.entities.is_alive(idx) {
                 let dx = self.entities.x[idx].abs_diff(px);
                 let dy = self.entities.y[idx].abs_diff(py);
                 if dx <= 1 && dy <= 1 && self.entities.hp[idx] < best_hp {
@@ -929,7 +949,7 @@ impl MicroGameState {
         let mut rounds: u8 = 0;
 
         loop {
-            if !self.entities.alive[best_idx as usize] {
+            if !self.entities.is_alive(best_idx as usize) {
                 break;
             }
 
@@ -955,7 +975,7 @@ impl MicroGameState {
             rounds,
             target_idx: best_idx,
             target_kind,
-            target_killed: !self.entities.alive[best_idx as usize],
+            target_killed: !self.entities.is_alive(best_idx as usize),
             player_hp_lost: hp_before.saturating_sub(self.entities.hp[pi]),
         })
     }
@@ -1015,7 +1035,7 @@ impl crate::rules::game_view::GameView for MicroGameState {
         (self.entities.x[i] as i32, self.entities.y[i] as i32)
     }
     fn entity_alive(&self, i: usize) -> bool {
-        self.entities.alive[i]
+        self.entities.is_alive(i)
     }
     fn entity_kind(&self, i: usize) -> Option<MonsterKind> {
         self.entities.kind[i]
@@ -1038,7 +1058,7 @@ impl crate::rules::game_view::GameView for MicroGameState {
         (self.items.x[i] as i32, self.items.y[i] as i32)
     }
     fn item_alive(&self, i: usize) -> bool {
-        self.items.alive[i]
+        self.items.is_alive(i)
     }
     fn item_kind_at(&self, i: usize) -> crate::rules::items::ItemKind {
         self.items.kind[i]
@@ -1109,7 +1129,7 @@ mod tests {
     fn new_game_is_playable() {
         let g = MicroGameState::new_default(42);
         assert!(!g.game_over);
-        assert!(g.entities.alive[PLAYER_IDX as usize]);
+        assert!(g.entities.is_alive(PLAYER_IDX as usize));
         assert!(g.entities.hp[PLAYER_IDX as usize] > 0);
         assert!(g.entities.count > 1, "should have monsters");
     }
@@ -1401,7 +1421,7 @@ mod tests {
         let result = g.step(GameCommand::Pickup);
         assert!(result.action_taken); // turn consumed
         // Item should still be on ground.
-        assert!(g.items.alive[0], "item should remain on ground");
+        assert!(g.items.is_alive(0), "item should remain on ground");
     }
 
     // --- auto-pickup tests ---
@@ -1493,7 +1513,7 @@ mod tests {
         }
         let dir = place_item_adjacent(&mut g, ItemKind::HealthPotion);
         g.step(GameCommand::Move(dir));
-        assert!(g.items.alive[0], "potion should remain on ground");
+        assert!(g.items.is_alive(0), "potion should remain on ground");
     }
 
     #[test]
@@ -1548,7 +1568,7 @@ mod tests {
         // Item should be on ground at player position.
         let px = g.entities.x[0];
         let py = g.entities.y[0];
-        assert!(g.items.alive[0]);
+        assert!(g.items.is_alive(0));
         assert_eq!(g.items.x[0], px);
         assert_eq!(g.items.y[0], py);
         assert_eq!(g.items.kind[0], ItemKind::ShortSword);
@@ -1668,7 +1688,7 @@ mod tests {
                 g.items.spawn(nx, ny, ItemKind::HealthPotion);
                 g.step(GameCommand::Move(dir));
                 // Item should still be on ground (no auto-pickup).
-                assert!(g.items.alive[0], "item should remain on ground");
+                assert!(g.items.is_alive(0), "item should remain on ground");
                 // Item should be in no inventory.
                 assert!(g.inventory.is_empty(), "no auto-pickup");
                 break;
@@ -1757,7 +1777,7 @@ mod tests {
     fn count_wanderers(g: &MicroGameState) -> u8 {
         let mut count = 0u8;
         for i in 1..g.entities.count as usize {
-            if g.entities.alive[i] && g.entities.ai[i] == AiPersonality::Patrol {
+            if g.entities.is_alive(i) && g.entities.ai[i] == AiPersonality::Patrol {
                 count += 1;
             }
         }
@@ -1918,7 +1938,7 @@ mod tests {
         let mut g = MicroGameState::new_default(42);
         // Clear all monsters far from player.
         for i in 1..g.entities.count as usize {
-            g.entities.alive[i] = false;
+            g.entities.set_alive(i, false);
         }
         assert!(g.auto_fight().is_none());
     }
@@ -1931,7 +1951,7 @@ mod tests {
         let py = g.entities.y[0];
         // Clear existing monsters.
         for i in 1..g.entities.count as usize {
-            g.entities.alive[i] = false;
+            g.entities.set_alive(i, false);
         }
         // Spawn an orc (higher HP) and a goblin (lower HP) adjacent.
         g.entities

@@ -41,11 +41,11 @@ impl ItemStore {
     pub fn spawn(&mut self, ix: u8, iy: u8, item_kind: ItemKind) -> bool {
         // Scan for a dead slot to reuse.
         for i in 0..self.count as usize {
-            if !self.alive[i] {
+            if !self.is_alive(i) {
                 self.x[i] = ix;
                 self.y[i] = iy;
                 self.kind[i] = item_kind;
-                self.alive[i] = true;
+                self.set_alive(i, true);
                 return true;
             }
         }
@@ -55,7 +55,7 @@ impl ItemStore {
             self.x[i] = ix;
             self.y[i] = iy;
             self.kind[i] = item_kind;
-            self.alive[i] = true;
+            self.set_alive(i, true);
             self.count += 1;
             return true;
         }
@@ -66,7 +66,7 @@ impl ItemStore {
     pub fn item_at(&self, ix: u8, iy: u8) -> u8 {
         for i in 0..self.count {
             let idx = i as usize;
-            if self.alive[idx] && self.x[idx] == ix && self.y[idx] == iy {
+            if self.is_alive(idx) && self.x[idx] == ix && self.y[idx] == iy {
                 return i;
             }
         }
@@ -75,9 +75,21 @@ impl ItemStore {
 
     /// Remove an item by marking it dead.
     pub fn remove(&mut self, i: u8) {
-        self.alive[i as usize] = false;
+        self.set_alive(i as usize, false);
+    }
+
+    #[inline]
+    pub fn is_alive(&self, i: usize) -> bool {
+        self.alive[i]
+    }
+
+    #[inline]
+    pub fn set_alive(&mut self, i: usize, alive: bool) {
+        self.alive[i] = alive;
     }
 }
+
+const _: () = assert!(core::mem::size_of::<ItemStore>() == 129);
 
 #[cfg(test)]
 mod tests {
@@ -98,7 +110,7 @@ mod tests {
         let mut items = ItemStore::new();
         items.spawn(5, 5, ItemKind::HealthPotion);
         items.remove(0);
-        assert!(!items.alive[0]);
+        assert!(!items.is_alive(0));
         assert_eq!(items.item_at(5, 5), NO_ITEM);
     }
 
@@ -142,7 +154,7 @@ mod tests {
         items.remove(0);
         assert!(items.spawn(9, 9, ItemKind::LeatherArmor));
         assert_eq!(items.count, count_before, "count should not grow");
-        assert!(items.alive[0]);
+        assert!(items.is_alive(0));
         assert_eq!(items.kind[0], ItemKind::LeatherArmor);
         assert_eq!(items.x[0], 9);
     }

@@ -540,7 +540,7 @@ fn refresh_fov_area(
 /// Render ground items that are visible and within the viewport.
 fn render_items(state: &MicroGameState, vx: u8, vy: u8) {
     for i in 0..(state.items.count as usize).min(MAX_ITEMS) {
-        if !state.items.alive[i] {
+        if !state.items.is_alive(i) {
             continue;
         }
         let ix = state.items.x[i];
@@ -575,7 +575,7 @@ fn render_entities(state: &MicroGameState, vx: u8, vy: u8) {
             continue;
         }
 
-        let (glyph, color) = if !state.entities.alive[idx] {
+        let (glyph, color) = if !state.entities.is_alive(idx) {
             if i == PLAYER_IDX { continue; }
             (SC_CORPSE, c64::COLOR_BROWN)
         } else if i == PLAYER_IDX {
@@ -784,19 +784,20 @@ fn format_event(event: GameEvent, buf: &mut [u8; 40]) {
             let p = copy_num(buf, p, healed);
             copy_bytes(buf, p, b" HP)")
         }
-        GameEvent::UseStrengthPotion { bonus } => {
+        GameEvent::StatBoost { kind, bonus } => {
             let p = copy_bytes(buf, 0, b"You drink ");
-            let p = copy_bytes(buf, p, items::name(items::ItemKind::StrengthPotion).as_bytes());
+            let p = copy_bytes(buf, p, items::name(kind).as_bytes());
             let p = copy_bytes(buf, p, b". (+");
             let p = copy_num(buf, p, bonus);
-            copy_bytes(buf, p, b" ATK)")
-        }
-        GameEvent::UseToughnessPotion { bonus } => {
-            let p = copy_bytes(buf, 0, b"You drink ");
-            let p = copy_bytes(buf, p, items::name(items::ItemKind::ToughnessPotion).as_bytes());
-            let p = copy_bytes(buf, p, b". (+");
-            let p = copy_num(buf, p, bonus);
-            copy_bytes(buf, p, b" DEF)")
+            copy_bytes(
+                buf,
+                p,
+                match kind {
+                    items::ItemKind::StrengthPotion => b" ATK)",
+                    items::ItemKind::ToughnessPotion => b" DEF)",
+                    _ => b" STAT)",
+                },
+            )
         }
         GameEvent::EquipWeapon { kind, bonus } => {
             let p = copy_bytes(buf, 0, b"You equip ");
@@ -991,7 +992,7 @@ impl DiffState {
         for i in 0..ec {
             self.entity_x[i] = state.entities.x[i];
             self.entity_y[i] = state.entities.y[i];
-            if state.entities.alive[i] {
+            if state.entities.is_alive(i) {
                 self.entity_alive[i >> 3] |= BIT[i & 7];
             }
         }
@@ -1003,7 +1004,7 @@ impl DiffState {
         for i in 0..ic {
             self.item_x[i] = state.items.x[i];
             self.item_y[i] = state.items.y[i];
-            if state.items.alive[i] {
+            if state.items.is_alive(i) {
                 self.item_alive[i >> 3] |= BIT[i & 7];
             }
         }
@@ -1083,7 +1084,7 @@ pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
         let ox = prev.entity_x[i];
         let oy = prev.entity_y[i];
         let changed = if i < state.entities.count as usize {
-            !state.entities.alive[i]
+            !state.entities.is_alive(i)
                 || state.entities.x[i] != ox
                 || state.entities.y[i] != oy
         } else {
@@ -1095,7 +1096,7 @@ pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
     }
     // Mark new positions of entities that moved or were spawned.
     for i in 0..(state.entities.count as usize).min(MAX_ENTITIES) {
-        if !state.entities.alive[i] {
+        if !state.entities.is_alive(i) {
             continue;
         }
         let ex = state.entities.x[i];
@@ -1121,7 +1122,7 @@ pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
         let ox = prev.item_x[i];
         let oy = prev.item_y[i];
         let changed = if i < state.items.count as usize {
-            !state.items.alive[i]
+            !state.items.is_alive(i)
                 || state.items.x[i] != ox
                 || state.items.y[i] != oy
         } else {
@@ -1132,7 +1133,7 @@ pub fn render_diff(state: &MicroGameState, prev: &DiffState, vx: u8, vy: u8) {
         }
     }
     for i in 0..(state.items.count as usize).min(MAX_ITEMS) {
-        if !state.items.alive[i] {
+        if !state.items.is_alive(i) {
             continue;
         }
         let ix = state.items.x[i];
@@ -1251,7 +1252,7 @@ pub fn restore_tile(state: &MicroGameState, vx: u8, vy: u8, wx: u8, wy: u8) {
     // 2. Item layer (only if visible)
     if visible {
         for i in 0..(state.items.count as usize).min(MAX_ITEMS) {
-            if state.items.alive[i] && state.items.x[i] == wx && state.items.y[i] == wy {
+            if state.items.is_alive(i) && state.items.x[i] == wx && state.items.y[i] == wy {
                 let kind = state.items.kind[i];
                 let glyph = items::glyph(kind) as u8;
                 let c = game_color_to_c64(items::color(kind));
@@ -1266,7 +1267,7 @@ pub fn restore_tile(state: &MicroGameState, vx: u8, vy: u8, wx: u8, wy: u8) {
             if state.entities.x[idx] != wx || state.entities.y[idx] != wy {
                 continue;
             }
-            let (glyph, c) = if !state.entities.alive[idx] {
+            let (glyph, c) = if !state.entities.is_alive(idx) {
                 if i == PLAYER_IDX { continue; }
                 (SC_CORPSE, c64::COLOR_BROWN)
             } else if i == PLAYER_IDX {
@@ -1341,7 +1342,7 @@ pub fn render_look_status(state: &MicroGameState, cx: u8, cy: u8) {
             }
 
             for i in 0..(state.items.count as usize).min(MAX_ITEMS) {
-                if state.items.alive[i] && state.items.x[i] == cx && state.items.y[i] == cy {
+                if state.items.is_alive(i) && state.items.x[i] == cx && state.items.y[i] == cy {
                     if p < 40 { buf[p] = b' '; p += 1; }
                     if p < 40 { buf[p] = b'['; p += 1; }
                     p = copy_bytes(&mut buf, p, items::name(state.items.kind[i]).as_bytes());

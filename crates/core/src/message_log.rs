@@ -158,12 +158,16 @@ pub fn format_event(event: GameEvent) -> String {
             }
         }
         GameEvent::Autorun => "Running...".into(),
-        GameEvent::UseStrengthPotion { bonus } => {
-            format!("You drink the Potion of Strength. (+{} ATK)", bonus)
-        }
-        GameEvent::UseToughnessPotion { bonus } => {
-            format!("You drink the Potion of Toughness. (+{} DEF)", bonus)
-        }
+        GameEvent::StatBoost { kind, bonus } => format!(
+            "You drink the {}. (+{} {})",
+            items::name(kind),
+            bonus,
+            match items::consumable_effect(kind).map(|effect| effect.kind) {
+                Some(items::ConsumableEffectKind::BoostAttack) => "ATK",
+                Some(items::ConsumableEffectKind::BoostDefense) => "DEF",
+                _ => "STAT",
+            }
+        ),
         GameEvent::CombineItems { target, source } => {
             format!(
                 "You combine the {} with the {}.",

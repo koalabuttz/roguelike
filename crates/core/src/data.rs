@@ -296,6 +296,30 @@ impl ItemDef {
         }
         bag
     }
+
+    /// Immediate effect produced by consuming this authored item definition.
+    pub fn consumable_effect(&self) -> Option<crate::rules::items::ConsumableEffect> {
+        use crate::rules::items::{ConsumableEffect, ConsumableEffectKind};
+
+        if self.heal_amount > 0 {
+            Some(ConsumableEffect {
+                kind: ConsumableEffectKind::Heal,
+                amount: self.heal_amount,
+            })
+        } else if self.strength_boost > 0 {
+            Some(ConsumableEffect {
+                kind: ConsumableEffectKind::BoostAttack,
+                amount: self.strength_boost,
+            })
+        } else if self.defense_boost > 0 {
+            Some(ConsumableEffect {
+                kind: ConsumableEffectKind::BoostDefense,
+                amount: self.defense_boost,
+            })
+        } else {
+            None
+        }
+    }
 }
 
 impl PlayerDef {

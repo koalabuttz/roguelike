@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "description": "Stock-C64 release reserves. Update reference_used only after reviewing an intentional size change.",
+  "regions": {
+    "ram": {
+      "minimum_free": 384,
+      "target_free": 512,
+      "reference_used": 50684
+    },
+    "ioram": {
+      "minimum_free": 128,
+      "target_free": 128,
+      "reference_used": 3943
+    },
+    "hiram": {
+      "minimum_free": 128,
+      "target_free": 128,
+      "reference_used": 8031
+    }
+  }
+}

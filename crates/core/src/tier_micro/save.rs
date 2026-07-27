@@ -178,17 +178,17 @@ pub fn serialize<F: FnMut(u8)>(state: &MicroGameState, emit: &mut F) -> usize {
     }
     i = 0;
     while i < ec {
-        wb!(state.entities.alive[i] as u8);
+        wb!(state.entities.is_alive(i) as u8);
         i += 1;
     }
     i = 0;
     while i < ec {
-        wb!(state.entities.sight[i]);
+        wb!(state.entities.sight_radius(i));
         i += 1;
     }
     i = 0;
     while i < ec {
-        wb!(state.entities.aware_last_turn[i] as u8);
+        wb!(state.entities.was_aware(i) as u8);
         i += 1;
     }
 
@@ -212,7 +212,7 @@ pub fn serialize<F: FnMut(u8)>(state: &MicroGameState, emit: &mut F) -> usize {
     }
     i = 0;
     while i < ic {
-        wb!(state.items.alive[i] as u8);
+        wb!(state.items.is_alive(i) as u8);
         i += 1;
     }
 
@@ -425,7 +425,7 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
     }
     i = 0;
     while i < ec {
-        state.entities.alive[i] = rb!() != 0;
+        state.entities.set_alive(i, rb!() != 0);
         i += 1;
     }
     i = 0;
@@ -435,7 +435,7 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
     }
     i = 0;
     while i < ec {
-        state.entities.aware_last_turn[i] = rb!() != 0;
+        state.entities.set_aware(i, rb!() != 0);
         i += 1;
     }
 
@@ -463,7 +463,7 @@ pub fn deserialize<F: FnMut() -> Option<u8>>(
     }
     i = 0;
     while i < ic {
-        state.items.alive[i] = rb!() != 0;
+        state.items.set_alive(i, rb!() != 0);
         i += 1;
     }
 
@@ -617,7 +617,10 @@ mod tests {
         assert_eq!(&loaded.entities.x[..ec], &original.entities.x[..ec]);
         assert_eq!(&loaded.entities.y[..ec], &original.entities.y[..ec]);
         assert_eq!(&loaded.entities.hp[..ec], &original.entities.hp[..ec]);
-        assert_eq!(&loaded.entities.alive[..ec], &original.entities.alive[..ec]);
+        for i in 0..ec {
+            assert_eq!(loaded.entities.is_alive(i), original.entities.is_alive(i));
+            assert_eq!(loaded.entities.was_aware(i), original.entities.was_aware(i));
+        }
         assert_eq!(&loaded.entities.kind[..ec], &original.entities.kind[..ec]);
 
         // Verify map tiles match

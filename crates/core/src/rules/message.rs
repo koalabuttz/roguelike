@@ -127,10 +127,8 @@ pub enum GameEvent {
     Autorun,
     /// Autorun finished — carries the stop reason.
     AutorunStop { cause: AutorunStopCause },
-    /// Player consumed a stat-boosting potion.
-    UseStrengthPotion { bonus: u8 },
-    /// Player consumed a permanent defense-boosting potion.
-    UseToughnessPotion { bonus: u8 },
+    /// Player consumed an item that permanently increased a statistic.
+    StatBoost { kind: ItemKind, bonus: u8 },
     /// Player combined two items (applied source properties to target).
     CombineItems { target: ItemKind, source: ItemKind },
     /// Combine attempt produced no property changes.

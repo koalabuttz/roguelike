@@ -842,38 +842,39 @@ impl GameState {
             None => return false,
         };
 
-        if item::is_consumable_with(&self.item_catalog, inv_slot.kind) {
-            let definition = &self.item_catalog[inv_slot.kind as usize];
-            let heal = definition.heal_amount as Stat;
-            if heal > 0 {
+        let effect = match self.item_catalog[inv_slot.kind as usize].consumable_effect() {
+            Some(effect) => effect,
+            None => return false,
+        };
+        let event = match effect.kind {
+            rules_items::ConsumableEffectKind::Heal => {
+                let heal = effect.amount as Stat;
                 let player = &mut self.entities[0];
                 let healed = heal.min(player.max_hp.saturating_sub(player.hp));
                 player.hp = player.hp.saturating_add(healed);
-                self.inventory.remove_one(slot as usize);
-                self.log.add_event(GameEvent::DrinkPotion {
+                GameEvent::DrinkPotion {
                     kind: inv_slot.kind,
                     healed: healed as u8,
-                });
-                return true;
+                }
             }
-            let boost = definition.strength_boost;
-            if boost > 0 {
-                self.entities[0].attack += boost as Stat;
-                self.inventory.remove_one(slot as usize);
-                self.log
-                    .add_event(GameEvent::UseStrengthPotion { bonus: boost });
-                return true;
+            rules_items::ConsumableEffectKind::BoostAttack => {
+                self.entities[0].attack += effect.amount as Stat;
+                GameEvent::StatBoost {
+                    kind: inv_slot.kind,
+                    bonus: effect.amount,
+                }
             }
-            let boost = definition.defense_boost;
-            if boost > 0 {
-                self.entities[0].defense += boost as Stat;
-                self.inventory.remove_one(slot as usize);
-                self.log
-                    .add_event(GameEvent::UseToughnessPotion { bonus: boost });
-                return true;
+            rules_items::ConsumableEffectKind::BoostDefense => {
+                self.entities[0].defense += effect.amount as Stat;
+                GameEvent::StatBoost {
+                    kind: inv_slot.kind,
+                    bonus: effect.amount,
+                }
             }
-        }
-        false
+        };
+        self.inventory.remove_one(slot as usize);
+        self.log.add_event(event);
+        true
     }
 
     /// Combine two inventory items: apply source's properties onto target.

@@ -276,13 +276,16 @@ pub fn encode_game_event(event: Option<GameEvent>) -> [u8; ENCODED_EVENT_SIZE] {
             GameEvent::ItemsHere { kind, count } => [19, encode_item_kind(kind), count, 0],
             GameEvent::Autorun => [20, 0, 0, 0],
             GameEvent::AutorunStop { cause } => [21, encode_autorun_stop(cause), 0, 0],
-            GameEvent::UseStrengthPotion { bonus } => [22, bonus, 0, 0],
+            GameEvent::StatBoost { kind, bonus } => match kind {
+                ItemKind::StrengthPotion => [22, bonus, 0, 0],
+                ItemKind::ToughnessPotion => [26, bonus, 0, 0],
+                _ => [0xFF, 0, 0, 0],
+            },
             GameEvent::CombineItems { target, source } => {
                 [23, encode_item_kind(target), encode_item_kind(source), 0]
             }
             GameEvent::CombineNoEffect => [24, 0, 0, 0],
             GameEvent::ItemDestroyed { kind } => [25, encode_item_kind(kind), 0, 0],
-            GameEvent::UseToughnessPotion { bonus } => [26, bonus, 0, 0],
         },
     }
 }
@@ -356,7 +359,10 @@ pub fn decode_game_event(bytes: [u8; ENCODED_EVENT_SIZE]) -> Option<GameEvent> {
         21 => Some(GameEvent::AutorunStop {
             cause: decode_autorun_stop(bytes[1]),
         }),
-        22 => Some(GameEvent::UseStrengthPotion { bonus: bytes[1] }),
+        22 => Some(GameEvent::StatBoost {
+            kind: ItemKind::StrengthPotion,
+            bonus: bytes[1],
+        }),
         23 => Some(GameEvent::CombineItems {
             target: decode_item_kind(bytes[1]),
             source: decode_item_kind(bytes[2]),
@@ -365,7 +371,10 @@ pub fn decode_game_event(bytes: [u8; ENCODED_EVENT_SIZE]) -> Option<GameEvent> {
         25 => Some(GameEvent::ItemDestroyed {
             kind: decode_item_kind(bytes[1]),
         }),
-        26 => Some(GameEvent::UseToughnessPotion { bonus: bytes[1] }),
+        26 => Some(GameEvent::StatBoost {
+            kind: ItemKind::ToughnessPotion,
+            bonus: bytes[1],
+        }),
         _ => None, // 0xFF (None) or unknown future tag
     }
 }
@@ -507,8 +516,14 @@ mod tests {
             Some(GameEvent::AutorunStop {
                 cause: AutorunStopCause::MonsterSpotted,
             }),
-            Some(GameEvent::UseStrengthPotion { bonus: 1 }),
-            Some(GameEvent::UseToughnessPotion { bonus: 1 }),
+            Some(GameEvent::StatBoost {
+                kind: ItemKind::StrengthPotion,
+                bonus: 1,
+            }),
+            Some(GameEvent::StatBoost {
+                kind: ItemKind::ToughnessPotion,
+                bonus: 1,
+            }),
             Some(GameEvent::CombineItems {
                 target: ItemKind::ShortSword,
                 source: ItemKind::IronMace,

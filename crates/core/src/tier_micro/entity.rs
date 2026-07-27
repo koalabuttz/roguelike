@@ -1,11 +1,15 @@
 //! Fixed-size parallel array entity storage for the micro tier.
 //!
 //! Player is always slot 0. Monsters occupy slots 1..count.
-//! All fields are `pub` for direct access from combat, AI, and rendering.
+//! Hot parallel arrays remain directly accessible. Liveness is derived from
+//! HP, while awareness shares the high bit of the sight-radius byte.
 
 use super::types::*;
 use crate::rules::balance;
 use crate::rules::monster_table::{self, AiPersonality, MonsterKind};
+
+const AWARE_FLAG: u8 = 0x80;
+const SIGHT_MASK: u8 = 0x7F;
 
 pub struct EntityStore {
     pub x: [u8; MAX_ENTITIES],
@@ -16,11 +20,10 @@ pub struct EntityStore {
     pub def: [Stat; MAX_ENTITIES],
     pub kind: [Option<MonsterKind>; MAX_ENTITIES],
     pub ai: [AiPersonality; MAX_ENTITIES],
-    pub alive: [bool; MAX_ENTITIES],
-    pub sight: [u8; MAX_ENTITIES],
     /// Whether this entity saw the player on its most recent turn. Used to
     /// detect the rising edge of awareness so EntityNotice fires exactly once.
-    pub aware_last_turn: [bool; MAX_ENTITIES],
+    /// Stored in the high bit of `sight`; all authored sight radii fit in 7 bits.
+    pub sight: [u8; MAX_ENTITIES],
     pub count: u8,
 }
 
@@ -41,9 +44,7 @@ impl EntityStore {
             def: [0; MAX_ENTITIES],
             kind: [None; MAX_ENTITIES],
             ai: [AiPersonality::Player; MAX_ENTITIES],
-            alive: [false; MAX_ENTITIES],
             sight: [0; MAX_ENTITIES],
-            aware_last_turn: [false; MAX_ENTITIES],
             count: 0,
         }
     }
@@ -58,7 +59,6 @@ impl EntityStore {
         self.atk[i] = balance::PLAYER_ATK;
         self.def[i] = balance::PLAYER_DEF;
         self.ai[i] = AiPersonality::Player;
-        self.alive[i] = true;
         self.sight[i] = balance::MICRO_FOV_RADIUS;
         if self.count == 0 {
             self.count = 1;
@@ -85,9 +85,7 @@ impl EntityStore {
         self.atk[i] = monster_table::attack(kind);
         self.def[i] = monster_table::defense(kind);
         self.ai[i] = personality;
-        self.alive[i] = true;
         self.sight[i] = monster_table::sight_radius(kind);
-        self.aware_last_turn[i] = false;
         self.count += 1;
         true
     }
@@ -96,7 +94,7 @@ impl EntityStore {
     pub fn entity_at(&self, ex: u8, ey: u8) -> u8 {
         for i in 0..self.count {
             let idx = i as usize;
-            if self.alive[idx] && self.x[idx] == ex && self.y[idx] == ey {
+            if self.is_alive(idx) && self.x[idx] == ex && self.y[idx] == ey {
                 return i;
             }
         }
@@ -107,7 +105,7 @@ impl EntityStore {
     pub fn monster_at(&self, ex: u8, ey: u8) -> u8 {
         for i in 1..self.count {
             let idx = i as usize;
-            if self.alive[idx] && self.x[idx] == ex && self.y[idx] == ey {
+            if self.is_alive(idx) && self.x[idx] == ex && self.y[idx] == ey {
                 return i;
             }
         }
@@ -121,7 +119,7 @@ impl EntityStore {
                 continue;
             }
             let idx = i as usize;
-            if self.alive[idx] && self.x[idx] == ex && self.y[idx] == ey {
+            if self.is_alive(idx) && self.x[idx] == ex && self.y[idx] == ey {
                 return true;
             }
         }
@@ -129,9 +127,47 @@ impl EntityStore {
     }
 
     pub fn kill(&mut self, i: u8) {
-        self.alive[i as usize] = false;
+        self.set_alive(i as usize, false);
+    }
+
+    #[inline]
+    pub fn is_alive(&self, i: usize) -> bool {
+        self.hp[i] > 0
+    }
+
+    #[inline]
+    pub fn set_alive(&mut self, i: usize, alive: bool) {
+        if !alive {
+            self.hp[i] = 0;
+        } else {
+            debug_assert!(self.hp[i] > 0);
+        }
+    }
+
+    #[inline]
+    pub fn was_aware(&self, i: usize) -> bool {
+        self.sight[i] & AWARE_FLAG != 0
+    }
+
+    #[inline]
+    pub fn set_aware(&mut self, i: usize, aware: bool) {
+        if aware {
+            self.sight[i] |= AWARE_FLAG;
+        } else {
+            self.sight[i] &= SIGHT_MASK;
+        }
+    }
+
+    #[inline]
+    pub fn sight_radius(&self, i: usize) -> u8 {
+        self.sight[i] & SIGHT_MASK
     }
 }
+
+const _: () = {
+    assert!(balance::MICRO_FOV_RADIUS <= SIGHT_MASK);
+    assert!(core::mem::size_of::<EntityStore>() == 577);
+};
 
 #[cfg(test)]
 mod tests {
@@ -143,7 +179,7 @@ mod tests {
         e.spawn_player(10, 20);
         assert_eq!(e.x[0], 10);
         assert_eq!(e.y[0], 20);
-        assert!(e.alive[0]);
+        assert!(e.is_alive(0));
         assert_eq!(e.kind[0], None);
         assert_eq!(e.count, 1);
     }
@@ -190,7 +226,7 @@ mod tests {
         e.spawn_player(5, 5);
         e.spawn_monster(MonsterKind::Goblin, 10, 10, AiPersonality::Aggressive);
         e.kill(1);
-        assert!(!e.alive[1]);
+        assert!(!e.is_alive(1));
         assert_eq!(e.entity_at(10, 10), NO_ENTITY);
     }
 

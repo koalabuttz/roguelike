@@ -29,14 +29,14 @@ pub fn run_monster_turns(
     let count = entities.count;
     for i in 1..count {
         let idx = i as usize;
-        if !entities.alive[idx] {
+        if !entities.is_alive(idx) {
             continue;
         }
 
         let mx = entities.x[idx];
         let my = entities.y[idx];
         let personality = entities.ai[idx];
-        let sight = entities.sight[idx];
+        let sight = entities.sight_radius(idx);
 
         let aware = match personality {
             AiPersonality::Aggressive | AiPersonality::Patrol | AiPersonality::Coward => {
@@ -45,8 +45,8 @@ pub fn run_monster_turns(
             AiPersonality::Player => false,
         };
 
-        let was_aware = entities.aware_last_turn[idx];
-        entities.aware_last_turn[idx] = aware;
+        let was_aware = entities.was_aware(idx);
+        entities.set_aware(idx, aware);
         if aware && !was_aware {
             let who = match entities.kind[idx] {
                 Some(mk) => Combatant::Monster(mk),
@@ -76,7 +76,7 @@ pub fn run_monster_turns(
             AiMode::Idle => {}
         }
 
-        if !entities.alive[PLAYER_IDX as usize] {
+        if !entities.is_alive(PLAYER_IDX as usize) {
             return true;
         }
     }

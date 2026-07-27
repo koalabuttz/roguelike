@@ -837,7 +837,7 @@ fn entity_info_at(
     y: u8,
 ) -> Option<EntityInfo> {
     for i in 0..entities.count as usize {
-        if entities.alive[i] && entities.x[i] == x && entities.y[i] == y {
+        if entities.is_alive(i) && entities.x[i] == x && entities.y[i] == y {
             let (name, glyph) = if let Some(kind) = entities.kind[i] {
                 (
                     monster_table::name(kind).to_string(),
@@ -901,7 +901,7 @@ fn build_micro_visible_entities(
     let mut result = Vec::new();
     // Skip player (index 0).
     for i in 1..entities.count as usize {
-        if entities.alive[i] && fov.is_visible(entities.x[i], entities.y[i]) {
+        if entities.is_alive(i) && fov.is_visible(entities.x[i], entities.y[i]) {
             let kind = entities.kind[i];
             let (name, glyph) = if let Some(k) = kind {
                 (monster_table::name(k).to_string(), monster_table::glyph(k))
@@ -951,7 +951,7 @@ fn build_micro_recent_messages_n(
 /// Get the glyph of the first alive item at (x, y), if any.
 fn item_glyph_at(items: &ItemStore, x: u8, y: u8) -> Option<char> {
     for i in 0..items.count as usize {
-        if items.alive[i] && items.x[i] == x && items.y[i] == y {
+        if items.is_alive(i) && items.x[i] == x && items.y[i] == y {
             return Some(rules_items::glyph(items.kind[i]));
         }
     }
@@ -962,7 +962,7 @@ fn item_glyph_at(items: &ItemStore, x: u8, y: u8) -> Option<char> {
 fn build_micro_visible_items(items: &ItemStore, fov: &MicroFov) -> Vec<ItemInfo> {
     let mut result = Vec::new();
     for i in 0..items.count as usize {
-        if items.alive[i] && fov.is_visible(items.x[i], items.y[i]) {
+        if items.is_alive(i) && fov.is_visible(items.x[i], items.y[i]) {
             result.push(ItemInfo {
                 name: rules_items::name(items.kind[i]).to_string(),
                 glyph: rules_items::glyph(items.kind[i]),
@@ -995,7 +995,7 @@ fn build_micro_inventory(inv: &crate::rules::items::Inventory) -> (Vec<String>, 
 fn build_micro_items_at(items: &ItemStore, x: u8, y: u8) -> Vec<ItemInfo> {
     let mut result = Vec::new();
     for i in 0..items.count as usize {
-        if items.alive[i] && items.x[i] == x && items.y[i] == y {
+        if items.is_alive(i) && items.x[i] == x && items.y[i] == y {
             result.push(ItemInfo {
                 name: rules_items::name(items.kind[i]).to_string(),
                 glyph: rules_items::glyph(items.kind[i]),

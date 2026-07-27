@@ -99,7 +99,7 @@ pub fn has_adjacent_monster(entities: &EntityStore) -> bool {
     let py = entities.y[pi];
     let mut i: usize = 1;
     while i < entities.count as usize {
-        if entities.alive[i] {
+        if entities.is_alive(i) {
             let dx = entities.x[i].abs_diff(px);
             let dy = entities.y[i].abs_diff(py);
             if dx <= 1 && dy <= 1 {
@@ -217,7 +217,7 @@ impl MicroAutorunStepper {
         let mut i: usize = 1;
         while i < entities.count as usize {
             self.visible_before[i] =
-                entities.alive[i] && fov.is_visible(entities.x[i], entities.y[i]);
+                entities.is_alive(i) && fov.is_visible(entities.x[i], entities.y[i]);
             i += 1;
         }
     }
@@ -225,7 +225,7 @@ impl MicroAutorunStepper {
     fn has_new_visible_monster(&self, entities: &EntityStore, fov: &MicroFov) -> bool {
         let mut i: usize = 1;
         while i < entities.count as usize {
-            if entities.alive[i]
+            if entities.is_alive(i)
                 && fov.is_visible(entities.x[i], entities.y[i])
                 && !self.visible_before[i]
             {
@@ -364,7 +364,7 @@ impl MicroBfsStepper {
         let mut i: usize = 1;
         while i < entities.count as usize {
             self.visible_before[i] =
-                entities.alive[i] && fov.is_visible(entities.x[i], entities.y[i]);
+                entities.is_alive(i) && fov.is_visible(entities.x[i], entities.y[i]);
             i += 1;
         }
     }
@@ -372,7 +372,7 @@ impl MicroBfsStepper {
     fn has_new_visible_monster(&self, entities: &EntityStore, fov: &MicroFov) -> bool {
         let mut i: usize = 1;
         while i < entities.count as usize {
-            if entities.alive[i]
+            if entities.is_alive(i)
                 && fov.is_visible(entities.x[i], entities.y[i])
                 && !self.visible_before[i]
             {
@@ -522,7 +522,7 @@ mod tests {
         state.entities.x[0] = 2;
         state.entities.y[0] = 10;
         for i in 1..state.entities.count as usize {
-            state.entities.alive[i] = false;
+            state.entities.set_alive(i, false);
         }
 
         state.fov = MicroFov::new(w, h);

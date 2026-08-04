@@ -1,0 +1,39 @@
+schema_version = 7
+
+[project]
+name = "roguelike-c64"
+
+[build]
+command = ["make", "analysis"]
+working_directory = "crates/c64"
+artifact = "crates/c64/analysis/roguelike-c64.prg"
+symbol_sources = [
+  { id = "resident-map", path = "crates/c64/analysis/map.txt", format = "llvm_lld_map", context = "resident" },
+  { id = "resident-elf", path = "crates/c64/analysis/roguelike-c64.elf", format = "elf_mos", context = "resident" },
+]
+source_remaps = [
+  { from = "/project", to = "." },
+]
+toolchain = "ghcr.io/koalabuttz/rust-mos:ac2fb2277-4537158-4aaa40e16"
+
+# Screen observation does not read these reserved mailbox fields. They remain
+# present for manifest compatibility until this project opts into the SDK.
+[diagnostics]
+address = 49152
+length = 256
+screen_address = 1024
+color_address = 55296
+
+[vice]
+executable = "x64sc"
+poll_interval_ms = 50
+
+[ultimate]
+poll_interval_ms = 250
+request_timeout_ms = 8000
+
+[[tests]]
+name = "title-screen"
+timeout_ms = 15000
+observation = "screen"
+expected_screen = "R O G U E L I K E"

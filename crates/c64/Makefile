@@ -4,7 +4,7 @@ PROJECT_ROOT = $(CURDIR)/../..
 DOCKER_RUN = sudo docker run --rm -e PATH=$(DOCKER_PATH) -v $(PROJECT_ROOT):/project -w /project/crates/c64 $(DOCKER_IMAGE)
 PRG = target/mos-c64-none/release/roguelike-c64
 
-.PHONY: build debug run clean size size-report map profile
+.PHONY: build analysis debug run clean size size-report map profile
 
 # Dev console build — release optimizations + menu-driven dev tools via ← key.
 debug:
@@ -13,6 +13,12 @@ debug:
 # Build with rust-mos Docker image.
 build:
 	@$(DOCKER_RUN) cargo build --release
+
+# Fresh resolver inputs. The isolated target avoids selecting a stale Cargo
+# sidecar; analysis_build.sh refuses to publish an ELF unless its objcopied
+# bytes exactly match the published PRG.
+analysis:
+	@bash analysis_build.sh
 
 # Generate linker map (builds with -Map flag)
 MAP_RUSTFLAGS = -C link-arg=-Tlink.ld -C link-arg=-Wl,--no-check-sections -C link-arg=-Wl,--allow-multiple-definition -C link-arg=-Wl,-Map,map.txt -Z mir-opt-level=1
